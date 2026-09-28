@@ -11,26 +11,20 @@
   <symbol id="i-hot" viewBox="0 0 16 16"><path d="M4 2h8l3 4-7 8-7-8z M1 6h14 M6 2l2 12 2-12"/></symbol>
 </svg>
 <header>
-  <div class="headrow">
-    <h1>ED Outrider <span id="here"></span></h1>
-    <div class="headright"><div id="firstsLine" data-unsold></div><div id="unsold" data-unsold></div></div>
+  <div class="topbar">
+    <h1>ED Outrider</h1>
+    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button></span>
+    <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button></span>
   </div>
-  <div class="sub" id="sub">loading…</div>
-  <div class="strip"><span id="fuelLine" data-fuel></span><span id="carrierLine"></span><span id="codexLine"></span><span id="freshLine"></span></div>
-  <div class="controls">
-    <span>Sort: <button data-sort="distance">distance</button> <button data-sort="name">name</button> <button data-sort="value">value</button></span>
-    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">📍 Here</button><button data-view="bm" id="bmViewBtn">★ Bookmarks</button><button data-view="search">🔍 Search</button><button data-view="map">🌌 Map</button><button data-view="hist">📜 History</button><button data-view="firsts">🏁 My firsts</button></span>
-    <span id="nearOpts">
-      <label><input type="checkbox" id="showVisited" checked> show visited</label>
-      <label><input type="checkbox" id="showExplored" checked> show fully explored</label>
-      <label><input type="checkbox" id="oneJump"> one jump only</label>
-    </span>
-    <span class="snd"><button id="sound">🔇 sounds off</button>
-      <button class="try" data-try="fanfare" title="play the new-discovery sound">▶ new</button>
-      <button class="try" data-try="upbeat" title="play the not-fully-scanned sound">▶ unscanned</button>
-      <button class="try" data-try="thud" title="play the visited / fully-scanned sound">▶ known</button>
-      <button class="try" data-try="alert" title="play the leaving-with-unfinished-work sound">▶ alert</button>
-      <button id="alertsBtn" title="desktop notifications">🔔 alerts</button></span>
+  <div class="tiles">
+    <div class="tile" id="tWhere"><div class="lbl">Where I Am Currently:</div><div class="val" id="here">loading…</div><div class="ln" id="refLn" title="distance from Sol and from Colonia (Eol Prou RS-T d3-94)"></div>
+      <div class="ln" id="sub"><b id="subKnown">…</b> known within <select id="radiusSel" title="how far around you Nearby lists systems (a bigger sphere takes longer to fill in the first time)"></select> ly · <b id="subUnvisited">…</b> not visited</div>
+      <div class="ln" id="subJump"></div><div class="ln" id="whereLn"></div></div>
+    <div class="tile" id="tCmdr"><div class="lbl" id="cmdrLbl">Commander</div><div id="cmdrLine"></div></div>
+    <div class="tile" id="tFuel" data-fuel><div class="lbl">Fuel</div><div id="fuelLine"></div></div>
+    <div class="tile" id="tCarrier"><div class="lbl">Carrier</div><div id="carrierLine"></div></div>
+    <div class="tile" id="tUnsold" data-unsold><div class="lbl">Unsold</div><div id="unsold"></div><div class="ln" id="firstsLine"></div></div>
+    <div class="tile" id="tData"><div class="lbl">Data</div><div id="freshLine"></div><div class="ln" id="statusLine"></div></div>
   </div>
   <div id="target"></div>
   <div id="leaving"></div>
@@ -41,12 +35,14 @@
 <section id="overView" hidden>
   <div class="ovbar">
     <button id="ovCollapse" type="button">▾ This system</button>
-    <span class="seg" role="radiogroup" aria-label="Overview layout">
-      <label><input type="radio" name="ovLayout" value="side" checked> side by side</label>
-      <label><input type="radio" name="ovLayout" value="stack"> stacked</label>
-    </span>
-    <button id="ovFlip" type="button" title="swap the two panes">⇄ swap sides</button>
-    <span class="unk" id="ovHint">drag the divider to resize</span>
+    <details class="ovmenu"><summary title="layout">⚙ layout</summary>
+      <div class="menu">
+        <label><input type="radio" name="ovLayout" value="side" checked> side by side</label>
+        <label><input type="radio" name="ovLayout" value="stack"> stacked</label>
+        <button id="ovFlip" type="button" title="swap the two panes">⇄ swap sides</button>
+        <div class="hint">drag the divider between the panes to resize</div>
+      </div>
+    </details>
   </div>
   <div id="ovPanes">
     <div id="ovNear"></div>
@@ -54,25 +50,34 @@
     <div id="ovHere"></div>
   </div>
 </section>
+<div id="nearWrap">
+  <div class="tablebar" id="nearOpts">
+    <label><input type="checkbox" id="showVisited" checked> show visited</label>
+    <label><input type="checkbox" id="showExplored" checked> show fully explored</label>
+    <label><input type="checkbox" id="oneJump"> one jump only</label>
+    <span class="unk">click a column heading to sort</span>
+  </div>
 <table id="nearTable">
   <thead><tr>
-    <th></th><th>System</th><th class="num">Dist</th><th class="num hide-sm" title="jumps at your max range">Jumps</th><th>Status</th><th>Main star</th>
-    <th>Bodies</th><th>Notable</th><th class="num hide-sm" title="Spansh's estimate for scanning and mapping every known body, plus the exobiology bound">Value (+bio)</th><th class="num hide-sm">Known</th>
+    <th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="num hide-sm" title="jumps at your max range">Jumps</th><th>Status</th><th>Main star</th>
+    <th>Bodies</th><th>Notable</th><th class="num hide-sm" data-sort="value" title="what selling now would pay for data you hold from this system / the most it could pay once fully scanned, mapped and sampled">Value now / max</th><th class="num hide-sm">Known</th>
   </tr></thead>
   <tbody id="rows"></tbody>
 </table>
+</div>
 <section id="hereView" hidden>
   <div id="hereHead"></div>
   <div id="hereLeaving"></div>
   <div id="hereMain">
   <table id="hereTable">
-    <thead><tr><th>Body</th><th>Class</th><th class="num">Dist ls</th><th class="num">g</th><th class="hide-sm">Atmosphere</th>
-      <th>Bio</th><th>Rings</th><th>Firsts</th><th class="num">Value</th><th class="num hide-sm">If mapped</th></tr></thead>
+    <thead><tr><th>Body</th><th>Class</th><th class="num">Dist ls</th><th class="num" title="surface gravity in g">Grav</th><th class="hide-sm">Atmosphere</th>
+      <th title="biological and geological signals">Bio / Geo</th><th>Rings</th><th>Firsts</th><th class="num" title="what this body's data would pay if sold now">Now</th><th class="num" id="hereMaxTh" title="the most it could pay once scanned, mapped and sampled">Max</th></tr></thead>
     <tbody id="hereRows"></tbody>
   </table>
-  <div class="hint">Hover a body for a summary, click it for everything known. Values use the same formula as the unsold estimate
-    (first-discovery bonus included, mapping bonus in the last column). Bio shows the genera the DSS found and your sampling
-    progress; 3/3 ✓ means analysed.</div>
+  <div id="hereSchematic" hidden></div>
+  <div class="hint" id="hereHint">Hover a body for a summary, click it for everything known. <b>Now</b> is what the data you hold from the body would
+    pay today; <b>Max</b> adds what is still there to scan, map and sample. Bio pays ×5 where nobody had set foot when you scanned
+    (×1 for bodies you have not scanned). 3/3 ✓ means a species is analysed.</div>
   </div>
   <div id="bodyPanel" hidden></div>
 </section>
@@ -81,7 +86,7 @@
     <label><input type="checkbox" id="fShowLost"> show lost</label><span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=firsts&format=csv" download>CSV</a> · <a href="api/export?what=firsts&format=json" download>JSON</a></span></div>
   <table id="firstsTable">
-    <thead><tr><th></th><th>System</th><th class="num">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th class="num">Unsold value</th></tr></thead>
+    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th class="num" data-sort="value">Unsold value</th></tr></thead>
     <tbody id="firstsRows"></tbody>
   </table>
   <div class="hint">Every visited system that still holds first-discovery or first-mapping data you have not sold (or lost). Unsold value is
@@ -100,13 +105,75 @@
   <table id="histTable">
     <thead><tr><th>Session</th><th class="num">Jumps</th><th class="num">ly</th><th class="num hide-sm">Max from Sol</th>
       <th class="num">🏁 systems</th><th class="num hide-sm">bodies</th><th class="num">mapped</th><th class="num hide-sm">👣</th><th class="num">🧬</th><th class="num hide-sm">📖</th></tr></thead>
+    <tbody id="histAll"></tbody>
     <tbody id="histRows"></tbody>
   </table>
+</section>
+<section id="logView" hidden>
+  <div class="srow">
+    <span class="chips" id="lCats">
+      <label><input type="checkbox" value="travel" checked> 🚀 travel</label>
+      <label><input type="checkbox" value="exploration" checked> 🔭 exploration</label>
+      <label><input type="checkbox" value="bio" checked> 🧬 bio</label>
+      <label><input type="checkbox" value="ship" checked> 🛠 ship</label>
+      <label><input type="checkbox" value="carrier" checked> 🚢 carrier</label>
+      <label><input type="checkbox" value="other" checked> • other</label>
+    </span>
+    <label><input type="checkbox" id="lNoise"> show noise</label>
+    <label>Last <select id="lDays"><option value="1">day</option><option value="7" selected>7 days</option><option value="30">30 days</option>
+      <option value="90">90 days</option><option value="365">year</option><option value="3650">everything</option></select></label>
+    <input type="search" id="lFilter" placeholder="search events" class="filter">
+    <span id="lStatus" class="unk"></span>
+  </div>
+  <table id="logTable">
+    <thead><tr><th>Time</th><th></th><th class="hide-sm">Event</th><th>What happened</th><th>System</th></tr></thead>
+    <tbody id="logRows"></tbody>
+  </table>
+  <div class="btns"><button type="button" id="lMore" hidden>More</button></div>
+  <div class="hint">Every journal event, newest first, read straight from your journal files; new events appear as they happen.
+    Click a row for the raw event. <b>Noise</b> is chatter, music, inventory snapshots and signal-source pings.
+    Click a system to copy it, ⌖ to open it in Here, 🔍 to open that body.</div>
+</section>
+<section id="matView" hidden>
+  <div class="srow">
+    <input type="search" id="mFilter" placeholder="filter materials" class="filter">
+    <label><input type="checkbox" id="mHeld"> held only</label>
+    <span id="matStatus" class="unk"></span>
+  </div>
+  <div id="matSynth"></div>
+  <div id="matGrid"></div>
+  <div class="hint">Counts come from the snapshot the game writes at every login, updated by what you collect, trade, discard,
+    synthesise and spend at engineers since. The next login corrects any drift. Bars show how full each material's storage is.</div>
+</section>
+<section id="bioView" hidden>
+  <div class="srow">
+    <label>Last <select id="bDays"><option value="7">7 days</option><option value="30" selected>30 days</option>
+      <option value="90">90 days</option><option value="365">year</option><option value="3650">everything</option></select></label>
+    <label>Show <select id="bState"><option value="">all</option><option value="aboard">aboard</option>
+      <option value="sold">sold</option><option value="lost">lost</option><option value="in progress">in progress</option></select></label>
+    <input type="search" id="bFilter" placeholder="filter genus, species, variant, system" class="filter">
+    <span class="grow"></span>
+    <span class="exports">Export: <a href="api/export?what=organics&format=csv" download>CSV</a> · <a href="api/export?what=organics&format=json" download>JSON</a></span>
+  </div>
+  <div id="bStatus" class="status"></div>
+  <table id="bioTable">
+    <thead><tr><th data-bsort="ts">When</th><th data-bsort="system">System</th><th data-bsort="body">Body</th><th data-bsort="genus">Genus</th>
+      <th data-bsort="species">Species</th><th class="hide-sm" data-bsort="variant">Variant</th><th class="num" data-bsort="samples">Samples</th>
+      <th data-bsort="state">State</th><th class="num" data-bsort="value" title="Vista Genomics payout, ×5 where nobody had set foot when you scanned the body">Value</th></tr></thead>
+    <tbody id="bioRows"></tbody>
+  </table>
+  <h3 class="subhead">Codex entries <span id="cStatus" class="unk"></span></h3>
+  <table id="codexTable">
+    <thead><tr><th>When</th><th>Entry</th><th class="hide-sm">Category</th><th class="hide-sm">Region</th><th>System</th><th></th></tr></thead>
+    <tbody id="codexRows"></tbody>
+  </table>
+  <div class="hint">Click a system name to copy it; click ⌖ to open that system in Here. A sample is <b>aboard</b> until a Vista Genomics
+    sale banks it and <b>lost</b> if your ship was destroyed first. Codex vouchers are paid on the spot.</div>
 </section>
 <div id="bmTools" hidden class="srow"><span class="grow"></span><span class="exports">Export: <a href="api/export?what=bookmarks&format=csv" download>CSV</a> · <a href="api/export?what=bookmarks&format=json" download>JSON</a></span></div>
 <table id="bmTable" hidden>
   <thead><tr>
-    <th></th><th>Bookmarked system</th><th class="num">Dist</th><th>Note</th><th class="hide-sm">Saved</th>
+    <th></th><th data-sort="name">Bookmarked system</th><th class="num" data-sort="distance">Dist</th><th>Note</th><th class="hide-sm">Saved</th>
   </tr></thead>
   <tbody id="bmRows"></tbody>
 </table>
@@ -151,7 +218,11 @@
         <label class="mod"><input type="checkbox" id="sMainOnly" checked> arrival star only</label>
       </fieldset>
       <fieldset><legend>Planets</legend><div class="opts" id="sPlanets"></div></fieldset>
-      <fieldset><legend>Rings</legend><div class="opts" id="sRings"></div></fieldset>
+      <div class="sstack">
+        <fieldset><legend>Rings</legend><div class="opts" id="sRings"></div></fieldset>
+        <fieldset><legend>Exobiology</legend><div class="opts" id="sBio"></div>
+          <div class="hint">bodies with bio signals you have not finished sampling; values are what the rest could pay at plain Vista Genomics prices (no first-footfall ×5)</div></fieldset>
+      </div>
       <fieldset><legend>Ring hotspots</legend><div class="opts" id="sHotspots"></div></fieldset>
     </div>
     <div class="hint">Within a section any ticked item counts (OR); a system must match every section you tick something in (AND across sections).
@@ -159,10 +230,15 @@
       which only exist for rings someone has probed. <b>Spansh (online)</b> covers everything anyone has reported.</div>
   </form>
   <div id="sStatus"></div>
+  <div id="sMain">
+  <div id="sResults">
   <table id="sTable" hidden>
-    <thead><tr><th></th><th>System</th><th class="num">Dist</th><th>Matches</th></tr></thead>
+    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th>Matches</th></tr></thead>
     <tbody id="sRows"></tbody>
   </table>
+  </div>
+  <div id="sBodyPanel" class="bodypanel" hidden></div>
+  </div>
 </section>
 </main>
 <div id="toast"></div>
@@ -174,10 +250,26 @@
     <label class="master"><input type="checkbox" data-alert="enabled"> Enabled (the browser will ask permission once)</label>
     <div class="opts" id="alertOpts"></div>
     <div class="hint">The tab title also carries the current state, so a background tab still tells you something.</div>
+    <h4>Sounds</h4>
+    <div class="opts inline">Try them:
+      <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>
+      <button type="button" class="try" data-try="upbeat" title="known but not fully scanned">▶ unscanned</button>
+      <button type="button" class="try" data-try="thud" title="visited or fully scanned">▶ known</button>
+      <button type="button" class="try" data-try="alert" title="leaving with unfinished work">▶ alert</button>
+    </div>
     <h4>Thresholds (these also drive the header colours and the leaving warning)</h4>
     <label class="mod">Exobiology: only count a body as unfinished if it could pay over
       <input type="number" id="bioMin" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="bioMin">reset</span>
       <span class="hint">straight Vista Genomics payout, no first-log bonus; sampling you have already started always counts; a body the rules cannot price always counts</span></label>
+    <div class="hint" id="bioRules"></div>
+    <label class="mod">Highlight a body in Here when its scan + map data pays over
+      <input type="number" id="hlBody" min="0" step="100000" style="width:9em"> cr<span class="reset" data-reset="hlBody">reset</span>
+      <span class="hint">the row turns green; straight Universal Cartographics value, no first-discovery, first-mapped or efficiency bonus</span></label>
+    <label class="mod">Highlight a body's bio when its species could pay over
+      <input type="number" id="hlBio" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="hlBio">reset</span>
+      <span class="hint">the Bio cell and the body name turn violet; straight Vista Genomics value, no first-footfall ×5</span></label>
+    <label class="mod"><input type="checkbox" id="maxBonus"> Here's <b>Max</b> column counts first-discovery, first-mapped and first-footfall bonuses<span class="reset" data-reset="maxBonus">reset</span>
+      <span class="hint">off shows plain payouts, for comparing bodies on their own merits; <b>Now</b> always includes the bonuses you have earned, since that is what a sale pays</span></label>
     <label class="mod">Unsold data on board: amber "worth selling soon" at
       <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
       <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>

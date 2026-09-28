@@ -25,6 +25,8 @@
                        # (no authentication: it exposes your journals' contents and lets anyone edit bookmarks)
 # port = 8025
 # radius = 25          # ly: the sphere of nearby systems the page lists (Spansh is asked once per jump)
+# radius_choices = [20, 25, 30, 40, 50]   # ly: the page's radius dropdown; larger spheres (up to your jump range,
+#                                         # say) work but fetch and redraw more — ~1,500 systems at 100 ly in the black
 # db = "ed_outrider.sqlite"
 
 [defaults]
@@ -34,6 +36,14 @@
 # unsold_urgent = 250000000   # red "go sell"
 # bio_min = 10000000          # a body only counts as unfinished bio if a single body could pay over this
 # sounds = true               # target sounds on by default (the browser still needs one click to allow audio)
+# body_highlight_level = 500000      # Here: a body's row turns green when its scan + map data pays this much
+#                                    # (straight Universal Cartographics value: no first-discovery,
+#                                    # first-mapped or efficiency bonus)
+# biology_highlight_value = 10000000 # Here: a body's bio turns violet when its species could pay this much
+#                                    # (straight Vista Genomics value: no first-footfall x5)
+# body_max_value_include_bonus = true # Here: the Max column (and the system's max total) counts first-discovery,
+#                                    # first-mapped and first-footfall bonuses; false shows plain payouts.
+#                                    # Now always includes them: it is what a sale would actually pay.
 
 [spansh]
 # concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh)

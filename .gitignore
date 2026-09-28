@@ -9,3 +9,9 @@ __pycache__/
 
 # Node modules if you install jsdom for tests/page_smoke.js
 node_modules/
+
+# Half-written rules download
+bio_rules.json.tmp
+
+# private planning notes, never committed
+project/

@@ -3,12 +3,22 @@
 ed_bio.py -- Which exobiology species can a planet host, and what are they worth?
 
 The game only spawns each species inside known bands of planet class, atmosphere, gravity,
-surface temperature and volcanism (the "spawn conditions" the community has mapped out).
-Given a body's scan data this module lists the species that could be there, grouped by genus
-with the most valuable candidate first, so you know before you drop a probe whether a body's
-bio signals might be a 19M Stratum Tectonicas or a 1M Bacterium Aurasus.
+surface temperature, pressure and volcanism, and some care about the stars in the system, the
+galactic region, or whether you are inside a nebula. Given a body's scan data (and a little
+about its system) this module lists the species that could be there, grouped by genus with the
+most valuable candidate first, so you know before you drop a probe whether a body's bio
+signals might be a 19M Stratum Tectonicas or a 1M Bacterium Aurasus.
 
-    python3 ed_bio.py --backtest      check the rules against your own journals
+The spawn conditions are the community's work, maintained in the BioScan plugin for EDMC
+(https://github.com/Silarn/EDMC-BioScan, GPL-2.0-or-later). They are not shipped with this
+tool: `--update-rules` downloads them (plus the galactic region map from
+https://github.com/klightspeed/EliteDangerousRegionMap, MIT) into bio_rules.json next to this
+file, and ED Outrider does that itself on first start. Run it again now and then to pick up
+refinements.
+
+    python3 ed_bio.py --update-rules     fetch the latest spawn rules
+    python3 ed_bio.py --backtest         check the rules against your own journals
+    python3 ed_bio.py --body '{"class":"Rocky body","atmosphere":"Ammonia","gravity":0.15,"temperature":170}'
 
 A prediction is a possibility, not a promise: the genus is usually reliable, the species within
 it (which sets the value) often depends on things the scan does not tell you, so several
@@ -16,43 +26,100 @@ species of one genus are commonly listed together. The backtest prints how often
 finds were on the list.
 
 Body dict used by predict():
-    class        journal PlanetClass or Spansh subtype ("Rocky body", "High metal content world")
-    atmosphere   journal AtmosphereType ("CarbonDioxide") or Spansh ("Thin Carbon dioxide")
-    gravity      g
-    temperature  K
-    volcanism    journal Volcanism string or Spansh volcanismType ("" / None for none)
-    dist_ls      distance from arrival (only Clypeus Speculumi cares)
-    star         arrival star class letter (only Electricae care)
+    class         journal PlanetClass or Spansh subtype ("Rocky body", "High metal content world")
+    atmosphere    journal AtmosphereType ("CarbonDioxide") or Spansh ("Thin Carbon dioxide")
+    gravity       g
+    temperature   K
+    pressure      atmospheres (optional)
+    volcanism     journal Volcanism string or Spansh volcanismType ("" / None for none)
+    dist_ls       distance from arrival
+    orbital_period_s  seconds (optional; only Sinuous Tubers care)
+    atmosphere_composition  {"SulphurDioxide": 1.2, ...} percentages (optional; Recepta care)
+    parents       star types of the stars this body orbits, journal codes (optional)
+    star          arrival star type (journal code) -- used when `system` gives no stars
+
+System dict (optional second argument; everything in it is optional too):
+    name, x, y, z   coordinates decide the region, nebulae and Guardian/tuber zones
+    region          region number 1-42 if you already know it (else derived from x, y, z)
+    stars           [{"type": "M", "luminosity": "Va", "main": True}, ...]
+    planet_types    PlanetClass of every planet in the system (some species need e.g. a water world)
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import collections
+import datetime as dt
+import functools
 import json
+import math
 import os
 import re
 import sys
+import urllib.request
 from glob import glob
 
 try:
-    from ed_unsold import ORGANIC_VALUES, DEFAULT_DIRS
+    from ed_unsold import ORGANIC_VALUES, find_journal_dirs
 except ImportError:  # standalone use without the price table
-    ORGANIC_VALUES, DEFAULT_DIRS = {}, []
+    ORGANIC_VALUES = {}
+    find_journal_dirs = None
+
+RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bio_rules.json")
+
+BIOSCAN = "https://raw.githubusercontent.com/Silarn/EDMC-BioScan/master/src/bio_scan/"
+BIOSCAN_API = "https://api.github.com/repos/Silarn/EDMC-BioScan/"
+BIOSCAN_PATHS = ["src/bio_scan/bio_data", "src/bio_scan/nebula_data"]  # the parts we take
+REGIONMAP = "https://raw.githubusercontent.com/klightspeed/EliteDangerousRegionMap/master/RegionMapData.py"
+REGIONMAP_API = "https://api.github.com/repos/klightspeed/EliteDangerousRegionMap/"
+RULESET_FILES = ["aleoida", "anemone", "bacterium", "brain_tree", "cactoida", "clypeus", "concha", "electricae",
+                 "fonticulua", "frutexa", "fumerola", "fungoida", "osseus", "recepta", "shard", "stratum",
+                 "tubers", "tubus", "tussock"]  # used if the GitHub directory listing is unavailable
+
+# The DSS's genus names for the Horizons life forms (the Odyssey ones are the species' first word).
+GENUS_NAMES = {
+    "$Codex_Ent_Brancae_Name;": "Brain Trees", "$Codex_Ent_Sphere_Name;": "Anemone",
+    "$Codex_Ent_Tube_Name;": "Sinuous Tubers", "$Codex_Ent_Ground_Struct_Ice_Name;": "Crystalline Shards",
+    "$Codex_Ent_Cone_Name;": "Bark Mounds", "$Codex_Ent_Vents_Name;": "Amphora Plant",
+    "$Codex_Ent_Ingensradices_Genus_Name;": "Radicoida",
+}
+
+# Region map origin (klightspeed's RegionMap.py): the grid has 83 cells per 4096 ly.
+REGION_ORIGIN = (-49985, -40985, -24105)
 
 # --------------------------------------------------------------------------
 # Normalisation of the different spellings the journal and Spansh use
 # --------------------------------------------------------------------------
 
-CLASSES = {
-    "rocky body": "rocky", "high metal content body": "hmc", "high metal content world": "hmc",
-    "icy body": "icy", "rocky ice body": "rockyice", "rocky ice world": "rockyice",
-    "metal rich body": "metalrich", "metal-rich body": "metalrich",
+LANDABLE = {
+    "rocky body": "Rocky body", "high metal content body": "High metal content body",
+    "high metal content world": "High metal content body",
+    "icy body": "Icy body", "rocky ice body": "Rocky ice body", "rocky ice world": "Rocky ice body",
+    "metal rich body": "Metal rich body", "metal-rich body": "Metal rich body",
 }
+OTHER_PLANETS = {
+    "earth-like world": "Earthlike body", "earthlike body": "Earthlike body",
+    "gas giant with water-based life": "Gas giant with water based life",
+    "gas giant with ammonia-based life": "Gas giant with ammonia based life",
+}
+STAR_NAMES = {  # Spansh subtype -> journal StarType, where the first word is not the code
+    "Neutron Star": "N", "Black Hole": "H", "Supermassive Black Hole": "SupermassiveBlackHole",
+    "T Tauri Star": "TTS", "Herbig Ae/Be Star": "AeBe", "Wolf-Rayet Star": "W", "MS-type Star": "MS",
+    "S-type Star": "S",
+}
+GIANTS = {"super giant": "SuperGiant", "giant": "Giant"}
+COLOURS = {"A": "BlueWhite", "B": "BlueWhite", "F": "White", "G": "White", "K": "Orange", "M": "Red"}
 
 
-def norm_class(c):
-    return CLASSES.get((c or "").strip().lower())
+def journal_class(c):
+    """Planet class in the journal's spelling, whichever spelling came in."""
+    k = (c or "").strip().lower()
+    return LANDABLE.get(k) or OTHER_PLANETS.get(k) or (c or "").strip()
+
+
+def landable_class(c):
+    return LANDABLE.get((c or "").strip().lower())
 
 
 def norm_atmosphere(a):
@@ -66,164 +133,474 @@ def norm_atmosphere(a):
 
 
 def norm_volcanism(v):
+    """Journal form: '' for none, else e.g. 'major silicate vapour geysers volcanism'."""
     v = (v or "").strip().lower()
     if v in ("", "none", "no volcanism"):
         return ""
-    return v.replace(" volcanism", "")
+    return v if v.endswith(" volcanism") else v + " volcanism"
+
+
+def star_code(s):
+    """Journal StarType code from either a code ('M', 'DA', 'M_RedGiant') or a Spansh name
+    ('M (Red giant) Star', 'White Dwarf (DA) Star')."""
+    s = (s or "").strip()
+    if not s or " " not in s:
+        return s or None
+    if s in STAR_NAMES:
+        return STAR_NAMES[s]
+    m = re.match(r"^White Dwarf \((\w+)\)", s)
+    if m:
+        return m.group(1)
+    m = re.match(r"^Wolf-Rayet (\w+) Star$", s)
+    if m:
+        return "W" + m.group(1)
+    m = re.match(r"^([A-Z]+)(?:-type)? (?:\(([^)]*)\) )?Star$", s)
+    if not m:
+        return s
+    code, detail = m.group(1), (m.group(2) or "").lower()
+    for word, suffix in GIANTS.items():
+        if detail.endswith(word) and code in COLOURS:
+            return f"{code}_{COLOURS[code]}{suffix}"
+    return code
+
+
+def star_matches(query, code):
+    """BioScan's star_check: a class letter also covers its giant variants."""
+    if not code:
+        return False
+    if query in ("A", "B", "F", "G", "K", "M"):
+        return code == query or code.startswith(query + "_")
+    if query in ("D", "C", "W"):
+        return code.startswith(query)
+    return code == query
+
+
+def luminosity_matches(want, have):
+    return bool(have) and any(want + flag == have for flag in ("", "a", "b", "ab", "z"))
 
 
 # --------------------------------------------------------------------------
-# Spawn rules
-#
-# atm: atmosphere keys (see norm_atmosphere); cls: planet class keys; g/t: inclusive ranges;
-# volc: None (don't care), "none" (must have no volcanism), "any" (must have some), or a tuple
-# of substrings one of which must appear in the volcanism text.
+# Fetching the rules
 # --------------------------------------------------------------------------
 
-CO2 = ("carbondioxide", "carbondioxiderich")
-AMM = ("ammonia",)
-ARG = ("argon", "argonrich")
-NEON = ("neon", "neonrich")
-METH = ("methane", "methanerich")
-SO2 = ("sulphurdioxide",)
-WATER = ("water", "waterrich")
-ROCKY_HMC = ("rocky", "hmc")
-ICES = ("icy", "rockyice")
-ALL_LANDABLE = ("rocky", "hmc", "icy", "rockyice", "metalrich")
+def _get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "ED-Outrider ed_bio"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read().decode("utf-8")
 
 
-def rule(name, cls, atm, g=(0, 0.28), t=(0, 9999), volc=None, genus=None, **extra):
-    return dict(name=name, genus=genus or name.split()[0], cls=tuple(cls), atm=tuple(atm), g=g, t=t, volc=volc, **extra)
+def _literals(source):
+    """Every top-level `name = <literal>` in a Python source file, without importing it."""
+    out = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name, value = node.targets[0].id, node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            name, value = node.target.id, node.value
+        else:
+            continue
+        try:
+            out[name] = ast.literal_eval(value)
+        except ValueError:
+            pass
+    return out
 
 
-RULES = [
-    # Aleoida: rocky/HMC, low gravity
-    rule("Aleoida Arcus", ROCKY_HMC, CO2, t=(175, 180)),
-    rule("Aleoida Coronamus", ROCKY_HMC, CO2, t=(180, 190)),
-    rule("Aleoida Gravis", ROCKY_HMC, CO2, t=(190, 196)),
-    rule("Aleoida Spica", ROCKY_HMC, AMM, t=(170, 177)),
-    rule("Aleoida Laminiae", ROCKY_HMC, AMM, t=(152, 177)),
-    # Bacterium: almost anywhere there is a thin atmosphere; the atmosphere picks the species
-    rule("Bacterium Aurasus", ALL_LANDABLE, CO2, g=(0, 0.61)),
-    rule("Bacterium Alcyoneum", ALL_LANDABLE, AMM, g=(0, 0.61)),
-    rule("Bacterium Vesicula", ALL_LANDABLE, ARG, g=(0, 0.61)),
-    rule("Bacterium Acies", ALL_LANDABLE, NEON, g=(0, 0.61)),
-    rule("Bacterium Bullaris", ALL_LANDABLE, METH, g=(0, 0.61)),
-    rule("Bacterium Cerbrus", ALL_LANDABLE, SO2 + WATER, g=(0, 0.61)),
-    rule("Bacterium Informem", ALL_LANDABLE, ("nitrogen",), g=(0, 0.61)),
-    rule("Bacterium Volu", ALL_LANDABLE, ("oxygen",), g=(0, 0.61)),
-    rule("Bacterium Nebulus", ALL_LANDABLE, ("helium",), g=(0, 0.61)),
-    rule("Bacterium Tela", ALL_LANDABLE, WATER + ("oxygen", "helium", "neonrich", "argonrich"), g=(0, 0.61)),
-    rule("Bacterium Tela", ALL_LANDABLE, CO2 + AMM + ARG + NEON + METH + SO2 + ("nitrogen",), g=(0, 0.61), volc="any"),
-    rule("Bacterium Scopulum", ALL_LANDABLE, NEON, g=(0, 0.61), volc=("carbon", "methane")),
-    rule("Bacterium Omentum", ALL_LANDABLE, NEON, g=(0, 0.61), volc=("nitrogen", "ammonia")),
-    rule("Bacterium Verrata", ALL_LANDABLE, NEON + WATER, g=(0, 0.61), volc=("water",)),
-    # Cactoida
-    rule("Cactoida Cortexum", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Cactoida Pullulanta", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Cactoida Lapis", ROCKY_HMC, AMM, t=(160, 180)),
-    rule("Cactoida Peperatis", ROCKY_HMC, AMM, t=(160, 180)),
-    rule("Cactoida Vermis", ROCKY_HMC, WATER + SO2),
-    # Clypeus: warm, CO2 or water
-    rule("Clypeus Lacrimam", ROCKY_HMC, CO2 + WATER, t=(190, 9999)),
-    rule("Clypeus Margaritus", ROCKY_HMC, CO2 + WATER, t=(190, 9999)),
-    rule("Clypeus Speculumi", ROCKY_HMC, CO2 + WATER, t=(190, 9999), dist_min=2500),
-    # Concha
-    rule("Concha Renibus", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Concha Renibus", ROCKY_HMC, WATER, t=(180, 9999)),
-    rule("Concha Labiata", ROCKY_HMC, CO2, t=(150, 200)),
-    rule("Concha Aureolas", ROCKY_HMC, AMM),
-    rule("Concha Biconcavis", ROCKY_HMC, ("nitrogen",)),
-    # Electricae: icy, cold, noble gases; Pluma wants a hot blue star
-    rule("Electricae Pluma", ("icy",), ARG + NEON + ("helium",), t=(0, 150), star=("A", "B", "O", "N", "D")),
-    rule("Electricae Radialem", ("icy",), ARG + NEON + ("helium",), t=(0, 150), star=("A", "B", "O", "N", "D")),
-    # Fonticulua: ice worlds, the atmosphere picks the species
-    rule("Fonticulua Campestris", ICES, ARG),
-    rule("Fonticulua Segmentatus", ICES, NEON),
-    rule("Fonticulua Digitos", ICES, METH),
-    rule("Fonticulua Upupam", ICES, ("argonrich",)),
-    rule("Fonticulua Lapida", ICES, ("nitrogen",)),
-    rule("Fonticulua Fluctus", ICES, ("oxygen",)),
-    # Frutexa
-    rule("Frutexa Acus", ("rocky",), CO2, t=(0, 195)),
-    rule("Frutexa Fera", ("rocky",), CO2, t=(0, 195)),
-    rule("Frutexa Metallicum", ("hmc",), AMM + CO2, t=(0, 195)),
-    rule("Frutexa Flabellum", ("rocky",), AMM),
-    rule("Frutexa Flammasis", ("rocky",), AMM),
-    rule("Frutexa Sponsae", ("rocky",), WATER),
-    rule("Frutexa Collum", ("rocky",), SO2),
-    # Fumerola: needs volcanism of the matching kind
-    rule("Fumerola Carbosis", ALL_LANDABLE, ARG + METH + NEON, volc=("carbon", "methane")),
-    rule("Fumerola Extremus", ALL_LANDABLE, ARG + METH + NEON + ("nitrogen",), volc=("silicate", "iron", "rocky", "metallic")),
-    rule("Fumerola Nitris", ALL_LANDABLE, ARG + METH + NEON + ("nitrogen",), volc=("nitrogen", "ammonia")),
-    rule("Fumerola Aquatis", ALL_LANDABLE, ARG + METH + NEON + WATER, volc=("water",)),
-    # Fungoida
-    rule("Fungoida Setisis", ROCKY_HMC + ("rockyice",), AMM + METH),
-    rule("Fungoida Stabitis", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Fungoida Stabitis", ROCKY_HMC, WATER, t=(180, 9999)),
-    rule("Fungoida Gelata", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Fungoida Gelata", ROCKY_HMC, WATER, t=(180, 9999)),
-    rule("Fungoida Bullarum", ("rockyice",), ARG),
-    # Osseus
-    rule("Osseus Spiralis", ROCKY_HMC, AMM, t=(160, 180)),
-    rule("Osseus Pumice", ("rockyice",), ARG + METH + ("nitrogen",)),
-    rule("Osseus Cornibus", ROCKY_HMC, CO2, t=(180, 196)),
-    rule("Osseus Fractus", ROCKY_HMC, CO2, t=(180, 190)),
-    rule("Osseus Pellebantus", ROCKY_HMC, CO2, t=(190, 196)),
-    rule("Osseus Discus", ROCKY_HMC, WATER),
-    # Recepta: sulphur dioxide
-    rule("Recepta Umbrux", ALL_LANDABLE, SO2, t=(132, 9999)),
-    rule("Recepta Deltahedronix", ROCKY_HMC, SO2, t=(132, 9999)),
-    rule("Recepta Conditivus", ICES, SO2, t=(132, 9999)),
-    # Stratum: tolerates more gravity than the rest; Tectonicas is the HMC one
-    rule("Stratum Tectonicas", ("hmc",), AMM + CO2 + SO2 + WATER + ("oxygen",), g=(0, 0.61), t=(165, 9999)),
-    rule("Stratum Paleas", ("rocky",), AMM + CO2 + WATER, g=(0, 0.61), t=(165, 9999)),
-    rule("Stratum Laminamus", ("rocky",), AMM, g=(0, 0.61), t=(165, 9999)),
-    rule("Stratum Excutitus", ("rocky",), CO2 + SO2, g=(0, 0.61), t=(165, 190)),
-    rule("Stratum Limaxus", ("rocky",), CO2 + SO2, g=(0, 0.61), t=(165, 190)),
-    rule("Stratum Frigus", ("rocky",), CO2 + SO2, g=(0, 0.61), t=(190, 9999)),
-    rule("Stratum Cucumisis", ("rocky",), CO2 + SO2, g=(0, 0.61), t=(190, 9999)),
-    rule("Stratum Araneamus", ("rocky",), SO2, g=(0, 0.61), t=(165, 9999)),
-    # Tubus: very low gravity only
-    rule("Tubus Compagibus", ("rocky",), CO2, g=(0, 0.153), t=(160, 190)),
-    rule("Tubus Cavas", ("rocky",), CO2, g=(0, 0.153), t=(160, 190)),
-    rule("Tubus Conifer", ("rocky",), CO2, g=(0, 0.153), t=(160, 190)),
-    rule("Tubus Rosarium", ("rocky",), AMM, g=(0, 0.153), t=(160, 190)),
-    rule("Tubus Sororibus", ("hmc",), CO2 + AMM, g=(0, 0.153), t=(160, 190)),
-    # Tussock: the CO2 ones are sorted by temperature band
-    rule("Tussock Pennata", ROCKY_HMC, CO2, t=(145, 155)),
-    rule("Tussock Ventusa", ROCKY_HMC, CO2, t=(155, 160)),
-    rule("Tussock Ignis", ROCKY_HMC, CO2, t=(160, 170)),
-    rule("Tussock Serrati", ROCKY_HMC, CO2, t=(170, 175)),
-    rule("Tussock Albata", ROCKY_HMC, CO2, t=(175, 180)),
-    rule("Tussock Caputus", ROCKY_HMC, CO2, t=(180, 190)),
-    rule("Tussock Triticum", ROCKY_HMC, CO2, t=(190, 197)),
-    rule("Tussock Pennatis", ROCKY_HMC, CO2, t=(145, 197)),
-    rule("Tussock Propagito", ROCKY_HMC, CO2, t=(145, 197)),
-    rule("Tussock Cultro", ROCKY_HMC, AMM),
-    rule("Tussock Catena", ROCKY_HMC, AMM),
-    rule("Tussock Divisa", ROCKY_HMC, AMM),
-    rule("Tussock Virgam", ROCKY_HMC, WATER),
-    rule("Tussock Stigmasis", ROCKY_HMC, SO2),
-    rule("Tussock Capillum", ("rockyice",), ARG + METH),
-    # Horizons-era life on airless bodies
-    rule("Brain Tree", ROCKY_HMC + ("metalrich",), ("none",), g=(0, 0.61), t=(200, 500), volc="any", genus="Brain Trees"),
-    rule("Sinuous Tubers", ROCKY_HMC + ("metalrich",), ("none",), g=(0, 0.61), t=(200, 500), volc="any", genus="Sinuous Tubers"),
-    rule("Crystalline Shards", ALL_LANDABLE, ("none",), g=(0, 0.61), t=(0, 273), dist_min=12000, star=("A", "F", "G", "K", "M", "S"),
-         genus="Crystalline Shards"),
-]
+def _genus_name(genus_id, species_name):
+    return GENUS_NAMES.get(genus_id) or species_name.split()[0]
 
-GENERA = sorted({r["genus"] for r in RULES})
 
+def genus_from_id(genus_id):
+    """A DSS genus code ('$Codex_Ent_Bacterial_Genus_Name;', as Spansh dumps list them) -> its name
+    ('Bacterium'). Unknown codes come back unchanged."""
+    if not isinstance(genus_id, str) or not genus_id.startswith("$"):
+        return genus_id
+    if genus_id in GENUS_NAMES:
+        return GENUS_NAMES[genus_id]
+    for sp in (load_rules() or {}).get("species") or []:
+        if sp.get("genus_id") == genus_id:
+            return sp.get("genus") or genus_id
+    return genus_id
+
+
+def _latest_commit(api, path):
+    commits = json.loads(_get(f"{api}commits?path={path}&per_page=1"))
+    return commits[0]["sha"] if commits else ""
+
+
+def remote_versions():
+    """The newest upstream commits touching the data we use (three small GitHub API calls)."""
+    return {"bioscan": ",".join(_latest_commit(BIOSCAN_API, p) for p in BIOSCAN_PATHS),
+            "regionmap": _latest_commit(REGIONMAP_API, "RegionMapData.py")}
+
+
+def update_if_newer(path=None, log=print):
+    """Refresh bio_rules.json when upstream has changed (or the file is missing). Returns True if
+    it was rewritten. Offline or rate-limited: keeps whatever is there and says so."""
+    current = load_rules(path)
+    try:
+        remote = remote_versions()
+    except Exception as e:  # noqa: BLE001 -- no network, GitHub down or throttled
+        log(f"bio rules: could not check for updates ({e}); "
+            + (f"using the copy from {(current.get('generated') or '')[:10]}" if current else "no rules available"))
+        if current:
+            return False
+        raise
+    if current and current.get("versions") == remote:
+        return False
+    update_rules(path, log=lambda *_: None, versions=remote)
+    return True
+
+
+def update_rules(path=None, log=print, versions=None):
+    """Download BioScan's catalog and the region map and write them to `path`. Returns the rule set."""
+    path = path or RULES_FILE
+    if versions is None:
+        try:
+            versions = remote_versions()
+        except Exception as e:  # noqa: BLE001
+            log(f"bio rules: could not read upstream versions ({e})")
+            versions = {}
+    try:
+        files = [f["name"][:-3] for f in json.loads(_get(BIOSCAN_API + "contents/src/bio_scan/bio_data/rulesets"))
+                 if f.get("name", "").endswith(".py") and not f["name"].startswith("_")]
+    except Exception as e:  # noqa: BLE001 -- the listing is a nicety; the known file names do
+        log(f"bio rules: could not list rulesets ({e}); using the known file names")
+        files = RULESET_FILES
+    catalog = {}
+    for name in files:
+        catalog.update(_literals(_get(f"{BIOSCAN}bio_data/rulesets/{name}.py")).get("catalog") or {})
+        log(f"bio rules: {name}")
+    catalog.update(_literals(_get(BIOSCAN + "bio_data/species.py")).get("_mound_amphora") or {})
+    regions = _literals(_get(BIOSCAN + "bio_data/regions.py"))
+    stars = _literals(_get(BIOSCAN + "nebula_data/reference_stars.py"))
+    sectors = _literals(_get(BIOSCAN + "nebula_data/sectors.py")).get("data") or []
+    log("bio rules: nebulae and regions")
+    grid = _literals(_get(REGIONMAP))
+    species = []
+    for genus_id, members in catalog.items():
+        for species_id, d in members.items():
+            species.append({"id": species_id, "genus_id": genus_id, "genus": _genus_name(genus_id, d["name"]),
+                            "name": d["name"], "value": d.get("value"), "rulesets": d.get("rulesets") or []})
+    data = {
+        "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "sources": [
+            {"name": "EDMC-BioScan", "url": "https://github.com/Silarn/EDMC-BioScan",
+             "commit": versions.get("bioscan", ""), "licence": "GPL-2.0-or-later",
+             "what": "species spawn rules, nebula and region tables"},
+            {"name": "EliteDangerousRegionMap", "url": "https://github.com/klightspeed/EliteDangerousRegionMap",
+             "commit": versions.get("regionmap", ""), "licence": "MIT", "what": "galactic region map"},
+        ],
+        "versions": versions,   # compared with GitHub at each start to know when to refresh
+        "species": species,
+        "region_map": regions.get("region_map") or {},
+        "guardian_nebulae": regions.get("guardian_nebulae") or {},
+        "tuber_zones": regions.get("tuber_zones") or {},
+        "nebulae_large": {**(stars.get("coordinates") or {}), **(stars.get("named_coordinates") or {})},
+        "nebulae_planetary": stars.get("planetary_coordinates") or {},
+        "sectors": sectors,
+        "region_names": grid.get("regions") or [],
+        "region_grid": grid.get("regionmap") or [],
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, separators=(",", ":"))
+    os.replace(tmp, path)
+    log(f"bio rules: {len(species)} species written to {path}")
+    return load_rules(path, force=True)
+
+
+# --------------------------------------------------------------------------
+# Loading
+# --------------------------------------------------------------------------
+
+_rules = None
+_rules_path = None
+
+
+def load_rules(path=None, force=False):
+    """The rule set from bio_rules.json (None if it has not been downloaded). Cached."""
+    global _rules, _rules_path
+    path = path or _rules_path or RULES_FILE
+    if _rules is not None and not force and path == _rules_path:
+        return _rules
+    _rules_path = path
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        _rules = None
+        return None
+    for s in data["species"]:
+        for r in s["rulesets"]:
+            if "region" in r and "regions" not in r:  # a typo in one BioScan file; clearly meant
+                r["regions"] = r.pop("region")
+            atm = r.get("atmosphere")
+            if isinstance(atm, list):
+                r["atmosphere"] = {norm_atmosphere(a) for a in atm}
+            if isinstance(r.get("volcanism"), list):
+                r["volcanism"] = [v.lower() for v in r["volcanism"]]
+            if isinstance(r.get("body_type"), list):
+                r["body_type"] = {journal_class(b) for b in r["body_type"]}
+            if isinstance(r.get("bodies"), list):
+                r["bodies"] = {journal_class(b) for b in r["bodies"]}
+            if isinstance(r.get("atmosphere_component"), dict):
+                r["atmosphere_component"] = {norm_atmosphere(k): v for k, v in r["atmosphere_component"].items()}
+    data["nebulae_large"] = {k: tuple(v) for k, v in data["nebulae_large"].items()}
+    data["nebulae_planetary"] = {k: tuple(v) for k, v in data["nebulae_planetary"].items()}
+    data["region_of"] = {int(i) for ids in data["region_map"].values() for i in ids}
+    _rules = data
+    _cached_region.cache_clear()
+    _cached_nebula.cache_clear()
+    return _rules
+
+
+def available():
+    return load_rules() is not None
+
+
+def rules_info():
+    """{"generated", "species", "sources"} for the page and the log, or None."""
+    r = load_rules()
+    if not r:
+        return None
+    return {"generated": r.get("generated"), "species": len(r["species"]), "sources": r.get("sources"),
+            "path": _rules_path}
+
+
+# --------------------------------------------------------------------------
+# Regions and nebulae
+# --------------------------------------------------------------------------
+
+def region_number(x, y, z):
+    """Galactic region number (1-42) for a position, or None outside the map."""
+    if x is None or z is None or not load_rules():
+        return None
+    return _cached_region(round(x, 1), round(z, 1))
+
+
+@functools.lru_cache(maxsize=4096)
+def _cached_region(x, z):
+    grid = _rules["region_grid"]
+    px = int((x - REGION_ORIGIN[0]) * 83 / 4096)
+    pz = int((z - REGION_ORIGIN[2]) * 83 / 4096)
+    if px < 0 or pz < 0 or pz >= len(grid):
+        return None
+    rx, pv = 0, 0
+    for rl, pv in grid[pz]:
+        if px < rx + rl:
+            break
+        rx += rl
+    else:
+        pv = 0
+    return pv or None
+
+
+def region_name(x, y, z):
+    n = region_number(x, y, z)
+    names = _rules["region_names"] if n and _rules else []
+    return names[n] if n and n < len(names) else None
+
+
+def _dist(a, b):
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+@functools.lru_cache(maxsize=1024)
+def _cached_nebula(name, x, y, z, kind):
+    """BioScan's nebula test: in a nebula sector by name, or within 150 ly of a large nebula's
+    reference star (or, for 'all', within 100 ly of a planetary nebula's)."""
+    r = _rules
+    if name and any(name.startswith(s) for s in r["sectors"]):
+        return True
+    if x is None:
+        return None
+    pos = (x, y, z)
+    if any(_dist(pos, c) < 150.0 for c in r["nebulae_large"].values()):
+        return True
+    return kind == "all" and any(_dist(pos, c) < 100.0 for c in r["nebulae_planetary"].values())
+
+
+def in_nebula(system, kind="all"):
+    if not load_rules():
+        return None
+    return _cached_nebula(system.get("name") or "", system.get("x"), system.get("y"), system.get("z"), kind)
+
+
+# --------------------------------------------------------------------------
+# The evaluator (mirrors BioScan's value_estimate, minus colour variants)
+# --------------------------------------------------------------------------
+
+SKIP = object()  # "this body does not tell us" -- the rule neither passes nor fails
+
+
+def _check(key, want, b, s):
+    """True/False, or SKIP when the data needed is unknown (a missing fact never eliminates)."""
+    if key == "atmosphere":
+        if want == "Any":
+            return b["atm"] != "none"
+        return b["atm"] in want
+    if key == "atmosphere_component":
+        comp = b.get("composition")
+        if comp is None:
+            return SKIP
+        return all(comp.get(gas, 0) >= pct for gas, pct in want.items())
+    if key == "min_gravity":
+        return SKIP if b["g"] is None else b["g"] >= want
+    if key == "max_gravity":
+        return SKIP if b["g"] is None else b["g"] <= want
+    if key == "min_temperature":
+        return SKIP if not b["t"] else b["t"] >= want
+    if key == "max_temperature":
+        return SKIP if not b["t"] else b["t"] <= want
+    if key == "min_pressure":
+        return SKIP if not b["p"] else b["p"] >= want
+    if key == "max_pressure":
+        return SKIP if not b["p"] else b["p"] < want
+    if key == "max_orbital_period":
+        op = b.get("orbital_period_s")
+        return SKIP if op is None else op < want
+    if key == "volcanism":
+        v = b["volc"]
+        if isinstance(want, list):
+            return any((v == w[1:]) if w.startswith("=") else (w in v) for w in want)
+        if want == "Any":
+            return v != ""
+        if want == "None":
+            return v == ""
+        if want.startswith("!"):  # "not X" assumes there is some volcanism
+            return v != "" and want[1:] not in v
+        return want in v
+    if key == "body_type":
+        return b["cls"] in want
+    if key == "regions":
+        if s["region"] is None:
+            return SKIP
+        rmap = _rules["region_map"]
+        if any(s["region"] in rmap.get(r[1:], ()) for r in want if r.startswith("!")):
+            return False
+        wanted = [r for r in want if not r.startswith("!")]
+        return not wanted or any(s["region"] in rmap.get(r, ()) for r in wanted)
+    if key == "guardian":
+        if not want:
+            return True
+        if s["pos"] is None:
+            return SKIP
+        return any(_dist(s["pos"], tuple(c)) < d for d, c in _rules["guardian_nebulae"].values())
+    if key == "tuber":
+        if s["pos"] is None:
+            return SKIP
+        for zone, ((lo, hi), c) in _rules["tuber_zones"].items():
+            if (want == "Any" or zone in want) and lo <= _dist(s["pos"], tuple(c)) <= hi:
+                return True
+        return False
+    if key == "bodies":
+        if s["planet_types"] is None:
+            return SKIP
+        return any(t in want for t in s["planet_types"])
+    if key == "main_star":
+        return _star_list_matches(want, [s["main"]] if s["main"] else [])
+    if key == "parent_star":
+        if s["main"] and any(star_matches(w, s["main"]["type"]) for w in want):
+            return True
+        parents = b.get("parents")
+        if parents is None:  # BioScan would eliminate here; we may simply not know the parents yet
+            return SKIP
+        return any(star_matches(w, p) for w in want for p in parents)
+    if key == "star":
+        if not s["stars"]:
+            return SKIP
+        return _star_list_matches(want, s["stars"])
+    if key == "nebula":
+        if want not in ("all", "large"):
+            return True
+        found = _cached_nebula(s["name"], *(s["pos"] or (None, None, None)), want)
+        return SKIP if found is None else found
+    if key == "distance":
+        return SKIP if b["dist"] is None else b["dist"] >= want
+    if key == "system":
+        return s["name"] == want
+    return True  # an unknown rule type from a newer BioScan: don't guess
+
+
+def _star_list_matches(want, stars):
+    """`want`: a code, or a list of codes and [code, luminosity] pairs; any star matching passes."""
+    for st in stars:
+        for w in (want if isinstance(want, list) else [want]):
+            if isinstance(w, (list, tuple)):
+                if star_matches(w[0], st["type"]) and luminosity_matches(w[1], st.get("luminosity")):
+                    return True
+            elif star_matches(w, st["type"]):
+                return True
+    return False
+
+
+def _body_facts(body):
+    g = body.get("gravity")
+    return {"cls": landable_class(body.get("class")), "atm": norm_atmosphere(body.get("atmosphere")),
+            "g": g, "t": body.get("temperature"), "p": body.get("pressure"),
+            "volc": norm_volcanism(body.get("volcanism")), "dist": body.get("dist_ls"),
+            "orbital_period_s": body.get("orbital_period_s"),
+            "composition": ({norm_atmosphere(k): v for k, v in body["atmosphere_composition"].items()}
+                            if body.get("atmosphere_composition") is not None else None),
+            "parents": [star_code(p) for p in body["parents"]] if body.get("parents") is not None else None}
+
+
+def _system_facts(system, body):
+    system = system or {}
+    stars = [{"type": star_code(st.get("type")), "luminosity": st.get("luminosity"), "main": st.get("main")}
+             for st in system.get("stars") or [] if st.get("type")]
+    main = next((st for st in stars if st.get("main")), None)
+    if main is None and body.get("star"):
+        main = {"type": star_code(body["star"]), "luminosity": None, "main": True}
+        if not stars:
+            stars = [main]
+    x, y, z = system.get("x"), system.get("y"), system.get("z")
+    region = system.get("region")
+    if region is None and x is not None:
+        region = region_number(x, y, z)
+    pt = system.get("planet_types")
+    return {"name": system.get("name") or "", "pos": (x, y, z) if x is not None else None, "region": region,
+            "stars": stars, "main": main,
+            "planet_types": [journal_class(t) for t in pt] if pt is not None else None}
+
+
+def predict(body, system=None):
+    """Species that could live on this body, most valuable first.
+
+    Returns [] for a body that cannot host anything (gas giant, not landable) or when the rules
+    have not been downloaded. Each entry: {name, genus, value}.
+    """
+    R = load_rules()
+    b = _body_facts(body)
+    if not R or not b["cls"]:
+        return []
+    s = _system_facts(system, body)
+    out = []
+    for sp in R["species"]:
+        for ruleset in sp["rulesets"]:
+            if all(_check(k, v, b, s) is not False for k, v in ruleset.items()):
+                out.append({"name": sp["name"], "genus": sp["genus"],
+                            "value": species_value(sp["name"]) or sp.get("value")})
+                break
+    out.sort(key=lambda x: -(x["value"] or 0))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Values and grouping
+# --------------------------------------------------------------------------
 
 def genus_value(genus):
-    """The most valuable species of a genus in the price table, by name prefix/suffix."""
+    """The most valuable species of a genus in the price table (or the rules), by name."""
     g = genus.lower().rstrip("s")
     best = 0
     for value, vname in ORGANIC_VALUES.values():
         n = vname.lower()
         if n.startswith(g) or n.endswith(" " + g) or n.endswith(" " + g + "s"):
             best = max(best, value)
+    if not best and load_rules():
+        best = max((sp.get("value") or 0 for sp in _rules["species"] if sp["genus"] == genus), default=0)
     return best or None
 
 
@@ -236,50 +613,6 @@ def species_value(name):
     return best or None
 
 
-def _matches(r, cls, atm, g, t, volc, dist_ls, star):
-    if cls not in r["cls"] or atm not in r["atm"]:
-        return False
-    if g is not None and not (r["g"][0] <= g <= r["g"][1]):
-        return False
-    if t is not None and not (r["t"][0] <= t <= r["t"][1]):
-        return False
-    v = r["volc"]
-    if v == "none" and volc:
-        return False
-    if v == "any" and not volc:
-        return False
-    if isinstance(v, tuple) and not any(k in volc for k in v):
-        return False
-    if r.get("dist_min") and dist_ls is not None and dist_ls < r["dist_min"]:
-        return False
-    if r.get("star") and star and star[0] not in r["star"]:
-        return False
-    return True
-
-
-def predict(body):
-    """Species that could live on this body, most valuable first.
-
-    Returns [] for a body that cannot host anything (gas giant, no atmosphere and no
-    volcanism, too heavy). Each entry: {name, genus, value}.
-    """
-    cls = norm_class(body.get("class"))
-    if not cls:
-        return []
-    atm = norm_atmosphere(body.get("atmosphere"))
-    g = body.get("gravity")
-    t = body.get("temperature")
-    volc = norm_volcanism(body.get("volcanism"))
-    out, seen = [], set()
-    for r in RULES:
-        if r["name"] in seen or not _matches(r, cls, atm, g, t, volc, body.get("dist_ls"), body.get("star")):
-            continue
-        seen.add(r["name"])
-        out.append({"name": r["name"], "genus": r["genus"], "value": species_value(r["name"])})
-    out.sort(key=lambda s: -(s["value"] or 0))
-    return out
-
-
 def potential(candidates, signals=None, genera=None):
     """An upper bound on what a body's bio could pay: the best species of each confirmed genus,
     or, before the DSS, of the `signals` most valuable possible genera."""
@@ -290,7 +623,7 @@ def potential(candidates, signals=None, genera=None):
 
 
 def short_species(name, genus):
-    """'Tussock Capillum' -> 'Capillum'; 'Brain Tree' stays whole."""
+    """'Tussock Capillum' -> 'Capillum'; 'Roseum Brain Tree' stays whole."""
     return name[len(genus) + 1:] if name.startswith(genus + " ") else name
 
 
@@ -311,19 +644,26 @@ def by_genus(candidates, genera=None):
             gr["min_value"] = c["value"]
     for g in genera or []:
         if g not in groups:
-            # No rule predicts it (Horizons life, or a gap in the table): bound it by the price
-            # table so it still counts, and flag that the rules had nothing to say.
+            # No rule predicts it (a gap in the rules, or unknown system context): bound it by the
+            # price table so it still counts, and flag that the rules had nothing to say.
             v = genus_value(g)
             groups[g] = {"genus": g, "best": None, "value": v, "min_value": v, "species": [], "unruled": True}
     return sorted(groups.values(), key=lambda gr: -(gr["value"] or 0))
 
 
-def body_from_scan(ev, star=None):
-    """Journal Scan event -> predict() body."""
+def body_from_scan(ev, star=None, star_types=None):
+    """Journal Scan event -> predict() body. `star_types`: {BodyID: StarType} to resolve Parents."""
     g = ev.get("SurfaceGravity")
+    parents = [p["Star"] for p in ev.get("Parents") or [] if "Star" in p]
     return {"class": ev.get("PlanetClass"), "atmosphere": ev.get("AtmosphereType"),
             "gravity": g / 9.80665 if g else None, "temperature": ev.get("SurfaceTemperature"),
-            "volcanism": ev.get("Volcanism"), "dist_ls": ev.get("DistanceFromArrivalLS"), "star": star}
+            "pressure": ev["SurfacePressure"] / 101325 if ev.get("SurfacePressure") else None,
+            "volcanism": ev.get("Volcanism"), "dist_ls": ev.get("DistanceFromArrivalLS"),
+            "orbital_period_s": ev.get("OrbitalPeriod"),
+            "atmosphere_composition": {c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
+            if "AtmosphereComposition" in ev else None,
+            "parents": [star_types[p] for p in parents if p in star_types] if star_types else None,
+            "star": star}
 
 
 # --------------------------------------------------------------------------
@@ -332,17 +672,28 @@ def body_from_scan(ev, star=None):
 
 def backtest(dirs, verbose=False, since=None):
     """since: only score samples/DSS results at or after this 'YYYY-MM' (an out-of-sample check)."""
-    scans, stars, analysed, genera = {}, {}, [], collections.defaultdict(set)
+    if not load_rules():
+        print(f"no rules at {RULES_FILE}: run  python3 ed_bio.py --update-rules  first")
+        return
+    scans, systems, analysed, genera = {}, {}, [], collections.defaultdict(set)
     for d in dirs:
         for path in sorted(glob(os.path.join(d, "Journal*.log"))):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     if '"event":"Scan"' in line:
                         ev = json.loads(line)
+                        sysd = systems.setdefault(ev.get("SystemAddress"), {"stars": {}, "planets": set()})
                         if ev.get("PlanetClass"):
                             scans[(ev.get("SystemAddress"), ev.get("BodyID"))] = ev
-                        elif ev.get("StarType") and not ev.get("DistanceFromArrivalLS"):
-                            stars[ev.get("SystemAddress")] = ev["StarType"]
+                            sysd["planets"].add(ev["PlanetClass"])
+                        elif ev.get("StarType"):
+                            sysd["stars"][ev.get("BodyID")] = {"type": ev["StarType"], "luminosity": ev.get("Luminosity"),
+                                                              "main": not ev.get("DistanceFromArrivalLS")}
+                    elif '"StarPos"' in line and ('"FSDJump"' in line or '"Location"' in line or '"CarrierJump"' in line):
+                        ev = json.loads(line)
+                        sysd = systems.setdefault(ev.get("SystemAddress"), {"stars": {}, "planets": set()})
+                        sysd["name"] = ev.get("StarSystem")
+                        sysd["x"], sysd["y"], sysd["z"] = ev["StarPos"]
                     elif '"event":"ScanOrganic"' in line and '"Analyse"' in line:
                         ev = json.loads(line)
                         if not since or ev.get("timestamp", "") >= since:
@@ -353,6 +704,18 @@ def backtest(dirs, verbose=False, since=None):
                             continue
                         for g in ev.get("Genuses") or []:
                             genera[(ev["SystemAddress"], ev["BodyID"])].add(g.get("Genus_Localised"))
+
+    def context(addr):
+        sysd = systems.get(addr) or {}
+        stars = list(sysd.get("stars", {}).values())
+        return ({"name": sysd.get("name"), "x": sysd.get("x"), "y": sysd.get("y"), "z": sysd.get("z"),
+                 "stars": stars, "planet_types": sorted(sysd.get("planets", ()))},
+                {bid: st["type"] for bid, st in sysd.get("stars", {}).items()})
+
+    def describe(sc):
+        b = body_from_scan(sc)
+        return (landable_class(b["class"]), norm_atmosphere(b["atmosphere"]), round(b["gravity"] or 0, 2),
+                round(b["temperature"] or 0), norm_volcanism(b["volcanism"])[:24])
 
     seen = set()
     sp_hit = sp_total = 0
@@ -366,7 +729,8 @@ def backtest(dirs, verbose=False, since=None):
         sc = scans.get((o["SystemAddress"], o["Body"]))
         if not sc:
             continue
-        cands = predict(body_from_scan(sc, stars.get(o["SystemAddress"])))
+        system, star_types = context(o["SystemAddress"])
+        cands = predict(body_from_scan(sc, star_types=star_types), system)
         names = [c["name"] for c in cands]
         sp_total += 1
         if o["Species_Localised"] in names:
@@ -374,9 +738,7 @@ def backtest(dirs, verbose=False, since=None):
             same = [c["name"] for c in cands if c["genus"] == o["Genus_Localised"]]
             ranks.append(same.index(o["Species_Localised"]) + 1 if o["Species_Localised"] in same else 0)
         else:
-            b = body_from_scan(sc)
-            misses[(o["Species_Localised"], norm_class(b["class"]), norm_atmosphere(b["atmosphere"]),
-                    round(b["gravity"] or 0, 2), round(b["temperature"] or 0), norm_volcanism(b["volcanism"])[:20])] += 1
+            misses[(o["Species_Localised"],) + describe(sc) + (region_name(system.get("x"), system.get("y"), system.get("z")),)] += 1
     g_hit = g_total = 0
     extra = []
     g_misses = collections.Counter()
@@ -384,16 +746,15 @@ def backtest(dirs, verbose=False, since=None):
         sc = scans.get(key)
         if not sc:
             continue
-        cands = predict(body_from_scan(sc, stars.get(key[0])))
+        system, star_types = context(key[0])
+        cands = predict(body_from_scan(sc, star_types=star_types), system)
         pg = {c["genus"] for c in cands}
         for g in gs:
             g_total += 1
             if g in pg:
                 g_hit += 1
             else:
-                b = body_from_scan(sc)
-                g_misses[(g, norm_class(b["class"]), norm_atmosphere(b["atmosphere"]), round(b["gravity"] or 0, 2),
-                          round(b["temperature"] or 0))] += 1
+                g_misses[(g,) + describe(sc)[:4]] += 1
         extra.append(len(pg - gs))
     print(f"species: {sp_hit}/{sp_total} of your analysed species were on the list "
           f"({100 * sp_hit / max(sp_total, 1):.0f}%)")
@@ -404,7 +765,7 @@ def backtest(dirs, verbose=False, since=None):
     print(f"genera:  {g_hit}/{g_total} of the genera the DSS found were predicted ({100 * g_hit / max(g_total, 1):.0f}%); "
           f"on average {sum(extra) / max(len(extra), 1):.1f} predicted genera per body did not show up")
     if misses:
-        print("\nspecies misses (species, class, atmosphere, g, K, volcanism) x n:")
+        print("\nspecies misses (species, class, atmosphere, g, K, volcanism, region) x n:")
         for k, n in misses.most_common(40):
             print("  ", k, "x", n)
     if g_misses:
@@ -415,17 +776,38 @@ def backtest(dirs, verbose=False, since=None):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--update-rules", action="store_true", help="Download the latest spawn rules to bio_rules.json.")
+    p.add_argument("--rules", metavar="PATH", help=f"Rules file to use (default {RULES_FILE}).")
     p.add_argument("--backtest", action="store_true", help="Check the rules against your journals.")
     p.add_argument("--since", metavar="YYYY-MM", help="With --backtest: only score finds from this month on (out-of-sample).")
     p.add_argument("--dir", action="append", help="Journal directory (repeatable).")
     p.add_argument("--body", help='Predict for a body given as JSON, e.g. \'{"class":"Rocky body","atmosphere":"Ammonia","gravity":0.15,"temperature":170}\'')
+    p.add_argument("--system", help='With --body: system context as JSON, e.g. \'{"x":-3485,"y":39,"z":7320,"stars":[{"type":"M","main":true}]}\'')
+    p.add_argument("--region", nargs=3, type=float, metavar=("X", "Y", "Z"), help="Print the galactic region at these coordinates.")
     a = p.parse_args(argv)
+    if a.rules:
+        load_rules(a.rules)
+    if a.update_rules:
+        update_rules(a.rules or RULES_FILE)
+        if not (a.body or a.backtest or a.region):
+            return
+    if not available():
+        print(f"no rules at {a.rules or RULES_FILE}: run  python3 ed_bio.py --update-rules  first")
+        return
+    if a.region:
+        print(region_name(*a.region) or "outside the mapped galaxy")
+        return
     if a.body:
-        for gr in by_genus(predict(json.loads(a.body))):
-            print(f"{gr['genus']:12} up to {gr['value'] or 0:>11,} cr  ({', '.join(short_species(s['name'], gr['genus']) + ' ' + str((s['value'] or 0) // 1000) + 'k' for s in gr['species'])})")
+        system = json.loads(a.system) if a.system else None
+        for gr in by_genus(predict(json.loads(a.body), system)):
+            print(f"{gr['genus']:18} up to {gr['value'] or 0:>11,} cr  ({', '.join(short_species(s['name'], gr['genus']) + ' ' + str((s['value'] or 0) // 1000) + 'k' for s in gr['species'])})")
         return
     if a.backtest:
-        backtest(a.dir or DEFAULT_DIRS, since=a.since)
+        dirs = a.dir
+        if not dirs and find_journal_dirs:
+            live, legacy = find_journal_dirs()
+            dirs = live + legacy
+        backtest(dirs or [], since=a.since)
         return
     p.print_help()
 

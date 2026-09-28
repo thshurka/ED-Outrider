@@ -21,6 +21,15 @@ const icon = (cls, id, n, title) =>
   `<span class="ic ${cls}" title="${title}"><svg><use href="#${id}"/></svg>${n}</span>`;
 const q = v => v === null || v === undefined ? "?" : v;
 
+function valueCell(s) {
+  if (!s.value_max) return "";
+  return s.value_now ? `<b>${credits(s.value_now)}</b> / ${credits(s.value_max)}` : credits(s.value_max);
+}
+function valueTitle(s) {
+  const v = s.value_parts; if (!v) return "";
+  const part = (c, b) => [c ? `${credits(c)} cartographics` : "", b ? `${credits(b)} exobiology` : ""].filter(Boolean).join(" + ") || "nothing";
+  return `On board from here: ${part(v.carto_now, v.bio_now)}\nStill available: ${part(v.carto_left, v.bio_left)}\n\nExobiology counts ×5 on bodies nobody had set foot on when you scanned them, ×1 on bodies you have not scanned.`;
+}
 function notable(s) {
   const n = s.notable || {};
   const names = {ELW: "Earth-like", WW: "water world", AW: "ammonia world", T: "terraformable"};
@@ -28,42 +37,85 @@ function notable(s) {
     `<span class="nb ${k}" title="${names[k]}${n[k] > 1 ? "s" : ""}">${k}${n[k] > 1 ? "×" + n[k] : ""}</span>`).join("") +
     (s.bio_potential ? `<span class="nb bio" title="exobiology: up to this much across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"}, from spawn rules">🧬≤${credits(s.bio_potential)}</span>` : "");
 }
+// Journal ship ids -> the names the game shows.
+const SHIP_NAMES = {sidewinder: "Sidewinder", eagle: "Eagle", hauler: "Hauler", adder: "Adder", empire_eagle: "Imperial Eagle",
+  viper: "Viper Mk III", cobramkiii: "Cobra Mk III", viper_mkiv: "Viper Mk IV", diamondback: "Diamondback Scout",
+  cobramkiv: "Cobra Mk IV", type6: "Type-6 Transporter", dolphin: "Dolphin", diamondbackxl: "Diamondback Explorer",
+  empire_courier: "Imperial Courier", independant_trader: "Keelback", asp_scout: "Asp Scout", vulture: "Vulture",
+  asp: "Asp Explorer", federation_dropship: "Federal Dropship", type7: "Type-7 Transporter", typex: "Alliance Chieftain",
+  federation_dropship_mkii: "Federal Assault Ship", empire_trader: "Imperial Clipper", typex_2: "Alliance Crusader",
+  typex_3: "Alliance Challenger", federation_gunship: "Federal Gunship", krait_light: "Krait Phantom", krait_mkii: "Krait Mk II",
+  orca: "Orca", ferdelance: "Fer-de-Lance", mamba: "Mamba", python: "Python", python_nx: "Python Mk II", type9: "Type-9 Heavy",
+  belugaliner: "Beluga Liner", type9_military: "Type-10 Defender", anaconda: "Anaconda", federation_corvette: "Federal Corvette",
+  cutter: "Imperial Cutter", mandalay: "Mandalay", type8: "Type-8 Transporter", cobramkv: "Cobra Mk V", corsair: "Corsair",
+  panthermkii: "Panther Clipper Mk II", explorer_nx: "Caspian Explorer", lakonminer: "Type-11 Prospector", smallcombat01_nx: "Kestrel Mk II"};
+const shipName = t => SHIP_NAMES[(t || "").toLowerCase()] || (t || "").replace(/_/g, " ");
+// FSD injections you could synthesise now (from the materials you carry).
+function boostLine() {
+  const m = data.materials; if (!m || !m.boosts) return "";
+  const b = m.boosts, part = k => `<b class="${b[k] ? "" : "zero"}">${b[k]}</b>`;
+  return `<div class="ln" id="fuelBoost" title="FSD injections you can synthesise with the materials aboard: premium (+100%) / standard (+50%) / basic (+25%)${m.stale ? ". Counts predate your last login." : ""}">` +
+    `FSD boosts ${part("premium")} / ${part("standard")} / ${part("basic")}</div>`;
+}
+document.getElementById("radiusSel").onchange = async e => {
+  const sel = e.target; sel.dataset.pending = "1";
+  let r;
+  try { r = await apiJson("api/radius", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({radius: Number(sel.value)})}); }
+  catch (err) { r = {error: err.message}; }
+  toast(r.error ? `Could not change the radius: ${r.error}` : `Nearby now covers ${r.radius} ly — asking Spansh…`);
+  delete sel.dataset.pending; sel.blur();
+};
 function renderStrip() {
-  const f = data.fuel, el = document.getElementById("fuelLine");
-  el.className = ""; el.title = "";
-  if (!f) el.innerHTML = "";
-  else if (!f.live) el.innerHTML = `⛽ <span class="unk">no live fuel reading (game not running)</span>` +
-    (f.main != null ? ` · last ${f.main.toFixed(1)} t` : "");
+  const val = (v, title) => `<div class="val"${title ? ` title="${title}"` : ""}>${v}</div>`, ln = v => v ? `<div class="ln">${v}</div>` : "";
+  // commander tile: credits at login plus exploration sales since, and the ship
+  const cm = data.commander, sh = data.ship, cmEl = document.getElementById("cmdrLine");
+  document.getElementById("cmdrLbl").textContent = cm && cm.name ? `Cmdr ${cm.name}` : "Commander";
+  const shipLine = sh ? `<span title="${esc(shipName(sh.type))}${data.jump_range ? ` · ${data.jump_range.toFixed(1)} ly max jump` : ""}">${esc(sh.name || shipName(sh.type))}` +
+    `${sh.type && shipName(sh.type) !== sh.name ? ` <span class="unk">· ${esc(shipName(sh.type))}</span>` : ""}</span>` : "";
+  cmEl.innerHTML = !cm ? val(`<span class="unk">no login seen</span>`) + ln(shipLine) :
+    val(cm.credits != null ? `≈ ${credits(cm.credits)} cr` : `<span class="unk">credits unknown</span>`,
+        `Credits at login (${esc((cm.login_ts || "").replace("T", " ").slice(0, 16))} UTC)${cm.credits_login != null ? ": " + cm.credits_login.toLocaleString() : ""}` +
+        ` plus exploration and exobiology sales since. Other spending and income (market, repairs, missions) is not tracked.`) +
+    ln(shipLine) + ln(cm.earned ? `+${credits(cm.earned)} cr sold since login` : "");
+  const p0 = data.position, wl = document.getElementById("whereLn");
+  wl.innerHTML = p0 ? `<span title="galactic coordinates (x / y / z)">Coord: ${[p0.x, p0.y, p0.z].map(v => v.toFixed(2)).join(" / ")}</span>` +
+    (p0.visits ? ` · <span title="arrivals in this system, from your journals">visit ${p0.visits}</span>` : "") : "";
+  // fuel tile
+  const f = data.fuel, tf = document.getElementById("tFuel"), el = document.getElementById("fuelLine");
+  tf.className = "tile"; tf.title = "";
+  if (!f) el.innerHTML = val(`<span class="unk">—</span>`);
+  else if (!f.live) el.innerHTML = val(`<span class="unk">${f.main != null ? f.main.toFixed(1) + " t (last reading)" : "no reading"}</span>`) + ln("game not running") + boostLine();
   else {
-    const level = f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "";
-    el.className = level;
-    el.innerHTML = `⛽ <b class="pct">${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` (${f.pct}%)` : ""}</b>` +
-      (f.jumps_recent != null ? ` · ≈<b>${f.jumps_recent}</b> jumps at your recent pace` : "") +
-      (f.jumps_max != null ? `, <b>${f.jumps_max}</b> at max range` : "") +
-      (f.since_scoop != null ? ` · ${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "");
-    el.title = "From Status.json. Jump estimates use fuel burned on your recent jumps; a max-range jump costs several times a short hop.";
+    tf.className = "tile " + (f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");
+    el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) +
+      ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
+      ln(f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "") + boostLine();
+    tf.title = "From Status.json. Jump estimates use fuel burned on your recent jumps; a max-range jump costs several times a short hop.";
   }
+  // carrier tile
   const c = data.carrier, cl = document.getElementById("carrierLine");
-  if (!c) cl.innerHTML = "";
-  else {
-    const plan = c.planned ? ` · jumping to <b>${esc(c.planned.system)}</b> at ${esc((c.planned.departure || "").slice(11, 16))} UTC` : "";
-    cl.innerHTML = `🚢 ${esc(c.name)} ${c.here ? "<b>is here</b>" : `at <span class="copy" data-name="${esc(c.system)}" title="click to copy">${esc(c.system)}</span>` +
-      (c.distance != null ? ` · <b>${c.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>` : "")}` +
-      ` · ${c.has_uc ? "UC ✓" : "no UC"} · ${c.has_vista ? "Vista ✓" : "no Vista"}` +
-      (c.fuel != null ? ` · ${c.fuel} t tritium` : "") + plan;
-  }
-  const k = (data.codex_recent || [])[0], kl = document.getElementById("codexLine");
-  kl.innerHTML = !k ? "" : `📖 latest codex: <b>${esc(k.name)}</b>` +
-    (k.voucher ? ` <span class="scoop">codex voucher ${k.voucher.toLocaleString()} cr</span>` : k.is_new ? " (new to your codex for this region)" : "") +
-    ` · ${esc(day(k.ts))}`;
-  // freshness: when the journal last said anything, so a stuck tailer is visible
-  const fr = data.freshness, fl = document.getElementById("freshLine");
+  if (!c) cl.innerHTML = val(`<span class="unk">none seen</span>`);
+  else cl.innerHTML = val(esc(c.name), esc(c.callsign || "")) +
+    ln(c.here ? "<b>here</b>" : `<span class="copy" data-name="${esc(c.system)}" title="click to copy">${esc(c.system)}</span>` +
+       (c.distance != null ? ` · <b>${c.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>` : "")) +
+    ln(`${c.has_uc ? "UC ✓" : "no UC"} · ${c.has_vista ? "Vista ✓" : "no Vista"}${c.fuel != null ? ` · ${c.fuel} t tritium` : ""}` +
+       (c.planned ? ` · jumping to <b>${esc(c.planned.system)}</b> ${esc((c.planned.departure || "").slice(11, 16))} UTC` : ""));
+  // data tile: journal freshness, link health, server state
+  const fr = data.freshness, fl = document.getElementById("freshLine"), sl = document.getElementById("statusLine"), td = document.getElementById("tData");
+  let dot = "", text = "", tcls = "";
   if (fr && fr.journal) {
     const age = Math.max(0, (Date.now() - Date.parse(fr.journal)) / 60000);
-    const cls = fr.live && age > 10 ? "dead" : fr.live && age > 3 ? "stale" : "";
-    fl.innerHTML = `📄 journal <span class="${cls}" title="newest journal event handled; the game is ${fr.live ? "running" : "not running"}">${esc(fr.journal.slice(11, 16))} UTC` +
-      (age >= 1 ? ` (${age < 90 ? Math.round(age) + " min" : Math.round(age / 60) + " h"} ago)` : "") + `</span>`;
-  } else fl.innerHTML = fr && !fr.dirs.length ? `<span class="dead">no journal folder found — pass --journals</span>` : "";
+    const cls = fr.live && age > 10 ? "bad" : fr.live && age > 3 ? "warn" : "";
+    dot = cls; tcls = cls === "bad" ? "urgent" : cls;
+    text = `journal ${esc(fr.journal.slice(11, 16))} UTC` + (age >= 1 ? ` · ${age < 90 ? Math.round(age) + " min" : Math.round(age / 60) + " h"} ago` : "") + (fr.live ? "" : " · game off");
+  } else text = fr && !fr.dirs.length ? "no journal folder — pass --journals" : "waiting for a journal";
+  const failed = /failed|error/.test(data.status || "");
+  const problems = [disconnected && `NOT CONNECTED since ${disconnected}`, data.tail_error && "journal tailing error — see the terminal",
+                    failed && esc(data.status)].filter(Boolean);
+  if (problems.length) { dot = disconnected || data.tail_error ? "bad" : "warn"; tcls = dot === "bad" ? "urgent" : "warn"; }
+  td.className = "tile " + tcls; td.title = data.tail_error || data.status || "";
+  fl.innerHTML = val(`<span class="dot ${dot}"></span>${text}`);
+  sl.innerHTML = problems.length ? problems.join(" · ") : /^asking|^fetching/.test(data.status || "") ? esc(data.status) : "Spansh ok";
   // docked somewhere that buys data with a worthwhile amount aboard: say so plainly
   const dk = data.docked, u = data.unsold, lvl = unsoldLevel(u), se = document.getElementById("sell");
   if (dk && (dk.has_uc || dk.has_vista) && lvl && lvl !== "ok") {
@@ -199,17 +251,15 @@ function unsoldLevel(u) {
   return u.total >= g ? "urgent" : u.total >= w ? "warn" : "ok";
 }
 function renderUnsold() {
-  const el = document.getElementById("unsold"), u = data.unsold;
-  el.className = unsoldLevel(u) || "";
-  const fl0 = document.getElementById("firstsLine");
-  if (!u) { el.textContent = "estimating unsold data…"; fl0.innerHTML = ""; return; }
-  if (u.error) { el.textContent = "unsold data: " + u.error; fl0.innerHTML = ""; return; }
-  const f = u.firsts, fl = document.getElementById("firstsLine");
-  fl.innerHTML = !f || !(f.systems || f.planets || f.mapped) ? "" :
-    `🏁 Unsold firsts: <b>${f.systems}</b> system${f.systems === 1 ? "" : "s"} · <b>${f.planets}</b> planet${f.planets === 1 ? "" : "s"}` +
-    ` · <b>${f.mapped}</b> first mapped`;
-  el.innerHTML = `Unsold: 🗺 <b>${credits(u.carto.estimated_payout ?? u.carto.estimated_value)}</b> · 🧬 <b>${credits(u.bio.estimated_value)}</b>` +
-    ` · total ≈ <b class="total">${credits(u.total)} cr</b>`;
+  const el = document.getElementById("unsold"), u = data.unsold, tile = document.getElementById("tUnsold"), fl = document.getElementById("firstsLine");
+  tile.className = "tile " + (unsoldLevel(u) || "");
+  if (!u) { el.innerHTML = `<div class="val"><span class="unk">estimating…</span></div>`; fl.innerHTML = ""; return; }
+  if (u.error) { el.innerHTML = `<div class="val"><span class="unk">unavailable</span></div>`; fl.innerHTML = esc(u.error).slice(0, 80); return; }
+  const f = u.firsts;
+  el.innerHTML = `<div class="val">${credits(u.total)} cr</div>` +
+    `<div class="ln">🗺 <b>${credits(u.carto.estimated_payout ?? u.carto.estimated_value)}</b> · 🧬 <b>${credits(u.bio.estimated_value)}</b></div>`;
+  fl.innerHTML = !f || !(f.systems || f.planets || f.mapped) ? "no unsold firsts" :
+    `🏁 <b>${f.systems}</b> system${f.systems === 1 ? "" : "s"} · <b>${f.planets}</b> planet${f.planets === 1 ? "" : "s"} · <b>${f.mapped}</b> mapped unsold`;
 }
 function unsoldHtml(u) {
   if (!u || u.error) return "";
@@ -246,30 +296,41 @@ function render() {
   renderUnsold();
   const p = data.position;
   const here = p && data.systems.find(s => s.id64 === p.id64), known = !!here;
-  const sol = p && Math.hypot(p.x, p.y, p.z).toLocaleString("en-US", {maximumFractionDigits: 0});
-  document.getElementById("here").innerHTML = !p ? "" :
-    `— <span class="copy" data-name="${esc(p.name)}" title="click to copy"` +
+  // distances to the two hubs: Sol, and Colonia (Eol Prou RS-T d3-94)
+  const lyTo = (x, y, z) => p && Math.hypot(p.x - x, p.y - y, p.z - z).toLocaleString("en-US", {maximumFractionDigits: 0});
+  document.getElementById("refLn").innerHTML = p ? `Sol <b>${lyTo(0, 0, 0)}</b> ly · Colonia <b>${lyTo(-9530.5, -910.28125, 19808.125)}</b> ly` : "";
+  document.getElementById("here").innerHTML = !p ? "waiting for your first jump…" :
+    `<span class="copy" data-name="${esc(p.name)}" title="click to copy"` +
     (known ? ` data-pop data-id="${p.id64}"` : "") + `>${esc(p.name)}</span>` + (here ? firstsIcon(here.firsts) : "") +
-    (here ? bmIcon(here.id, here.name, bms) : "") +
-    ` <span class="sol">(Distance to Sol: ${sol} ly)</span>`;
+    (here ? bmIcon(here.id, here.name, bms) : "");
   placeOverview();
-  document.getElementById("nearTable").hidden = !(view === "near" || view === "overview");
-  document.getElementById("nearOpts").hidden = !(view === "near" || view === "overview");
+  document.getElementById("nearWrap").hidden = !(view === "near" || view === "overview");
   document.getElementById("overView").hidden = view !== "overview";
   document.getElementById("bmTable").hidden = view !== "bm";
   document.getElementById("bmTools").hidden = view !== "bm";
-  document.getElementById("hereView").hidden = !(view === "here" || (view === "overview" && !ovState.collapsed));
+  const nearPinned = view === "near" && !!pinnedSystem;
+  document.getElementById("hereView").hidden = !(view === "here" || nearPinned || (view === "overview" && !ovState.collapsed));
+  document.querySelector("main").classList.toggle("nearPinned", nearPinned);
   document.getElementById("firstsView").hidden = view !== "firsts";
   if (view === "firsts") loadFirsts();
   document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
   document.getElementById("hereView").classList.toggle("detail", !!selectedBody);
   document.getElementById("histView").hidden = view !== "hist";
-  if (view === "here" || (view === "overview" && !ovState.collapsed)) loadHere();
+  document.getElementById("matView").hidden = view !== "mat";
+  if (view === "mat") loadMat();
+  document.getElementById("logView").hidden = view !== "log";
+  if (view === "log") { if (L.key === null) loadLog(); else tailLog(); }
+  document.getElementById("bioView").hidden = view !== "bio";
+  if (view === "bio") loadBio();
+  if (view === "here" || nearPinned || (view === "overview" && !ovState.collapsed)) {
+    loadHere();
+    if (hereData && lastHereCtx !== hereCtx()) renderHere();   // tab and pane keep different modes
+  }
   if (view === "hist") loadHistory();
   renderStrip();
   document.getElementById("searchView").hidden = view !== "search";
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === view));
-  document.getElementById("bmViewBtn").textContent = `★ Bookmarks (${(data.bookmarks || []).length})`;
+  document.getElementById("bmViewBtn").textContent = `Bookmarks${(data.bookmarks || []).length ? ` (${data.bookmarks.length})` : ""}`;
   document.getElementById("sFrom").textContent = p ? p.name : "—";
   renderBookmarks(bms);
   renderSearch(bms);
@@ -283,7 +344,7 @@ function render() {
     .filter(s => !oneJump.checked || !jr || s.distance <= jr);
   rows.sort(sortKey === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-    : sortKey === "value" ? (a, b) => ((b.est_value || 0) + (b.bio_potential || 0)) - ((a.est_value || 0) + (a.bio_potential || 0)) || a.distance - b.distance
+    : sortKey === "value" ? (a, b) => (b.value_max || 0) - (a.value_max || 0) || a.distance - b.distance
     : (a, b) => a.distance - b.distance);
   // Fuel: the nearest scoopable star you can reach (visited or not) gets a tag when the tank is low.
   const fuel = data.fuel, lowFuel = fuel && fuel.live && fuel.pct != null && fuel.pct < 30;
@@ -291,14 +352,16 @@ function render() {
     .sort((a, b) => a.distance - b.distance)[0];
   const prev = data.previous;
   const unvisited = data.systems.filter(s => !s.visited).length;
-  const failed = /failed/.test(data.status);
-  document.getElementById("sub").innerHTML =
-    `${data.systems.length} known within ${data.radius} ly · ${unvisited} not visited` +
-    (jr ? ` · <span title="Loadout MaxJumpRange: the best case with a near-empty tank; a full tank goes a little less far">max jump ${jr.toFixed(1)} ly</span>` : "") +
-    (prev && p ? ` · came from ${esc(prev.name)} (${Math.hypot(prev.x - p.x, prev.y - p.y, prev.z - p.z).toFixed(1)} ly)` : "") +
-    ` · <span class="${failed ? "warn" : ""}">${esc(data.status)}</span>` +
-    (data.tail_error ? ` · <span class="err" title="${esc(data.tail_error)}">journal tailing error — see the terminal</span>` : "") +
-    (disconnected ? ` · <span class="err">NOT CONNECTED since ${disconnected}</span>` : "");
+  document.getElementById("subKnown").textContent = data.systems.length;
+  document.getElementById("subUnvisited").textContent = unvisited;
+  const rs = document.getElementById("radiusSel"), choices = data.radius_choices || [data.radius];
+  if (rs.dataset.opts !== choices.join(",")) {   // rebuilt only when the choices change, so an open list stays open
+    rs.innerHTML = choices.map(r => `<option value="${r}">${r}</option>`).join(""); rs.dataset.opts = choices.join(",");
+    rs.title = `how far around you Nearby lists systems (radius_choices in ed_outrider.toml sets these; bigger spheres take longer to fill in)`;
+  }
+  if (document.activeElement !== rs && !rs.dataset.pending) rs.value = String(data.radius);
+  document.getElementById("subJump").innerHTML = (jr ? `<span title="Loadout MaxJumpRange: the best case with a near-empty tank">max jump ${jr.toFixed(1)} ly</span>` : "") +
+    (prev && p ? `${jr ? " · " : ""}came from ${esc(prev.name)} (${Math.hypot(prev.x - p.x, prev.y - p.y, prev.z - p.z).toFixed(1)} ly)` : "");
   document.body.classList.toggle("disconnected", !!disconnected);
   document.querySelectorAll("[data-sort]").forEach(b => b.classList.toggle("on", b.dataset.sort === sortKey));
   const t = data.target, tEl = document.getElementById("target");
@@ -326,6 +389,7 @@ function render() {
     const far = jr && s.distance > jr;
     const jumps = jr ? Math.ceil(s.distance / jr) : null;
     const cls = [s.visited && "visited", far && "far", isPrev && "prev", scoopNext && s.id64 === scoopNext.id64 && "scoopnext",
+                 pinnedSystem === String(s.id64) && "pinned",
                  data.target && s.id64 === data.target.id64 && "target"]
       .filter(Boolean).join(" ");
     const known = s.body_count ? `${s.bodies_known}/${s.body_count}` : (s.bodies_known || "");
@@ -339,7 +403,7 @@ function render() {
         ? `<span class="badge s-own" title="Spansh doesn't have this system; data is from your own scans">yours only</span>` : ""}${s.source === "edsm"
         ? `<span class="badge s-edsm" title="Spansh is unreachable; this comes from EDSM (no body data)">EDSM</span>` : ""}</td>
       <td>${star(s)}</td><td class="bodies" data-pop data-id="${s.id64}">${bodies(s)}</td>
-      <td class="notable">${notable(s)}</td><td class="num hide-sm" title="${s.est_value ? "cartographics " + credits(s.est_value) : ""}${s.bio_potential ? " · bio up to " + credits(s.bio_potential) : ""}">${(s.est_value || s.bio_potential) ? credits((s.est_value || 0) + (s.bio_potential || 0)) : ""}</td><td class="num hide-sm">${known}</td></tr>`;
+      <td class="notable">${notable(s)}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm">${known}</td></tr>`;
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
 }
 function emptyMessage(rows) {
@@ -395,18 +459,25 @@ bmDialog.addEventListener("close", async () => {
   } catch (err) { toast("bookmark failed: " + err.message); }
 });
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
+  if (b.dataset.view !== view && pinnedSystem) { pinnedSystem = null; if (selectedBody) closeBody(); }  // a pin belongs to the view it was made in
   view = b.dataset.view; store.set("view", view); render();
 });
 
 // ---- Here: every body in the current system ----
 let hereKey = null, hereData = null;
+// The system panel normally shows where you are; clicking a nearby row's Bodies cell pins
+// another system into it until the ✕ is clicked.
+let pinnedSystem = null;
+const shownSystem = () => pinnedSystem || (data && data.position ? String(data.position.id64) : null);
+function pinSystem(id) { pinnedSystem = String(id); if (selectedBody) closeBody(); hidePop(); render(); }
+function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); }
 async function loadHere() {
-  const p = data && data.position; if (!p) return;
-  const key = `${p.id64}|${data.scan_version}`;   // only your own scans change this view
+  const id = shownSystem(); if (!id) return;
+  const key = `${id}|${data.scan_version}`;   // only your own scans change this view
   if (key === hereKey) return;
   hereKey = key;
   let fresh;
-  try { fresh = await apiJson(`api/system/${p.id64}`); } catch (err) { fresh = {error: err.message}; }
+  try { fresh = await apiJson(`api/system/${id}`); } catch (err) { fresh = {error: err.message}; }
   if (key !== hereKey) return;   // a newer request is already on its way
   hereData = fresh;
   renderHere();
@@ -421,7 +492,7 @@ async function loadHere() {
 const ovState = Object.assign({layout: "side", collapsed: false, flip: false, split: 40}, store.get("overview", {}));
 const ovHome = {here: null, near: null};   // where the sections live when not in the overview
 function placeOverview() {
-  const ov = document.getElementById("overView"), here = document.getElementById("hereView"), near = document.getElementById("nearTable");
+  const ov = document.getElementById("overView"), here = document.getElementById("hereView"), near = document.getElementById("nearWrap");
   const paneHere = document.getElementById("ovHere"), paneNear = document.getElementById("ovNear");
   if (!ovHome.here) { ovHome.here = here.nextSibling; ovHome.near = near.nextSibling; }
   if (view === "overview") {
@@ -463,6 +534,13 @@ ovDivider.addEventListener("pointerdown", e => {
   for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) ovDivider.addEventListener(ev, up);
 });
 
+function bodyValueTitle(b) {
+  const v = b.value_parts; if (!v) return "";
+  const part = (c, b, note) => [c ? `${credits(c)} cartographics${note || ""}` : "", b ? `${credits(b)} exobiology` : ""].filter(Boolean).join(" + ") || "nothing";
+  const scan = v.scan_state && v.scan_state !== "unsold" ? ` (scan ${v.scan_state})` : "";
+  return (maxBonus() ? "" : `Max without bonuses: ${credits(b.value_max_base || 0)} (with them: ${credits(b.value_max || 0)})\n\n`) +
+    `On board: ${part(v.carto_now, v.bio_now, scan)}\nStill available: ${part(v.carto_left, v.bio_left)}\n\nExobiology here counts ×${v.bio_factor}${v.bio_factor === 5 ? " (nobody had set foot here when you scanned)" : " (someone had already landed here, or you have not scanned it)"}.`;
+}
 function renderHere() {
   const h = hereData, head = document.getElementById("hereHead"), lv = document.getElementById("hereLeaving");
   if (!h) { head.textContent = "loading…"; return; }
@@ -472,17 +550,31 @@ function renderHere() {
     if (selectedBody) closeBody();
     return;
   }
-  const total = h.bodies.reduce((n, b) => n + (b.value || 0), 0), totalMapped = h.bodies.reduce((n, b) => n + (b.value_if_mapped || b.value || 0), 0);
   const bioPot = h.bodies.reduce((n, b) => n + (b.bio_potential || 0), 0);
-  head.innerHTML = `<b>${esc(h.name)}</b> · ${h.bodies.length} bod${h.bodies.length === 1 ? "y" : "ies"} known · worth ≈ <b>${credits(total)} cr</b> as scanned, ` +
-    `<b>${credits(totalMapped)} cr</b> if everything were mapped` + (bioPot ? ` · 🧬 bio up to <b>${credits(bioPot)} cr</b>` : "");
+  const pinned = !!pinnedSystem, row = pinned && data.systems.find(s => String(s.id64) === pinnedSystem);
+  head.innerHTML = (pinned ? `<button type="button" class="unpin" onclick="unpinSystem()" title="back to the system you are in">✕</button><span class="pintag">viewing</span> ` : "") +
+    `<b>${esc(h.name)}</b>` + (pinned && row ? ` <span class="unk">· ${row.distance.toFixed(2)} ly away</span>` : "") +
+    ` · ${h.bodies.length} bod${h.bodies.length === 1 ? "y" : "ies"} known · ` +
+    `<span title="what selling now would pay for data you hold from here / the most this system could pay">now <b>${credits(h.value_now || 0)} cr</b> · max <b>${credits(maxOf(h) || 0)} cr</b>${maxBonus() ? "" : ` <span class="unk" title="Max leaves out first-discovery, first-mapped and first-footfall bonuses (alerts & thresholds dialog)">no bonus</span>`}</span>` +
+    `<span class="modes">${HERE_MODES.filter(([m]) => m !== "split" || hereCtx() === "tab").map(([m, label, title]) =>
+      `<button type="button" data-mode="${m}" title="${title}"${(m === "split" ? hereMode().split : hereMode().top === m) ? ' class="on"' : ""}>${label}</button>`).join("")}</span>`;
   const l = h.leaving;
-  lv.innerHTML = !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : l.clean
+  const firstsBlock = h.firsts ? firstsHtml(h.firsts).replace(/<div class="lbl">Your firsts<\/div>/, "") : "";
+  lv.innerHTML = firstsBlock + (pinned ? (!h.firsts ? `<span class="unk">${row ? esc(row.status) : ""}${row && row.visited ? " · you have been here" : ""}</span>` : "")
+    : !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : l.clean
     ? `<span class="ok">✓ Nothing left to do here${l.all_found ? " (all bodies found)" : ""}.</span>`
     : `<span class="todo">${[l.unscanned ? `${l.unscanned} bodies unscanned` : !l.honked ? "no FSS honk yet" : "",
         l.bio_pending.length ? `bio pending on ${l.bio_pending.map(b => esc(b.body) + (!Object.keys(b.partial || {}).length && b.potential != null && b.potential < bioMin ? ` <span class="unk">(under your ${credits(bioMin)} threshold)</span>` : b.potential == null && !Object.keys(b.partial || {}).length ? ` <span class="unk">(value unknown)</span>` : "")).join(", ")}` : "",
-        l.unmapped_valuable.length ? `unmapped: ${l.unmapped_valuable.map(esc).join(", ")}` : ""].filter(Boolean).join(" · ")}</span>`;
-  document.getElementById("hereRows").innerHTML = h.bodies.map(b => {
+        l.unmapped_valuable.length ? `unmapped: ${l.unmapped_valuable.map(esc).join(", ")}` : ""].filter(Boolean).join(" · ")}</span>`);
+  lastHereCtx = hereCtx();
+  const hm = h.tree ? hereMode() : {top: "list", split: false};
+  const showTable = hm.top !== "schematic", showSch = hm.top === "schematic" || hm.split;
+  document.getElementById("hereTable").hidden = !showTable;
+  document.getElementById("hereHint").hidden = !showTable;
+  const sEl = document.getElementById("hereSchematic");
+  sEl.hidden = !showSch; sEl.classList.toggle("split", showTable && showSch);
+  if (showSch) sEl.innerHTML = schematicHtml(h);
+  const rowHtml = (b, ind = "") => {
     const done = b.organics.filter(o => o.done).map(o => o.genus);
     const bio = [];
     const guessOf = g => (b.bio_guess || []).find(x => x.genus === g);
@@ -505,21 +597,158 @@ function renderHere() {
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
                     b.first_footfall && `<span class="fl" title="first footfall">👣</span>`, !b.scanned && `<span class="unk" title="known to Spansh, not scanned by you">—</span>`].filter(Boolean).join("");
-    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name">${esc(b.name)}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
+    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name">${ind}${esc(b.name)}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
       <td>${esc(b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}</td>
       <td class="num">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
       <td class="num${b.gravity > 2 ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
       <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}</td>
-      <td class="bio">${bio.join(" ")}${codex}</td>
+      <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}</td>
       <td>${b.rings ? `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}` : ""}</td>
       <td>${firsts}</td>
-      <td class="num">${b.value != null ? credits(b.value) : ""}</td>
-      <td class="num hide-sm">${b.value_if_mapped != null ? credits(b.value_if_mapped) : ""}</td></tr>`;
-  }).join("") || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
+      <td class="num" title="${bodyValueTitle(b)}">${b.value_now ? credits(b.value_now) : ""}</td>
+      <td class="num" title="${bodyValueTitle(b)}">${maxOf(b) ? credits(maxOf(b)) : ""}</td></tr>`;
+  };
+  document.getElementById("hereMaxTh").title = maxBonus()
+    ? "the most it could pay once scanned, mapped and sampled, including first-discovery, first-mapped and first-footfall (×5 bio) bonuses where they apply"
+    : "the most it could pay once scanned, mapped and sampled, with no bonuses: plain Universal Cartographics and Vista Genomics payouts";
+  const byMax = maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => (maxOf(b) || 0) - (maxOf(a) || 0));
+  document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
+    || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
 }
 document.getElementById("hereRows").addEventListener("click", e => {
   const tr = e.target.closest("tr[data-body]"); if (!tr) return;
   tr.dataset.body === selectedBody ? closeBody() : openBody(tr.dataset.body);
+});
+
+// ---- Here as a schematic: stars, planets and moons in their hierarchy ----
+// Modes are remembered separately for the Here tab (default: table above, schematic below) and for
+// the Here pane in the Overview or beside Nearby (default: the table).
+const HERE_MODES = [["list", "☰ list", "the body table, most valuable first"],
+                    ["text", "≡ tree", "the body table in orbital order, moons indented under their planet"],
+                    ["schematic", "◉ schematic", "the system drawn as stars, planets and moons"],
+                    ["split", "⬒ split", "add the schematic below the list or tree"]];
+// {top: list | text | schematic, split: schematic below the table (Here tab only)}
+const hereModes = {tab: {top: "list", split: true}, pane: {top: "list", split: false}};
+for (const [k, v] of Object.entries(store.get("hereModes", {})))   // older saves held a plain mode name
+  if (hereModes[k]) hereModes[k] = typeof v === "string" ? {top: v === "split" ? "list" : v, split: v === "split"} : Object.assign(hereModes[k], v);
+const hereCtx = () => view === "here" ? "tab" : "pane";
+const hereMode = () => { const m = hereModes[hereCtx()]; return hereCtx() === "tab" ? m : {top: m.top, split: false}; };
+function setHereMode(mode) {
+  const m = hereModes[hereCtx()];
+  if (mode === "split") { m.split = !m.split; if (m.split && m.top === "schematic") m.top = "list"; }
+  else if (mode === "schematic") { m.top = "schematic"; m.split = false; }
+  else m.top = mode;   // list or tree: swaps the top half, split stays as it was
+  store.set("hereModes", hereModes);
+}
+let lastHereCtx = null;
+// Tree mode: the same table rows in orbital order, each child indented under its parent. A barycentre
+// (two or more bodies circling a shared centre of mass rather than each other) gets a row of its own.
+function treeRowsHtml(h, rowHtml) {
+  const by = Object.fromEntries(h.bodies.map(b => [b.name, b]));
+  const out = [];
+  const walk = (n, depth) => {
+    const ind = depth ? `<span class="tind">${"→".repeat(depth)}</span>` : "";
+    if (n.kind === "body" && by[n.name]) out.push(rowHtml(by[n.name], ind));
+    else {
+      // name everything circling this centre: bodies by name, a nested barycentre as "the B and C pair"
+      const list = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "";
+      const named = c => c.kind === "body" ? esc(c.name)
+        : c.kind === "barycentre" ? `the ${list(c.children.map(named))} ${c.children.length > 2 ? "group" : "pair"}`
+        : esc(c.label);
+      const members = n.children.map(named);
+      const what = n.kind === "unknown" ? `${esc(n.label)} (not scanned by you)`
+        : members.length > 1 ? `${list(members)} orbit a shared centre (barycentre)`
+        : members.length ? `${members[0]} orbits a barycentre whose other members are not known yet`
+        : `barycentre ${esc(n.label)}`;
+      out.push(`<tr class="bary"><td colspan="10">${ind}<span class="unk">${n.kind === "unknown" ? "?" : "⊕"} ${what}</span></td></tr>`);
+    }
+    n.children.forEach(c => walk(c, depth + 1));
+  };
+  h.tree.forEach(n => walk(n, 0));
+  return out.join("");
+}
+function starCode(sub) {
+  sub = sub || "";
+  if (/Neutron/i.test(sub)) return "N";
+  if (/Black Hole/i.test(sub)) return "BH";
+  if (/White Dwarf/i.test(sub)) return "D";
+  if (/Wolf-Rayet/i.test(sub)) return "W";
+  if (/T Tauri/i.test(sub)) return "TTS";
+  if (/Herbig/i.test(sub)) return "AeBe";
+  if (/^C[A-Z]*[- ]|Carbon/.test(sub)) return "C";
+  if (/^(MS|S)-type/.test(sub)) return "S";
+  return sub[0] || null;
+}
+const PLANET_COLOURS = [[/Earth-like/, "#4fbf6a"], [/^Water world/, "#3f8ee8"], [/Ammonia/, "#b377e0"], [/High metal/, "#a0826d"],
+  [/Metal.rich/, "#8c3b30"], [/Rocky ice/i, "#c7ccd4"], [/^Rocky/, "#8f8f8f"], [/Icy/, "#dbe9f7"], [/Water giant/, "#5aa9e6"],
+  [/water-based life/, "#6fb3a0"], [/ammonia-based life/, "#c79a5b"], [/Helium/, "#e8d7b0"], [/Class I gas/, "#d9b47a"],
+  [/Class II gas/, "#e8e0c8"], [/Class III gas/, "#8fb0d9"], [/Class IV gas/, "#c98b5a"], [/Class V gas/, "#b0a0c8"], [/gas giant/i, "#c9a36b"]];
+const planetColour = sub => (PLANET_COLOURS.find(([re]) => re.test(sub || "")) || [null, "#999"])[1];
+function discSize(b, depth) {
+  if (b.type === "Star") {
+    const c = starCode(b.subtype);
+    const px = ["N", "D", "BH"].includes(c) ? 22 : ["L", "T", "Y"].includes(c) ? 34 : 46;
+    return b.main ? px + 6 : px;
+  }
+  const r = b.radius_km;
+  const px = r == null ? 20 : r < 1500 ? 12 : r < 4000 ? 18 : r < 10000 ? 26 : r < 30000 ? 34 : 44;
+  return depth > 1 ? Math.max(10, Math.round(px * .8)) : px;
+}
+function discHtml(b, depth) {
+  const size = discSize(b, depth);
+  const col = b.type === "Star" ? (STAR_COLOURS[starGroup(starCode(b.subtype))] || "#ccc") : planetColour(b.subtype);
+  const cls = ["disc", b.scanned ? "" : "hollow", b.landable ? "landable" : "", selectedBody === b.name ? "sel" : ""].filter(Boolean).join(" ");
+  const ring = b.rings ? `<svg class="ringmark" viewBox="0 0 16 16" style="width:${size + 14}px;height:${size + 14}px"><ellipse cx="8" cy="8" rx="7.6" ry="2.3" transform="rotate(-18 8 8)"/></svg>` : "";
+  const badges = [b.first_discovered && "🏁", b.first_mapped ? "🗺" : b.mapped ? `<span class="unk">🗺</span>` : "",
+    (b.bio || b.genera.length) && `🧬${b.bio || b.genera.length}`, b.geo && `🪨${b.geo}`, hasVolcanism(b) && `<span title="${esc(b.volcanism)}">🌋</span>`, b.first_footfall && "👣",
+    b.terraformable && `<span class="nb T">T</span>`, b.notable && `<span class="nb ${b.notable}">${b.notable}</span>`,
+    b.type === "Star" && b.scoopable && `<span class="scoop">⛽</span>`].filter(Boolean).join("");
+  const belts = (b.belts || []).length ? `<span class="belt" title="${b.belts.length} belt${b.belts.length === 1 ? "" : "s"}">⋯</span>` : "";
+  return `<div class="sbody${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}">` +
+    `<div class="discwrap" style="width:${size + 14}px;height:${size + 14}px">${ring}<span class="${cls}" style="width:${size}px;height:${size}px;--c:${col}"></span></div>` +
+    `<div class="sname" title="${esc(b.name)}">${esc(b.name)}${belts}</div><div class="badges">${badges}</div>` +
+    `<div class="sval${maxOf(b) ? "" : " unk"}">${maxOf(b) ? credits(maxOf(b)) : "—"}</div>` +
+    (b.type === "Planet" && b.dist_ls != null ? `<div class="sdist">${Math.round(b.dist_ls).toLocaleString()} ls</div>` : "") + `</div>`;
+}
+function schematicHtml(h) {
+  const by = Object.fromEntries(h.bodies.map(b => [b.name, b]));
+  const isStar = n => n.kind === "body" && by[n.name] && by[n.name].type === "Star";
+  // a column: a body with its moons stacked beneath it, or a barycentre box with its members side by side
+  const col = (n, depth) => {
+    if (n.kind === "body" && by[n.name]) {
+      const moons = n.children.map(c => col(c, depth + 1)).join("");
+      return `<div class="scol">${discHtml(by[n.name], depth)}${moons ? `<div class="smoons">${moons}</div>` : ""}</div>`;
+    }
+    const inner = n.children.map(c => col(c, depth)).join("");
+    return `<div class="scol sbary"><div class="sblabel" title="${n.kind === "unknown" ? "a body you have not scanned" : "barycentre: these orbit their common centre"}">${n.kind === "unknown" ? "?" : "⊕"} ${esc(n.label)}</div><div class="sgroup">${inner}</div></div>`;
+  };
+  // a row: a star and everything orbiting it, left to right in orbital order
+  const starRow = n => {
+    const b = by[n.name];
+    const planets = n.children.filter(c => !isStar(c)), stars = n.children.filter(isStar);
+    return `<div class="srowS"><div class="sstar">${discHtml(b, 0)}</div><div class="splanets">${planets.map(c => col(c, 1)).join("") || `<span class="unk">no planets known</span>`}</div></div>` +
+      (stars.length ? `<div class="snest">${stars.map(starRow).join("")}</div>` : "");
+  };
+  const top = n => {
+    if (isStar(n)) return starRow(n);
+    if (n.kind === "barycentre" && n.children.some(isStar)) {
+      const starGroupOf = c => c.kind === "barycentre" && c.children.some(isStar);   // a nested star pair: drawn as its own group
+      const stars = n.children.filter(isStar), other = n.children.filter(c => !isStar(c) && !starGroupOf(c));
+      return `<div class="sgroupTop"><div class="sblabel">⊕ ${esc(n.label)}</div>${stars.map(starRow).join("")}` +
+        (other.length ? `<div class="srowS"><div class="sstar sround">around ${esc(n.label)}</div><div class="splanets">${other.map(c => col(c, 1)).join("")}</div></div>` : "") +
+        n.children.filter(starGroupOf).map(top).join("") + `</div>`;
+    }
+    return `<div class="srowS"><div class="splanets">${col(n, 1)}</div></div>`;
+  };
+  return h.tree.map(top).join("") || `<div class="unk">No bodies known here.</div>`;
+}
+document.getElementById("hereHead").addEventListener("click", e => {
+  const m = e.target.closest("[data-mode]"); if (!m) return;
+  setHereMode(m.dataset.mode); renderHere();
+});
+document.getElementById("hereSchematic").addEventListener("click", e => {
+  const b = e.target.closest("[data-body]"); if (!b) return;
+  b.dataset.body === selectedBody ? closeBody() : openBody(b.dataset.body);
 });
 
 // ---- body hover summary ----
@@ -551,7 +780,7 @@ function bodyPopHtml(b) {
   }
   if (b.geo) h += `<div class="sec">${b.geo} geological signal${b.geo === 1 ? "" : "s"}</div>`;
   const flags = [b.first_discovered && "🏁 first discovered", b.first_mapped && "🗺 first mapped", !b.first_mapped && b.mapped && "mapped", b.first_footfall && "👣 first footfall", !b.scanned && "not scanned by you"].filter(Boolean);
-  h += `<div class="sec"><span>${b.value != null ? `worth ${credits(b.value)}` : ""}${b.value_if_mapped != null ? ` · ${credits(b.value_if_mapped)} if mapped` : ""}</span>` +
+  h += `<div class="sec"><span>${maxOf(b) ? `now ${credits(b.value_now || 0)} · max ${credits(maxOf(b))}` : ""}</span>` +
        (flags.length ? `<div class="unk">${flags.join(" · ")}</div>` : "") + `</div><div class="sec unk">click for everything known</div>`;
   return h;
 }
@@ -566,8 +795,8 @@ async function reloadBody() {
   bodyData = fresh; renderBody();
 }
 async function openBody(name) {
-  const p = data && data.position; if (!p) return;
-  selectedBody = name; selectedSystem = String(p.id64); bodyData = null; hidePop();
+  const id = hereData && !hereData.error ? hereData.id64 : shownSystem(); if (!id) return;
+  selectedBody = name; selectedSystem = String(id); bodyData = null; hidePop();
   const panel = document.getElementById("bodyPanel");
   panel.hidden = false; panel.innerHTML = `<h3><b>${esc(name)}</b> <button type="button" onclick="closeBody()">✕</button></h3><div class="unk">loading…</div>`;
   render(); renderHere();
@@ -575,16 +804,17 @@ async function openBody(name) {
 }
 function closeBody() { selectedBody = null; selectedSystem = null; bodyData = null; document.getElementById("bodyPanel").hidden = true; render(); renderHere(); }
 const bodySecs = store.get("bodySecs", {});   // which detail sections you've collapsed
-document.getElementById("bodyPanel").addEventListener("click", e => {
+for (const id of ["bodyPanel", "sBodyPanel"]) document.getElementById(id).addEventListener("click", e => {
   const lbl = e.target.closest(".sec > .lbl"); if (!lbl) return;
   const sec = lbl.parentNode; sec.classList.toggle("closed");
   bodySecs[sec.dataset.sec] = sec.classList.contains("closed"); store.set("bodySecs", bodySecs);
 });
-function renderBody() {
-  const panel = document.getElementById("bodyPanel"), d = bodyData;
+function renderBody() { renderBodyInto(document.getElementById("bodyPanel"), bodyData, selectedBody, "closeBody()"); }
+// The body detail panel, drawn into any container (Here's, or Search's); closeJs is the ✕ button's action.
+function renderBodyInto(panel, d, bodyName, closeJs) {
   if (!d) return;
   const short = name => name && name.startsWith(d.full_name + " ") ? name.slice(d.full_name.length + 1) : name;
-  if (d.error) { panel.innerHTML = `<h3><b>${esc(selectedBody)}</b> <button type="button" onclick="closeBody()">✕</button></h3><div class="unk">${esc(d.error)}</div>`; return; }
+  if (d.error) { panel.innerHTML = `<h3><b>${esc(bodyName)}</b> <button type="button" onclick="${closeJs}">✕</button></h3><div class="unk">${esc(d.error)}</div>`; return; }
   const own = d.own || {}, sp = d.spansh || {}, row = d.row || {};
   const has = v => v !== undefined && v !== null && v !== "";
   const pick = (a, b) => has(a) ? a : has(b) ? b : null;
@@ -605,7 +835,7 @@ function renderBody() {
   const ownMat = own.Materials && Object.fromEntries(own.Materials.map(m => [m.Name, m.Percent]));
   const ownAtm = own.AtmosphereComposition && Object.fromEntries(own.AtmosphereComposition.map(m => [m.Name, m.Percent]));
   let h = `<h3><b>${esc(d.full_name)}</b> <span class="cls">${esc(pick(own.PlanetClass && row.subtype, sp.subType) || row.subtype || own.StarType || "")}</span>` +
-    `<button type="button" onclick="copyText(${JSON.stringify(d.full_name)})">copy name</button><button type="button" onclick="closeBody()">✕</button></h3>`;
+    `<button type="button" onclick="copyText(${esc(JSON.stringify(d.full_name))})">copy name</button><button type="button" onclick="${closeJs}">✕</button></h3>`;
   let physSec = "", orbitSec = "", compSec = "", ringSec = "";
   if (isStar) physSec = sec("star", "Star", kv([
     ["Class", (own.StarType ? `${esc(own.StarType)}${own.Subclass != null ? own.Subclass : ""} ${esc(own.Luminosity || "")}` : `${esc(sp.spectralClass || sp.subType || "")} ${esc(sp.luminosity || "")}`).trim()],
@@ -669,7 +899,9 @@ function renderBody() {
   }
   h += bioSec + ringSec + compSec + `<div class="two">${physSec}${orbitSec}</div>`;
   h += sec("value", "Value and discovery", kv([
-    ["Value", has(row.value) ? credits(row.value) + " cr" : null], ["If mapped", has(row.value_if_mapped) ? credits(row.value_if_mapped) + " cr" : null],
+    ["Pays now", has(row.value_now) ? credits(row.value_now) + " cr" : null], ["Could pay", has(row.value_max) ? credits(row.value_max) + " cr" + (has(row.value_max_base) && row.value_max_base !== row.value_max ? ` (${credits(row.value_max_base)} without bonuses)` : "") : null],
+    ["Of which", row.value_parts ? `${credits(row.value_parts.carto_now)} + ${credits(row.value_parts.bio_now)} bio held · ${credits(row.value_parts.carto_left)} + ${credits(row.value_parts.bio_left)} bio still there (bio ×${row.value_parts.bio_factor})` : null],
+    ["Scan value", has(row.value) ? credits(row.value) + " cr" + (has(row.value_if_mapped) ? `, ${credits(row.value_if_mapped)} if mapped` : "") : null],
     ["Spansh estimate", has(sp.estimatedMappingValue || row.spansh_value) ? credits(sp.estimatedMappingValue || row.spansh_value) + " cr mapped" : null],
     ["When you scanned it", has(own.WasDiscovered) ? `${own.WasDiscovered ? "already discovered" : "undiscovered"} · ${own.WasMapped ? "already mapped" : "unmapped"}${has(own.WasFootfalled) ? " · " + (own.WasFootfalled ? "footfalled" : "no footfall") : ""}` : null],
     ["Your firsts", [row.first_discovered && "🏁 discovered", row.first_mapped && "🗺 mapped", row.first_footfall && "👣 footfall"].filter(Boolean).join(", ") || null],
@@ -714,6 +946,211 @@ const fShowLost = document.getElementById("fShowLost");
 fShowLost.checked = store.get("fShowLost", false);
 fShowLost.onchange = () => { store.set("fShowLost", fShowLost.checked); renderFirsts(); };
 
+// ---- Materials ----
+let matKey = null, matData = null;
+const mFilter = document.getElementById("mFilter"), mHeld = document.getElementById("mHeld");
+mHeld.checked = store.get("mHeld", false);
+mHeld.onchange = () => { store.set("mHeld", mHeld.checked); renderMat(); };
+mFilter.oninput = () => renderMat();
+async function loadMat() {
+  const key = `${data && data.materials && data.materials.version}|${data && data.run_id}`;
+  if (key === matKey) return;
+  matKey = key;
+  document.getElementById("matStatus").textContent = "loading…";
+  try { const m = await apiJson("api/materials"); if (key === matKey) matData = m; else return; } catch (err) { matData = {error: err.message}; }
+  renderMat();
+}
+function renderMat() {
+  const m = matData, st = document.getElementById("matStatus");
+  if (!m || m.error) { st.textContent = m ? m.error : ""; return; }
+  const held = m.rows.filter(r => r.count);
+  st.innerHTML = !m.snapshot_ts ? "No Materials snapshot in your journals yet: log in to the game once." :
+    `${held.length} materials held, ${held.reduce((n, r) => n + r.count, 0).toLocaleString()} units · snapshot ${esc(m.snapshot_ts.replace("T", " ").slice(0, 16))} UTC` +
+    (m.ts !== m.snapshot_ts ? ` · last change ${esc((m.ts || "").replace("T", " ").slice(0, 16))}` : "") +
+    (m.stale ? ` · <span class="noscoop">your last login wrote no Materials line: these counts predate it</span>` : "");
+  document.getElementById("matSynth").innerHTML = m.synthesis.map(r => `<div class="synth" title="${r.verified ? "recipe checked against a real synthesis in your journals" : "published in-game recipe"}">
+      <span class="n${r.craftable ? "" : " zero"}">×${r.craftable}</span><b>${esc(r.name)}</b>${r.boost ? ` <span class="unk">${esc(r.boost)} range</span>` : ""}
+      <div class="mats">${r.materials.map(x => `<span class="${x.have < x.need ? "short" : r.limit === x.name && r.craftable < 10 ? "limit" : ""}">${esc(x.name)} ${x.have}/${x.need}</span>`).join(" · ")}</div></div>`).join("");
+  const f = mFilter.value.trim().toLowerCase();
+  const rows = m.rows.filter(r => (!mHeld.checked || r.count) && (!f || r.name.toLowerCase().includes(f)));
+  const cats = ["Raw", "Manufactured", "Encoded", "Other"];
+  document.getElementById("matGrid").innerHTML = cats.map(c => {
+    const list = rows.filter(r => r.category === c);
+    if (!list.length) return "";
+    const grades = [...new Set(list.map(r => r.grade))].sort();
+    return `<div><h4>${c}</h4>` + grades.map(g => `<div class="grade">${g ? `Grade ${g} · cap ${list.find(r => r.grade === g).cap}` : "Unknown grade"}</div>` +
+      list.filter(r => r.grade === g).sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+        const pct = r.cap ? Math.min(100, 100 * r.count / r.cap) : 0;
+        return `<div class="mrow${!r.count ? " none" : r.cap && r.count >= r.cap ? " full" : ""}"><span>${esc(r.name)}</span>` +
+          `<span class="cnt"><b>${r.count}</b>${r.cap ? " / " + r.cap : ""}</span><span class="bar"><i style="width:${pct}%"></i></span></div>`;
+      }).join("")).join("") + `</div>`;
+  }).join("") || `<div class="unk">No materials match.</div>`;
+}
+
+// ---- Log: every journal event ----
+const L = {rows: [], next: null, newest: null, key: null, loading: false, open: new Set(), journal: null, fresh: new Set()};
+const lDays = document.getElementById("lDays"), lNoise = document.getElementById("lNoise"), lFilter = document.getElementById("lFilter");
+const lCatBoxes = [...document.querySelectorAll("#lCats input")];
+const lSaved = store.get("log", {});
+if (lSaved.days) lDays.value = lSaved.days;
+lNoise.checked = !!lSaved.noise;
+if (lSaved.cats) lCatBoxes.forEach(b => b.checked = lSaved.cats.includes(b.value));
+const CAT_GLYPH = {travel: "🚀", exploration: "🔭", bio: "🧬", ship: "🛠", carrier: "🚢", other: "•", noise: "·"};
+function logQuery() {
+  const cats = lCatBoxes.filter(b => b.checked).map(b => b.value);
+  if (lNoise.checked) cats.push("noise");
+  return `days=${lDays.value}&cat=${cats.join(",") || "none"}&q=${encodeURIComponent(lFilter.value.trim())}&noise=${lNoise.checked ? 1 : 0}`;
+}
+function saveLog() {
+  store.set("log", {days: lDays.value, noise: lNoise.checked, cats: lCatBoxes.filter(b => b.checked).map(b => b.value)});
+}
+async function loadLog(force = false) {
+  const key = logQuery();
+  if (key === L.key && !force) return;
+  L.key = key; L.loading = true;
+  document.getElementById("lStatus").textContent = "loading…";
+  try {
+    const r = await apiJson(`api/log?${key}`);
+    if (key !== L.key) return;
+    Object.assign(L, {rows: r.rows, next: r.next, newest: r.newest, error: null, journal: data && data.freshness && data.freshness.journal});
+  } catch (err) { L.error = err.message; }
+  L.loading = false;
+  renderLog();
+}
+async function moreLog() {
+  if (!L.next || L.loading) return;
+  const key = L.key; L.loading = true;
+  try {
+    const r = await apiJson(`api/log?${key}&before=${encodeURIComponent(L.next)}`);
+    if (key === L.key) { L.rows = L.rows.concat(r.rows); L.next = r.next; }
+  } catch (err) { L.error = err.message; }
+  L.loading = false;
+  renderLog();
+}
+async function tailLog() {   // new journal lines since the newest row: prepend them
+  const j = data && data.freshness && data.freshness.journal;
+  if (!L.newest || L.loading || j === L.journal) return;
+  const key = L.key; L.journal = j; L.loading = true;
+  try {
+    const r = await apiJson(`api/log?${key}&after=${encodeURIComponent(L.newest)}`);
+    L.loading = false;
+    if (key !== L.key) return;
+    if (r.reset) return loadLog(true);
+    L.newest = r.newest || L.newest;
+    if (r.rows.length) {
+      const before = document.documentElement.scrollHeight, y = window.scrollY;
+      r.rows.forEach(x => L.fresh.add(x.id));
+      L.rows = r.rows.concat(L.rows);
+      renderLog();
+      if (y > 0) window.scrollBy(0, document.documentElement.scrollHeight - before);  // keep your place unless at the top
+      setTimeout(() => { r.rows.forEach(x => L.fresh.delete(x.id)); }, 2500);
+    }
+  } catch { L.loading = false; }
+}
+function openBodyIn(id, name) {
+  id = String(id);
+  view = "here"; store.set("view", view);
+  pinnedSystem = data.position && String(data.position.id64) === id ? null : id;
+  hidePop();
+  selectedBody = name; selectedSystem = id; bodyData = null;
+  const panel = document.getElementById("bodyPanel");
+  panel.hidden = false; panel.innerHTML = `<h3><b>${esc(name)}</b> <button type="button" onclick="closeBody()">✕</button></h3><div class="unk">loading…</div>`;
+  render(); renderHere(); reloadBody();
+}
+const localTime = ts => { const d = new Date(ts); return isNaN(d) ? ts : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}); };
+const localDay = ts => { const d = new Date(ts); return isNaN(d) ? "" : d.toLocaleDateString([], {weekday: "short", year: "numeric", month: "short", day: "numeric"}); };
+function renderLog() {
+  const st = document.getElementById("lStatus");
+  st.textContent = L.error ? L.error : L.loading ? "loading…" : `${L.rows.length} events${L.next ? " (more below)" : ""}`;
+  let day = null, h = "";
+  for (const r of L.rows) {
+    const d = localDay(r.ts);
+    if (d !== day) { h += `<tr class="day"><td colspan="5">${esc(d)}</td></tr>`; day = d; }
+    const sys = r.system ? `<span class="name" data-name="${esc(r.system)}" title="click to copy">${esc(r.system)}</span>` +
+      (r.id64 ? `<span class="goto" data-goto="${esc(r.id64)}" title="open in Here">⌖</span>` : "") : "";
+    const body = r.body && r.id64 ? ` <span class="goto" data-body="${esc(r.body)}" data-bsys="${esc(r.id64)}" title="open ${esc(r.body)} in Here">🔍</span>` : "";
+    h += `<tr class="ln ${r.cat}${L.fresh.has(r.id) ? " fresh" : ""}" data-id="${esc(r.id)}"><td class="t" title="${esc(r.ts)}">${localTime(r.ts)}</td>` +
+      `<td title="${r.cat}">${CAT_GLYPH[r.cat] || ""}</td><td class="ev hide-sm">${esc(r.event)}</td><td class="sum">${esc(r.summary)}${body}</td><td>${sys}</td></tr>`;
+    if (L.open.has(r.id)) h += `<tr class="raw"><td colspan="5"><pre>${esc(JSON.stringify(r.raw, null, 2))}</pre></td></tr>`;
+  }
+  document.getElementById("logRows").innerHTML = h || `<tr><td colspan="5" class="unk">${L.loading ? "" : "No events match."}</td></tr>`;
+  document.getElementById("lMore").hidden = !L.next;
+}
+lCatBoxes.forEach(b => b.onchange = () => { saveLog(); loadLog(); });
+lNoise.onchange = () => { saveLog(); loadLog(); };
+lDays.onchange = () => { saveLog(); loadLog(); };
+let lTimer = null;
+lFilter.oninput = () => { clearTimeout(lTimer); lTimer = setTimeout(() => loadLog(), 350); };
+document.getElementById("lMore").onclick = moreLog;
+document.getElementById("logRows").addEventListener("click", e => {
+  const b = e.target.closest("[data-body]"); if (b) return openBodyIn(b.dataset.bsys, b.dataset.body);
+  const g = e.target.closest("[data-goto]"); if (g) return showInHere(g.dataset.goto);
+  const n = e.target.closest(".name"); if (n) return copyText(n.dataset.name);
+  const tr = e.target.closest("tr.ln"); if (!tr) return;
+  L.open.has(tr.dataset.id) ? L.open.delete(tr.dataset.id) : L.open.add(tr.dataset.id);
+  renderLog();
+});
+
+// ---- Samples: every exobiology run and codex entry ----
+let bioKey = null, bioData = null;
+const bDays = document.getElementById("bDays"), bState = document.getElementById("bState"), bFilter = document.getElementById("bFilter");
+bDays.value = store.get("bDays", "30"); bState.value = store.get("bState", "");
+let bioSort = store.get("bioSort", {key: "ts", dir: -1});
+bDays.onchange = () => { store.set("bDays", bDays.value); bioKey = null; loadBio(); };
+bState.onchange = () => { store.set("bState", bState.value); renderBio(); };
+bFilter.oninput = () => renderBio();
+function showInHere(id) { view = "here"; store.set("view", view); pinSystem(id); }
+async function loadBio() {
+  const key = `${bDays.value}|${data && data.scan_version}`;
+  if (key === bioKey) return;
+  bioKey = key;
+  document.getElementById("bStatus").textContent = "loading…";
+  try { const b = await apiJson(`api/organics?days=${bDays.value}`); if (key === bioKey) bioData = b; else return; } catch (err) { bioData = {error: err.message}; }
+  renderBio();
+}
+const when = ts => ts ? ts.slice(0, 10) + " " + ts.slice(11, 16) : "";
+const sysCell = s => !s ? "" : `<span class="name" data-name="${esc(s.name)}" title="click to copy">${esc(s.name)}</span><span class="goto" data-goto="${esc(s.id)}" title="open in Here">⌖</span>`;
+function renderBio() {
+  const b = bioData, st = document.getElementById("bStatus");
+  if (!b || b.error) { st.textContent = b ? b.error : ""; return; }
+  const f = bFilter.value.trim().toLowerCase();
+  const match = r => !f || [r.genus, r.species, r.variant, r.system.name, r.body].some(x => (x || "").toLowerCase().includes(f));
+  const rows = b.rows.filter(r => (!bState.value || r.state === bState.value) && match(r));
+  const k = bioSort.key, dir = bioSort.dir;
+  const val = r => k === "system" ? r.system.name : r[k];
+  rows.sort((x, y) => { const a = val(x), c = val(y);
+    if (typeof a === "number" || typeof c === "number") return dir * ((a ?? -1) - (c ?? -1));
+    return dir * String(a ?? "").localeCompare(String(c ?? ""), undefined, {numeric: true}); });
+  const n = b.counts, t = b.totals;
+  st.innerHTML = `${b.rows.length} sample runs · <span class="aboard">${n.aboard} aboard <b>${credits(t.aboard)} cr</b></span> · ` +
+    `<span class="sold">${n.sold} sold <b>${credits(t.sold)} cr</b></span> · <span class="lost">${n.lost} lost <b>${credits(t.lost)} cr</b></span>` +
+    (n["in progress"] ? ` · <span class="progress">${n["in progress"]} in progress</span>` : "") +
+    (rows.length !== b.rows.length ? ` · showing ${rows.length}` : "");
+  document.querySelectorAll("th[data-bsort]").forEach(h => h.classList.toggle("on", h.dataset.bsort === k));
+  document.getElementById("bioRows").innerHTML = rows.map(r => `<tr>
+      <td>${when(r.ts)}</td><td>${sysCell(r.system)}</td><td>${esc(r.body)}</td><td>${esc(r.genus || "")}</td>
+      <td>${esc((r.species || "").split(" ").slice(1).join(" ") || r.species || "")}</td><td class="hide-sm">${esc((r.variant || "").split(" - ").pop())}</td>
+      <td class="num">${r.samples}/3</td>
+      <td class="${r.state === "in progress" ? "progress" : r.state}" title="${r.sold_ts ? "sold " + when(r.sold_ts) : ""}">${r.state}</td>
+      <td class="num" title="${r.factor === 5 ? "×5 first footfall bonus" : ""}">${r.value ? credits(r.value) + (r.factor === 5 ? " ✦" : "") : "?"}</td></tr>`).join("") ||
+    `<tr><td colspan="9" class="unk">${b.rows.length ? "Nothing matches the filter." : "No samples in this period."}</td></tr>`;
+  const cx = b.codex.filter(c => !f || [c.name, c.category, c.region, c.system && c.system.name].some(x => (x || "").toLowerCase().includes(f)));
+  document.getElementById("cStatus").textContent = `· ${b.codex.length} in this period, ${b.codex.filter(c => c.new).length} new to your codex, ` +
+    `${credits(b.codex.reduce((s, c) => s + (c.voucher || 0), 0))} cr in vouchers`;
+  document.getElementById("codexRows").innerHTML = cx.map(c => `<tr><td>${when(c.ts)}</td><td>${esc(c.name)}</td>
+      <td class="hide-sm">${esc([c.category, c.subcategory].filter(Boolean).join(" · "))}</td><td class="hide-sm">${esc(c.region || "")}</td>
+      <td>${sysCell(c.system)}</td><td>${c.voucher ? `💰 ${c.voucher.toLocaleString()} cr` : c.new ? "✦ new" : ""}</td></tr>`).join("") ||
+    `<tr><td colspan="6" class="unk">No codex entries in this period.</td></tr>`;
+}
+document.querySelectorAll("th[data-bsort]").forEach(h => h.onclick = () => {
+  bioSort = {key: h.dataset.bsort, dir: bioSort.key === h.dataset.bsort ? -bioSort.dir : (["ts", "value", "samples"].includes(h.dataset.bsort) ? -1 : 1)};
+  store.set("bioSort", bioSort); renderBio();
+});
+document.getElementById("bioView").addEventListener("click", e => {
+  const g = e.target.closest("[data-goto]"); if (g) return showInHere(g.dataset.goto);
+  const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);
+});
+
 // ---- History ----
 let histKey = null, histData = null;
 const hDays = document.getElementById("hDays");
@@ -734,6 +1171,12 @@ function renderHistory() {
   const tot = k => h.sessions.reduce((n, s) => n + s[k], 0);
   st.textContent = `${h.sessions.length} sessions · ${tot("jumps")} jumps · ${Math.round(tot("ly")).toLocaleString()} ly · ${tot("firsts")} systems first discovered · ${tot("samples")} samples`;
   const fmt = ts => ts.slice(0, 10) + " " + ts.slice(11, 16);
+  const a = h.all_time;
+  document.getElementById("histAll").innerHTML = !a ? "" : `<tr class="alltime" title="every session in your journals${a.since ? ", since " + a.since.slice(0, 10) : ""}">
+      <td><b>All time</b> <span class="unk">${a.sessions.toLocaleString()} sessions</span></td>
+      <td class="num">${a.jumps.toLocaleString()}</td><td class="num">${Math.round(a.ly).toLocaleString()}</td><td class="num hide-sm">${a.max_sol.toLocaleString()}</td>
+      <td class="num">${a.firsts.toLocaleString()}</td><td class="num hide-sm">${a.bodies_first.toLocaleString()}</td><td class="num">${a.mapped.toLocaleString()}</td>
+      <td class="num hide-sm">${a.footfalls.toLocaleString()}</td><td class="num">${a.samples.toLocaleString()}</td><td class="num hide-sm">${a.codex_new.toLocaleString()}</td></tr>`;
   document.getElementById("histRows").innerHTML = h.sessions.map((s, i) => {
     const open = openSessions.has(s.start);
     return `<tr class="sess${open ? " open" : ""}" data-sess="${esc(s.start)}"><td>${fmt(s.start)} → ${s.end.slice(11, 16)}</td>
@@ -1031,6 +1474,7 @@ document.getElementById("sOtherStars").innerHTML = OPTS.other_stars.map(([k, l])
 document.getElementById("sPlanets").innerHTML = OPTS.planets.map(t => box("planets", t, t)).join("");
 document.getElementById("sRings").innerHTML = OPTS.rings.map(t => box("rings", t, t)).join("");
 document.getElementById("sHotspots").innerHTML = OPTS.hotspots.map(t => box("hotspots", t, t)).join("");
+document.getElementById("sBio").innerHTML = (OPTS.bio || []).map(([k, l]) => box("bio", k, l)).join("");
 const sScoop = document.getElementById("sScoop");
 const scoopBoxes = () => [...document.querySelectorAll("#sScoopOpts input")];
 function syncScoop() {
@@ -1046,7 +1490,7 @@ function formParams() {
     source: sForm.querySelector("input[name=sSource]:checked").value,
     radius: parseFloat(document.getElementById("sRadius").value) || 100,
     main_only: document.getElementById("sMainOnly").checked,
-    stars: ticked("stars"), planets: ticked("planets"), rings: ticked("rings"), hotspots: ticked("hotspots"),
+    stars: ticked("stars"), planets: ticked("planets"), rings: ticked("rings"), hotspots: ticked("hotspots"), bio: ticked("bio"),
   };
 }
 function loadForm(p) {
@@ -1054,7 +1498,7 @@ function loadForm(p) {
   document.getElementById("sRadius").value = p.radius ?? 100;
   const src = sForm.querySelector(`input[name=sSource][value="${p.source}"]`); if (src) src.checked = true;
   document.getElementById("sMainOnly").checked = p.main_only ?? true;
-  for (const g of ["stars", "planets", "rings", "hotspots"])
+  for (const g of ["stars", "planets", "rings", "hotspots", "bio"])
     sForm.querySelectorAll(`input[data-group="${g}"]`).forEach(b => b.checked = (p[g] || []).includes(b.value));
   syncScoop();
 }
@@ -1066,7 +1510,38 @@ document.getElementById("sClear").onclick = () => {
 loadForm(store.get("search", null));
 
 let search = null, searchPolling = false;
-const sLabels = {stars: "Star", planets: "Planet", rings: "Ring", hotspots: "Hotspot"};
+const sLabels = {stars: "Star", planets: "Planet", rings: "Ring", hotspots: "Hotspot", bio: "Bio"};
+// ---- Search results: body pop-ups and a body panel beside the results ----
+const sysDetail = {};   // id64 -> system detail (or a pending promise), for the pop-ups
+function systemFor(id) {
+  if (!sysDetail[id]) sysDetail[id] = apiJson(`api/system/${id}`).then(d => (sysDetail[id] = d)).catch(err => (sysDetail[id] = {error: err.message}));
+  return sysDetail[id];
+}
+const sBody = {sys: null, name: null, data: null};
+async function openSearchBody(sys, name) {
+  if (sBody.sys === sys && sBody.name === name) return closeSearchBody();
+  Object.assign(sBody, {sys, name, data: null}); hidePop();
+  const panel = document.getElementById("sBodyPanel");
+  panel.hidden = false; panel.innerHTML = `<h3><b>${esc(name)}</b> <button type="button" onclick="closeSearchBody()">✕</button></h3><div class="unk">loading…</div>`;
+  document.getElementById("sMain").classList.add("detail");
+  renderSearch();
+  await systemFor(sys);   // makes sure the server has the system's bodies before asking for one
+  let d;
+  try { d = await apiJson(`api/body?system=${sys}&name=${encodeURIComponent(name)}`); } catch (err) { d = {error: err.message}; }
+  if (sBody.sys !== sys || sBody.name !== name) return;
+  sBody.data = d; renderBodyInto(panel, d, name, "closeSearchBody()");
+}
+function closeSearchBody() {
+  Object.assign(sBody, {sys: null, name: null, data: null});
+  document.getElementById("sBodyPanel").hidden = true; document.getElementById("sMain").classList.remove("detail");
+  renderSearch();
+}
+const hitHtml = (h, sys) => typeof h === "string" ? esc(h)
+  : `<span class="shit${sBody.sys === sys && sBody.name === h.body ? " sel" : ""}" data-sbodypop="${esc(h.body)}" data-sys="${esc(sys)}">${esc(h.t)}</span>`;
+document.getElementById("sRows").addEventListener("click", e => {
+  const h = e.target.closest("[data-sbodypop]"); if (h) openSearchBody(h.dataset.sys, h.dataset.sbodypop);
+});
+
 function renderSearch(bms) {
   const st = document.getElementById("sStatus"), table = document.getElementById("sTable");
   if (!search) { st.textContent = ""; table.hidden = true; return; }
@@ -1086,7 +1561,7 @@ function renderSearch(bms) {
         ? `<span class="badge s-visited">visited</span>` : ""}</td>
       <td class="num dist">${r.distance.toFixed(2)}</td>
       <td class="matches">${Object.entries(r.matches).map(([k, hits]) =>
-        `<div><span class="mlbl">${sLabels[k] || k}</span>${hits.map(esc).join("; ")}</div>`).join("")}</td></tr>`).join("");
+        `<div><span class="mlbl">${sLabels[k] || k}</span>${hits.map(h => hitHtml(h, r.id)).join("; ")}</div>`).join("")}</td></tr>`).join("");
 }
 async function pollSearch() {
   if (searchPolling) return;
@@ -1111,7 +1586,7 @@ sForm.addEventListener("submit", async e => {
 });
 pollSearch();  // show the last search's results after a reload
 
-document.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => {
+document.querySelectorAll("th[data-sort]").forEach(b => b.onclick = () => {
   sortKey = b.dataset.sort; store.set("sort", sortKey); render();
 });
 const oneJump = document.getElementById("oneJump");
@@ -1136,6 +1611,8 @@ function copyText(text) {
   else fallback();  // http:// from another machine is not a secure context
 }
 document.addEventListener("click", e => {
+  const cell = e.target.closest("#rows td.bodies[data-id]");
+  if (cell) return cell.dataset.id === pinnedSystem ? unpinSystem() : pinSystem(cell.dataset.id);  // same system again closes it
   const bm = e.target.closest("[data-bm]");
   if (bm) return openBookmark(bm.dataset.bm, bm.dataset.name);
   const td = e.target.closest("td.name, #here .copy"); if (!td) return;
@@ -1204,6 +1681,19 @@ function showPop(td, x, y) {
     popId = "unsold"; pop.innerHTML = h; pop.style.display = "block"; placePop(x, y);
     return;
   }
+  if (td.dataset.sbodypop !== undefined) {   // a body in a search result: its system may still be loading
+    const key = "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop, sd = sysDetail[td.dataset.sys];
+    popId = key;
+    if (!sd || sd instanceof Promise) {
+      pop.innerHTML = `<div class="unk">loading ${esc(td.dataset.sbodypop)}…</div>`; pop.style.display = "block"; placePop(x, y);
+      systemFor(td.dataset.sys).then(() => { if (popId === key) showPop(td, x, y); });
+      return;
+    }
+    const b = sd.bodies && sd.bodies.find(q => q.name === td.dataset.sbodypop);
+    if (!b) { pop.innerHTML = `<div class="unk">${esc(sd.error || "no details known for this body")}</div>`; pop.style.display = "block"; placePop(x, y); return; }
+    pop.innerHTML = bodyPopHtml(b).replace("click for everything known", "click for the details panel"); pop.style.display = "block"; placePop(x, y);
+    return;
+  }
   if (td.dataset.bodypop !== undefined) {
     const b = hereData && hereData.bodies && hereData.bodies.find(x => x.name === td.dataset.bodypop);
     if (!b) return hidePop();
@@ -1229,23 +1719,24 @@ let lastPointer = null;
 document.addEventListener("mousemove", e => {
   if (e.target === mapCanvas) return;  // the map draws its own hover
   lastPointer = {x: e.clientX, y: e.clientY};
-  const td = e.target.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop]");
+  const td = e.target.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, e.clientX, e.clientY) : popId !== null && hidePop();
 });
 function refreshPop() {
   // render() has just rebuilt the DOM: re-resolve whatever the pointer is over.
   if (popId === null || popId === "map" || !lastPointer) return;
   const el = document.elementFromPoint(lastPointer.x, lastPointer.y);
-  const td = el && el.closest && el.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop]");
+  const td = el && el.closest && el.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, lastPointer.x, lastPointer.y) : hidePop();
 }
 document.addEventListener("mouseleave", hidePop);
 // Touch: tap the bodies cell to toggle.
 document.addEventListener("touchstart", e => {
   if (e.target.closest("[data-bm]")) return;  // taps on a star open the bookmark dialog
-  const td = e.target.closest("[data-pop], [data-unsold], [data-bodypop]"); if (!td) return hidePop();
+  const td = e.target.closest("[data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
   const t = e.touches[0];
-  const key = td.dataset.unsold !== undefined ? "unsold" : td.dataset.bodypop !== undefined ? "body" + td.dataset.bodypop : td.dataset.id;
+  const key = td.dataset.unsold !== undefined ? "unsold" : td.dataset.sbodypop !== undefined ? "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop
+    : td.dataset.bodypop !== undefined ? "body" + td.dataset.bodypop : td.dataset.id;
   popId === key ? hidePop() : showPop(td, t.clientX, t.clientY);
 }, {passive: true});
 
@@ -1295,8 +1786,10 @@ function play(name) {
 }
 function drawSoundBtn() {
   const blocked = soundOn && actx && actx.state !== "running";
-  soundBtn.textContent = !soundOn ? "🔇 sounds off" : blocked ? "🔊 click to allow audio" : "🔊 sounds on";
-  soundBtn.classList.toggle("on", soundOn);
+  soundBtn.textContent = soundOn ? "🔊" : "🔇";
+  soundBtn.title = !soundOn ? "sounds off — click to turn on" : blocked ? "sounds on, but the browser needs one click on the page to allow audio" : "sounds on — click to turn off";
+  soundBtn.classList.toggle("on", !!soundOn);
+  soundBtn.classList.toggle("blocked", !!blocked);
 }
 soundBtn.onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (soundOn) audio(); drawSoundBtn(); };
 document.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { play(b.dataset.try); drawSoundBtn(); });
@@ -1308,10 +1801,15 @@ drawSoundBtn();
 
 let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierTs = null, lastCodexTs = null, lastDockTs = null;
 function onData() {
+  const br = data.bio_rules, brEl = document.getElementById("bioRules");
+  if (brEl) brEl.textContent = br
+    ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
+    : "Spawn rules missing (bio_rules.json) and could not be downloaded: bodies get no species guesses. Run python3 ed_bio.py --update-rules once online.";
   if (data.run_id !== runId) {  // first payload, or the server was restarted: no sounds for old state
     runId = data.run_id; lastSeq = data.target ? data.target.seq : 0;
     const df = data.defaults || {};
     if (bioMin == null) { bioMin = df.bio_min ?? 10000000; bioMinEl.value = bioMin; }
+    showHl(); showMaxBonus();
     if (store.get("sound", null) === null && df.sounds != null) { soundOn = !!df.sounds; drawSoundBtn(); }
     lastArrival = data.arrival ? data.arrival.seq : 0;
     lastUnsoldLevel = unsoldLevel(data.unsold); lastCarrierTs = data.carrier && data.carrier.ts;
@@ -1394,6 +1892,45 @@ for (const [id, key] of [["unsoldWarn", "warn"], ["unsoldUrgent", "urgent"]]) {
     for (const f of Object.values(thresholdEls)) f.dispatchEvent(new Event("focus"));
   };
 }
+// ---- body highlights (Here list, tree and schematic) ----
+// Per browser; blank means the server default from ed_outrider.toml (body_highlight_level, biology_highlight_value).
+const hlCfg = Object.assign({body: null, bio: null}, store.get("highlightCfg", {}));
+const hlDefault = k => (data && data.defaults && data.defaults[k === "body" ? "body_highlight" : "bio_highlight"]) ?? (k === "body" ? 500000 : 10000000);
+const hlLevel = k => hlCfg[k] ?? hlDefault(k);
+// Bio worth: the likeliest species' value for what is still unknown, or what you have analysed, whichever is
+// more; both are straight Vista Genomics prices (the x5 first-footfall bonus is applied elsewhere).
+const bioWorth = b => Math.max(b.bio_potential || 0, (b.organics || []).filter(o => !o.lost).reduce((n, o) => n + (o.value || 0), 0));
+// Geology: signal counts from the FSS/DSS, and volcanism from the scan (where geological sites and
+// the materials they hold are found on landable bodies).
+const hasVolcanism = b => b.type === "Planet" && !!b.volcanism && !/^no volcanism$/i.test(b.volcanism.trim());
+// just the fact of volcanism (hover names it, the body panel has the rest); brighter where the body is landable
+const volcanoIcon = b => hasVolcanism(b)
+  ? ` <span class="volc${b.landable ? " land" : ""}" title="${esc(b.volcanism)}${b.landable ? " · landable: geological sites possible" : " · not landable"}">🌋</span>` : "";
+const geoTag = b => b.geo ? ` <span class="sp geo" title="geological signals">🪨 ${b.geo} geo</span>` : "";
+// Max with or without first-discovery / first-mapped / first-footfall bonuses: body_max_value_include_bonus in
+// ed_outrider.toml, overridable per browser. Now always includes them (it is what a sale would pay).
+let maxBonusCfg = store.get("maxBonus", null);
+const maxBonus = () => maxBonusCfg ?? (data && data.defaults && data.defaults.max_include_bonus) ?? true;
+const maxOf = x => maxBonus() || x.value_max_base == null ? x.value_max : x.value_max_base;
+function hotClasses(b) {
+  return (b.base_value != null && b.base_value >= hlLevel("body") ? " hot" : "") + (bioWorth(b) >= hlLevel("bio") ? " biohot" : "");
+}
+const maxBonusEl = document.getElementById("maxBonus");
+const showMaxBonus = () => { maxBonusEl.checked = maxBonus(); };
+maxBonusEl.onchange = () => { maxBonusCfg = maxBonusEl.checked; store.set("maxBonus", maxBonusCfg); renderHere(); };
+showMaxBonus();
+const hlEls = {hlBody: document.getElementById("hlBody"), hlBio: document.getElementById("hlBio")};
+function showHl() { for (const [id, el] of Object.entries(hlEls)) { const k = id === "hlBody" ? "body" : "bio"; el.value = hlCfg[k] ?? ""; el.placeholder = hlDefault(k); } }
+for (const [id, el] of Object.entries(hlEls)) {
+  const k = id === "hlBody" ? "body" : "bio";
+  el.onfocus = showHl;
+  el.onchange = () => {
+    const v = Number(el.value);
+    hlCfg[k] = el.value.trim() === "" || !isFinite(v) || v < 0 ? null : Math.round(v);
+    store.set("highlightCfg", hlCfg); showHl(); renderHere();
+  };
+}
+showHl();
 const bioMinEl = document.getElementById("bioMin");
 bioMinEl.value = bioMin ?? "";
 bioMinEl.onchange = () => {
@@ -1401,9 +1938,12 @@ bioMinEl.onchange = () => {
   bioMin = bioMinEl.value.trim() === "" || !isFinite(v) || v < 0 ? ((data && data.defaults && data.defaults.bio_min) ?? 10000000) : Math.round(v);
   bioMinEl.value = bioMin; store.set("bioMin", bioMin); render();
 };
-document.querySelectorAll("[data-reset]").forEach(r => r.onclick = () => {
+document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
+  e.preventDefault();   // the link sits inside a <label>: don't let the click also toggle or focus its input
   const id = r.dataset.reset;
-  if (id === "bioMin") { bioMin = (data && data.defaults && data.defaults.bio_min) ?? 10000000; bioMinEl.value = bioMin; store.set("bioMin", bioMin); }
+  if (id === "maxBonus") { maxBonusCfg = null; store.set("maxBonus", null); showMaxBonus(); renderHere(); }
+  else if (id === "hlBody" || id === "hlBio") { hlCfg[id === "hlBody" ? "body" : "bio"] = null; store.set("highlightCfg", hlCfg); showHl(); renderHere(); }
+  else if (id === "bioMin") { bioMin = (data && data.defaults && data.defaults.bio_min) ?? 10000000; bioMinEl.value = bioMin; store.set("bioMin", bioMin); }
   else { unsoldCfg[id === "unsoldWarn" ? "warn" : "urgent"] = null; store.set("unsoldCfg", unsoldCfg); thresholdEls[id].dispatchEvent(new Event("focus")); }
   render();
 });

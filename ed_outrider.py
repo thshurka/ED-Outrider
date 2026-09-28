@@ -14,15 +14,23 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              credit estimate, your 🏁 first-discovery markers (sold / unsold / lost), bookmarks
   Here       every body in the current system: value as scanned and if mapped, gravity, atmosphere,
              bio genera with 0/3..3/3 sampling progress and which species they are likely to be
-             (ed_bio.py spawn rules, with credit values), ring hotspots, codex entries, your firsts
+             (ed_bio.py spawn rules, with credit values), ring hotspots, codex entries, your firsts;
+             or as a schematic: stars, planets, moons and barycentres in their hierarchy
+  Samples    every exobiology sample run (aboard / sold / lost, with value) and codex entry
   Bookmarks  systems you starred, with a note each
   Search     local database or Spansh: star classes (scoopable shortcut), planet types, ring types,
              ring hotspot minerals
   Map        3D canvas of the neighbourhood with your path, first discoveries, boost stars
              (neutron / white dwarf) and your carrier
-  History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex; exports
+  History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
+             all-time row; exports
+  Log        every journal event with a one-line summary (ed_log.py), filtered by category, time and
+             text, read straight from the journal files and updated live
+  Materials  engineering materials against their caps, and how many FSD injections and other
+             syntheses you can make (ed_materials.py)
 
-The header shows the current system, fuel (with jumps left and jumps since the last scoop), your
+The header shows the current system (coordinates, visit count), the commander (credits at login plus
+sales since, ship), fuel (with jumps left, jumps since the last scoop and FSD boosts on hand), your
 carrier (distance, UC / Vista services), the latest codex first, unsold firsts, and the unsold
 cartographic + exobiology estimate from ed_unsold.py. Targeting a system plays a sound: fanfare if
 neither Spansh nor EDSM has heard of it, upbeat if it is not fully scanned, thud if you have been
@@ -80,6 +88,11 @@ try:  # exobiology spawn rules: which species a body could host
     import ed_bio
 except ImportError:
     ed_bio = None
+import ed_materials  # engineering materials and synthesis recipes (no dependencies)
+try:  # one-line summaries of every journal event, for the Log view
+    import ed_log
+except ImportError:
+    ed_log = None
 
 
 # Which deaths cost the ship (and its cartographic data): shared with ed_unsold so the
@@ -131,6 +144,16 @@ UNSOLD_URGENT = 250_000_000
 # Defaults a browser adopts until its user changes them (page settings live in the browser).
 BIO_MIN = 10_000_000
 SOUNDS_DEFAULT = True
+# Rows in Here stand out when a body's data is worth this much, bonuses left out: cartographic (scan +
+# map, no first-discovery / first-mapped / efficiency bonus) and exobiology (no first-footfall x5).
+BODY_HIGHLIGHT = 500_000
+BIO_HIGHLIGHT = 10_000_000
+# Whether Here's Max column counts first-discovery / first-mapped / first-footfall bonuses (Now always does:
+# it is what a sale would pay).
+MAX_INCLUDE_BONUS = True
+# The Nearby radius choices offered on the page (ly). Bigger spheres cost Spansh requests and page redraws:
+# ~1,500 systems at 100 ly out in the black, far more near the bubble.
+RADIUS_CHOICES = (20, 25, 30, 40, 50)
 
 
 # --------------------------------------------------------------------------
@@ -172,12 +195,16 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "host": pick(args.host, sv.get("host"), "127.0.0.1"),
         "port": int(pick(args.port, sv.get("port"), 8025)),
         "radius": float(pick(args.radius, sv.get("radius"), 25.0)),
+        "radius_choices": sorted({float(x) for x in sv.get("radius_choices", RADIUS_CHOICES) if float(x) > 0}) or list(RADIUS_CHOICES),
         # a relative db path is relative to the script, so a copied folder keeps working
         "db": os.path.join(SCRIPT_DIR, os.path.expanduser(pick(args.db, sv.get("db"), DB_PATH))),
         "unsold_warn": int(df.get("unsold_warn", UNSOLD_WARN)),
         "unsold_urgent": int(df.get("unsold_urgent", UNSOLD_URGENT)),
         "bio_min": int(df.get("bio_min", BIO_MIN)),
         "sounds": bool(df.get("sounds", SOUNDS_DEFAULT)),
+        "body_highlight": int(df.get("body_highlight_level", BODY_HIGHLIGHT)),
+        "bio_highlight": int(df.get("biology_highlight_value", BIO_HIGHLIGHT)),
+        "max_include_bonus": bool(df.get("body_max_value_include_bonus", MAX_INCLUDE_BONUS)),
         "concurrency": int(sp.get("concurrency", SPANSH_CONCURRENCY)),
         "map_max_radius": float(sp.get("map_max_radius", MAP_MAX_RADIUS)),
         "map_max_pages": int(sp.get("map_max_pages", MAP_MAX_PAGES)),
@@ -199,6 +226,7 @@ legacy = {lst(st["legacy"])}  # folders of older journals, imported once and nev
 host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on your network
 port = {st["port"]}
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
+radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
 db = {q(os.path.basename(st["db"]) if os.path.dirname(st["db"]) == SCRIPT_DIR else st["db"])}
 
 [defaults]   # what a browser uses until its user changes it (page settings stay per browser)
@@ -206,6 +234,9 @@ unsold_warn = {st["unsold_warn"]}     # amber "worth selling soon", credits on b
 unsold_urgent = {st["unsold_urgent"]}   # red "go sell"
 bio_min = {st["bio_min"]}         # a body only counts as unfinished bio if it could pay over this
 sounds = {"true" if st["sounds"] else "false"}
+body_highlight_level = {st["body_highlight"]}     # Here: a body's row turns green if scan + map pays this, no bonuses
+biology_highlight_value = {st["bio_highlight"]}  # Here: a body's bio turns violet if it could pay this, no x5 bonus
+body_max_value_include_bonus = {"true" if st["max_include_bonus"] else "false"}  # Here: Max counts first-discovery/mapped/footfall bonuses
 
 [spansh]
 concurrency = {st["concurrency"]}          # body-detail fetches in flight after an arrival
@@ -216,17 +247,23 @@ map_max_pages = {st["map_max_pages"]}        # pages of 500 systems fetched for 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")
 STAR_CLASS_EVENTS = ("FSDTarget", "StartJump")
 SCAN_EVENTS = ("Scan", "FSSDiscoveryScan", "FSSAllBodiesFound", "SAASignalsFound", "FSSBodySignals",
-               "SAAScanComplete", "Disembark", "ScanOrganic", "CodexEntry")
+               "SAAScanComplete", "Disembark", "ScanOrganic", "CodexEntry", "ScanBaryCentre")
 # Your fleet carrier, and fuel: where it is, what it carries, how much is in the tank.
 SHIP_EVENTS = ("FuelScoop", "RefuelAll", "RefuelPartial", "CarrierStats", "CarrierJump", "CarrierJumpRequest",
                "CarrierJumpCancelled", "CarrierLocation", "Docked", "Undocked")
 # Selling or losing exploration data decides whether your discoveries were credited.
 DATA_EVENTS = ("MultiSellExplorationData", "SellExplorationData", "SellOrganicData", "Died", "Resurrect")
+# Who is playing and what they had at login: name, credits.
+CMDR_EVENTS = ("LoadGame", "Commander")
+# Engineering materials: the login snapshot and everything that adds or spends them (see ed_materials).
+MATERIAL_EVENTS = ("Materials", "MaterialCollected", "MaterialDiscarded", "Synthesis", "EngineerCraft",
+                   "MaterialTrade", "TechnologyBroker", "ScientificResearch", "MissionCompleted")
 WANTED = tuple(f'"event":"{e}"'.encode()
-               for e in POSITION_EVENTS + STAR_CLASS_EVENTS + SCAN_EVENTS + DATA_EVENTS + SHIP_EVENTS + ("Loadout",))
+               for e in POSITION_EVENTS + STAR_CLASS_EVENTS + SCAN_EVENTS + DATA_EVENTS + SHIP_EVENTS
+               + CMDR_EVENTS + MATERIAL_EVENTS + ("Loadout",))
 
 # Bump when the journal parser learns new events: forces a one-off re-read of every journal.
-PARSER_VERSION = 12
+PARSER_VERSION = 14
 
 SCOOPABLE = set("OBAFGKM")
 FUEL_HISTORY = 20          # recent jumps used to estimate fuel per jump
@@ -262,7 +299,11 @@ CREATE TABLE IF NOT EXISTS spansh_systems (
 CREATE TABLE IF NOT EXISTS own_systems (
     id64 INTEGER PRIMARY KEY, name TEXT, body_count INTEGER, all_found INTEGER);
 CREATE TABLE IF NOT EXISTS own_bodies (
-    system INTEGER, body_id INTEGER, name TEXT, record TEXT, ts TEXT,
+    system INTEGER, body_id INTEGER, name TEXT, record TEXT, ts TEXT, raw TEXT,
+    PRIMARY KEY (system, body_id));
+-- Barycentres (the Null entries in a body's Parents): their orbit, from ScanBaryCentre.
+CREATE TABLE IF NOT EXISTS own_barycentres (
+    system INTEGER, body_id INTEGER, record TEXT, ts TEXT,
     PRIMARY KEY (system, body_id));
 CREATE TABLE IF NOT EXISTS own_signals (
     system INTEGER, name TEXT, bio INTEGER, geo INTEGER, ts TEXT,
@@ -310,7 +351,8 @@ DELETE FROM journal_files; DELETE FROM visits; DELETE FROM jumps;
 DELETE FROM own_systems; DELETE FROM own_bodies; DELETE FROM own_signals; DELETE FROM own_ring_signals;
 DELETE FROM own_firsts; DELETE FROM own_mapped; DELETE FROM own_footfall; DELETE FROM sales; DELETE FROM deaths;
 DELETE FROM own_genera; DELETE FROM own_organic; DELETE FROM codex; DELETE FROM bio_sales;
-DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop');
+DELETE FROM own_barycentres;
+DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials');
 DELETE FROM meta WHERE key LIKE 'legacy:%' OR key IN ('pos', 'prev', 'jump_range');
 """
 
@@ -344,6 +386,12 @@ def open_db(path, rescan=False):
         meta_set(db, "parser_version", PARSER_VERSION)
         db.commit()
     return db
+
+
+def ts_seconds(ts):
+    """Journal timestamp ('2026-09-28T02:06:56Z') -> seconds since the epoch (UTC)."""
+    import calendar
+    return calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
 
 
 def meta_get(db, key, default=None):
@@ -446,6 +494,104 @@ def minerals(signals):
     return {mineral_name(k): v for k, v in (signals or {}).items() if not k.startswith("$")}
 
 
+LIGHT_SPEED = 299792458.0       # m/s: journal distances are metres
+AU_LS = 499.00478384            # light-seconds in an AU (Spansh orbits are in AU)
+SOLAR_RADIUS_KM = 695700.0
+
+
+def parents_full(parents):
+    """A journal/Spansh Parents list -> [{kind: Star|Planet|Null|Ring, id}], nearest first. None if unknown."""
+    if parents is None:
+        return None
+    return [{"kind": k, "id": v} for p in parents for k, v in p.items()]
+
+
+def build_tree(system, bodies):
+    """The system's hierarchy for the schematic view.
+
+    `bodies` are rows with name (short), type, main, body_id and parents_full. Trust order: the
+    Parents chain (Null entries are barycentres), then the body's name ('A 6 a' orbits 'A 6'; 'AB 1'
+    orbits the A-B barycentre), then the main star. Returns nested nodes:
+    {kind: body|barycentre|unknown, name|id, label, children: [...]}, children in orbital order.
+    """
+    names = {b["name"]: b for b in bodies}
+    by_id = {b["body_id"]: b["name"] for b in bodies if b.get("body_id") is not None}
+    parent = {}
+    ref = lambda kind, i: ("n", i) if kind == "Null" else (("b", by_id[i]) if i in by_id else ("u", i))
+    for b in bodies:
+        chain = [p for p in b.get("parents_full") or [] if p["kind"] != "Ring"]
+        cur = ("b", b["name"])
+        for p in chain:
+            k = ref(p["kind"], p["id"])
+            if k == cur or cur in parent:
+                break
+            parent[cur] = k
+            cur = k
+    # direct star children of each barycentre give it its label ("A+B") and let names like "AB 1" find it
+    kids = {}
+    for c, par in parent.items():
+        kids.setdefault(par, []).append(c)
+    star_letters = lambda key: sorted(c[1] for c in kids.get(key, []) if c[0] == "b" and names[c[1]]["type"] == "Star")
+    groups = {}
+    for key in kids:
+        if key[0] == "n":
+            letters = star_letters(key)
+            if letters and all(len(x) == 1 and x.isupper() for x in letters):
+                groups.setdefault("".join(letters), key)
+    main = next((b["name"] for b in bodies if b.get("main")), None)
+    for b in bodies:
+        k = ("b", b["name"])
+        if k in parent or b.get("parents_full") == [] or b["name"] == main:
+            continue    # placed by its Parents chain, or known to orbit nothing
+        tokens = b["name"].split()
+        found = None
+        for i in range(len(tokens) - 1, 0, -1):
+            cand = " ".join(tokens[:i])
+            if cand in names and cand != b["name"]:
+                found = ("b", cand)
+                break
+        if not found and len(tokens) > 1 and len(tokens[0]) > 1 and tokens[0].isalpha() and tokens[0].isupper():
+            found = groups.get(tokens[0]) or ("g", tokens[0])   # 'AB 1': around the A-B barycentre
+        if not found and b["type"] != "Star" and main and main != b["name"]:
+            found = ("b", main)
+        if found:
+            parent[k] = found
+    # assemble, guarding against cycles in odd data
+    kids = {}
+    for c, par in parent.items():
+        kids.setdefault(par, []).append(c)
+    everything = {("b", n) for n in names} | set(parent.values())
+    def order(key):   # orbital order: body id, then distance from arrival, then the name
+        b = names.get(key[1]) if key[0] == "b" else None
+        bid = b.get("body_id") if b else key[1] if key[0] in "nu" else None
+        return (bid if bid is not None else 10 ** 6, (b or {}).get("dist_ls") or 0, natural(str(key[1])))
+    seen = set()
+
+    def node(key):
+        seen.add(key)
+        children = [node(c) for c in sorted(kids.get(key, []), key=order) if c not in seen]
+        if key[0] == "b":
+            return {"kind": "body", "name": key[1], "children": children}
+        if key[0] == "n":
+            letters = star_letters(key)
+            members = [c["name"] for c in children if c["kind"] == "body"]
+            nested = [f"({c['label']})" for c in children if c["kind"] == "barycentre"]   # a pair inside this one
+            if letters:   # stars name the centre; planets circling the pair (AB 1) are not part of the name
+                parts = ["+".join(letters)]
+            else:
+                parts = [" + ".join(members)] if members else []
+            label = "+".join(parts + nested) if parts or nested else f"barycentre #{key[1]}"
+            return {"kind": "barycentre", "id": key[1], "label": label, "children": children}
+        if key[0] == "g":
+            return {"kind": "barycentre", "id": None, "label": "+".join(key[1]), "children": children}
+        return {"kind": "unknown", "id": key[1], "label": f"body #{key[1]}", "children": children}
+
+    roots = sorted((k for k in everything if k not in parent), key=order)
+    tree = [node(k) for k in roots]
+    tree += [node(k) for k in sorted(everything - seen, key=order) if k not in seen]  # cycle leftovers
+    return tree, {c[1]: p for c, p in parent.items() if c[0] == "b"}
+
+
 def record_from_search(system, b):
     st = b.get("subtype")
     return {"name": short_name(system, b.get("name")), "type": b.get("type"), "subtype": st,
@@ -454,6 +600,12 @@ def record_from_search(system, b):
             # Spansh's own credit estimates: what a scan is worth, and what scan+map is worth.
             "value": b.get("estimated_mapping_value"), "scan_value": b.get("estimated_scan_value"),
             "dist_ls": b.get("distance_to_arrival")}
+
+
+def genus_label(g):
+    """A genus from a Spansh dump ({name: ...} or '$Codex_Ent_..._Genus_Name;') -> its display name."""
+    name = g.get("name") or g.get("genus") if isinstance(g, dict) else g
+    return ed_bio.genus_from_id(name) if ed_bio else name
 
 
 def record_from_dump(system, b):
@@ -474,7 +626,17 @@ def record_from_dump(system, b):
         "gravity": round(b["gravity"], 2) if b.get("gravity") is not None else None,
         "atmosphere": b.get("atmosphereType"), "dist_ls": b.get("distanceToArrival"),
         "temperature": b.get("surfaceTemperature"), "volcanism": b.get("volcanismType"),
-        "genera": [g.get("name") or g for g in (b.get("signals") or {}).get("genuses") or [] if g],
+        # Spansh lists the DSS's genera as objects in some dumps and as bare genus codes in others
+        "genera": [genus_label(g) for g in (b.get("signals") or {}).get("genuses") or [] if g],
+        # what the exobiology rules ask about beyond the basics (see ed_bio)
+        "body_id": b.get("bodyId"), "luminosity": b.get("luminosity"),
+        "parents": [p["Star"] for p in b.get("parents") or [] if "Star" in p],
+        "orbital_period_s": round(b["orbitalPeriod"] * 86400) if b.get("orbitalPeriod") else None,
+        "atmo_comp": b.get("atmosphereComposition"),
+        # the system schematic: hierarchy, size, orbit
+        "parents_full": parents_full(b.get("parents")),
+        "radius_km": b.get("radius") or (b["solarRadius"] * SOLAR_RADIUS_KM if b.get("solarRadius") else None),
+        "sma_ls": b["semiMajorAxis"] * AU_LS if b.get("semiMajorAxis") else None,
     }
 
 
@@ -509,6 +671,14 @@ def record_from_scan(ev):
         "pressure": round(ev["SurfacePressure"] / 101325, 4) if ev.get("SurfacePressure") else (0 if "SurfacePressure" in ev else None),
         "was_discovered": ev.get("WasDiscovered"), "was_mapped": ev.get("WasMapped"),
         "scan_type": ev.get("ScanType"),
+        "body_id": ev.get("BodyID"), "luminosity": ev.get("Luminosity"),
+        "parents": [p["Star"] for p in ev.get("Parents") or [] if "Star" in p],
+        "orbital_period_s": ev.get("OrbitalPeriod"),
+        "parents_full": parents_full(ev.get("Parents")),
+        "radius_km": ev["Radius"] / 1000 if ev.get("Radius") else None,
+        "sma_ls": ev["SemiMajorAxis"] / LIGHT_SPEED if ev.get("SemiMajorAxis") else None,
+        "atmo_comp": ({c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
+                      if "AtmosphereComposition" in ev else None),
         # what ed_unsold.body_value needs to price it
         "ed": {k: ev.get(k) for k in ("StarType", "StellarMass", "PlanetClass", "TerraformState", "MassEM")},
     }
@@ -587,6 +757,11 @@ class Journals:
         self.target = None         # latest FSDTarget, cleared on arrival
         self.dirty = set()         # systems whose own scan data changed since last looked
         self.sales_changed = False  # a sale or death: every row's discovery status may change
+        # {name, fid, credits (at the last LoadGame), login_ts, earned (exploration sales since)}
+        self.commander = meta_get(db, "commander")
+        self.materials = meta_get(db, "materials") or ed_materials.new_state()
+        self.materials_changed = False
+        self.cmdr_changed = False
 
     def import_legacy(self):
         for d in LEGACY_DIRS:
@@ -659,6 +834,14 @@ class Journals:
                              "ts": ts}
                 meta_set(self.db, "ship", self.ship)
             return
+        if name in CMDR_EVENTS:
+            self.handle_cmdr(name, ev, ts)
+            return
+        if name in MATERIAL_EVENTS:
+            if ed_materials.apply(self.materials, ev):
+                meta_set(self.db, "materials", self.materials)
+                self.materials_changed = True
+            return
         if name in SHIP_EVENTS and name != "CarrierJump":  # CarrierJump is also a position event
             self.handle_ship(name, ev, ts)
             return
@@ -685,16 +868,19 @@ class Journals:
             elif name == "SellOrganicData":
                 self.db.execute("INSERT OR IGNORE INTO bio_sales VALUES (?, ?)", (ts, len(ev.get("BioData") or [])))
                 self.bio_sales_changed = True
+                self.add_earnings(ts, sum((b.get("Value") or 0) + (b.get("Bonus") or 0) for b in ev.get("BioData") or []))
             elif name == "Resurrect":
                 self.db.execute("UPDATE deaths SET option = ? WHERE ts = (SELECT max(ts) FROM deaths WHERE ts <= ?)",
                                 (ev.get("Option"), ts))
                 self.last_scoop = ts   # the replacement ship comes with a full tank
                 meta_set(self.db, "last_scoop", ts)
             elif name == "MultiSellExplorationData":
+                self.add_earnings(ts, ev.get("TotalEarnings") or 0)
                 for d in ev.get("Discovered") or []:
                     self.db.execute("INSERT INTO sales VALUES (?, ?, ?)",
                                     (d.get("SystemName"), ts, d.get("NumBodies")))
             else:  # the pre-3.3 sale event: just a list of system names
+                self.add_earnings(ts, ev.get("TotalEarnings") or 0)
                 for sysname in ev.get("Systems") or []:
                     self.db.execute("INSERT INTO sales VALUES (?, ?, NULL)", (sysname, ts))
             self.sales_changed = True
@@ -736,6 +922,27 @@ class Journals:
                 meta_set(self.db, "prev", self.prev)
             self.pos = {"name": ev.get("StarSystem"), "id64": id64, "x": x, "y": y, "z": z, "ts": ts}
             meta_set(self.db, "pos", self.pos)
+
+    def handle_cmdr(self, name, ev, ts):
+        c = self.commander or {}
+        if ts < c.get("login_ts", ""):
+            return   # an older login read out of order (legacy folders are imported after the fact)
+        if name == "Commander":
+            c.update(name=ev.get("Name") or c.get("name"), fid=ev.get("FID") or c.get("fid"))
+        else:  # LoadGame: the credit balance at login is the baseline; sales since are added to it
+            c.update(name=ev.get("Commander") or c.get("name"), fid=ev.get("FID") or c.get("fid"),
+                     credits=ev.get("Credits"), loan=ev.get("Loan"), login_ts=ts, earned=0,
+                     mode=ev.get("GameMode"))
+        self.commander = c
+        self.cmdr_changed = True
+        meta_set(self.db, "commander", c)
+
+    def add_earnings(self, ts, amount):
+        c = self.commander
+        if c and amount and ts >= c.get("login_ts", ""):
+            c["earned"] = (c.get("earned") or 0) + int(amount)
+            self.cmdr_changed = True
+            meta_set(self.db, "commander", c)
 
     def handle_ship(self, name, ev, ts):
         if name in ("FuelScoop", "RefuelAll", "RefuelPartial"):
@@ -822,6 +1029,14 @@ class Journals:
             if ev.get("IsNewEntry") or ev.get("VoucherAmount"):
                 self.codex_new += 1
             self.dirty.add(system)
+            return
+        if name == "ScanBaryCentre":
+            if ev.get("BodyID") is not None:
+                rec = {k: ev.get(k) for k in ("SemiMajorAxis", "Eccentricity", "OrbitalInclination",
+                                              "OrbitalPeriod", "Periapsis", "AscendingNode", "MeanAnomaly")}
+                self.db.execute("INSERT OR REPLACE INTO own_barycentres VALUES (?, ?, ?, ?)",
+                                (system, ev["BodyID"], json.dumps(rec), ts))
+                self.dirty.add(system)
             return
         if name == "Scan":
             record = record_from_scan(ev)
@@ -925,6 +1140,24 @@ def organic_state(db, done_ts):
     return "lost" if death else "aboard"
 
 
+def pickup_judge(db, system):
+    """A function pickup_ts -> (state, ts): sold / lost / unsold, for cartographic data from `system`."""
+    sales = [r[0] for r in db.execute("SELECT ts FROM sales WHERE name = ? ORDER BY ts", (system,))]
+    losses = [r[0] for r in db.execute(f"SELECT ts FROM deaths WHERE {SHIP_LOSS_SQL} ORDER BY ts")]
+
+    def state(pickup):
+        if not pickup:
+            return "unsold", None
+        sale = next((t for t in sales if t > pickup), None)
+        loss = next((t for t in losses if t > pickup), None)
+        if sale and (not loss or sale < loss):
+            return "sold", sale
+        if loss:
+            return "lost", loss
+        return "unsold", None
+    return state
+
+
 def own_firsts(db, id64, system):
     """What you were first to: discovery, mapping, footfall -- and whether the data was sold.
 
@@ -945,19 +1178,7 @@ def own_firsts(db, id64, system):
     # Each body is judged on its own pickup time: the data must reach a cartographer after
     # that, and a lost ship in between loses it (a rescan picks it up again, and undisc_ts
     # advances with every unsold rescan).
-    sales = [r[0] for r in db.execute("SELECT ts FROM sales WHERE name = ? ORDER BY ts", (system,))]
-    losses = [r[0] for r in db.execute(f"SELECT ts FROM deaths WHERE {SHIP_LOSS_SQL} ORDER BY ts")]
-
-    def state(pickup):
-        if not pickup:
-            return "unsold", None
-        sale = next((t for t in sales if t > pickup), None)
-        loss = next((t for t in losses if t > pickup), None)
-        if sale and (not loss or sale < loss):
-            return "sold", sale
-        if loss:
-            return "lost", loss
-        return "unsold", None
+    state = pickup_judge(db, system)
 
     disc_states = [state(r["undisc_ts"] or r["first_ts"]) for r in disc]
     map_states = [state(r["mapped_ts"]) for r in mapped]
@@ -1044,21 +1265,42 @@ def ring_stats(rings):
     return out
 
 
-def bio_guess(r, star=None, genera=None):
+def bio_context(name, records, x=None, y=None, z=None, star=None):
+    """What the exobiology rules want to know about a system as a whole: where it is (region,
+    nebulae), its stars, and which planet classes it holds. `star` is the arrival star class
+    from the journal, used when no star has been scanned yet."""
+    stars, planet_types, star_types = [], [], {}
+    for r in records:
+        if r.get("type") == "Star":
+            stars.append({"type": r.get("subtype"), "luminosity": r.get("luminosity"), "main": r.get("main")})
+            if r.get("body_id") is not None:
+                star_types[r["body_id"]] = r.get("subtype")
+        elif r.get("type") == "Planet":
+            planet_types.append(r.get("subtype"))
+    if not any(s.get("main") for s in stars) and star:
+        stars.append({"type": star, "luminosity": None, "main": True})
+    return {"name": name, "x": x, "y": y, "z": z, "stars": stars, "planet_types": planet_types,
+            "star_types": star_types}
+
+
+def bio_guess(r, star=None, genera=None, ctx=None):
     """What a body's bio signals could be: (upper-bound credits, genus groups) or (None, [])."""
     if not ed_bio or r.get("type") != "Planet":
         return None, []
+    star_types = (ctx or {}).get("star_types") or {}
+    parents = r.get("parent_star_types") or [star_types[p] for p in r.get("parents") or [] if p in star_types]
     body = {"class": r.get("subtype"), "atmosphere": r.get("atmosphere"), "gravity": r.get("gravity"),
             "temperature": r.get("temperature"), "volcanism": r.get("volcanism"), "dist_ls": r.get("dist_ls"),
-            "star": star}
-    cands = ed_bio.predict(body)
+            "pressure": r.get("pressure"), "orbital_period_s": r.get("orbital_period_s"),
+            "atmosphere_composition": r.get("atmo_comp"), "parents": parents or None, "star": star}
+    cands = ed_bio.predict(body, ctx)
     if not cands and not genera:
         return None, []
     val, groups = ed_bio.potential(cands, signals=r.get("bio") or None, genera=genera)
     return (val if any(g.get("value") for g in groups) else None), groups
 
 
-def summarise(records, body_count, star=None):
+def summarise(records, body_count, star=None, ctx=None):
     stars = [r for r in records if r["type"] == "Star"]
     planets = [r for r in records if r["type"] == "Planet"]
     main = next((r for r in stars if r.get("main")), stars[0] if len(stars) == 1 else None)
@@ -1085,7 +1327,7 @@ def summarise(records, body_count, star=None):
     pot, n = 0, 0
     for r in records:
         if r.get("bio"):
-            val, groups = bio_guess(r, star, r.get("genera") or None)
+            val, groups = bio_guess(r, star, r.get("genera") or None, ctx)
             if val:
                 pot += val
                 n += 1
@@ -1124,7 +1366,7 @@ def summarise(records, body_count, star=None):
 # --------------------------------------------------------------------------
 
 # Bump when the cached record layout changes so cached systems get re-fetched.
-CACHE_VERSION = 9
+CACHE_VERSION = 11
 
 
 class Spansh:
@@ -1296,6 +1538,7 @@ class State:
         self.arrival = None        # reconciliation of that announcement with the arrival scan
         self.arrival_seq = 0
         self.tail_error = None     # last journal-tailing exception, shown on the page
+        self.materials_version = 0  # bumps when the materials inventory changes (Materials view keys on it)
         self.scan_version = 0      # bumps only when your own scan data changes (Here/History views key on it)
         self.system_values = {}    # system name -> unsold cartographic value, from the last estimate
         t = journals.target        # whatever was targeted before we started: no sound for it
@@ -1308,7 +1551,11 @@ class State:
         pos, jr = self.journals.pos, self.journals.jump_range
         return {
             "version": self.version, "run_id": RUN_ID, "status": self.status, "radius": self.radius,
-            "position": pos, "previous": self.journals.prev, "jump_range": jr["ly"] if jr else None,
+            "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
+            "position": dict(pos, visits=self.visit_count(pos["id64"])) if pos else pos,
+            "previous": self.journals.prev,
+            "commander": self.commander_summary(),
+            "materials": self.materials_summary(), "jump_range": jr["ly"] if jr else None,
             "systems": list(self.systems.values()),
             "target": dict(self.target, leaving=self.leaving_summary(pos["id64"])) if self.target and pos else self.target,
             "arrival": self.arrival,
@@ -1317,7 +1564,10 @@ class State:
                           "live": bool((self.journals.status_json or {}).get("live")),
                           "dirs": LIVE_DIRS, "legacy": LEGACY_DIRS},
             "docked": self.docked_summary(),
-            "defaults": {"unsold_warn": UNSOLD_WARN, "unsold_urgent": UNSOLD_URGENT, "bio_min": BIO_MIN, "sounds": SOUNDS_DEFAULT},
+            "defaults": {"unsold_warn": UNSOLD_WARN, "unsold_urgent": UNSOLD_URGENT, "bio_min": BIO_MIN, "sounds": SOUNDS_DEFAULT,
+                         "body_highlight": BODY_HIGHLIGHT, "bio_highlight": BIO_HIGHLIGHT,
+                         "max_include_bonus": MAX_INCLUDE_BONUS},
+            "bio_rules": ed_bio.rules_info() if ed_bio else None,
             "fuel": self.fuel_summary(),
             "ship": self.journals.ship,
             "carrier": self.carrier_summary(),
@@ -1328,7 +1578,30 @@ class State:
             "unsold": self.unsold,
         }
 
-    # ---- fuel, carrier, current system ----
+    # ---- commander, materials, fuel, carrier, current system ----
+
+    def visit_count(self, id64):
+        row = self.db.execute("SELECT count FROM visits WHERE id64=?", (id64,)).fetchone()
+        return row["count"] if row else 0
+
+    def commander_summary(self):
+        c = self.journals.commander
+        if not c:
+            return None
+        cr = c.get("credits")
+        return {"name": c.get("name"), "credits": cr + (c.get("earned") or 0) if cr is not None else None,
+                "credits_login": cr, "earned": c.get("earned") or 0, "login_ts": c.get("login_ts"),
+                "loan": c.get("loan"), "mode": c.get("mode")}
+
+    def materials_summary(self):
+        m = self.journals.materials
+        if not m or not m.get("snapshot_ts"):
+            return None
+        login = (self.journals.commander or {}).get("login_ts")
+        return {"ts": m.get("ts"), "snapshot_ts": m["snapshot_ts"], "version": self.materials_version,
+                "boosts": ed_materials.boosts(m["counts"]), "count": sum(m["counts"].values()),
+                # a login whose Materials line was never seen: the counts predate it
+                "stale": bool(login and ts_seconds(login) - ts_seconds(m["snapshot_ts"]) > 120)}
 
     def fuel_summary(self):
         j = self.journals
@@ -1420,7 +1693,9 @@ class State:
                   self.db.execute("SELECT body_id, record FROM own_bodies WHERE system=?", (id64,))}
         if not sysrow and not bodies:
             return None
-        name_of = lambda bid: short_name(self.locate(id64)[0] if self.locate(id64) else "", bodies[bid]["name"])
+        where = self.locate(id64) or ("", None, None, None)
+        ctx = bio_context(where[0], bodies.values(), where[1], where[2], where[3], star)
+        name_of = lambda bid: short_name(where[0], bodies[bid]["name"])
         count = sysrow["body_count"] if sysrow else None
         unscanned = (count - len(bodies)) if count else None
         mapped = {r[0] for r in self.db.execute("SELECT body_id FROM own_mapped WHERE system=?", (id64,))}
@@ -1444,11 +1719,11 @@ class State:
                 continue
             left = genera.get(bid, set()) - done.get(bid, {}).get("done", set())
             partial = done.get(bid, {}).get("partial", {})
-            val, _ = bio_guess(rec, star, sorted(genera[bid]) if bid in genera else None)
+            val, _ = bio_guess(rec, star, sorted(genera[bid]) if bid in genera else None, ctx)
             if bid not in genera and not partial:
                 bio_pending.append({"body": name_of(bid), "signals": n_sig, "genera": None, "partial": {}, "potential": val})
             elif left or partial:
-                left_val, _ = bio_guess(rec, star, sorted(left)) if left else (None, [])
+                left_val, _ = bio_guess(rec, star, sorted(left), ctx) if left else (None, [])
                 bio_pending.append({"body": name_of(bid), "signals": n_sig, "genera": sorted(left),
                                     "partial": partial, "potential": left_val})
         unmapped = []
@@ -1501,11 +1776,15 @@ class State:
         odyssey = True
         star_row = self.db.execute("SELECT star_class FROM jumps WHERE id64=? ORDER BY ts DESC LIMIT 1", (id64,)).fetchone()
         star = star_row["star_class"] if star_row else None
+        ctx = bio_context(name, records, where[1], where[2], where[3], star)
+        judge = pickup_judge(self.db, name)
+        scan_ts = {r["body_id"]: (r["undisc_ts"], r["first_ts"]) for r in self.db.execute(
+            "SELECT body_id, undisc_ts, first_ts FROM own_firsts WHERE system=?", (id64,))}
         out = []
         for r in records:
             bid = own_ids.get(r["name"])
             known_genera = genera.get(bid) or r.get("genera") or []
-            bio_val, bio_groups = bio_guess(r, star, known_genera or None) if (r.get("bio") or known_genera) else (None, [])
+            bio_val, bio_groups = bio_guess(r, star, known_genera or None, ctx) if (r.get("bio") or known_genera) else (None, [])
             f = firsts.get(bid) if bid is not None else None
             first_disc = bool(f and f["was_discovered"] == 0)
             is_mapped = bool(f and f["mapped_ts"])
@@ -1515,9 +1794,35 @@ class State:
                 body = dict(r["ed"], first_discovered=first_disc, first_mapped=f["was_mapped"] == 0 if f else False)
                 value = ed_unsold.body_value(body, is_mapped, False, odyssey)
                 value_if_mapped = ed_unsold.body_value(body, True, False, odyssey) if not is_mapped else None
+                # scan + map with no first-discovery, first-mapped or efficiency bonus: the highlight test
+                plain = dict(r["ed"], first_discovered=False, first_mapped=False)
+                base_value = ed_unsold.body_value(plain, True, False, odyssey)
+                value_nb = ed_unsold.body_value(plain, is_mapped, False, odyssey)   # the same, bonuses left out
+                value_if_mapped_nb = base_value if not is_mapped else None
             else:
                 value, value_if_mapped = r.get("scan_value"), r.get("value")
+                base_value = r.get("value")   # Spansh's scan + map estimate
+                value_nb, value_if_mapped_nb = value, value_if_mapped
+            # now / max: what this body's data would pay if sold now, and once fully worked
+            scan_state = judge(scan_ts[bid][0] or scan_ts[bid][1])[0] if bid in scan_ts else None
+            held = organics.get(bid, [])
+            bio_factor = 5 if f and f["was_footfalled"] == 0 else 1   # x5 where nobody had set foot when you scanned
+            bio_now = sum((o.get("value") or 0) for o in held if o["done"] and not o["lost"]) * bio_factor
+            got = {o["genus"] for o in held if o["done"] and not o["lost"]}
+            bio_left = sum((g.get("value") or 0) for g in bio_groups if g["genus"] not in got) * bio_factor
+            carto_now = (value or 0) if (bid is not None and scan_state == "unsold") else 0
+            carto_left = (r.get("value") or r.get("scan_value") or 0) if bid is None else \
+                (max(0, (value_if_mapped or 0) - (value or 0)) if not is_mapped and value_if_mapped else 0)
+            # Max without any bonus: no first-discovery / first-mapped multipliers, bio at x1
+            carto_now_nb = (value_nb or 0) if (bid is not None and scan_state == "unsold") else 0
+            carto_left_nb = (r.get("value") or r.get("scan_value") or 0) if bid is None else \
+                (max(0, (value_if_mapped_nb or 0) - (value_nb or 0)) if not is_mapped and value_if_mapped_nb else 0)
+            max_nb = carto_now_nb + carto_left_nb + (bio_now + bio_left) / bio_factor
             out.append({
+                "value_now": int(carto_now + bio_now), "value_max": int(carto_now + bio_now + carto_left + bio_left),
+                "value_max_base": int(max_nb),
+                "value_parts": {"carto_now": int(carto_now), "bio_now": int(bio_now), "carto_left": int(carto_left),
+                                "bio_left": int(bio_left), "scan_state": scan_state, "bio_factor": bio_factor},
                 "name": r["name"], "type": r["type"], "subtype": r["subtype"], "main": r.get("main"),
                 "dist_ls": r.get("dist_ls"), "gravity": r.get("gravity"), "atmosphere": r.get("atmosphere"),
                 "temperature": r.get("temperature"), "volcanism": r.get("volcanism"), "pressure": r.get("pressure"),
@@ -1537,10 +1842,39 @@ class State:
                 "first_mapped": first_map, "footfall": bool(f and f["foot_ts"]),
                 "first_footfall": bool(f and f["was_footfalled"] == 0 and f["foot_ts"]),
                 "value": value, "value_if_mapped": value_if_mapped,
+                "base_value": base_value,
+                "body_id": r.get("body_id"), "radius_km": r.get("radius_km"), "sma_ls": r.get("sma_ls"),
+                "parents_full": r.get("parents_full"),
             })
-        out.sort(key=lambda b: -((b["value_if_mapped"] or b["value"] or 0)))
-        return {"id64": str(id64), "name": name, "bodies": out, "leaving": self.leaving_summary(id64),
-                "firsts": own_firsts(self.db, id64, name)}
+        out.sort(key=lambda b: -(b["value_max"] or 0))
+        tree, parent_of = build_tree(name, out)
+        types = {b["name"]: b["type"] for b in out}
+        for b in out:
+            p = parent_of.get(b["name"])
+            b["is_moon"] = bool(p and p[0] == "b" and types.get(p[1]) == "Planet")
+            del b["parents_full"]
+        return {"id64": str(id64), "name": name, "bodies": out, "tree": tree, "leaving": self.leaving_summary(id64),
+                "firsts": own_firsts(self.db, id64, name),
+                "value_now": sum(b["value_now"] for b in out), "value_max": sum(b["value_max"] for b in out),
+                "value_max_base": sum(b["value_max_base"] for b in out)}
+
+    async def ensure_records(self, id64):
+        """Make sure a system's bodies are known before showing it: a search result or pinned system with
+        no cached Spansh dump gets one fetched (and cached) now. Failures leave things as they were."""
+        if id64 in self.bases:
+            return
+        _, base = self.spansh.cached(id64)
+        if base and any(r.get("full") for r in base.get("records") or []):
+            return
+        where = self.locate(id64)
+        if not where:
+            return
+        name, x, y, z = where
+        try:
+            await self.spansh.full_records(id64, None, {"v": CACHE_VERSION, "name": name, "x": x, "y": y, "z": z,
+                                                        "body_count": None, "records": (base or {}).get("records") or []})
+        except Exception as e:
+            print(f"body lookup for {name} failed: {type(e).__name__}: {e}", file=sys.stderr)
 
     async def body_detail(self, id64, body_name):
         """Everything known about one body: your raw Scan, Spansh's record, and the merged row."""
@@ -1586,9 +1920,35 @@ class State:
                 "row": row, "own": own, "spansh": spansh, "rings": rings,
                 "spansh_error": locals().get("lookup_error")}
 
+    COUNT_QUERIES = {
+        "firsts": "SELECT count(DISTINCT system) FROM own_firsts WHERE is_main=1 AND was_discovered=0 AND undisc_ts BETWEEN ? AND ?",
+        "bodies_first": "SELECT count(*) FROM own_firsts WHERE was_discovered=0 AND undisc_ts BETWEEN ? AND ?",
+        "mapped": "SELECT count(*) FROM own_mapped WHERE ts BETWEEN ? AND ?",
+        "footfalls": "SELECT count(*) FROM own_footfall WHERE ts BETWEEN ? AND ?",
+        "samples": "SELECT count(*) FROM own_organic WHERE done_ts BETWEEN ? AND ?",
+        "codex_new": "SELECT count(*) FROM codex WHERE is_new=1 AND ts BETWEEN ? AND ?",
+    }
+
+    def range_counts(self, a, b):
+        """What you achieved between two timestamps (inclusive): the per-session and all-time numbers."""
+        return {k: self.db.execute(sql, (a, b)).fetchone()[0] for k, sql in self.COUNT_QUERIES.items()}
+
     def history(self, days):
-        """Your sessions (gaps of 2 h+ split them), newest first, with what each one achieved."""
+        """Your sessions (gaps of 2 h+ split them), newest first, with what each one achieved,
+        plus an all-time row that ignores `days`."""
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        sessions = self.sessions(since)
+        for s_ in sessions:
+            s_.update(self.range_counts(s_["start"], s_["end"] + "~"))  # "~" sorts after any time: inclusive
+        everything = self.sessions("")
+        all_time = {"jumps": sum(x["jumps"] for x in everything), "ly": round(sum(x["ly"] for x in everything), 1),
+                    "max_sol": max((x["max_sol"] for x in everything), default=0), "sessions": len(everything),
+                    "since": everything[-1]["start"] if everything else None}
+        all_time.update(self.range_counts("", "~"))
+        return {"days": days, "sessions": sessions, "all_time": all_time}
+
+    def sessions(self, since):
+        """Jumps since `since` grouped into sessions, newest first (no achievement counts)."""
         jumps = [dict(r) for r in self.db.execute(
             "SELECT ts, id64, name, x, y, z, kind FROM jumps WHERE ts >= ? ORDER BY ts", (since,))]
         def parse(ts):
@@ -1609,18 +1969,57 @@ class State:
             cur["systems"].append({"ts": j["ts"], "id": str(j["id64"]), "name": j["name"], "kind": j["kind"]})
             cur["_prev"] = j
         for s_ in sessions:
-            a, b = s_["start"], s_["end"] + "~"  # inclusive of the last timestamp
-            q = lambda sql: self.db.execute(sql, (a, b)).fetchone()[0]
-            s_["firsts"] = q("SELECT count(DISTINCT system) FROM own_firsts WHERE is_main=1 AND was_discovered=0 AND undisc_ts BETWEEN ? AND ?")
-            s_["bodies_first"] = q("SELECT count(*) FROM own_firsts WHERE was_discovered=0 AND undisc_ts BETWEEN ? AND ?")
-            s_["mapped"] = q("SELECT count(*) FROM own_mapped WHERE ts BETWEEN ? AND ?")
-            s_["footfalls"] = q("SELECT count(*) FROM own_footfall WHERE ts BETWEEN ? AND ?")
-            s_["samples"] = q("SELECT count(*) FROM own_organic WHERE done_ts BETWEEN ? AND ?")
-            s_["codex_new"] = q("SELECT count(*) FROM codex WHERE is_new=1 AND ts BETWEEN ? AND ?")
             s_["ly"] = round(s_["ly"], 1); s_["max_sol"] = round(s_["max_sol"])
             del s_["_last"], s_["_prev"]
         sessions.reverse()
-        return {"days": days, "sessions": sessions}
+        return sessions
+
+    def system_names(self, ids):
+        """id64 -> name for systems you have visited or scanned."""
+        ids = list(set(ids))
+        names = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for table, col in (("own_systems", "id64"), ("visits", "id64")):
+                for r in self.db.execute(f"SELECT {col} AS id, name FROM {table} WHERE {col} IN ({marks})", chunk):
+                    if r["name"]:
+                        names[r["id"]] = r["name"]
+        return names
+
+    def organics(self, days):
+        """Every exobiology sample run (newest first) with what it is worth and whether it was banked,
+        plus your codex entries over the same period."""
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        runs = [dict(r) for r in self.db.execute(
+            """SELECT o.*, b.name AS body_name, f.was_footfalled FROM own_organic o
+               LEFT JOIN own_bodies b ON b.system = o.system AND b.body_id = o.body_id
+               LEFT JOIN own_firsts f ON f.system = o.system AND f.body_id = o.body_id
+               WHERE coalesce(o.done_ts, o.ts) >= ? ORDER BY coalesce(o.done_ts, o.ts) DESC""", (since,))]
+        codex = [dict(r) for r in self.db.execute("SELECT * FROM codex WHERE ts >= ? ORDER BY ts DESC", (since,))]
+        names = self.system_names([r["system"] for r in runs] + [c["system"] for c in codex if c["system"]])
+        sales = [r[0] for r in self.db.execute("SELECT ts FROM bio_sales ORDER BY ts")]
+        rows, totals = [], {"aboard": 0, "sold": 0, "lost": 0, "in progress": 0}
+        counts = dict.fromkeys(totals, 0)
+        for r in runs:
+            sysname = names.get(r["system"]) or f"#{r['system']}"
+            st = organic_state(self.db, r["done_ts"]) or "in progress"
+            factor = 5 if r["was_footfalled"] == 0 else 1
+            base = ed_bio.species_value(r["species_name"]) if ed_bio and r["species_name"] else None
+            value = base * factor if base else None
+            body = short_name(sysname, r["body_name"]) if r["body_name"] else f"body #{r['body_id']}"
+            rows.append({"ts": r["done_ts"] or r["ts"], "system": {"id": str(r["system"]), "name": sysname},
+                         "body": body, "genus": r["genus_name"], "species": r["species_name"],
+                         "variant": r["variant_name"], "samples": r["samples"], "state": st,
+                         "value": value, "factor": factor,
+                         "sold_ts": next((t for t in sales if t > r["done_ts"]), None) if st == "sold" else None})
+            counts[st] += 1
+            totals[st] += value or 0
+        return {"days": days, "rows": rows, "totals": totals, "counts": counts,
+                "codex": [{"ts": c["ts"], "name": c["name"], "category": c["category"], "subcategory": c["subcategory"],
+                           "region": c["region"], "new": bool(c["is_new"]), "voucher": c["voucher"],
+                           "system": {"id": str(c["system"]), "name": c["system_name"] or names.get(c["system"])}
+                           if c["system"] else None} for c in codex]}
 
     def _unsold_rows(self):
         args = argparse.Namespace(commander=None, since=None, ignore_deaths=False, bonus_rate=None,
@@ -1635,6 +2034,12 @@ class State:
         if what == "jumps":
             rows = [dict(r) for r in self.db.execute("SELECT * FROM jumps ORDER BY ts")]
             return ["ts", "id64", "name", "x", "y", "z", "star_class", "kind"], rows
+        if what == "organics":
+            rows = []
+            for r in self.organics(3650)["rows"]:
+                rows.append(dict(r, system=r["system"]["name"], system_id=r["system"]["id"]))
+            return ["ts", "system", "system_id", "body", "genus", "species", "variant", "samples", "state",
+                    "value", "factor", "sold_ts"], rows
         if what == "codex":
             rows = [dict(r) for r in self.db.execute("SELECT * FROM codex ORDER BY ts")]
             return ["ts", "entry_id", "name", "category", "subcategory", "region", "system", "system_name",
@@ -1706,6 +2111,49 @@ class State:
         self.db.commit()
         self.bump()
 
+    def system_value(self, id64, name, records, star, ctx=None):
+        """Credits from a system: what selling now would pay for data you hold from it, and the
+        most it could pay once everything there is scanned, mapped and sampled.
+
+        Cartographics use the same formula as the unsold estimate (first-discovery and
+        first-mapping bonuses from your own scans; Spansh's estimate for bodies you have not
+        scanned). Exobiology pays x5 on a body nobody had set foot on when you scanned it (or
+        where you took first footfall); a body you have not scanned counts at x1, since its
+        footfall state is unknown.
+        """
+        own_ids = {short_name(name, r["name"]): r["body_id"] for r in
+                   self.db.execute("SELECT body_id, name FROM own_bodies WHERE system=?", (id64,))}
+        firsts = {r["body_id"]: r for r in self.db.execute(
+            """SELECT f.body_id, f.was_discovered, f.was_mapped, f.was_footfalled, m.ts AS mapped_ts
+               FROM own_firsts f LEFT JOIN own_mapped m ON m.system = f.system AND m.body_id = f.body_id
+               WHERE f.system = ?""", (id64,))}
+        genera = {}  # body_id -> genera your DSS found there (limits the guess to what is really present)
+        for r in self.db.execute("SELECT body_id, genus_name FROM own_genera WHERE system=?", (id64,)):
+            genera.setdefault(r["body_id"], []).append(r["genus_name"])
+        done = {}   # body_id -> {genus: species value} for samples you hold (not lost)
+        for r in self.db.execute("SELECT body_id, genus_name, species_name, done_ts FROM own_organic WHERE system=? AND done_ts IS NOT NULL", (id64,)):
+            if organic_state(self.db, r["done_ts"]) != "lost":
+                done.setdefault(r["body_id"], {})[r["genus_name"]] = (ed_bio.species_value(r["species_name"]) if ed_bio else 0) or 0
+        now_c = self.system_values.get(name, 0)
+        rem_c = now_b = rem_b = 0
+        for r in records:
+            bid = own_ids.get(r["name"])
+            f = firsts.get(bid) if bid is not None else None
+            if bid is None:
+                rem_c += r.get("value") or r.get("scan_value") or 0
+            elif f and not f["mapped_ts"] and r.get("ed") and ed_unsold and r["type"] == "Planet":
+                body = dict(r["ed"], first_discovered=f["was_discovered"] == 0, first_mapped=f["was_mapped"] == 0)
+                rem_c += max(0, ed_unsold.body_value(body, True, False, True) - ed_unsold.body_value(body, False, False, True))
+            if r.get("bio") or r.get("genera"):
+                factor = 5 if f and f["was_footfalled"] == 0 else 1
+                got = done.get(bid, {}) if bid is not None else {}
+                now_b += sum(got.values()) * factor
+                known = (genera.get(bid) if bid is not None else None) or r.get("genera") or None
+                _, groups = bio_guess(r, star, known, ctx)
+                rem_b += sum((g.get("value") or 0) for g in groups if g["genus"] not in got) * factor
+        return {"value_now": int(now_c + now_b), "value_max": int(now_c + now_b + rem_c + rem_b),
+                "value_parts": {"carto_now": int(now_c), "bio_now": int(now_b), "carto_left": int(rem_c), "bio_left": int(rem_b)}}
+
     def row(self, id64):
         """Page row for a system: its Spansh base merged with your own scans."""
         source, base = self.bases[id64]
@@ -1713,7 +2161,9 @@ class State:
         records = merge_records(base.get("records") or [], own, hotspots)
         counts = [c for c in (base.get("body_count"), own_count) if c]
         star_row = self.db.execute("SELECT star_class FROM star_classes WHERE id64=?", (id64,)).fetchone()
-        s = summarise(records, max(counts) if counts else None, star_row["star_class"] if star_row else None)
+        star = star_row["star_class"] if star_row else None
+        ctx = bio_context(base["name"], records, base.get("x"), base.get("y"), base.get("z"), star)
+        s = summarise(records, max(counts) if counts else None, star, ctx)
         s.update(id64=id64, id=str(id64), name=base["name"], source=source, in_spansh=source == "spansh",
                  visited=id64 in self.visited, distance=round(dist(self.center, base), 2),
                  own_scans=len(own), firsts=own_firsts(self.db, id64, base["name"]),
@@ -1722,6 +2172,7 @@ class State:
                           ON m.system = f.system AND m.body_id = f.body_id
                         WHERE f.system = ? AND (f.was_mapped = 1 OR m.ts IS NOT NULL)""",
                      (id64,)).fetchone()[0])
+        s.update(self.system_value(id64, base["name"], records, star, ctx))
         if not s["bodies_known"]:
             s["status"] = "unreported" if source == "route" else "no bodies"
         elif s["body_count"] is None or s["bodies_known"] < s["body_count"]:
@@ -1827,6 +2278,17 @@ class State:
         if self.refresh_task and not self.refresh_task.done():
             self.refresh_task.cancel()
         self.refresh_task = asyncio.create_task(self.refresh(pos, retry))
+
+    def set_radius(self, r):
+        """Change the Nearby sphere from the page: remembered in the database and fetched at once."""
+        if r == self.radius:
+            return
+        self.radius = r
+        meta_set(self.db, "radius_choice", r)
+        self.db.commit()
+        self.center = None          # forces a fresh Spansh sphere around where you are
+        self.maybe_refresh()
+        self.bump()
 
     def schedule_retry(self):
         delay = self.retry_backoff
@@ -2016,13 +2478,19 @@ class State:
                     import traceback
                     traceback.print_exc()
                     self.tail_error = f"{type(e).__name__} while updating {id64}: {e}"
-        if self.journals.bio_sales_changed:
+        bio_sold = self.journals.bio_sales_changed
+        if bio_sold:
             self.journals.bio_sales_changed = False
             pos = self.journals.pos
             if pos and pos["id64"] in self.bases:
                 dirty.add(pos["id64"])
-        if changed or dirty:
+        if changed or dirty or bio_sold:   # a sale changes the Samples view even far from any row
             self.scan_version += 1
+            self.bump()
+        if self.journals.materials_changed or self.journals.cmdr_changed:
+            if self.journals.materials_changed:
+                self.materials_version += 1
+            self.journals.materials_changed = self.journals.cmdr_changed = False
             self.bump()
 
     # ---- 3D map ----
@@ -2139,6 +2607,7 @@ class State:
             try:
                 self.unsold = await asyncio.get_running_loop().run_in_executor(None, compute_unsold)
                 self.system_values = self.unsold.pop("system_values", {})
+                self.journals.dirty |= set(self.bases)   # rows carry per-system values: rebuild them
             except (Exception, SystemExit) as e:  # read_events() fails if it finds no journals
                 self.unsold = {"error": str(e)}
             self.bump()
@@ -2264,10 +2733,16 @@ PLANET_TYPES = [
 ]
 RING_TYPES = ["Icy", "Rocky", "Metal Rich", "Metallic"]
 
+# Exobiology you have not finished sampling, by what the rest could pay (plain Vista Genomics prices,
+# no first-footfall x5): key -> (label, credits threshold).
+BIO_SEARCH = {"any": ("Unscanned bio signals", 0), "1m": ("Unscanned bio signals, > 1 mil", 1_000_000),
+              "5m": ("Unscanned bio signals, > 5 mil", 5_000_000), "10m": ("Unscanned bio signals, > 10 mil", 10_000_000)}
+
 SEARCH_OPTIONS = {
     "scoopable": [k for k, _ in _SCOOP],
     "other_stars": [[k, label] for k, label, _ in _OTHER_STARS],
     "planets": PLANET_TYPES, "rings": RING_TYPES, "hotspots": HOTSPOT_MINERALS,
+    "bio": [[k, label] for k, (label, _) in BIO_SEARCH.items()],
 }
 
 SEARCH_MAX_RADIUS = {"local": 5000, "spansh": 500}
@@ -2276,15 +2751,59 @@ SEARCH_MAX_RESULTS = 1000
 
 
 def record_from_body_search(b):
-    """A Spansh /bodies/search result -> body record."""
+    """A Spansh /bodies/search result -> body record (with what the exobiology rules can use: the
+    search leaves out volcanism, so species guesses from it are broader than from a full dump)."""
     rings = []
     for r in b.get("rings") or []:
         rings.append({"name": short_name(b.get("name"), r.get("name")), "type": r.get("type"),
                       "hotspots": minerals({s["name"]: s["count"] for s in r.get("signals") or []})})
     st = b.get("subtype")
+    signals = {s.get("name"): s.get("count", 0) for s in b.get("signals") or []}
     return {"name": short_name(b.get("system_name"), b.get("name")), "type": b.get("type"),
             "subtype": st, "main": bool(b.get("is_main_star")), "scoopable": subtype_scoopable(st),
-            "rings": rings, "full": True}
+            "rings": rings, "full": True,
+            "bio": signals.get("Biological", 0), "geo": signals.get("Geological", 0),
+            "body_id": b.get("body_id"), "landable": bool(b.get("is_landable")),
+            "gravity": b.get("gravity"), "atmosphere": b.get("atmosphere"), "temperature": b.get("surface_temperature"),
+            "pressure": b.get("surface_pressure"), "dist_ls": b.get("distance_to_arrival"),
+            # the search names parent stars directly ([{type, subtype, id64}]) rather than by body id
+            "parent_star_types": [p.get("subtype") for p in b.get("parents") or [] if p.get("type") == "Star" and p.get("subtype")],
+            "orbital_period_s": round(b["orbital_period"] * 86400) if b.get("orbital_period") else None,
+            "atmo_comp": ({a.get("name"): a.get("share") for a in b["atmosphere_composition"]}
+                          if isinstance(b.get("atmosphere_composition"), list) else b.get("atmosphere_composition"))}
+
+
+def bio_hits(db, id64, system, x, y, z, records, threshold):
+    """Bodies in a system with exobiology you have not finished, worth at least `threshold` for what is
+    left (plain prices, no x5). A body the rules cannot price only counts when threshold is 0."""
+    got, genera = {}, {}
+    for r in db.execute("SELECT body_id, genus_name, done_ts FROM own_organic WHERE system=? AND done_ts IS NOT NULL", (id64,)):
+        if organic_state(db, r["done_ts"]) != "lost":
+            got.setdefault(r["body_id"], set()).add(r["genus_name"])
+    for r in db.execute("SELECT body_id, genus_name FROM own_genera WHERE system=?", (id64,)):
+        genera.setdefault(r["body_id"], []).append(r["genus_name"])
+    row = db.execute("SELECT star_class FROM star_classes WHERE id64=?", (id64,)).fetchone()
+    star = row["star_class"] if row else None
+    ctx = bio_context(system, records, x, y, z, star)
+    hits = []
+    for r in records:
+        bid = r.get("body_id")
+        known = genera.get(bid) or r.get("genera") or []
+        signals = r.get("bio") or len(known)
+        if r.get("type") != "Planet" or not signals:
+            continue
+        done = got.get(bid, set())
+        left_n = signals - len(done)
+        if left_n <= 0:
+            continue                      # every species here analysed
+        _, groups = bio_guess(r, star, known or None, ctx)
+        priced = [g for g in groups if g["genus"] not in done and g.get("value")]
+        left = sum(g["value"] for g in priced) if priced else None
+        if (left or 0) < threshold or (left is None and threshold):
+            continue
+        hits.append((left or 0, {"t": f"{r['name']} · {left_n} of {signals} unscanned"
+                                 + (f" · up to {left / 1e6:.1f}M" if left else " · value unknown"), "body": r["name"]}))
+    return [h for _, h in sorted(hits, key=lambda t: -t[0])]
 
 
 def match_system(system, records, crit):
@@ -2297,16 +2816,17 @@ def match_system(system, records, crit):
             is_main = r.get("main") or len(stars) == 1
             if r["subtype"] in crit["stars"] and (is_main or not crit["main_only"]):
                 label = "arrival star" if r["name"] == system else r["name"]
-                hits.append(f"{label} · {r['subtype']}" + (" (arrival)" if is_main and r["name"] != system else ""))
+                hits.append({"t": f"{label} · {r['subtype']}" + (" (arrival)" if is_main and r["name"] != system else ""),
+                             "body": r["name"]})
         if hits:
             out["stars"] = hits
     if crit["planets"]:
-        hits = [f"{r['name']} · {r['subtype']}" for r in records
+        hits = [{"t": f"{r['name']} · {r['subtype']}", "body": r["name"]} for r in records
                 if r["type"] == "Planet" and r["subtype"] in crit["planets"]]
         if hits:
             out["planets"] = hits
     if crit["rings"]:
-        hits = [f"{r['name']} {x['name']} · {x['type']}" for r in records
+        hits = [{"t": f"{r['name']} {x['name']} · {x['type']}", "body": r["name"]} for r in records
                 for x in r.get("rings") or [] if x["type"] in crit["rings"]]
         if hits:
             out["rings"] = hits
@@ -2316,8 +2836,9 @@ def match_system(system, records, crit):
             for x in r.get("rings") or []:
                 found = {m: n for m, n in minerals(x.get("hotspots")).items() if m in crit["hotspots"]}
                 if found:
-                    hits.append(f"{r['name']} {x['name']} ({x['type']}): " +
-                                ", ".join(f"{m} {n}" for m, n in sorted(found.items(), key=lambda kv: -kv[1])))
+                    hits.append({"t": f"{r['name']} {x['name']} ({x['type']}): " +
+                                 ", ".join(f"{m} {n}" for m, n in sorted(found.items(), key=lambda kv: -kv[1])),
+                                 "body": r["name"]})
         if hits:
             out["hotspots"] = hits
     return out
@@ -2366,10 +2887,12 @@ class Searcher:
             "planets": set(params.get("planets") or []) & set(PLANET_TYPES),
             "rings": set(params.get("rings") or []) & set(RING_TYPES),
             "hotspots": set(params.get("hotspots") or []) & set(HOTSPOT_MINERALS),
+            # ticked bio thresholds are OR'd like any other section: the lowest one decides
+            "bio": min((BIO_SEARCH[k][1] for k in params.get("bio") or [] if k in BIO_SEARCH), default=None),
         }
-        sections = [k for k in ("stars", "planets", "rings", "hotspots") if crit[k]]
+        sections = [k for k in ("stars", "planets", "rings", "hotspots", "bio") if crit[k] is not None and crit[k] != set()]
         if not sections:
-            return self.update(seq, running=False, status="tick at least one star, planet, ring or hotspot type")
+            return self.update(seq, running=False, status="tick at least one star, planet, ring, hotspot or exobiology option")
 
         if source == "local":
             systems, coverage = self.local(pos, radius), radius
@@ -2391,6 +2914,13 @@ class Searcher:
             if d > coverage:
                 continue
             m = match_system(name, records, crit)
+            if crit["bio"] is not None and all(k in m for k in sections if k != "bio"):
+                # price from the fullest record we have: a cached Spansh dump plus your scans beats the
+                # search result (which lacks volcanism and the system's stars)
+                bio_recs = records if source == "local" else (self.local_records(id64, name) or records)
+                hits = bio_hits(self.db, id64, name, x, y, z, bio_recs, crit["bio"])
+                if hits:
+                    m["bio"] = hits
             if all(k in m for k in sections):
                 results.append({"id": str(id64), "name": name, "distance": round(d, 2),
                                 "visited": id64 in visited, "matches": m,
@@ -2431,6 +2961,15 @@ class Searcher:
             out[id64] = (name, x, y, z, merge_records(records, own, hotspots))
         return out
 
+    def local_records(self, id64, name):
+        """A system's cached Spansh dump merged with your scans, or None if nothing full is cached."""
+        _, base = self.spansh.cached(id64)
+        own, hotspots, _ = own_data(self.db, id64, name)
+        recs = (base or {}).get("records") or []
+        if not (any(r.get("full") for r in recs) or own):
+            return None
+        return merge_records(recs, own, hotspots)
+
     async def online(self, seq, pos, radius, crit):
         """One Spansh body search per OR'd value (its lists are AND'd), merged per system."""
         queries = []
@@ -2445,6 +2984,8 @@ class Searcher:
             queries.append(("rings", {"rings": [{"type": t}]}))
         for m in sorted(crit["hotspots"]):
             queries.append(("hotspots", {"ring_signals": [{"name": m, "value": [1, 9999], "comparison": "<=>"}]}))
+        if crit["bio"] is not None:
+            queries.append(("bio", {"signals": [{"name": "Biological", "value": [1, 999], "comparison": "<=>"}]}))
 
         done = 0
         truncated_at = []
@@ -2492,8 +3033,17 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 def load_page():
+    """page.html with its script and stylesheet links stamped by modification time, so a browser fetches
+    the new copy as soon as either file changes instead of running a cached one."""
     with open(os.path.join(STATIC_DIR, "page.html"), encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    for name in ("page.js", "page.css"):
+        try:
+            stamp = int(os.path.getmtime(os.path.join(STATIC_DIR, name)))
+        except OSError:
+            continue
+        html = html.replace(f'"static/{name}"', f'"static/{name}?v={stamp}"')
+    return html
 
 
 def make_app(state):
@@ -2571,6 +3121,7 @@ def make_app(state):
             id64 = parse_id64(request.match_info["id64"])
         except ValueError:
             return web.json_response({"error": "bad id"}, status=400)
+        await state.ensure_records(id64)
         d = state.system_detail(id64)
         if not d:
             return web.json_response({"error": "unknown system"}, status=404)
@@ -2593,6 +3144,44 @@ def make_app(state):
         except ValueError:
             days = 30
         return web.json_response(state.history(days))
+
+    async def organics_view(request):
+        try:
+            days = max(1, min(int(request.query.get("days", 30)), 3650))
+        except ValueError:
+            days = 30
+        return web.json_response(state.organics(days))
+
+    async def radius_view(request):
+        try:
+            r = float((await request.json())["radius"])
+        except (ValueError, KeyError, TypeError):
+            return web.json_response({"error": "bad request"}, status=400)
+        if r not in RADIUS_CHOICES and r != state.radius:
+            return web.json_response({"error": "radius must be one of " + ", ".join(f"{x:g}" for x in RADIUS_CHOICES)}, status=400)
+        state.set_radius(r)
+        return web.json_response({"radius": state.radius})
+
+    async def materials_view(_):
+        inv = ed_materials.inventory(state.journals.materials)
+        inv["stale"] = bool((state.materials_summary() or {}).get("stale"))
+        return web.json_response(inv)
+
+    async def log_view(request):
+        if not ed_log:
+            return web.json_response({"error": "ed_log.py is missing"}, status=500)
+        qs = request.query
+        try:
+            days = max(1, min(int(qs.get("days", 7)), 3650))
+            limit = max(1, min(int(qs.get("limit", 200)), 500))
+        except ValueError:
+            return web.json_response({"error": "bad request"}, status=400)
+        cats = {c for c in qs["cat"].split(",") if c in ed_log.CATEGORIES} if "cat" in qs else None  # empty: nothing
+        kw = dict(days=days, limit=limit, cats=cats, q=(qs.get("q") or "").strip()[:200] or None,
+                  noise=qs.get("noise") in ("1", "true"), before=qs.get("before"), after=qs.get("after"))
+        dirs = LIVE_DIRS + LEGACY_DIRS
+        out = await asyncio.get_running_loop().run_in_executor(None, lambda: ed_log.read_log(dirs, **kw))
+        return web.json_response(out)
 
     async def export_view(request):
         what, fmt = request.query.get("what", "firsts"), request.query.get("format", "csv")
@@ -2618,6 +3207,10 @@ def make_app(state):
     app.router.add_get("/api/map", map_view)
     app.router.add_get("/api/system/{id64}", system_view)
     app.router.add_get("/api/history", history_view)
+    app.router.add_get("/api/organics", organics_view)
+    app.router.add_get("/api/log", log_view)
+    app.router.add_get("/api/materials", materials_view)
+    app.router.add_post("/api/radius", radius_view)
     app.router.add_get("/api/firsts", firsts_view)
     app.router.add_get("/api/body", body_view)
     app.router.add_get("/api/export", export_view)
@@ -2627,8 +3220,26 @@ def make_app(state):
     return app
 
 
+async def check_bio_rules(state):
+    """Keep the exobiology spawn rules current. A copy ships with Outrider; each start asks GitHub
+    whether BioScan or the region map changed and fetches the new data if so (offline just keeps
+    the copy). Rows carry bio estimates, so they are rebuilt after an update."""
+    try:
+        updated = await asyncio.get_running_loop().run_in_executor(None, lambda: ed_bio.update_if_newer(log=print))
+    except Exception as e:  # noqa: BLE001 -- no shipped copy and no network: the page works without predictions
+        print(f"exobiology rules: none available ({e}); no species guesses until "
+              f"python3 ed_bio.py --update-rules  succeeds.", file=sys.stderr)
+        return
+    info = ed_bio.rules_info()
+    if updated:
+        print(f"exobiology rules: updated from BioScan ({info['species']} species)")
+        state.journals.dirty |= set(state.bases)
+    else:
+        print(f"exobiology rules: {info['species']} species from BioScan, up to date")
+
+
 async def run(args, st):
-    global LIVE_DIRS, LEGACY_DIRS, UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT
+    global LIVE_DIRS, LEGACY_DIRS, UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT, BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS, RADIUS_CHOICES
     global SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES
     LIVE_DIRS = [d for d in st["live"] if os.path.isdir(d)]
     LEGACY_DIRS = [d for d in st["legacy"] if os.path.isdir(d)]
@@ -2636,7 +3247,10 @@ async def run(args, st):
         if not os.path.isdir(d):
             print(f"journal folder not found, skipping: {d}", file=sys.stderr)
     UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT = st["unsold_warn"], st["unsold_urgent"], st["bio_min"], st["sounds"]
+    BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS = st["body_highlight"], st["bio_highlight"], st["max_include_bonus"]
+    RADIUS_CHOICES = tuple(st["radius_choices"])
     SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES = st["concurrency"], st["map_max_radius"], st["map_max_pages"]
+    radius_flag = args.radius   # --radius on the command line beats a radius chosen on the page
     args.host, args.port, args.radius, args.db = st["host"], st["port"], st["radius"], st["db"]
     if ed_unsold:
         ed_unsold.LIVE_DIRS, ed_unsold.LEGACY_DIRS = LIVE_DIRS, LEGACY_DIRS
@@ -2676,8 +3290,11 @@ async def run(args, st):
 
     spansh = Spansh(db)
     await spansh.start()
-    state = State(db, journals, spansh, args.radius)
+    chosen = meta_get(db, "radius_choice")   # picked from the page's Where tile; survives a restart
+    usable = chosen and radius_flag is None and float(chosen) in RADIUS_CHOICES   # the config may have dropped it
+    state = State(db, journals, spansh, float(chosen) if usable else args.radius)
     state.searcher = Searcher(state)
+    rules_task = asyncio.create_task(check_bio_rules(state)) if ed_bio else None
     watcher = asyncio.create_task(state.watch())
 
     runner = web.AppRunner(make_app(state))
@@ -2690,7 +3307,7 @@ async def run(args, st):
     try:
         await asyncio.Event().wait()
     finally:
-        tasks = [t for t in (watcher, state.refresh_task, state.target_task, state.unsold_task,
+        tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task,
                              state.carrier_task, state.searcher.task) if t]
         for t in tasks:
             t.cancel()
