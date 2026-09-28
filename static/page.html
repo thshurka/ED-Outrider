@@ -77,7 +77,8 @@
   <div id="bodyPanel" hidden></div>
 </section>
 <section id="firstsView" hidden>
-  <div class="srow"><span id="fStatus"></span><span class="grow"></span>
+  <div class="srow"><span id="fStatus"></span>
+    <label><input type="checkbox" id="fShowLost"> show lost</label><span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=firsts&format=csv" download>CSV</a> · <a href="api/export?what=firsts&format=json" download>JSON</a></span></div>
   <table id="firstsTable">
     <thead><tr><th></th><th>System</th><th class="num">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th class="num">Unsold value</th></tr></thead>

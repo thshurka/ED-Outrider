@@ -692,12 +692,13 @@ async function loadFirsts() {
 function renderFirsts() {
   const f = firstsData, st = document.getElementById("fStatus"), bms = bmMap();
   if (!f || f.error) { st.textContent = f ? f.error : ""; return; }
-  const list = f.firsts.slice();
+  // lost data stays in the database (a rescan earns it again) but is hidden unless asked for
+  const list = f.firsts.filter(x => fShowLost.checked || x.state !== "lost");
   list.sort(sortKey === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
           : sortKey === "distance" ? (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)
           : (a, b) => (b.value || 0) - (a.value || 0));
-  const unsold = list.filter(x => x.state === "unsold"), lost = list.filter(x => x.state === "lost");
-  st.textContent = `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts`;
+  const unsold = f.firsts.filter(x => x.state === "unsold"), lost = f.firsts.filter(x => x.state === "lost");
+  st.textContent = `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts${fShowLost.checked ? "" : " (hidden)"}`;
   const by = b => ["sold", "unsold", "lost"].filter(k => b && b[k]).map(k => `<span class="${k}">${b[k]} ${k}</span>`).join(" · ");
   document.getElementById("firstsRows").innerHTML = list.map(x => `<tr>
       <td class="bmcell">${bmIcon(x.id, x.name, bms)}</td>
@@ -706,8 +707,12 @@ function renderFirsts() {
       <td>${x.system ? `<span class="${x.system_state}">🏁 ${x.system_state}</span>` : ""}</td>
       <td class="by">${by(x.bodies_by)}</td><td class="by">${by(x.mapped_by)}</td>
       <td class="num">${x.value ? credits(x.value) : ""}</td></tr>`).join("") ||
-    `<tr><td colspan="7" class="unk">Nothing unsold or lost: every first you have found is banked.</td></tr>`;
+    `<tr><td colspan="7" class="unk">${lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
+      : "Nothing unsold or lost: every first you have found is banked."}</td></tr>`;
 }
+const fShowLost = document.getElementById("fShowLost");
+fShowLost.checked = store.get("fShowLost", false);
+fShowLost.onchange = () => { store.set("fShowLost", fShowLost.checked); renderFirsts(); };
 
 // ---- History ----
 let histKey = null, histData = null;
