@@ -1,0 +1,41 @@
+# ED Outrider configuration — copy to ed_outrider.toml next to ed_outrider.py and edit.
+#
+# Every key is optional. Precedence, highest first:
+#   command-line flags (--journals, --host, --port, --radius, --db)
+#   the ED_JOURNALS environment variable (journal folders, separated by ":" on Linux/macOS, ";" on Windows)
+#   this file
+#   built-in defaults and journal auto-detection
+#
+# Journal auto-detection looks in the Windows save folder, every Steam library's Proton prefix
+# for Elite (app 359320), and, for legacy folders, any mounted Windows drive's Users/*/Saved Games.
+# You only need [journals] if that does not find yours. `python3 ed_outrider.py --write-config`
+# writes the settings that are in effect right now as a starting point.
+
+[journals]
+# Folders holding Journal.*.log that are read live. Typical locations:
+#   Windows:       C:/Users/<you>/Saved Games/Frontier Developments/Elite Dangerous
+#   Steam/Proton:  <library>/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous
+# live = ["C:/Users/you/Saved Games/Frontier Developments/Elite Dangerous"]
+
+# Folders of older journals (an old PC, a backup) imported once on the first run and never re-read.
+# legacy = ["D:/old-pc/Saved Games/Frontier Developments/Elite Dangerous"]
+
+[server]
+# host = "127.0.0.1"   # "0.0.0.0" makes the page reachable from other devices on your network
+                       # (no authentication: it exposes your journals' contents and lets anyone edit bookmarks)
+# port = 8025
+# radius = 25          # ly: the sphere of nearby systems the page lists (Spansh is asked once per jump)
+# db = "ed_outrider.sqlite"
+
+[defaults]
+# What a browser uses until its user changes it in the page's 🔔 alerts & thresholds dialog.
+# Page settings (views, layout, thresholds once changed, notification choices) stay in that browser.
+# unsold_warn = 50000000      # amber "worth selling soon": credits of unsold data on board
+# unsold_urgent = 250000000   # red "go sell"
+# bio_min = 10000000          # a body only counts as unfinished bio if a single body could pay over this
+# sounds = true               # target sounds on by default (the browser still needs one click to allow audio)
+
+[spansh]
+# concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh)
+# map_max_radius = 250  # ly: the largest 3D map the page may ask for (Spansh caps a search at 10,000 systems)
+# map_max_pages = 6     # pages of 500 systems fetched for the map; near the bubble each page is several MB

@@ -1,0 +1,11 @@
+# Machine-specific configuration (journal paths) — start from ed_outrider.toml.example
+ed_outrider.toml
+
+# Local database built from your journals, and caches
+ed_outrider.sqlite
+ed_outrider.sqlite-journal
+__pycache__/
+*.pyc
+
+# Node modules if you install jsdom for tests/page_smoke.js
+node_modules/
