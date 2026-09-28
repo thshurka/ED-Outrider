@@ -146,6 +146,9 @@ def _add(state, name, n, localised=None):
     if localised and not localised.startswith("$"):
         state["names"][name] = localised
     c = state["counts"].get(name, 0) + int(n or 0)
+    cap = CAPS.get(MATERIALS.get(name, (None, None, None))[2])
+    if cap:
+        c = min(c, cap)   # the game logs the pickup's nominal count even when the bin fills before it
     if c > 0:
         state["counts"][name] = c
     else:
@@ -186,6 +189,9 @@ def apply(state, ev):
         paid, got = ev.get("Paid") or {}, ev.get("Received") or {}
         _add(state, paid.get("Material"), -paid.get("Quantity", 0), paid.get("Material_Localised"))
         _add(state, got.get("Material"), got.get("Quantity", 0), got.get("Material_Localised"))
+    elif name == "EngineerContribution":
+        if ev.get("Type") == "Materials":   # donations to unlock an engineer (commodities are cargo)
+            _add(state, ev.get("Material"), -ev.get("Quantity", 0))
     elif name == "MissionCompleted":
         for m in ev.get("MaterialsReward") or []:
             _add(state, m.get("Name"), m.get("Count", 1), m.get("Name_Localised"))

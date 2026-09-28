@@ -12,7 +12,7 @@ import json
 import os
 import re
 import time
-from collections import OrderedDict
+from collections import ChainMap, OrderedDict
 from glob import glob
 
 C = 299792458.0
@@ -21,7 +21,7 @@ C = 299792458.0
 # Categories
 # ---------------------------------------------------------------------------
 
-CATEGORIES = ("travel", "exploration", "bio", "ship", "carrier", "other", "noise")
+CATEGORIES = ("travel", "exploration", "phenomena", "bio", "ship", "carrier", "other", "noise")
 
 _CAT_EVENTS = {
     "travel": "FSDJump StartJump FSDTarget Location CarrierJump SupercruiseEntry SupercruiseExit "
@@ -33,7 +33,7 @@ _CAT_EVENTS = {
                    "BuyExplorationData",
     "bio": "ScanOrganic SellOrganicData CodexEntry Disembark Embark LaunchSRV DockSRV",
     "ship": "Loadout RefuelAll RefuelPartial RepairAll Repair Resurrect Died HullDamage HeatWarning HeatDamage "
-            "Synthesis EngineerCraft MaterialCollected MaterialDiscarded MaterialTrade LoadGame Shutdown Materials "
+            "Synthesis EngineerCraft MaterialCollected MaterialDiscarded MaterialDiscovered MaterialTrade LoadGame Shutdown Materials "
             "ShipyardSwap ShipyardBuy ShipyardSell ModuleBuy ModuleSell ModuleSwap ModuleStore ModuleRetrieve "
             "AfmuRepairs RebootRepair SelfDestruct FuelUsed",
     "noise": "Music ReceiveText SendText ShipLocker Backpack SuitLoadout Cargo FSSSignalDiscovered "
@@ -95,7 +95,7 @@ _SKIP = {"timestamp", "event", "SystemAddress", "MarketID", "BodyID", "ShipID", 
 
 def fallback(ev):
     """Event name in words plus up to four scalar fields, localised names preferred."""
-    parts = []
+    parts = [_words(ev.get("event") or "event")]
     for k, v in ev.items():
         if k in _SKIP or k.endswith("_Localised") or k.endswith("ID") or isinstance(v, (dict, list)) or v in (None, ""):
             continue
@@ -110,7 +110,7 @@ def fallback(ev):
         elif isinstance(v, int):
             v = f"{v:,}"
         parts.append(f"{k}: {v}")
-        if len(parts) == 4:
+        if len(parts) == 5:
             break
     return " · ".join(parts)
 
@@ -154,7 +154,9 @@ def _signals(ev):
 
 
 def _organic(ev, bodies):
-    body = bodies.get((ev.get("SystemAddress"), ev.get("Body"))) or f"body #{ev.get('Body')}"
+    system = _SYSTEMS.get(ev.get("SystemAddress"))
+    body = bodies.get((ev.get("SystemAddress"), ev.get("Body"))) \
+        or f"body #{ev.get('Body')}" + (f" in {system}" if system else "")
     var = _loc(ev, "Variant")
     var = var.split(" - ")[-1] if var else ""
     return f"{ev.get('ScanType', '')}: {_loc(ev, 'Species') or _loc(ev, 'Genus')}{' – ' + var if var else ''} on {body}"
@@ -225,7 +227,11 @@ LOG_FORMAT = {
     "ScanBaryCentre": lambda e: f"Barycentre #{e.get('BodyID')} · orbit {_num((e.get('SemiMajorAxis') or 0) / C, '{:,.1f}')} ls",
     "NavBeaconScan": lambda e: f"Nav beacon: {e.get('NumBodies')} bodies",
     "MultiSellExplorationData": _sale,
-    "SellExplorationData": _sale,
+    "SellExplorationData": lambda e: (f"Sold data from {len(e.get('Systems') or [])} system"
+                                      f"{'s' if len(e.get('Systems') or []) != 1 else ''}"
+                                      + (f" ({len(e['Discovered'])} new)" if e.get("Discovered") else "")
+                                      + f" · {_num(e.get('TotalEarnings'))} cr"
+                                      + (f" (+{_num(e['Bonus'])} bonus)" if e.get("Bonus") else "")),
     "FSSSignalDiscovered": lambda e: _loc(e, "SignalName") or "Signal",
     # bio
     "SellOrganicData": _bio_sale,
@@ -238,7 +244,7 @@ LOG_FORMAT = {
     "LaunchSRV": lambda e: f"Launched {_loc(e, 'SRVType') or 'SRV'}",
     "DockSRV": lambda e: f"Docked {_loc(e, 'SRVType') or 'SRV'}",
     # ship
-    "Loadout": lambda e: f"{e.get('ShipName') or ''} ({e.get('Ship')}) · {_num(e.get('MaxJumpRange'), '{:.2f}')} ly"
+    "Loadout": lambda e: f"{(e.get('ShipName') or '').strip() or 'Ship'} ({e.get('Ship')}) · {_num(e.get('MaxJumpRange'), '{:.2f}')} ly"
                          + (f" · rebuy {_num(e['Rebuy'])} cr" if e.get("Rebuy") else ""),
     "RefuelAll": lambda e: f"Refuelled {_num(e.get('Amount'), '{:.1f}')} t for {_num(e.get('Cost'))} cr",
     "RefuelPartial": lambda e: f"Refuelled {_num(e.get('Amount'), '{:.1f}')} t for {_num(e.get('Cost'))} cr",
@@ -304,8 +310,29 @@ def file_key(path):
     return None
 
 
+def _utc_key(path, name_key):
+    """A file's place in time as UTC 'YYYY-MM-DDTHH:MM:SS': its first line's timestamp, or its name's
+    local time converted to UTC when the file is still empty."""
+    ts = _FIRST_TS.get(path)
+    if ts is None:
+        try:
+            with open(path, "rb") as f:
+                head = f.read(512)
+            m = re.search(rb'"timestamp":\s*"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)', head)
+            if m:
+                ts = _FIRST_TS[path] = m.group(1).decode()
+        except OSError:
+            pass
+    if ts:
+        return ts
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.mktime(time.strptime(name_key, "%Y-%m-%dT%H:%M:%S"))))
+    except (ValueError, OverflowError):
+        return name_key
+
+
 def journal_files(dirs):
-    """Every journal file in `dirs`, oldest first, one per file name."""
+    """Every journal file in `dirs`, oldest first by UTC start time, one per file name."""
     seen, out = set(), []
     for d in dirs:
         for p in glob(os.path.join(d, "Journal.*.log")):
@@ -313,14 +340,14 @@ def journal_files(dirs):
             k = file_key(p)
             if k and base not in seen:
                 seen.add(base)
-                out.append((k, p))
+                out.append(((_utc_key(p, k[0]), k[1]), p))
     out.sort()
     return out
 
 
 def window(files, days, now=None):
     """The files that can hold events from the last `days`: every file started since then (with a
-    day of slack, since names are local time) plus the one before, which may run into the window."""
+    day of slack) plus the one before, which may run into the window."""
     now = time.time() if now is None else now
     since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - days * 86400 - 86400))
     first = next((i for i, (k, _) in enumerate(files) if k[0] >= since), len(files))
@@ -331,7 +358,11 @@ _CACHE = OrderedDict()   # (path, size) -> {"lines": [...], "bodies": {...}}
 _CACHE_MAX = 16
 _SYSTEM_EVENTS = (b'"event":"FSDJump"', b'"event":"Location"', b'"event":"CarrierJump"', b'"event":"FSDTarget"')
 _BODY_EVENTS = (b'"event":"Scan"', b'"event":"FSSBodySignals"', b'"event":"SAASignalsFound"',
-                b'"event":"SAAScanComplete"')
+                b'"event":"SAAScanComplete"', b'"event":"Touchdown"', b'"event":"Liftoff"', b'"event":"Disembark"',
+                b'"event":"Embark"', b'"event":"ApproachBody"', b'"event":"LeaveBody"', b'"event":"Location"',
+                b'"event":"SupercruiseExit"')
+_BODIES = {}   # (SystemAddress, BodyID) -> short body name, learned from every file read so far
+_FIRST_TS = {}   # path -> timestamp of its first line (file order), read once
 
 
 def _load(path):
@@ -363,9 +394,12 @@ def _load(path):
                     ev = json.loads(line)
                 except ValueError:
                     continue
-                if ev.get("BodyID") is not None and ev.get("BodyName"):
-                    bodies[(ev.get("SystemAddress"), ev["BodyID"])] = _short(ev, ev["BodyName"])
-    entry = {"lines": lines, "bodies": bodies}
+                name = ev.get("BodyName") or (ev.get("Body") if isinstance(ev.get("Body"), str) else None)
+                if ev.get("BodyID") is not None and name:
+                    bodies[(ev.get("SystemAddress"), ev["BodyID"])] = _short(ev, name)
+        _BODIES.update(bodies)
+    # a session that starts on the planet names the body in an older file: fall back to what we know
+    entry = {"lines": lines, "bodies": ChainMap(bodies, _BODIES)}
     for k in [k for k in _CACHE if k[0] == path]:
         del _CACHE[k]
     _CACHE[key] = entry
@@ -385,6 +419,22 @@ def _event_name(line):
         return line[i + 9:j].decode("ascii", "replace")
     m = _EVENT.search(line)
     return m.group(1).decode("ascii", "replace") if m else ""
+
+
+def _values_text(ev):
+    """Every value in an event (nested too) as one lower-case string, keys left out."""
+    out = []
+    def walk(v):
+        if isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+        elif v is not None:
+            out.append(str(v))
+    walk(ev)
+    return " ".join(out).lower()
 
 
 def parse_cursor(cursor):
@@ -418,23 +468,35 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
     if noise:
         want.add("noise")
     ql = q.lower().encode() if q else None
+    # The tail continues from the last line of the newest file AS SCANNED here: reading the file again
+    # afterwards could see lines the game wrote in between, and they would never be returned.
+    seen_newest = None
     rows, truncated = [], False
 
     def accept(line, cursor, entry):
         name = _event_name(line)
-        if category(name) not in want:
+        # notable stellar phenomena ride on FSS signal lines, which are otherwise noise
+        cat = "phenomena" if b"Fixed_Event_Life" in line else category(name)
+        if cat not in want:
             return None
-        if ql and ql not in line.lower():
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                return None
-            r = _row(ev, cursor, entry["bodies"])
-            return r if ql.decode() in r["summary"].lower() else None
         try:
-            return _row(json.loads(line), cursor, entry["bodies"])
+            ev = json.loads(line)
         except ValueError:
             return None
+        r = _row(ev, cursor, entry["bodies"])
+        if cat == "phenomena":
+            r["cat"] = cat
+            kind = re.search(r"Fixed_Event_Life_(\w+?);?\"", line.decode("utf-8", "replace"))
+            kind = kind.group(1).lower() if kind else "?"
+            r["summary"] = f"🌀 Notable stellar phenomena ({kind}) " + ("found by the FSS" if name == "FSSSignalDiscovered" else "reached")
+        if ql:
+            q = ql.decode()
+            # the summary, the event name and every value (not the keys: "star" would match every
+            # StarSystem field, "mapped" every WasMapped)
+            if q not in r["summary"].lower() and q not in name.lower() and \
+                    (q.encode() not in line.lower() or q not in _values_text(ev)):
+                return None
+        return r
 
     if after:
         cur = parse_cursor(after)
@@ -446,6 +508,8 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
             if k < ck:
                 continue
             base, entry = os.path.basename(p), _load(p)
+            if p == files[-1][1]:
+                seen_newest = _cursor_of(p, entry)
             start = cur[1] + 1 if base == cur[0] else 0
             for i in range(start, len(entry["lines"])):
                 r = accept(entry["lines"][i], f"{base}|{i}", entry)
@@ -454,7 +518,7 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
         if len(rows) > cap:
             rows, truncated = rows[-cap:], True
         rows.reverse()
-        newest = _newest(files) or after
+        newest = seen_newest or _newest(files) or after
         return {"rows": rows, "next": None, "newest": newest, "reset": truncated}
 
     chosen = window(files, days, now)
@@ -466,8 +530,10 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
         if cur and cur[0] in order and k > order[cur[0]]:
             continue
         entry = _load(p)
+        if p == files[-1][1]:
+            seen_newest = _cursor_of(p, entry)
         lines = entry["lines"]
-        top = cur[1] if cur and base == cur[0] else len(lines)
+        top = max(0, min(cur[1], len(lines))) if cur and base == cur[0] else len(lines)
         for i in range(top - 1, -1, -1):
             r = accept(lines[i], f"{base}|{i}", entry)
             if not r:
@@ -482,7 +548,11 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
             break
     more = len(rows) >= limit and not done
     return {"rows": rows, "next": rows[-1]["id"] if more and rows else None,
-            "newest": _newest(files), "reset": False}
+            "newest": seen_newest or _newest(files), "reset": False}
+
+
+def _cursor_of(path, entry):
+    return f"{os.path.basename(path)}|{len(entry['lines']) - 1}" if entry["lines"] else None
 
 
 def _newest(files):

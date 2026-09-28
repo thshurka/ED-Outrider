@@ -3,7 +3,10 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 let data = null, version = -1;
-let sortKey = store.get("sort", "distance");
+// Each sortable table keeps its own sort (a value sort chosen in My firsts must not re-sort Nearby).
+const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search"};
+const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance"},
+                               store.get("sorts", {}));
 const showVisited = document.getElementById("showVisited");
 const showExplored = document.getElementById("showExplored");
 showVisited.checked = store.get("showVisited", true);
@@ -35,7 +38,15 @@ function notable(s) {
   const names = {ELW: "Earth-like", WW: "water world", AW: "ammonia world", T: "terraformable"};
   return ["ELW", "WW", "AW", "T"].filter(k => n[k]).map(k =>
     `<span class="nb ${k}" title="${names[k]}${n[k] > 1 ? "s" : ""}">${k}${n[k] > 1 ? "×" + n[k] : ""}</span>`).join("") +
-    (s.bio_potential ? `<span class="nb bio" title="exobiology: up to this much across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"}, from spawn rules">🧬≤${credits(s.bio_potential)}</span>` : "");
+    (s.bio_potential ? `<span class="nb bio" title="exobiology: up to this much across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"}, from spawn rules">🧬≤${credits(s.bio_potential)}</span>` : "") +
+    phenomenaTag(s.phenomena) +
+    (s.curiosities ? `<span class="nb cur" title="curiosities (Observatory-style): ringed landables, high-g, close orbits, wide rings, hot Jupiters, moons of moons…">🔭${s.curiosities > 1 ? "×" + s.curiosities : ""}</span>` : "");
+}
+// 🌀 notable stellar phenomena your FSS found in a system (life clouds, rings); dimmed once you have been to it
+function phenomenaTag(list) {
+  if (!list || !list.length) return "";
+  const left = list.filter(p => !p.reached_ts);
+  return `<span class="nb nsp${left.length ? "" : " done"}" title="notable stellar phenomena: ${list.map(p => p.kind + (p.reached_ts ? " (reached)" : "")).join(", ")}">🌀${list.length > 1 ? "×" + list.length : ""}</span>`;
 }
 // Journal ship ids -> the names the game shows.
 const SHIP_NAMES = {sidewinder: "Sidewinder", eagle: "Eagle", hauler: "Hauler", adder: "Adder", empire_eagle: "Imperial Eagle",
@@ -51,6 +62,13 @@ const SHIP_NAMES = {sidewinder: "Sidewinder", eagle: "Eagle", hauler: "Hauler", 
   panthermkii: "Panther Clipper Mk II", explorer_nx: "Caspian Explorer", lakonminer: "Type-11 Prospector", smallcombat01_nx: "Kestrel Mk II"};
 const shipName = t => SHIP_NAMES[(t || "").toLowerCase()] || (t || "").replace(/_/g, " ");
 // FSD injections you could synthesise now (from the materials you carry).
+// Hull, when it is not full: the percentage and how many basic repairs your materials allow.
+function hullLine() {
+  const h = data.hull; if (!h || h.pct == null || h.pct >= 100) return "";
+  const reps = data.materials && data.materials.repairs;
+  const cls = h.pct < 25 ? "noscoop" : h.pct < 50 ? "warnc" : "";
+  return `<div class="ln" title="hull integrity, from the journal">hull <b class="${cls}">${h.pct}%</b>${reps != null ? ` · repair basic ×${reps}` : ""}</div>`;
+}
 function boostLine() {
   const m = data.materials; if (!m || !m.boosts) return "";
   const b = m.boosts, part = k => `<b class="${b[k] ? "" : "zero"}">${b[k]}</b>`;
@@ -65,6 +83,52 @@ document.getElementById("radiusSel").onchange = async e => {
   toast(r.error ? `Could not change the radius: ${r.error}` : `Nearby now covers ${r.radius} ly — asking Spansh…`);
   delete sel.dataset.pending; sel.blur();
 };
+// The Data tile's "journal N min ago" and its stale colouring depend on the clock, not on new data: a
+// hung or crashed game writes nothing, every poll answers 204, and nothing would redraw it.
+setInterval(() => { if (data) renderStrip(); }, 30000);
+// ---- carrier tile: where it is, the rendezvous maths, and a live countdown to a booked jump ----
+let carrierWarned = null;
+function renderCarrier() {
+  const c = data && data.carrier, cl = document.getElementById("carrierLine");
+  const val = (v, title) => `<div class="val"${title ? ` title="${title}"` : ""}>${v}</div>`, ln = v => v ? `<div class="ln">${v}</div>` : "";
+  if (!c) { cl.innerHTML = val(`<span class="unk">none seen</span>`); return; }
+  const fmtLy = d => d.toLocaleString("en-US", {maximumFractionDigits: 1});
+  let where = c.aboard ? "<b>aboard</b>" : c.here ? "<b>in this system</b>"
+    : `<span class="copy" data-name="${esc(c.system)}" title="click to copy">${esc(c.system)}</span>` + (c.distance != null ? ` · <b>${fmtLy(c.distance)} ly</b>` : "");
+  // straight-line lower bounds: the real route is never shorter
+  let meet = "";
+  if (!c.here && c.distance) {
+    const jr = effRange(), f = data.fuel;
+    const mine = jr ? Math.ceil(c.distance / jr) : null, theirs = Math.ceil(c.distance / (c.jump_range || 500));
+    const tank = f && f.jumps_max != null ? f.jumps_max : null;
+    meet = (mine != null ? `you → it ≈ <b>${mine}</b> jump${mine === 1 ? "" : "s"}` +
+             (tank != null ? ` <span class="${tank < mine ? "warnc" : "unk"}" title="jumps at max range your tank covers now">(tank ${tank})</span>` : "") : "") +
+           ` · it → you ≈ <b>${theirs}</b> carrier jump${theirs === 1 ? "" : "s"}`;
+  }
+  let plan = "";
+  const pl = c.planned;
+  if (pl && pl.departure) {
+    const left = (Date.parse(pl.departure) - Date.now()) / 1000;
+    const mmss = t => t >= 3600 ? `${Math.floor(t / 3600)} h ${Math.floor(t % 3600 / 60)} min` : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+    const urgent = left > 0 && left < 300 && !c.aboard;
+    plan = `<span class="${urgent ? "noscoop" : ""}">${left > 0 ? `departs for <b>${esc(pl.system)}</b> in <b>${mmss(left)}</b>` : `jumping to <b>${esc(pl.system)}</b>`}</span>` +
+      (pl.jump_ly ? ` <span class="unk">(${fmtLy(pl.jump_ly)} ly jump${pl.distance_from_you != null ? `, then ${fmtLy(pl.distance_from_you)} ly from you` : ""})</span>` : "");
+    if (urgent && carrierWarned !== pl.departure) {   // once per booking, only if you are not aboard
+      carrierWarned = pl.departure;
+      alertOut("carrier", `${c.name} departs in ${Math.ceil(left / 60)} minutes`, `for ${pl.system}; you are not aboard`,
+               {sound: "alert", say: `Your carrier departs in ${Math.ceil(left / 60)} minutes, and you are not aboard.`});
+    }
+  }
+  cl.innerHTML = val(esc(c.name), esc(c.callsign || "")) + ln(where) + ln(meet) + ln(plan) +
+    ln(`${c.has_uc ? "UC ✓" : "no UC"} · ${c.has_vista ? "Vista ✓" : "no Vista"}${c.fuel != null ? ` · ${c.fuel} t tritium` : ""}`);
+}
+// the countdown ticks without new data
+setInterval(() => { if (data && data.carrier && data.carrier.planned) renderCarrier(); }, 1000);
+document.addEventListener("click", async e => {
+  if (!e.target.closest || !e.target.closest("#backupBtn")) return;
+  const r = await apiJson("api/backup", {method: "POST"});
+  toast(r.error ? `Backup failed: ${r.error}` : "Backing up the database and journals…");
+});
 function renderStrip() {
   const val = (v, title) => `<div class="val"${title ? ` title="${title}"` : ""}>${v}</div>`, ln = v => v ? `<div class="ln">${v}</div>` : "";
   // commander tile: credits at login plus exploration sales since, and the ship
@@ -76,7 +140,13 @@ function renderStrip() {
     val(cm.credits != null ? `≈ ${credits(cm.credits)} cr` : `<span class="unk">credits unknown</span>`,
         `Credits at login (${esc((cm.login_ts || "").replace("T", " ").slice(0, 16))} UTC)${cm.credits_login != null ? ": " + cm.credits_login.toLocaleString() : ""}` +
         ` plus exploration and exobiology sales since. Other spending and income (market, repairs, missions) is not tracked.`) +
-    ln(shipLine) + ln(cm.earned ? `+${credits(cm.earned)} cr sold since login` : "");
+    ln(shipLine) + ln(cm.earned ? `+${credits(cm.earned)} cr sold since login` : "") +
+    ln(["Explore", "Exobiologist"].filter(k => cm.ranks && cm.ranks[k]).map(k => { const r = cm.ranks[k];
+      return `<span title="${k === "Explore" ? "exploration" : "exobiology"} rank${r.progress != null ? `, ${r.progress}% to the next` : ""}">${k === "Explore" ? "Explorer" : "Exobiologist"}: <b>${esc(r.name)}</b>${r.progress != null ? ` <span class="unk">${r.progress}%</span>` : ""}</span>`; }).join(" · "));
+  const ns = data.next_stop, nsEl = document.getElementById("nextStopLn"), jr0 = effRange();
+  nsEl.innerHTML = ns ? `<span title="your chosen next stop (clears when you arrive)">next stop:</span> <span class="copy" data-name="${esc(ns.name)}" title="click to copy">${esc(ns.name)}</span>` +
+    (ns.distance != null ? ` · <b>${ns.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>${jr0 ? ` ≈ ${Math.max(1, Math.ceil(ns.distance / jr0))} jumps` : ""}` : "") +
+    ` <span class="unk" id="nsClear" title="clear the next stop" style="cursor:pointer">✕</span>` : "";
   const p0 = data.position, wl = document.getElementById("whereLn");
   wl.innerHTML = p0 ? `<span title="galactic coordinates (x / y / z)">Coord: ${[p0.x, p0.y, p0.z].map(v => v.toFixed(2)).join(" / ")}</span>` +
     (p0.visits ? ` · <span title="arrivals in this system, from your journals">visit ${p0.visits}</span>` : "") : "";
@@ -87,19 +157,12 @@ function renderStrip() {
   else if (!f.live) el.innerHTML = val(`<span class="unk">${f.main != null ? f.main.toFixed(1) + " t (last reading)" : "no reading"}</span>`) + ln("game not running") + boostLine();
   else {
     tf.className = "tile " + (f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");
-    el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) +
+    el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) + hullLine() +
       ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
       ln(f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "") + boostLine();
     tf.title = "From Status.json. Jump estimates use fuel burned on your recent jumps; a max-range jump costs several times a short hop.";
   }
-  // carrier tile
-  const c = data.carrier, cl = document.getElementById("carrierLine");
-  if (!c) cl.innerHTML = val(`<span class="unk">none seen</span>`);
-  else cl.innerHTML = val(esc(c.name), esc(c.callsign || "")) +
-    ln(c.here ? "<b>here</b>" : `<span class="copy" data-name="${esc(c.system)}" title="click to copy">${esc(c.system)}</span>` +
-       (c.distance != null ? ` · <b>${c.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>` : "")) +
-    ln(`${c.has_uc ? "UC ✓" : "no UC"} · ${c.has_vista ? "Vista ✓" : "no Vista"}${c.fuel != null ? ` · ${c.fuel} t tritium` : ""}` +
-       (c.planned ? ` · jumping to <b>${esc(c.planned.system)}</b> ${esc((c.planned.departure || "").slice(11, 16))} UTC` : ""));
+  renderCarrier();
   // data tile: journal freshness, link health, server state
   const fr = data.freshness, fl = document.getElementById("freshLine"), sl = document.getElementById("statusLine"), td = document.getElementById("tData");
   let dot = "", text = "", tcls = "";
@@ -116,9 +179,16 @@ function renderStrip() {
   td.className = "tile " + tcls; td.title = data.tail_error || data.status || "";
   fl.innerHTML = val(`<span class="dot ${dot}"></span>${text}`);
   sl.innerHTML = problems.length ? problems.join(" · ") : /^asking|^fetching/.test(data.status || "") ? esc(data.status) : "Spansh ok";
+  const bk = data.backup || {};
+  const bkAge = bk.ts ? Math.floor((Date.now() - Date.parse(bk.ts)) / 86400000) : null;
+  document.getElementById("backupLine").innerHTML = bk.running ? "backing up…" :
+    `<span class="${bkAge == null || bkAge > 30 ? "warnc" : "unk"}" title="${bk.error ? "last backup failed: " + esc(bk.error) : bk.path ? esc(bk.path) : "no backup made yet"}">` +
+    `${bk.ts ? `backup ${bkAge ? bkAge + " d" : "today"}` : "no backup yet"}${bk.error ? " (failed)" : ""}</span> <button type="button" id="backupBtn" class="mini">back up now</button>`;
   // docked somewhere that buys data with a worthwhile amount aboard: say so plainly
   const dk = data.docked, u = data.unsold, lvl = unsoldLevel(u), se = document.getElementById("sell");
-  if (dk && (dk.has_uc || dk.has_vista) && lvl && lvl !== "ok") {
+  if (saleBanner && Date.now() < saleBanner.until) {
+    se.className = "ok"; se.textContent = saleBanner.text;
+  } else if (dk && (dk.has_uc || dk.has_vista) && lvl && lvl !== "ok") {
     se.className = lvl;
     se.innerHTML = `💰 Docked at ${esc(dk.station)}${dk.has_uc ? " with Universal Cartographics" : ""}${dk.has_vista ? (dk.has_uc ? " and" : " with") + " Vista Genomics" : ""}: ` +
       `<b>${credits(u.total)} cr</b> on board — sell before you undock.`;
@@ -129,29 +199,147 @@ function renderStrip() {
     (f && f.live && f.pct != null && f.pct < 30 ? ` · ⛽${f.pct}%` : "") +
     (unsoldLevel(data.unsold) === "urgent" ? " · 💰 sell!" : "");
 }
-let bioMin = store.get("bioMin", null);   // null until the first payload brings the server's default
+// Per-browser override of the bio threshold; null follows bio_min in ed_outrider.toml (reset = null).
+let bioMinCfg = store.get("bioMinCfg", store.get("bioMin", null));
+const bioMinNow = () => bioMinCfg ?? (data && data.defaults && data.defaults.bio_min) ?? 10000000;
 function worthLeavingFor(l) {
   // The server lists everything unfinished; the page applies your exobiology threshold:
   // un-started bio only counts if a single body could pay over bioMin (started sampling always counts).
   if (!l) return null;
   // a body the rules cannot price (potential null) is kept: unknown is not the same as worthless
-  const bio = l.bio_pending.filter(b => Object.keys(b.partial || {}).length || b.potential == null || b.potential >= bioMin);
-  return {...l, bio_pending: bio, clean: !l.unscanned && !l.unmapped_valuable.length && !bio.length};
+  const bio = l.bio_pending.filter(b => Object.keys(b.partial || {}).length || b.potential == null || b.potential >= bioMinNow()
+    || (codexNewCounts && b.codex_new));   // a species new to your codex here is worth stopping for (vouchers)
+  // mapping only counts when it would add at least the green-row level (bonus-free, like the highlight),
+  // or the body is special: a first-discovered / first-map ELW, water world, ammonia world or terraformable.
+  // Unscanned bodies and a missing honk stay on Here's to-do line; they never sound the alert on their own.
+  const maps = (l.unmapped || []).filter(u => u.special || (u.increment != null && u.increment >= hlLevel("body")));
+  return {...l, bio_pending: bio, maps, clean: !maps.length && !bio.length};
 }
 function leavingText(l) {
   l = worthLeavingFor(l);
   if (!l || l.clean) return "";
   const bits = [];
-  if (l.unscanned) bits.push(`<b>${l.unscanned}</b> bod${l.unscanned === 1 ? "y" : "ies"} unscanned`);
-  else if (!l.honked) bits.push("no FSS honk yet");
+  if (l.maps.length) bits.push("unmapped " + l.maps.map(u => `<b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}` +
+    (u.increment ? `, +${credits(u.increment)}` : "") + ")").join(", "));
   for (const b of l.bio_pending) {
     const parts = Object.entries(b.partial).map(([g, n]) => `${esc(g)} ${n}/3`).concat((b.genera || []).map(esc));
     bits.push(`bio on <b>${esc(b.body)}</b>${b.genera === null ? ` (${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd)` : parts.length ? ` (${parts.join(", ")})` : ""}` +
-              (b.potential ? ` up to ${credits(b.potential)}` : b.potential == null && !Object.keys(b.partial || {}).length ? " (value unknown)" : ""));
+              (b.potential ? ` up to ${credits(b.potential)}` : b.potential == null && !Object.keys(b.partial || {}).length ? " (value unknown)" : "") +
+              (b.codex_new ? " ✦ new to your codex here" : ""));
   }
-  if (l.unmapped_valuable.length) bits.push(`unmapped valuables: ${l.unmapped_valuable.map(esc).join(", ")}`);
   return `Leaving with unfinished work: ${bits.join(" · ")}`;
 }
+// Here's to-do list for the system: ticks itself off as you honk, find, map and sample. Items worth
+// doing by your thresholds are listed; the rest are summarised so nothing is hidden.
+function checklistHtml(l) {
+  const w = worthLeavingFor(l);
+  const item = (done, text) => `<li class="${done ? "done" : "todo"}">${done ? "✓" : "○"} ${text}</li>`;
+  const items = [item(l.honked, l.honked ? "honked" : "honk (FSS discovery scan)"),
+    item(!l.unscanned && l.honked, l.unscanned ? `${l.unscanned} bod${l.unscanned === 1 ? "y" : "ies"} left to find in the FSS` : l.all_found ? "all bodies found" : "bodies found")];
+  for (const u of w.maps) items.push(item(false, `map <b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}${u.increment ? `, +${credits(u.increment)}` : ""})`));
+  const smallMaps = (l.unmapped || []).length - w.maps.length;
+  if (!w.maps.length) items.push(item(true, "no mapping worth doing" + (smallMaps ? ` <span class="unk">(${smallMaps} small, under your ${credits(hlLevel("body"))} level)</span>` : "")));
+  for (const b of w.bio_pending) {
+    const parts = Object.entries(b.partial || {}).map(([g, n]) => `${esc(g)} ${n}/3`).concat((b.genera || []).map(esc));
+    items.push(item(false, `bio on <b>${esc(b.body)}</b>` + (b.genera === null ? ` (${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd)` : parts.length ? `: ${parts.join(", ")}` : "") +
+      (b.potential ? ` up to ${credits(b.potential)}` : "") + (b.codex_new ? ` <span class="cxnew">✦</span>` : "")));
+  }
+  const smallBio = l.bio_pending.length - w.bio_pending.length;
+  if (!w.bio_pending.length) items.push(item(true, "no bio worth sampling" + (smallBio ? ` <span class="unk">(${smallBio} under your ${credits(bioMinNow())} threshold)</span>` : "")));
+  return `<ul class="checklist">${items.join("")}</ul>`;
+}
+// ---- on-body strip: what is left to sample on the body you are standing on (landed, SRV, on foot) ----
+let obKey = null, obData = null;
+async function loadOnBody() {
+  const ob = data && data.on_body;
+  if (!ob) { if (obData) { obData = null; obKey = null; } renderOnBody(); return; }
+  const key = `${ob.system}|${data.scan_version}`;
+  if (key === obKey) return renderOnBody();
+  obKey = key;
+  try { obData = await apiJson(`api/system/${ob.system}`); } catch { obData = null; }
+  if (obData && obData.error) obKey = null;
+  renderOnBody();
+}
+// sample spacing: how far to walk before the next sample of this species counts as a new colony
+function samplingHtml() {
+  const sm = data.sampling; if (!sm || !sm.samples || sm.samples >= 3) return "";
+  const head = `<b>${esc(sm.genus || "")}</b> <span class="unk">${esc((sm.species || "").split(" ").slice(1).join(" "))}</span> · sample ${sm.samples}/3`;
+  if (sm.to_go == null) return `<div class="spacing unk">${head} · ${sm.need ? `need ${sm.need} m from the last sample` : "spacing unknown"}` +
+    ` <span title="the position of your earlier samples was not recorded (they were taken before Outrider was running)">(position unknown)</span></div>`;
+  return `<div class="spacing ${sm.clear ? "clear" : ""}">${head} · ` +
+    (sm.clear ? `✓ clear to sample <span class="unk">(${sm.nearest} m from the nearest, ${sm.need} m needed)</span>`
+              : `<b>${sm.to_go} m</b> to go <span class="unk">(${sm.nearest} of ${sm.need} m)</span>`) + `</div>`;
+}
+let clearAnnounced = null;
+function renderOnBody() {
+  const el = document.getElementById("onbody"), ob = data && data.on_body;
+  if (!ob) { el.innerHTML = ""; return; }
+  const b = obData && !obData.error && obData.bodies.find(x => x.name === ob.body);
+  if (!b) { el.innerHTML = `On <b>${esc(ob.body)}</b> (${ob.how})`; return; }
+  const bits = [];
+  for (const g of b.genera) {
+    const o = b.organics.find(o => o.genus === g), x = (b.bio_guess || []).find(q => q.genus === g);
+    bits.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` +
+                  `${o.species ? ` <span class="unk">${esc(o.species.split(" ").slice(1).join(" "))}</span>` : ""}</span>`
+               : `<span class="sp">${esc(g)} 0/3${x && x.best ? ` <span class="unk">likely ${esc(x.best.split(" ").slice(1).join(" "))} ${credits(x.value || 0)}</span>` : ""}${codexMark(x, obData.region)}</span>`);
+  }
+  if (!b.genera.length && b.bio) bits.push(`<span class="unk">${b.bio} bio signal${b.bio === 1 ? "" : "s"}, not DSS'd</span>`);
+  if (b.geo) bits.push(`<span class="sp geo">🪨 ${b.geo} geo</span>`);
+  const x5 = b.value_parts && b.value_parts.bio_factor === 5;
+  el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> <span class="unk">(${ob.how})</span>: ` + (bits.join(" ") || `<span class="unk">no bio or geo signals known</span>`) +
+    (x5 && (b.genera.length || b.bio) ? ` · <span class="ok" title="nobody had set foot here when you scanned it: exobiology pays ×5">first footfall ×5</span>` : "");
+}
+// ---- route strip: the plotted route from here, hop by hop ----
+function renderRoute() {
+  const r = data.route, el = document.getElementById("routeStrip");
+  if (!r || !r.hops.length) { el.innerHTML = ""; return; }
+  const n = r.hops.length;
+  const chips = r.hops.slice(0, 24).map(h => `<span class="hop${h.scoopable ? " sc" : h.scoopable === false ? " dry" : ""}${h.visited ? " vis" : ""}" ` +
+    `title="${esc(h.name)} · ${esc(h.star_class || "?")}${h.scoopable ? " (scoopable)" : h.scoopable === false ? " (not scoopable)" : ""} · ${h.ly} ly${h.visited ? " · visited" : ""}${h.known ? "" : " · not reported to Spansh"}">` +
+    `${esc(h.star_class || "?")}${h.known ? "" : "✦"}</span>`).join("");
+  el.innerHTML = `Route: <b>${n}</b> jump${n === 1 ? "" : "s"} · <b>${Math.round(r.ly).toLocaleString()}</b> ly` +
+    (r.next_scoop ? ` · next scoop in <b>${r.next_scoop}</b>` : ` · <span class="warnc">no scoopable star on the route</span>`) +
+    (r.longest_dry > 1 ? ` · <span class="${r.longest_dry >= 4 ? "warnc" : ""}">longest dry stretch ${r.longest_dry}</span>` : "") +
+    ` <span class="hops">${chips}${n > 24 ? ` <span class="unk">+${n - 24}</span>` : ""}</span>`;
+}
+// ---- Now mode: five big lines for a second monitor, readable from the chair ----
+function renderNow() {
+  const el = document.getElementById("nowView"), p = data.position, f = data.fuel, t = data.target, a = data.arrival;
+  if (!p) { el.innerHTML = `<div class="now-sys">waiting for your first jump…</div>`; return; }
+  const lines = [`<div class="now-sys">${esc(p.name)}</div>`];
+  // the arrival verdict, for twenty seconds after a jump
+  if (a && a.id64 === String(p.id64) && Date.now() - Date.parse(a.ts) < 20000)
+    lines.push(`<div class="now-card ${a.undiscovered ? "yes" : "no"}">${a.undiscovered ? "🏁 Undiscovered — first discovery is yours" : "Already discovered"}</div>`);
+  if (t) {
+    const label = {"unreported": "never reported — new discovery!", "no bodies": "no scan data", "partial": "partly scanned",
+      "explored": "fully scanned", "visited": "you've been here"}[t.status] || t.status;
+    const hz = hazardNote(t.star_class);
+    lines.push(`<div class="now-line">➜ <b>${esc(t.name)}</b> <span class="t-${t.status.replace(" ", "")}">${esc(label)}</span>` +
+      (t.star_class ? ` <span class="${/^[OBAFGKM](_|$)/.test(t.star_class) ? "ok" : "noscoop"}">${esc(t.star_class)}${/^[OBAFGKM](_|$)/.test(t.star_class) ? " ⛽" : " ✕"}</span>` : "") +
+      (hz ? ` <span class="hazard">⚠ ${esc(hz)}</span>` : "") + `</div>`);
+  }
+  if (f && f.live && f.pct != null)
+    lines.push(`<div class="now-line ${f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : ""}">⛽ <b>${f.pct}%</b>` +
+      (f.jumps_max != null ? ` · ${f.jumps_max} jumps` : "") + (f.since_scoop != null ? ` · ${f.since_scoop} since scoop` : "") +
+      (data.boost ? ` · <span class="boosted">boosted ×${data.boost}</span>` : "") + `</div>`);
+  // landed: what is left on this body (and the sample spacing); otherwise what is left in the system
+  if (data.on_body) lines.push(`<div class="now-line now-body">${document.getElementById("onbody").innerHTML}</div>`);
+  else {
+    const here = data.systems.find(s => s.id64 === p.id64);
+    const w = hereData && hereData.id64 === String(p.id64) ? worthLeavingFor(hereData.leaving) : null;
+    lines.push(`<div class="now-line">${w && !w.clean ? `<span class="warnc">${leavingText(hereData.leaving).replace(/^Leaving with unfinished work: /, "Still here: ")}</span>`
+      : `<span class="ok">✓ nothing worth staying for</span>`}${here && here.value_now ? ` · <span class="unk">${credits(here.value_now)} cr aboard from here</span>` : ""}</div>`);
+  }
+  if (lastAlert && Date.now() - lastAlert.at < 15000)
+    lines.push(`<div class="now-card alert">${esc(lastAlert.title)}${lastAlert.body ? ` <span class="unk">${esc(lastAlert.body)}</span>` : ""}</div>`);
+  el.innerHTML = lines.join("");
+}
+document.getElementById("nowView").addEventListener("click", () => {
+  view = viewBeforeNow || "overview"; store.set("view", view);
+  if (new URLSearchParams(location.search).get("mode") === "now") history.replaceState(null, "", location.pathname);
+  render();
+});
+setInterval(() => { if (view === "now" && data) renderNow(); }, 2000);   // arrival card and alert card expire
 function renderLeaving(l) {
   const t = leavingText(l);
   document.getElementById("leaving").innerHTML = t ? "⚠ " + t : "";
@@ -187,13 +375,58 @@ function star(s) {
 }
 
 let view = store.get("view", "near");
-const ALERTS = [["discovery", "a targeted system is a new discovery"], ["arrival", "an arrival contradicts what was announced"],
-  ["leaving", "leaving a system with unfinished work"], ["fuel", "fuel low and the target star is not scoopable"],
-  ["unsold", "unsold data crosses a threshold"], ["carrier", "your carrier arrives somewhere"], ["codex", "a new codex entry"]];
+let viewBeforeNow = view === "now" ? "overview" : view;
+if (new URLSearchParams(location.search).get("mode") === "now") view = "now";   // the only URL parameter the page reads
+// Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
+// per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
+const ALERTS = [["discovery", "a targeted system is a new discovery", null], ["arrival", "an arrival contradicts what was announced", null],
+  ["leaving", "leaving a system with work worth coming back for", "alert"], ["fuel", "fuel low where you cannot scoop", "alert"],
+  ["find", "a valuable body just scanned (over your highlight levels)", "find"],
+  ["sell", "docked where you can sell, and what you banked", "cash"],
+  ["unsold", "unsold data crosses a threshold", "cash"], ["hull", "hull damage, heat damage, interdiction", "danger"],
+  ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"]];
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alerts", {}));
+const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSound", {}));
+const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSpeak", {}));
+let speechOn = store.get("speech", false);
 function notify(kind, title, body) {
   if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return;
   try { new Notification(title, {body, tag: "ed-" + kind}); } catch {}
+}
+// One path for every alert: its sound (if sounds are on and the kind's sound is ticked), a desktop
+// notification (if enabled), and speech (if 🗣 is on and the kind is ticked). `say` defaults to the title.
+let lastAlert = null;
+function alertOut(kind, title, body, {sound, say, delay = 0} = {}) {
+  lastAlert = {kind, title, body, at: Date.now()};
+  const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
+  if (snd && soundOn && alertSound[kind]) setTimeout(() => play(snd), delay);
+  notify(kind, title, body);
+  if (speechOn && alertSpeak[kind]) speak(say || title, snd ? delay + 900 : delay);
+}
+// ---- speech: Piper on the server when it has a voice ready, else the browser's own ----
+let speechQueue = Promise.resolve();
+const spokenText = t => String(t).replace(/<[^>]+>/g, "").replace(/[⚠📖🚢💰🧬🏁🗺👣⛽🌋🪨✦★☆]/gu, "")
+  .replace(/(\d+(?:\.\d+)?)M\b/g, "$1 million").replace(/(\d+(?:\.\d+)?)k\b/g, "$1 thousand")
+  .replace(/(\d+(?:\.\d+)?)B\b/g, "$1 billion").replace(/\bcr\b/g, "credits").replace(/\s·\s/g, ", ").replace(/\s+/g, " ").trim();
+function speak(text, delay = 0) {
+  const words = spokenText(text); if (!words) return;
+  speechQueue = speechQueue.then(() => new Promise(res => setTimeout(res, delay))).then(async () => {
+    const tts = data && data.tts;
+    if (tts && tts.engine === "piper") {
+      try {
+        const r = await fetch(`api/say?text=${encodeURIComponent(words)}`);
+        if (r.ok) {
+          const ctx = audio(); if (!ctx || ctx.state !== "running") return;
+          const buf = await ctx.decodeAudioData(await r.arrayBuffer());
+          const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+          await new Promise(res => { src.onended = res; src.start(); });
+          return;
+        }
+      } catch {}
+    }
+    if (typeof speechSynthesis === "undefined") return;
+    await new Promise(res => { const u = new SpeechSynthesisUtterance(words); u.onend = u.onerror = res; speechSynthesis.speak(u); setTimeout(res, 15000); });
+  }).catch(() => {});
 }
 const bmMap = () => Object.fromEntries((data.bookmarks || []).map(b => [b.id, b]));
 const day = ts => (ts || "").slice(0, 10);
@@ -248,7 +481,9 @@ function unsoldThresholds(u) {
 function unsoldLevel(u) {
   if (!u || u.error || u.total == null) return null;
   const [w, g] = unsoldThresholds(u);
-  return u.total >= g ? "urgent" : u.total >= w ? "warn" : "ok";
+  const rebuy = data && data.ship && data.ship.rebuy, rw = unsoldCfg.rebuyWarn, ru = unsoldCfg.rebuyUrgent;
+  const x = rebuy ? u.total / rebuy : 0;
+  return u.total >= g || (ru && x >= ru) ? "urgent" : u.total >= w || (rw && x >= rw) ? "warn" : "ok";
 }
 function renderUnsold() {
   const el = document.getElementById("unsold"), u = data.unsold, tile = document.getElementById("tUnsold"), fl = document.getElementById("firstsLine");
@@ -256,10 +491,23 @@ function renderUnsold() {
   if (!u) { el.innerHTML = `<div class="val"><span class="unk">estimating…</span></div>`; fl.innerHTML = ""; return; }
   if (u.error) { el.innerHTML = `<div class="val"><span class="unk">unavailable</span></div>`; fl.innerHTML = esc(u.error).slice(0, 80); return; }
   const f = u.firsts;
-  el.innerHTML = `<div class="val">${credits(u.total)} cr</div>` +
-    `<div class="ln">🗺 <b>${credits(u.carto.estimated_payout ?? u.carto.estimated_value)}</b> · 🧬 <b>${credits(u.bio.estimated_value)}</b></div>`;
+  const rebuy = data.ship && data.ship.rebuy, ss = data.since_sale;
+  el.innerHTML = `<div class="val">${credits(u.total)} cr${rebuy ? ` <span class="unk" title="what the data on board is worth, in rebuys of your ship (${credits(rebuy)} cr)">= ${(u.total / rebuy).toFixed(u.total / rebuy < 10 ? 1 : 0)}× rebuy</span>` : ""}</div>` +
+    `<div class="ln">🗺 <b>${credits(u.carto.estimated_payout ?? u.carto.estimated_value)}</b> · 🧬 <b>${credits(u.bio.estimated_value)}</b></div>` +
+    (ss ? `<div class="ln" title="since your last sale to Universal Cartographics (${esc(ss.ts.slice(0, 10))})"><b>${ss.days}</b> d · <b>${Math.round(ss.ly).toLocaleString()}</b> ly since you last sold</div>` : "") +
+    sellersLine();
   fl.innerHTML = !f || !(f.systems || f.planets || f.mapped) ? "no unsold firsts" :
     `🏁 <b>${f.systems}</b> system${f.systems === 1 ? "" : "s"} · <b>${f.planets}</b> planet${f.planets === 1 ? "" : "s"} · <b>${f.mapped}</b> mapped unsold`;
+}
+// The nearest places to sell (Spansh station search): the nearest trustworthy one of each kind.
+const sellerTxt = x => !x ? "" : `${esc(x.name)}${x.yours ? " (your carrier)" : x.carrier ? " (carrier)" : ""} · ${esc(x.system)} · ${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` +
+  (effRange() ? ` ≈ ${Math.max(1, Math.ceil(x.distance / effRange()))} jump${Math.ceil(x.distance / effRange()) > 1 ? "s" : ""}` : "") +
+  (x.carrier && !x.yours && x.age_days != null ? ` <span class="unk">(seen ${x.age_days < 1 ? "today" : Math.round(x.age_days) + " d ago"})</span>` : "");
+function sellersLine() {
+  const s = data.sellers; if (!s || !s.uc) return "";
+  const uc = s.uc.fresh || s.uc.nearest, vi = s.vista.fresh || s.vista.nearest;
+  const d = x => x ? `${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` : "?";
+  return `<div class="ln" title="nearest Universal Cartographics: ${uc ? sellerTxt(uc).replace(/<[^>]+>/g, "") : "none known"}\nnearest Vista Genomics: ${vi ? sellerTxt(vi).replace(/<[^>]+>/g, "") : "none known"}">sell: UC <b>${d(uc)}</b> · Vista <b>${d(vi)}</b>${uc && uc.yours ? " <span class=\"unk\">(your carrier)</span>" : ""}</div>`;
 }
 function unsoldHtml(u) {
   if (!u || u.error) return "";
@@ -286,7 +534,15 @@ function unsoldHtml(u) {
                  `${Math.round(b.bonus_rate * 100)}%</span></li>` : "") +
     u.species.map(r => `<li><span class="bn">${esc(r.species)} ×${r.count}</span><b>${cr(r.value)}</b></li>`).join("") +
     (b.unknown_species.length ? `<li><span class="bn">not priced: ${b.unknown_species.map(esc).join(", ")}</span></li>` : "") +
-    `</ul></div><div class="adv ${lvl}">${advice}</div>` +
+    `</ul></div>` +
+    ((u.top_bodies || []).length ? `<div class="sec"><div class="lbl">Most valuable aboard</div><ul>` +
+      u.top_bodies.map(t => `<li><span class="bn">${esc(t.body)} · ${esc(t.type)}${t.first_discovered ? " 🏁" : ""}${t.mapped ? " 🗺" : ""}</span><b>${cr(t.value)}</b></li>`).join("") + `</ul></div>` : "") +
+    (data.sellers && data.sellers.uc ? `<div class="sec"><div class="lbl">Nearest places to sell</div><ul>` +
+      [["Universal Cartographics", data.sellers.uc], ["Vista Genomics", data.sellers.vista]].map(([k, g]) =>
+        `<li><span class="bn">${k}: ${sellerTxt(g.fresh || g.nearest) || "none known"}</span></li>` +
+        (g.station && g.station !== (g.fresh || g.nearest) ? `<li><span class="bn">&nbsp;&nbsp;nearest station: ${sellerTxt(g.station)}</span></li>` : "")).join("") +
+      `</ul></div>` : "") +
+    `<div class="adv ${lvl}">${advice}</div>` +
     `<div class="sec unk">first-discovery and mapping bonuses included · belts and rings not counted · updated ${u.computed}</div>`;
 }
 
@@ -298,7 +554,9 @@ function render() {
   const here = p && data.systems.find(s => s.id64 === p.id64), known = !!here;
   // distances to the two hubs: Sol, and Colonia (Eol Prou RS-T d3-94)
   const lyTo = (x, y, z) => p && Math.hypot(p.x - x, p.y - y, p.z - z).toLocaleString("en-US", {maximumFractionDigits: 0});
-  document.getElementById("refLn").innerHTML = p ? `Sol <b>${lyTo(0, 0, 0)}</b> ly · Colonia <b>${lyTo(-9530.5, -910.28125, 19808.125)}</b> ly` : "";
+  const rg = data.region;
+  document.getElementById("refLn").innerHTML = p ? (rg && rg.name ? `<span title="galactic region (codex entries are per region)${rg.nebula ? "; inside a nebula zone" : ""}">${esc(rg.name)}${rg.nebula ? " · nebula" : ""}</span> · ` : "") +
+    `Sol <b>${lyTo(0, 0, 0)}</b> ly · Colonia <b>${lyTo(-9530.5, -910.28125, 19808.125)}</b> ly` : "";
   document.getElementById("here").innerHTML = !p ? "waiting for your first jump…" :
     `<span class="copy" data-name="${esc(p.name)}" title="click to copy"` +
     (known ? ` data-pop data-id="${p.id64}"` : "") + `>${esc(p.name)}</span>` + (here ? firstsIcon(here.firsts) : "") +
@@ -312,7 +570,7 @@ function render() {
   document.getElementById("hereView").hidden = !(view === "here" || nearPinned || (view === "overview" && !ovState.collapsed));
   document.querySelector("main").classList.toggle("nearPinned", nearPinned);
   document.getElementById("firstsView").hidden = view !== "firsts";
-  if (view === "firsts") loadFirsts();
+  if (view === "firsts") { loadFirsts(); loadLeft(); }
   document.documentElement.style.setProperty("--head-h", document.querySelector("header").offsetHeight + "px");
   document.getElementById("hereView").classList.toggle("detail", !!selectedBody);
   document.getElementById("histView").hidden = view !== "hist";
@@ -322,12 +580,13 @@ function render() {
   if (view === "log") { if (L.key === null) loadLog(); else tailLog(); }
   document.getElementById("bioView").hidden = view !== "bio";
   if (view === "bio") loadBio();
-  if (view === "here" || nearPinned || (view === "overview" && !ovState.collapsed)) {
+  if (view === "here" || nearPinned || (view === "overview" && !ovState.collapsed) || view === "now") {   // Now reads Here's data
     loadHere();
     if (hereData && lastHereCtx !== hereCtx()) renderHere();   // tab and pane keep different modes
   }
   if (view === "hist") loadHistory();
   renderStrip();
+  loadOnBody();
   document.getElementById("searchView").hidden = view !== "search";
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === view));
   document.getElementById("bmViewBtn").textContent = `Bookmarks${(data.bookmarks || []).length ? ` (${data.bookmarks.length})` : ""}`;
@@ -335,16 +594,19 @@ function render() {
   renderBookmarks(bms);
   renderSearch(bms);
   document.getElementById("mapView").hidden = view !== "map";
+  document.body.classList.toggle("nowmode", view === "now");
+  document.getElementById("nowView").hidden = view !== "now";
+  if (view === "now") renderNow();
   if (view === "map") { loadMap(); drawMap(); }
   refreshPop();
-  const jr = data.jump_range;
+  const jr = effRange();
   let rows = data.systems.filter(s => s.id64 !== (p && p.id64))
     .filter(s => showVisited.checked || !s.visited)
     .filter(s => showExplored.checked || s.status !== "explored")
     .filter(s => !oneJump.checked || !jr || s.distance <= jr);
-  rows.sort(sortKey === "name"
+  rows.sort(sortKeys.near === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-    : sortKey === "value" ? (a, b) => (b.value_max || 0) - (a.value_max || 0) || a.distance - b.distance
+    : sortKeys.near === "value" ? (a, b) => (b.value_max || 0) - (a.value_max || 0) || a.distance - b.distance
     : (a, b) => a.distance - b.distance);
   // Fuel: the nearest scoopable star you can reach (visited or not) gets a tag when the tank is low.
   const fuel = data.fuel, lowFuel = fuel && fuel.live && fuel.pct != null && fuel.pct < 30;
@@ -354,16 +616,20 @@ function render() {
   const unvisited = data.systems.filter(s => !s.visited).length;
   document.getElementById("subKnown").textContent = data.systems.length;
   document.getElementById("subUnvisited").textContent = unvisited;
+  document.getElementById("subCut").innerHTML = data.sphere_cut != null
+    ? ` · <span class="warn" title="Spansh knows more systems in range than Outrider fetches; the list is complete only out to ${data.sphere_cut} ly. A smaller radius shows them all.">complete to ${data.sphere_cut} ly</span>` : "";
   const rs = document.getElementById("radiusSel"), choices = data.radius_choices || [data.radius];
   if (rs.dataset.opts !== choices.join(",")) {   // rebuilt only when the choices change, so an open list stays open
     rs.innerHTML = choices.map(r => `<option value="${r}">${r}</option>`).join(""); rs.dataset.opts = choices.join(",");
     rs.title = `how far around you Nearby lists systems (radius_choices in ed_outrider.toml sets these; bigger spheres take longer to fill in)`;
   }
   if (document.activeElement !== rs && !rs.dataset.pending) rs.value = String(data.radius);
-  document.getElementById("subJump").innerHTML = (jr ? `<span title="Loadout MaxJumpRange: the best case with a near-empty tank">max jump ${jr.toFixed(1)} ly</span>` : "") +
+  document.getElementById("subJump").innerHTML = (jr ? `<span title="Loadout MaxJumpRange: the best case with a near-empty tank">max jump ${(data.jump_range || jr).toFixed(1)} ly</span>` +
+    (data.boost ? ` <b class="boosted" title="jet-cone charge: your next jump reaches this far">boosted ×${data.boost} → ${jr.toFixed(0)} ly</b>` : "") : "") +
     (prev && p ? `${jr ? " · " : ""}came from ${esc(prev.name)} (${Math.hypot(prev.x - p.x, prev.y - p.y, prev.z - p.z).toFixed(1)} ly)` : "");
   document.body.classList.toggle("disconnected", !!disconnected);
-  document.querySelectorAll("[data-sort]").forEach(b => b.classList.toggle("on", b.dataset.sort === sortKey));
+  document.querySelectorAll("table th[data-sort]").forEach(b =>
+    b.classList.toggle("on", b.dataset.sort === sortKeys[SORT_TABLES[b.closest("table").id]]));
   const t = data.target, tEl = document.getElementById("target");
   if (!t) tEl.innerHTML = "";
   else {
@@ -375,10 +641,12 @@ function render() {
       (/^[OBAFGKM](_|$)/.test(t.star_class) ? ` <span class="scoop" title="scoopable">⛽</span>`
                                            : ` <span class="noscoop" title="not scoopable">✕</span>`) : "";
     const src = t.source === "edsm" ? " (known to EDSM only)" : "";
+    const hz = hazardNote(t.star_class);
     tEl.innerHTML = `Target: <b>${esc(t.name)}</b>${row ? ` · ${row.distance.toFixed(2)} ly` : ""}${sc}` +
-      ` · <span class="t-${t.status.replace(" ", "")}">${label}${src}</span>`;
+      ` · <span class="t-${t.status.replace(" ", "")}">${label}${src}</span>` + (hz ? ` · <span class="hazard">⚠ ${hz}</span>` : "");
   }
   renderLeaving(t && t.leaving);
+  renderRoute();
   const a = data.arrival, aEl = document.getElementById("arrival");
   aEl.innerHTML = !a || !p || a.id64 !== String(p.id64) ? "" :
     `Arrived at <b>${esc(a.name)}</b>: ` + (a.undiscovered
@@ -389,6 +657,7 @@ function render() {
     const far = jr && s.distance > jr;
     const jumps = jr ? Math.ceil(s.distance / jr) : null;
     const cls = [s.visited && "visited", far && "far", isPrev && "prev", scoopNext && s.id64 === scoopNext.id64 && "scoopnext",
+                 data.next_stop && String(s.id64) === data.next_stop.id && "nextstop",
                  pinnedSystem === String(s.id64) && "pinned",
                  data.target && s.id64 === data.target.id64 && "target"]
       .filter(Boolean).join(" ");
@@ -416,7 +685,7 @@ function emptyMessage(rows) {
 
 function renderBookmarks(bms) {
   const list = Object.values(bms);
-  list.sort(sortKey === "name"
+  list.sort(sortKeys.bm === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
     : (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9));
   document.getElementById("bmRows").innerHTML = list.map(b => `<tr>
@@ -448,6 +717,11 @@ bmNote.addEventListener("keydown", e => {
 bmDialog.addEventListener("close", async () => {
   const action = bmDialog.returnValue, id = bmTarget;
   bmTarget = null;
+  if (id && action === "next") {   // the dialog's "Set as next stop"
+    const r = await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})});
+    toast(r.error ? `could not set the next stop: ${r.error}` : "next stop set");
+    return;
+  }
   if (!id || (action !== "save" && action !== "remove")) return;
   try {
     const r = await fetch("api/bookmark", {method: "POST", headers: {"Content-Type": "application/json"},
@@ -460,6 +734,7 @@ bmDialog.addEventListener("close", async () => {
 });
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
   if (b.dataset.view !== view && pinnedSystem) { pinnedSystem = null; if (selectedBody) closeBody(); }  // a pin belongs to the view it was made in
+  if (b.dataset.view === "now" && view !== "now") viewBeforeNow = view;
   view = b.dataset.view; store.set("view", view); render();
 });
 
@@ -469,16 +744,25 @@ let hereKey = null, hereData = null;
 // another system into it until the ✕ is clicked.
 let pinnedSystem = null;
 const shownSystem = () => pinnedSystem || (data && data.position ? String(data.position.id64) : null);
-function pinSystem(id) { pinnedSystem = String(id); if (selectedBody) closeBody(); hidePop(); render(); }
-function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); }
+function pinSystem(id) {
+  // the system you are in is not "pinned": Here shows it anyway, with its to-do line
+  pinnedSystem = data && data.position && String(data.position.id64) === String(id) ? null : String(id);
+  if (view === "overview" && ovState.collapsed) { ovState.collapsed = false; saveOv(); }   // else the pin shows nothing
+  if (selectedBody) closeBody(); hidePop(); render(); renderHere();
+}
+function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); renderHere(); }
 async function loadHere() {
   const id = shownSystem(); if (!id) return;
-  const key = `${id}|${data.scan_version}`;   // only your own scans change this view
+  // Only your own scans change this view, except while Spansh's body details are still arriving
+  // ("partial"): then ask again every few seconds until they have.
+  const partial = hereData && hereData.partial && hereData.id64 === id ? `|p${Math.floor(Date.now() / 4000)}` : "";
+  const key = `${id}|${data.scan_version}${partial}`;
   if (key === hereKey) return;
   hereKey = key;
   let fresh;
   try { fresh = await apiJson(`api/system/${id}`); } catch (err) { fresh = {error: err.message}; }
   if (key !== hereKey) return;   // a newer request is already on its way
+  if (fresh.error) hereKey = null;   // a failed fetch is retried at the next render, not kept
   hereData = fresh;
   renderHere();
   // the open body panel belongs to a system: close it on a jump, refresh it after a scan
@@ -554,18 +838,14 @@ function renderHere() {
   const pinned = !!pinnedSystem, row = pinned && data.systems.find(s => String(s.id64) === pinnedSystem);
   head.innerHTML = (pinned ? `<button type="button" class="unpin" onclick="unpinSystem()" title="back to the system you are in">✕</button><span class="pintag">viewing</span> ` : "") +
     `<b>${esc(h.name)}</b>` + (pinned && row ? ` <span class="unk">· ${row.distance.toFixed(2)} ly away</span>` : "") +
-    ` · ${h.bodies.length} bod${h.bodies.length === 1 ? "y" : "ies"} known · ` +
+    ` · ${h.bodies.length} bod${h.bodies.length === 1 ? "y" : "ies"} known · ` + (h.phenomena && h.phenomena.length ? phenomenaTag(h.phenomena) + " · " : "") +
     `<span title="what selling now would pay for data you hold from here / the most this system could pay">now <b>${credits(h.value_now || 0)} cr</b> · max <b>${credits(maxOf(h) || 0)} cr</b>${maxBonus() ? "" : ` <span class="unk" title="Max leaves out first-discovery, first-mapped and first-footfall bonuses (alerts & thresholds dialog)">no bonus</span>`}</span>` +
     `<span class="modes">${HERE_MODES.filter(([m]) => m !== "split" || hereCtx() === "tab").map(([m, label, title]) =>
       `<button type="button" data-mode="${m}" title="${title}"${(m === "split" ? hereMode().split : hereMode().top === m) ? ' class="on"' : ""}>${label}</button>`).join("")}</span>`;
   const l = h.leaving;
   const firstsBlock = h.firsts ? firstsHtml(h.firsts).replace(/<div class="lbl">Your firsts<\/div>/, "") : "";
   lv.innerHTML = firstsBlock + (pinned ? (!h.firsts ? `<span class="unk">${row ? esc(row.status) : ""}${row && row.visited ? " · you have been here" : ""}</span>` : "")
-    : !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : l.clean
-    ? `<span class="ok">✓ Nothing left to do here${l.all_found ? " (all bodies found)" : ""}.</span>`
-    : `<span class="todo">${[l.unscanned ? `${l.unscanned} bodies unscanned` : !l.honked ? "no FSS honk yet" : "",
-        l.bio_pending.length ? `bio pending on ${l.bio_pending.map(b => esc(b.body) + (!Object.keys(b.partial || {}).length && b.potential != null && b.potential < bioMin ? ` <span class="unk">(under your ${credits(bioMin)} threshold)</span>` : b.potential == null && !Object.keys(b.partial || {}).length ? ` <span class="unk">(value unknown)</span>` : "")).join(", ")}` : "",
-        l.unmapped_valuable.length ? `unmapped: ${l.unmapped_valuable.map(esc).join(", ")}` : ""].filter(Boolean).join(" · ")}</span>`);
+    : !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : checklistHtml(l));
   lastHereCtx = hereCtx();
   const hm = h.tree ? hereMode() : {top: "list", split: false};
   const showTable = hm.top !== "schematic", showSch = hm.top === "schematic" || hm.split;
@@ -574,11 +854,13 @@ function renderHere() {
   const sEl = document.getElementById("hereSchematic");
   sEl.hidden = !showSch; sEl.classList.toggle("split", showTable && showSch);
   if (showSch) sEl.innerHTML = schematicHtml(h);
+  const dest = data.destination && data.position && String(data.position.id64) === h.id64 ? data.destination : null;
+  const destBody = dest && h.bodies.find(b => b.body_id === dest.body_id);
   const rowHtml = (b, ind = "") => {
     const done = b.organics.filter(o => o.done).map(o => o.genus);
     const bio = [];
     const guessOf = g => (b.bio_guess || []).find(x => x.genus === g);
-    const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value)})</span>`;
+    const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value)})</span>` + codexMark(x, h.region);
     for (const g of b.genera) {
       const o = b.organics.find(o => o.genus === g);
       bio.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}" title="${esc(o.species || "")}${o.variant ? " · " + esc(o.variant) : ""}${o.lost ? " · lost with the ship, sample again" : ""}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}${o.done && o.value ? ` <span class="unk">${credits(o.value)}</span>` : ""}</span>` +
@@ -590,14 +872,14 @@ function renderHere() {
     if (!bio.length && b.bio) {
       const gl = (b.bio_guess || []).slice(0, b.bio);
       bio.push(`<span class="unk">${b.bio} signal${b.bio === 1 ? "" : "s"}, not DSS'd</span>` + (gl.length
-        ? `<br><span class="unk">likely: </span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits(x.value || 0)}</span>`).join("")}` : ""));
+        ? `<br><span class="unk">likely: </span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits(x.value || 0)}${codexMark(x, h.region)}</span>`).join("")}` : ""));
     }
     if (b.bio_potential) bio.push(`<span class="unk">· up to <b>${credits(b.bio_potential)}</b></span>`);
     const codex = b.codex.map(c => `<span class="sp" title="codex">📖 ${esc(c.name)}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
                     b.first_footfall && `<span class="fl" title="first footfall">👣</span>`, !b.scanned && `<span class="unk" title="known to Spansh, not scanned by you">—</span>`].filter(Boolean).join("");
-    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name">${ind}${esc(b.name)}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
+    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${destBody === b ? " dest" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name">${ind}${esc(b.name)}${(b.curiosities || []).length ? ` <span class="cur" title="${b.curiosities.map(c => esc(c.tag + ": " + c.why)).join("&#10;")}">🔭</span>` : ""}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
       <td>${esc(b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}</td>
       <td class="num">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
       <td class="num${b.gravity > 2 ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
@@ -614,7 +896,21 @@ function renderHere() {
   const byMax = maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => (maxOf(b) || 0) - (maxOf(a) || 0));
   document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
     || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
+  // the body targeted in-game: a line saying what it is worth going to, and its row brought into view
+  if (destBody) {
+    const b = destBody, bio = (b.bio_guess || []).slice(0, b.bio || b.genera.length).map(x => x.best ? `${x.best.split(" ")[0]}? ${credits(x.value || 0)}` : x.genus);
+    const bits = [b.subtype, b.gravity != null && b.type === "Planet" && `${b.gravity.toFixed(2)} g`,
+      b.atmosphere && b.atmosphere !== "None" && b.atmosphere, (b.bio || b.genera.length) && `${b.bio || b.genera.length} bio${bio.length ? ` (${bio.join(", ")})` : ""}`,
+      b.geo && `${b.geo} geo`, b.dist_ls != null && `${Math.round(b.dist_ls).toLocaleString()} ls`, maxOf(b) && `max ${credits(maxOf(b))}`].filter(Boolean);
+    lv.insertAdjacentHTML("afterbegin", `<div class="destline">➜ Heading to <b>${esc(b.name)}</b> · ${bits.map(esc).join(" · ")}</div>`);
+    const dk = `${h.id64}|${b.body_id}`;
+    if (dk !== lastDestKey) {
+      lastDestKey = dk;
+      const tr = document.querySelector("#hereRows tr.dest"); if (tr) tr.scrollIntoView({block: "nearest"});
+    }
+  } else lastDestKey = null;
 }
+let lastDestKey = null;
 document.getElementById("hereRows").addEventListener("click", e => {
   const tr = e.target.closest("tr[data-body]"); if (!tr) return;
   tr.dataset.body === selectedBody ? closeBody() : openBody(tr.dataset.body);
@@ -725,9 +1021,12 @@ function schematicHtml(h) {
   // a row: a star and everything orbiting it, left to right in orbital order
   const starRow = n => {
     const b = by[n.name];
-    const planets = n.children.filter(c => !isStar(c)), stars = n.children.filter(isStar);
+    // a pair of stars circling this one is drawn as its own nested group, not in the planet row
+    const pairOfStars = c => c.kind === "barycentre" && c.children.some(isStar);
+    const planets = n.children.filter(c => !isStar(c) && !pairOfStars(c)), stars = n.children.filter(isStar);
+    const groups = n.children.filter(pairOfStars);
     return `<div class="srowS"><div class="sstar">${discHtml(b, 0)}</div><div class="splanets">${planets.map(c => col(c, 1)).join("") || `<span class="unk">no planets known</span>`}</div></div>` +
-      (stars.length ? `<div class="snest">${stars.map(starRow).join("")}</div>` : "");
+      (stars.length || groups.length ? `<div class="snest">${stars.map(starRow).join("")}${groups.map(top).join("")}</div>` : "");
   };
   const top = n => {
     if (isStar(n)) return starRow(n);
@@ -775,7 +1074,7 @@ function bodyPopHtml(b) {
       const o = (b.organics || []).find(o => o.genus === g), x = (b.bio_guess || []).find(x => x.genus === g);
       lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")} ${o.samples}/3${o.done ? " ✓" : ""}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}` : ""}</span><b>${x && x.value ? credits(x.value) : ""}</b></li>`);
     }
-    if (!(b.genera || []).length && b.bio) lines.push(...(b.bio_guess || []).slice(0, b.bio).map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})</span><b>≤${credits(x.value || 0)}</b></li>`));
+    if (!(b.genera || []).length && b.bio) lines.push(...(b.bio_guess || []).slice(0, b.bio).map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})${codexMark(x, hereData && hereData.region)}</span><b>≤${credits(x.value || 0)}</b></li>`));
     h += `<div class="sec"><div class="lbl">🧬 Bio${b.bio ? ` · ${b.bio} signal${b.bio === 1 ? "" : "s"}` : ""}${b.bio_potential ? ` · up to ${credits(b.bio_potential)}` : ""}</div><ul>${lines.join("")}</ul></div>`;
   }
   if (b.geo) h += `<div class="sec">${b.geo} geological signal${b.geo === 1 ? "" : "s"}</div>`;
@@ -893,7 +1192,7 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
       lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}` : ""}</span>` +
                  `<b>${priced ? credits(o.value) : x && x.value ? "≤" + credits(x.value) : ""}</b></li>`);
     }
-    if (!(row.genera || []).length && row.bio) lines.push(...(row.bio_guess || []).slice(0, row.bio).map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    if (!(row.genera || []).length && row.bio) lines.push(...(row.bio_guess || []).slice(0, row.bio).map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}${codexMark(x)}</span><b>≤${credits(x.value || 0)}</b></li>`));
     for (const c of row.codex || []) lines.push(`<li><span>📖 ${esc(c.name)}</span><b>${c.voucher ? "voucher " + c.voucher.toLocaleString() + " cr" : c.new ? "new to your codex" : ""}</b></li>`);
     bioSec = sec("bio", `🧬 Exobiology${row.bio ? ` · ${row.bio} signal${row.bio === 1 ? "" : "s"}` : ""}${row.bio_potential ? ` · up to ${credits(row.bio_potential)}` : ""}`, `<ul>${lines.join("")}</ul>`);
   }
@@ -919,6 +1218,7 @@ async function loadFirsts() {
   firstsKey = key;
   document.getElementById("fStatus").textContent = "loading…";
   try { const f = await apiJson("api/firsts"); if (key === firstsKey) firstsData = f; else return; } catch (err) { firstsData = {error: err.message}; }
+  if (firstsData && firstsData.error) firstsKey = null;   // retried at the next render
   renderFirsts();
 }
 function renderFirsts() {
@@ -926,8 +1226,8 @@ function renderFirsts() {
   if (!f || f.error) { st.textContent = f ? f.error : ""; return; }
   // lost data stays in the database (a rescan earns it again) but is hidden unless asked for
   const list = f.firsts.filter(x => fShowLost.checked || x.state !== "lost");
-  list.sort(sortKey === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-          : sortKey === "distance" ? (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)
+  list.sort(sortKeys.firsts === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
+          : sortKeys.firsts === "distance" ? (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)
           : (a, b) => (b.value || 0) - (a.value || 0));
   const unsold = f.firsts.filter(x => x.state === "unsold"), lost = f.firsts.filter(x => x.state === "lost");
   st.textContent = `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts${fShowLost.checked ? "" : " (hidden)"}`;
@@ -942,6 +1242,38 @@ function renderFirsts() {
     `<tr><td colspan="7" class="unk">${lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
       : "Nothing unsold or lost: every first you have found is banked."}</td></tr>`;
 }
+// ---- Left behind: unfinished work in systems you have visited nearby ----
+let leftKey = null, leftData = null;
+const lbRadius = document.getElementById("lbRadius");
+lbRadius.value = store.get("lbRadius", "100");
+lbRadius.onchange = () => { store.set("lbRadius", lbRadius.value); leftKey = null; loadLeft(); };
+async function loadLeft() {
+  const key = `${lbRadius.value}|${data && data.scan_version}|${data && data.position && data.position.id64}`;
+  if (key === leftKey) return renderLeft();
+  leftKey = key;
+  try { leftData = await apiJson(`api/left?radius=${lbRadius.value}`); } catch (err) { leftData = {error: err.message}; }
+  if (leftData.error) leftKey = null;
+  renderLeft();
+}
+function renderLeft() {
+  const el = document.getElementById("leftRows"), d = leftData;
+  if (!d || d.error) { el.innerHTML = `<tr><td colspan="4" class="unk">${d ? esc(d.error) : "loading…"}</td></tr>`; return; }
+  const rows = d.systems.map(r => {
+    const maps = r.maps.filter(m => m.increment >= hlLevel("body")), bio = r.bio.filter(b => b.value >= bioMinNow());
+    const worth = maps.reduce((n, m) => n + m.increment, 0) + bio.reduce((n, b) => n + b.value, 0);
+    const bits = [r.unfound ? `${r.unfound} bod${r.unfound === 1 ? "y" : "ies"} not found` : "",
+      maps.length ? "map " + maps.map(m => `<b>${esc(m.body)}</b> <span class="unk">${esc(m.subtype)}${m.terraformable ? " T" : ""} +${credits(m.increment)}</span>`).join(", ") : "",
+      bio.length ? "bio " + bio.map(b => `<b>${esc(b.body)}</b> <span class="unk">${b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : ""].filter(Boolean);
+    return {r, bits, worth, keep: maps.length || bio.length || r.unfound};
+  }).filter(x => x.keep && x.bits.length);
+  el.innerHTML = rows.map(({r, bits, worth}) => `<tr><td><span class="name" data-name="${esc(r.name)}" title="click to copy">${esc(r.name)}</span><span class="goto" data-goto="${esc(r.id)}" title="open in Here">⌖</span></td>
+      <td class="num">${r.distance.toFixed(1)}</td><td class="left-what">${bits.join(" · ")}</td><td class="num">${worth ? credits(worth) : ""}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="unk">Nothing worth going back for within ${d.radius} ly.</td></tr>`;
+}
+document.getElementById("leftRows").addEventListener("click", e => {
+  const g = e.target.closest("[data-goto]"); if (g) return showInHere(g.dataset.goto);
+  const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);
+});
 const fShowLost = document.getElementById("fShowLost");
 fShowLost.checked = store.get("fShowLost", false);
 fShowLost.onchange = () => { store.set("fShowLost", fShowLost.checked); renderFirsts(); };
@@ -958,6 +1290,7 @@ async function loadMat() {
   matKey = key;
   document.getElementById("matStatus").textContent = "loading…";
   try { const m = await apiJson("api/materials"); if (key === matKey) matData = m; else return; } catch (err) { matData = {error: err.message}; }
+  if (matData && matData.error) matKey = null;   // retried at the next render
   renderMat();
 }
 function renderMat() {
@@ -969,8 +1302,17 @@ function renderMat() {
     (m.ts !== m.snapshot_ts ? ` · last change ${esc((m.ts || "").replace("T", " ").slice(0, 16))}` : "") +
     (m.stale ? ` · <span class="noscoop">your last login wrote no Materials line: these counts predate it</span>` : "");
   document.getElementById("matSynth").innerHTML = m.synthesis.map(r => `<div class="synth" title="${r.verified ? "recipe checked against a real synthesis in your journals" : "published in-game recipe"}">
-      <span class="n${r.craftable ? "" : " zero"}">×${r.craftable}</span><b>${esc(r.name)}</b>${r.boost ? ` <span class="unk">${esc(r.boost)} range</span>` : ""}
+      <span class="n${r.craftable ? "" : " zero"}">×${r.craftable}</span><b>${esc(r.name)}</b>${r.boost ? `<div class="unk boostline">${esc(r.boost)} range</div>` : ""}
       <div class="mats">${r.materials.map(x => `<span class="${x.have < x.need ? "short" : r.limit === x.name && r.craftable < 10 ? "limit" : ""}">${esc(x.name)} ${x.have}/${x.need}</span>`).join(" · ")}</div></div>`).join("");
+  // where to find the FSD-injection materials: the nearest landable bodies you have scanned that carry them
+  const src = m.sources || {}, limits = new Set(m.synthesis.filter(r => /^FSD/.test(r.name)).map(r => r.limit));
+  const have = Object.fromEntries(m.rows.map(r => [r.id, r]));
+  document.getElementById("matSources").innerHTML = Object.keys(src).length ? `<h3 class="subhead">Where to find FSD-injection materials <span class="unk">· scanned landable bodies within 300 ly, nearest first</span></h3>` +
+    `<table class="srcTable"><tbody>` + Object.entries(src).map(([mat, list]) => { const h = have[mat] || {};
+      return `<tr class="${limits.has(h.name) ? "limiting" : ""}"><td><b>${esc(h.name || mat)}</b>${limits.has(h.name) ? ` <span class="noscoop" title="limits how many injections you can make">limiting</span>` : ""}</td>` +
+        `<td class="num">${h.count ?? 0}${h.cap ? " / " + h.cap : ""}</td><td>` +
+        (list.map(x => `<span class="name" data-name="${esc(x.system)}" title="click to copy the system">${esc(x.body)}</span> <span class="unk">${x.pct}% · ${x.distance} ly</span>`).join(" · ") || `<span class="unk">none scanned nearby</span>`) + `</td></tr>`; }).join("") +
+    `</tbody></table>` : "";
   const f = mFilter.value.trim().toLowerCase();
   const rows = m.rows.filter(r => (!mHeld.checked || r.count) && (!f || r.name.toLowerCase().includes(f)));
   const cats = ["Raw", "Manufactured", "Encoded", "Other"];
@@ -994,15 +1336,18 @@ const lCatBoxes = [...document.querySelectorAll("#lCats input")];
 const lSaved = store.get("log", {});
 if (lSaved.days) lDays.value = lSaved.days;
 lNoise.checked = !!lSaved.noise;
-if (lSaved.cats) lCatBoxes.forEach(b => b.checked = lSaved.cats.includes(b.value));
-const CAT_GLYPH = {travel: "🚀", exploration: "🔭", bio: "🧬", ship: "🛠", carrier: "🚢", other: "•", noise: "·"};
+// a category added since the filters were saved starts ticked
+const lKnown = lSaved.known || ["travel", "exploration", "bio", "ship", "carrier", "other"];   // saves from before "known"
+if (lSaved.cats) lCatBoxes.forEach(b => b.checked = lSaved.cats.includes(b.value) || !lKnown.includes(b.value));
+const CAT_GLYPH = {travel: "🚀", exploration: "🔭", phenomena: "🌀", bio: "🧬", ship: "🛠", carrier: "🚢", other: "•", noise: "·"};
 function logQuery() {
   const cats = lCatBoxes.filter(b => b.checked).map(b => b.value);
   if (lNoise.checked) cats.push("noise");
   return `days=${lDays.value}&cat=${cats.join(",") || "none"}&q=${encodeURIComponent(lFilter.value.trim())}&noise=${lNoise.checked ? 1 : 0}`;
 }
 function saveLog() {
-  store.set("log", {days: lDays.value, noise: lNoise.checked, cats: lCatBoxes.filter(b => b.checked).map(b => b.value)});
+  store.set("log", {days: lDays.value, noise: lNoise.checked, cats: lCatBoxes.filter(b => b.checked).map(b => b.value),
+                    known: lCatBoxes.map(b => b.value)});
 }
 async function loadLog(force = false) {
   const key = logQuery();
@@ -1106,6 +1451,7 @@ async function loadBio() {
   bioKey = key;
   document.getElementById("bStatus").textContent = "loading…";
   try { const b = await apiJson(`api/organics?days=${bDays.value}`); if (key === bioKey) bioData = b; else return; } catch (err) { bioData = {error: err.message}; }
+  if (bioData && bioData.error) bioKey = null;   // retried at the next render
   renderBio();
 }
 const when = ts => ts ? ts.slice(0, 10) + " " + ts.slice(11, 16) : "";
@@ -1162,6 +1508,7 @@ async function loadHistory() {
   histKey = key;
   document.getElementById("hStatus").textContent = "loading…";
   try { const h = await apiJson(`api/history?days=${hDays.value}`); if (key === histKey) histData = h; else return; } catch (err) { histData = {error: err.message}; }
+  if (histData && histData.error) histKey = null;   // retried at the next render
   renderHistory();
 }
 const openSessions = new Set();
@@ -1177,6 +1524,32 @@ function renderHistory() {
       <td class="num">${a.jumps.toLocaleString()}</td><td class="num">${Math.round(a.ly).toLocaleString()}</td><td class="num hide-sm">${a.max_sol.toLocaleString()}</td>
       <td class="num">${a.firsts.toLocaleString()}</td><td class="num hide-sm">${a.bodies_first.toLocaleString()}</td><td class="num">${a.mapped.toLocaleString()}</td>
       <td class="num hide-sm">${a.footfalls.toLocaleString()}</td><td class="num">${a.samples.toLocaleString()}</td><td class="num hide-sm">${a.codex_new.toLocaleString()}</td></tr>`;
+  const L = h.ledger || {}, ss = L.since_last_sale, car = L.career;
+  if (ss && ss.since) document.getElementById("histAll").insertAdjacentHTML("beforeend",
+    `<tr class="alltime sincesale" title="everything since your last sale to Universal Cartographics"><td><b>Since your last sale</b> <span class="unk">${ss.days} d · ${esc(ss.since.slice(0, 10))}</span></td>
+      <td class="num">${ss.jumps.toLocaleString()}</td><td class="num">${Math.round(ss.ly).toLocaleString()}</td><td class="num hide-sm">${ss.max_sol.toLocaleString()}</td>
+      <td class="num">${ss.firsts}</td><td class="num hide-sm">${ss.bodies_first}</td><td class="num">${ss.mapped}</td>
+      <td class="num hide-sm">${ss.footfalls}</td><td class="num">${ss.samples}</td><td class="num hide-sm">${ss.codex_new}</td></tr>`);
+  if (car && car.Exploration) { const e = car.Exploration, o = car.Exobiology || {};
+    document.getElementById("histAll").insertAdjacentHTML("beforeend",
+      `<tr class="alltime career" title="the game's own statistics (your whole career, including journals Outrider never saw), as of ${esc((car.ts || "").slice(0, 10))}">
+        <td><b>Career</b> <span class="unk">game statistics</span></td><td class="num">${(e.Total_Hyperspace_Jumps || 0).toLocaleString()}</td>
+        <td class="num">${Math.round(e.Total_Hyperspace_Distance || 0).toLocaleString()}</td><td class="num hide-sm" title="greatest distance from your start">${Math.round(e.Greatest_Distance_From_Start || 0).toLocaleString()}</td>
+        <td class="num" title="systems visited">${(e.Systems_Visited || 0).toLocaleString()}</td><td class="num hide-sm"></td><td class="num" title="planets mapped (surface scans)">${(e.Planets_Scanned_To_Level_3 || 0).toLocaleString()}</td>
+        <td class="num hide-sm">${(e.First_Footfalls || 0).toLocaleString()}</td><td class="num" title="organic species encountered">${(o.Organic_Species_Encountered || 0).toLocaleString()}</td><td class="num hide-sm"></td></tr>`); }
+  const fmtD = t => t ? t.slice(0, 10) : "start";
+  document.getElementById("tripRows").innerHTML = (L.trips || []).map(t => {
+    const est = t.estimate ? ` <span class="unk">${t.estimate ? (t.paid_carto >= t.estimate ? "+" : "") + Math.round(100 * (t.paid_carto - t.estimate) / t.estimate) + "%" : ""}</span>` : "";
+    const losses = t.losses.map(l => `<span class="lost" title="${l.bodies} bodies (${l.firsts} first discoveries) died with the ship">✗ ${esc(l.ts.slice(0, 10))} −${credits(l.value)}</span>`).join(" ");
+    return `<tr><td>${fmtD(t.start)} → ${fmtD(t.end)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
+      <td class="num hide-sm">${Math.round(t.ly).toLocaleString()}</td><td class="num">${t.firsts}</td>
+      <td class="num" title="${credits(t.paid_carto || 0)} cartographics + ${credits(t.paid_bio || 0)} exobiology">${credits(t.paid)}</td>
+      <td class="num hide-sm">${t.estimate ? credits(t.estimate) + est : ""}</td><td class="num hide-sm">${t.per_hour ? credits(t.per_hour) : ""}</td>
+      <td class="num hide-sm">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm">${t.first_rate ?? ""}</td><td>${losses}</td></tr>`;
+  }).join("") || `<tr><td colspan="11" class="unk">No sales on record yet.</td></tr>`;
+  document.getElementById("topRows").innerHTML = (L.top_finds || []).map(f => `<tr><td><span class="name" data-name="${esc(f.body)}" title="click to copy">${esc(f.body)}</span></td>
+      <td>${esc(f.type || "")}${f.first_discovered ? " 🏁" : ""}${f.mapped ? " 🗺" : ""}</td><td class="num">${credits(f.value)}</td>
+      <td class="${f.state === "lost" ? "lost" : f.state === "sold" ? "sold" : "unsold"}">${f.state === "unsold" ? "aboard" : f.state}</td><td class="hide-sm">${esc((f.ts || "").slice(0, 10))}</td></tr>`).join("");
   document.getElementById("histRows").innerHTML = h.sessions.map((s, i) => {
     const open = openSessions.has(s.start);
     return `<tr class="sess${open ? " open" : ""}" data-sess="${esc(s.start)}"><td>${fmt(s.start)} → ${s.end.slice(11, 16)}</td>
@@ -1306,6 +1679,7 @@ function drawMap() {
     g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
   };
   ringAt(jr, C.accent, [4, 4]);
+  if (data && data.boost) ringAt(jr * data.boost, "#5ce1e6", [2, 3]);   // charged: this jump's real reach
   // Boosted range from here: neutron cone ×4, white dwarf ×1.5.
   const hs = d.here_star, mult = hs === "N" ? 4 : /^D/.test(hs || "") ? 1.5 : 0;
   if (jr && mult) ringAt(jr * mult, "#5ce1e6", [2, 6]);
@@ -1552,7 +1926,7 @@ function renderSearch(bms) {
   if (ob) ob.onclick = () => { sForm.querySelector('input[name=sSource][value=spansh]').checked = true; saveForm(); sForm.requestSubmit(); };
   const rows = [...(search.results || [])];
   table.hidden = !rows.length;
-  rows.sort(sortKey === "name"
+  rows.sort(sortKeys.search === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
     : (a, b) => a.distance - b.distance);
   document.getElementById("sRows").innerHTML = rows.map(r => `<tr>
@@ -1587,7 +1961,10 @@ sForm.addEventListener("submit", async e => {
 pollSearch();  // show the last search's results after a reload
 
 document.querySelectorAll("th[data-sort]").forEach(b => b.onclick = () => {
-  sortKey = b.dataset.sort; store.set("sort", sortKey); render();
+  const t = SORT_TABLES[b.closest("table").id]; if (!t) return;
+  sortKeys[t] = b.dataset.sort; store.set("sorts", sortKeys);
+  if (t === "firsts") renderFirsts();
+  render();
 });
 const oneJump = document.getElementById("oneJump");
 oneJump.checked = store.get("oneJump", false);
@@ -1777,6 +2154,20 @@ const SOUNDS = {
   alert(ctx, out) {     // two-note nag: something is unfinished here
     [0, .22].forEach(t => { tone(ctx, out, 987.77, t, .1, {type: "square", vol: .12}); tone(ctx, out, 739.99, t + .1, .1, {type: "square", vol: .12}); });
   },
+  chime(ctx, out) {     // soft bell: news, nothing to do right now
+    [[1318.5, 0], [1760, .09]].forEach(([hz, t]) => tone(ctx, out, hz, t, .9, {type: "sine", vol: .16, attack: .004}));
+  },
+  cash(ctx, out) {      // bright two-step "ka-ching": money
+    tone(ctx, out, 1567.98, 0, .08, {type: "triangle", vol: .22, attack: .002});
+    tone(ctx, out, 2093, .07, .5, {type: "triangle", vol: .2, attack: .002});
+    tone(ctx, out, 3135.96, .07, .35, {type: "sine", vol: .06, attack: .002});
+  },
+  find(ctx, out) {      // rising sparkle: something worth a look just turned up
+    [880, 1108.73, 1318.51, 1760].forEach((hz, i) => tone(ctx, out, hz, i * .07, .35, {type: "sine", vol: .14, attack: .005}));
+  },
+  danger(ctx, out) {    // low two-tone klaxon: the ship is in trouble
+    [0, .3].forEach(t => { tone(ctx, out, 330, t, .25, {type: "sawtooth", vol: .1}); tone(ctx, out, 247, t + .14, .14, {type: "sawtooth", vol: .1}); });
+  },
 };
 function play(name) {
   const ctx = audio(); if (!ctx || !SOUNDS[name]) return;
@@ -1800,7 +2191,18 @@ if (soundOn) audio();
 drawSoundBtn();
 
 let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierTs = null, lastCodexTs = null, lastDockTs = null;
+let lastMomentSeq = 0, lastSaleTs = null, lastPosId, lastLowFlag = false, hullLatch = 0, saleBanner = null;
+const hullBand = h => !h || h.pct == null ? 0 : h.pct < 25 ? 2 : h.pct < 50 ? 1 : 0;
+// "nearest KNOWN scoopable": out in the black most systems are unreported and most stars are scoopable,
+// so the absence of a known one is not a reason to panic, and the text says so
+function scoopHint() {
+  const p = data.position, jr = effRange();
+  const s = (data.systems || []).filter(x => x.id64 !== (p && p.id64) && x.main_scoopable).sort((a, b) => a.distance - b.distance)[0];
+  return s ? `nearest known scoopable: ${s.name} · ${s.distance.toFixed(1)} ly${jr && s.distance > jr ? " (beyond one jump)" : ""}`
+           : "no known scoopable star nearby (most unreported stars are scoopable: check the galaxy map)";
+}
 function onData() {
+  drawTts();
   const br = data.bio_rules, brEl = document.getElementById("bioRules");
   if (brEl) brEl.textContent = br
     ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
@@ -1808,64 +2210,160 @@ function onData() {
   if (data.run_id !== runId) {  // first payload, or the server was restarted: no sounds for old state
     runId = data.run_id; lastSeq = data.target ? data.target.seq : 0;
     const df = data.defaults || {};
-    if (bioMin == null) { bioMin = df.bio_min ?? 10000000; bioMinEl.value = bioMin; }
+    showBioMin();
     showHl(); showMaxBonus();
     if (store.get("sound", null) === null && df.sounds != null) { soundOn = !!df.sounds; drawSoundBtn(); }
     lastArrival = data.arrival ? data.arrival.seq : 0;
     lastUnsoldLevel = unsoldLevel(data.unsold); lastCarrierTs = data.carrier && data.carrier.ts;
     lastCodexTs = (data.codex_recent || [])[0] && data.codex_recent[0].ts;
     lastDockTs = data.docked && data.docked.ts;
+    lastMomentSeq = Math.max(0, ...(data.moments || []).map(m => m.seq));
+    lastSaleTs = data.last_sale && data.last_sale.ts;
+    lastPosId = data.position && data.position.id64; lastLowFlag = !!(data.fuel && data.fuel.low_flag);
+    hullLatch = hullBand(data.hull);
+    clearAnnounced = data.sampling && data.sampling.clear ? `${data.sampling.species}|${data.sampling.samples}` : null;
     return;
   }
   const dk = data.docked, dl = unsoldLevel(data.unsold);
   if (dk && dk.ts !== lastDockTs) {   // just docked: the moment to sell, if it is worth it
     if (lastDockTs !== undefined && (dk.has_uc || dk.has_vista) && dl && dl !== "ok")
-      notify("unsold", `Docked at ${dk.station} — ${credits(data.unsold.total)} cr to sell`, dk.has_uc ? "Universal Cartographics is here." : "Vista Genomics is here.");
+      alertOut("sell", `Docked at ${dk.station} — ${credits(data.unsold.total)} cr to sell`, dk.has_uc ? "Universal Cartographics is here." : "Vista Genomics is here.",
+               {say: `Docked. ${credits(data.unsold.total)} credits to sell here.`});
     lastDockTs = dk.ts;
-  } else if (!dk) lastDockTs = null;
+  } else if (!dk) {
+    if (lastDockTs && dl === "urgent")   // undocked with a red-level haul still aboard
+      alertOut("sell", `Undocked with ${credits(data.unsold.total)} cr still aboard`, "Nothing was sold.", {sound: "alert"});
+    lastDockTs = null;
+  }
+  const sale = data.last_sale;
+  if (sale && sale.ts !== lastSaleTs) {   // what did I bank, and is half of it still aboard?
+    const parts = [sale.carto && `${credits(sale.carto)} cr cartographics`, sale.bio && `${credits(sale.bio)} cr exobiology`].filter(Boolean);
+    const u = data.unsold || {}, bioLeft = (u.bio || {}).estimated_value || 0, cartoLeft = (u.carto || {}).estimated_payout || 0;
+    const still = sale.carto && !sale.bio && bioLeft > 0 ? `Exobiology still aboard: ${credits(bioLeft)} cr (Vista Genomics)`
+                : sale.bio && !sale.carto && cartoLeft > 0 ? `Cartographics still aboard: ${credits(cartoLeft)} cr (Universal Cartographics)` : "";
+    saleBanner = {text: `💰 Sold ${parts.join(" · ")}${sale.systems ? ` · ${sale.systems} systems` : ""}${still ? ` — ${still}` : ""}`, until: Date.now() + 60000};
+    alertOut("sell", `Sold ${parts.join(" and ")}`, still, {say: `Sold ${parts.join(" and ")}. ${still}`});
+    lastSaleTs = sale.ts;
+  }
+  // arrival: low fuel at a star you cannot scoop (the target-time warning only covers plotted jumps)
+  const pos = data.position, f0 = data.fuel;
+  if (pos && pos.id64 !== lastPosId) {
+    const hs = data.here_star;
+    if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && f0.pct < 30 && hs && !/^[OBAFGKM](_|$)/.test(hs))
+      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {say: `Fuel ${f0.pct} percent, and this star cannot be scooped.`});
+    lastPosId = pos.id64;
+  }
+  const low = !!(f0 && f0.low_flag);
+  if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {say: "Fuel low."});
+  lastLowFlag = low;
+  // moments: valuable finds (priced by the server, judged against your highlight levels), heat, interdiction
+  for (const m of (data.moments || []).filter(m => m.seq > lastMomentSeq)) {
+    if (m.kind === "scan") {
+      const special = (m.notable || m.terraformable) && m.first_discovered;
+      if (special || (m.base_value != null && m.base_value >= hlLevel("body"))) {
+        const what = [m.subtype, m.terraformable && "terraformable", m.first_discovered && "undiscovered"].filter(Boolean).join(", ");
+        alertOut("find", `${m.body}: ${what}`, m.base_value ? `${credits(m.base_value)} cr scanned and mapped` : "", {say: `${what}, ${m.body}.`});
+        toast(`✦ ${m.body}: ${what}`);
+      }
+    } else if (m.kind === "bio" && m.bio_value != null && m.bio_value >= hlLevel("bio")) {
+      alertOut("find", `Bio on ${m.body}: up to ${credits(m.bio_value)} cr`, `${m.signals} signal${m.signals === 1 ? "" : "s"}`,
+               {say: `Biology on ${m.body}, worth up to ${credits(m.bio_value)} credits.`});
+      toast(`🧬 ${m.body}: up to ${credits(m.bio_value)} cr`);
+    } else if (m.kind === "heat") alertOut("hull", "Heat damage", "", {say: "Heat damage."});
+    else if (m.kind === "interdicted") alertOut("hull", `Interdicted${m.by ? " by " + m.by : ""}`, m.submitted ? "you submitted" : "", {say: "Interdicted."});
+    lastMomentSeq = Math.max(lastMomentSeq, m.seq);
+  }
+  // sample spacing: say so once when you are far enough from every earlier sample of the species
+  const sm = data.sampling, smKey = sm && `${sm.species}|${sm.samples}`;
+  if (sm && sm.clear && smKey !== clearAnnounced) {
+    clearAnnounced = smKey;
+    alertOut("find", `Clear to sample ${sm.genus}`, `${sm.nearest} m from the nearest sample (${sm.need} m needed)`, {sound: "upbeat", say: `Clear to sample ${sm.genus}.`});
+  }
+  // hull: once below half, once below a quarter (re-armed by a repair)
+  const band = hullBand(data.hull);
+  if (band > hullLatch) {
+    const reps = data.materials && data.materials.repairs;
+    alertOut("hull", `Hull ${data.hull.pct}%`, reps ? `${reps} basic repairs can be synthesised` : "", {say: `Hull at ${data.hull.pct} percent.`});
+  }
+  hullLatch = band;
   const t = data.target;
   if (t && t.seq !== lastSeq) {
     if (t.fresh && soundOn && t.sound) play(t.sound);
-    if (t.fresh && t.status === "unreported") notify("discovery", "New discovery targeted", `${t.name} is not in Spansh or EDSM`);
+    if (t.fresh && t.status === "unreported")   // the fanfare above is the sound; this adds notification and speech
+      alertOut("discovery", "New discovery targeted", `${t.name} is not in Spansh or EDSM`, {sound: null, say: "New discovery targeted.", delay: 1500});
     const l = worthLeavingFor(t.leaving);
     if (t.fresh && l && !l.clean) {
-      if (soundOn) setTimeout(() => play("alert"), t.sound ? 1600 : 0);
-      notify("leaving", "Leaving with unfinished work", leavingText(t.leaving).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, ""));
+      const text = leavingText(t.leaving).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, "");
+      alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: `Leaving with unfinished work: ${text}`});
     }
     const f = data.fuel;
-    if (t.fresh && f && f.live && f.pct != null && f.pct < 30 && t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class)) {
-      if (soundOn) setTimeout(() => play("alert"), 800);
-      notify("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`);
-    }
+    if (t.fresh && f && f.live && f.pct != null && f.pct < 30 && t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class))
+      alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
+               {delay: 800, say: `Fuel ${f.pct} percent, and the target cannot be scooped.`});
     lastSeq = t.seq;
   }
   const a = data.arrival;
   if (a && a.seq !== lastArrival) {
-    if (a.wrong && soundOn && a.sound) play(a.sound);  // correct a wrong call out loud
-    if (a.wrong) notify("arrival", a.undiscovered ? `${a.name}: actually undiscovered` : `${a.name}: already discovered`,
-                        a.undiscovered ? "the fanfare was deserved after all" : "someone was here before you");
+    if (a.wrong)   // correct a wrong call out loud
+      alertOut("arrival", a.undiscovered ? `${a.name}: actually undiscovered` : `${a.name}: already discovered`,
+               a.undiscovered ? "the fanfare was deserved after all" : "someone was here before you", {sound: a.sound || null});
     lastArrival = a.seq;
   }
   const u = data.unsold, ulvl = unsoldLevel(u);
   if (ulvl && ulvl !== lastUnsoldLevel) {
-    if (lastUnsoldLevel && ulvl !== "ok") notify("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.");
+    if (lastUnsoldLevel && ulvl !== "ok") alertOut("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.");
     lastUnsoldLevel = ulvl;
   }
   const c = data.carrier;
   if (c && c.ts !== lastCarrierTs) {
-    if (lastCarrierTs) { notify("carrier", `${c.name} is at ${c.system}`, c.distance != null ? `${c.distance} ly from you` : ""); toast(`🚢 ${c.name} arrived at ${c.system}`); }
+    if (lastCarrierTs) { alertOut("carrier", `${c.name} is at ${c.system}`, c.distance != null ? `${c.distance} ly from you` : ""); toast(`🚢 ${c.name} arrived at ${c.system}`); }
     lastCarrierTs = c.ts;
   }
   const k = (data.codex_recent || [])[0];
   if (k && k.ts !== lastCodexTs) {
-    if (lastCodexTs) { const what = k.voucher ? `codex voucher · ${k.voucher.toLocaleString()} cr` : "new to your codex for this region"; notify("codex", `📖 ${k.name}`, what); toast(`📖 ${k.name} — ${what}`); }
+    if (lastCodexTs) { const what = k.voucher ? `codex voucher · ${k.voucher.toLocaleString()} cr` : "new to your codex for this region"; alertOut("codex", `📖 ${k.name}`, what, {say: `Codex: ${k.name}, ${what}.`}); toast(`📖 ${k.name} — ${what}`); }
     lastCodexTs = k.ts;
   }
 }
 // ---- alert settings ----
 const alertDialog = document.getElementById("alertDialog");
-document.getElementById("alertOpts").innerHTML = ALERTS.map(([k, label]) =>
-  `<label><input type="checkbox" data-alert="${k}"> ${esc(label)}</label>`).join("");
+document.getElementById("alertOpts").innerHTML = ALERTS.map(([k, label, snd]) =>
+  `<tr><td>${esc(label)}</td><td><input type="checkbox" data-alert="${k}" aria-label="notify"></td>` +
+  `<td>${snd || k === "arrival" ? `<input type="checkbox" data-asound="${k}" aria-label="sound">` : `<span class="unk" title="the target sound">·</span>`}</td>` +
+  `<td><input type="checkbox" data-aspeak="${k}" aria-label="speak"></td></tr>`).join("");
+for (const [attr, cfg, key] of [["asound", alertSound, "alertSound"], ["aspeak", alertSpeak, "alertSpeak"]])
+  alertDialog.querySelectorAll(`[data-${attr}]`).forEach(cb => {
+    cb.checked = !!cfg[cb.dataset[attr]];
+    cb.onchange = () => { cfg[cb.dataset[attr]] = cb.checked; store.set(key, cfg); };
+  });
+// spoken alerts: header toggle, voice picker, a test button
+const speechBtn = document.getElementById("speechBtn");
+function drawSpeechBtn() {
+  speechBtn.classList.toggle("on", !!speechOn); speechBtn.style.opacity = speechOn ? 1 : .45;
+  const t = data && data.tts;
+  speechBtn.title = (speechOn ? "spoken alerts on" : "spoken alerts off") + " — " +
+    (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see ed_tts.py)");
+}
+speechBtn.onclick = () => { speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn(); if (speechOn) speak("Spoken alerts on."); };
+document.getElementById("trySpeak").onclick = () => { audio(); speak("Leaving with unfinished work: A 2, a class two gas giant, plus 1.4M to map."); };
+function drawTts() {
+  const t = data && data.tts, sel = document.getElementById("ttsVoice");
+  document.getElementById("ttsEngine").textContent = t && t.engine === "piper" ? "· Piper" : "· browser speech";
+  document.getElementById("ttsStatus").textContent = t && t.available ? t.status : "";
+  document.getElementById("ttsHint").textContent = !t || !t.available
+    ? "Piper is not installed, so the browser's own voice is used (robotic on Linux). For a natural voice: python3 -m venv --system-site-packages .venv && .venv/bin/pip install piper-tts, then restart Outrider."
+    : "Voices live in piper-voices/ next to the script; a configured voice that is missing is downloaded there on first use.";
+  const opts = (t && t.voices) || [];
+  if (sel.dataset.opts !== opts.join(",")) {
+    sel.innerHTML = opts.map(v => `<option>${esc(v)}</option>`).join("") || `<option value="">(none installed yet)</option>`;
+    sel.dataset.opts = opts.join(",");
+  }
+  if (t && t.voice && document.activeElement !== sel) sel.value = t.voice;
+  sel.disabled = !opts.length;
+  drawSpeechBtn();
+}
+drawSpeechBtn();
+document.getElementById("ttsVoice").onchange = e => apiJson("api/voice", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({voice: e.target.value})});
 alertDialog.querySelectorAll("[data-alert]").forEach(cb => {
   cb.checked = !!alertCfg[cb.dataset.alert];
   cb.onchange = async () => {
@@ -1912,9 +2410,33 @@ const geoTag = b => b.geo ? ` <span class="sp geo" title="geological signals">�
 let maxBonusCfg = store.get("maxBonus", null);
 const maxBonus = () => maxBonusCfg ?? (data && data.defaults && data.defaults.max_include_bonus) ?? true;
 const maxOf = x => maxBonus() || x.value_max_base == null ? x.value_max : x.value_max_base;
+// ✦: the likeliest species of a genus has no codex entry of yours in this region (codex entries, and their
+// vouchers, are per region). Species level is conservative: a codex entry is per colour variant.
+const codexMark = (x, region) => x && x.codex_new
+  ? ` <span class="cxnew" title="new to your codex in ${esc(region || "this region")} (likeliest species; the colour variant may differ)">✦</span>` : "";
+let codexNewCounts = store.get("codexNewCounts", true);
+// Jump range with a jet-cone charge applied (neutron x4, white dwarf x1.5; the journal gives the exact value).
+const effRange = () => data && data.jump_range ? data.jump_range * (data.boost || 1) : null;
+// Arrival stars worth a warning before you jump: exclusion zones and jet cones at the drop.
+const hazardNote = sc => !sc ? "" : /^N$/.test(sc) ? "neutron star: throttle down on arrival, mind the jet cone"
+  : /^D/.test(sc) ? "white dwarf: throttle down on arrival, mind the jet cone"
+  : /^(H|SupermassiveBlackHole)$/.test(sc) ? "black hole: throttle down on arrival" : "";
 function hotClasses(b) {
   return (b.base_value != null && b.base_value >= hlLevel("body") ? " hot" : "") + (bioWorth(b) >= hlLevel("bio") ? " biohot" : "");
 }
+// rebuy multiples: blank = off
+for (const [id, key] of [["rebuyWarn", "rebuyWarn"], ["rebuyUrgent", "rebuyUrgent"]]) {
+  const el = document.getElementById(id);
+  el.value = unsoldCfg[key] ?? "";
+  el.onchange = () => {
+    const v = Number(el.value);
+    unsoldCfg[key] = el.value.trim() === "" || !isFinite(v) || v <= 0 ? null : v;
+    el.value = unsoldCfg[key] ?? ""; store.set("unsoldCfg", unsoldCfg); render();
+  };
+}
+const codexNewEl = document.getElementById("codexNewCounts");
+codexNewEl.checked = codexNewCounts;
+codexNewEl.onchange = () => { codexNewCounts = codexNewEl.checked; store.set("codexNewCounts", codexNewCounts); render(); };
 const maxBonusEl = document.getElementById("maxBonus");
 const showMaxBonus = () => { maxBonusEl.checked = maxBonus(); };
 maxBonusEl.onchange = () => { maxBonusCfg = maxBonusEl.checked; store.set("maxBonus", maxBonusCfg); renderHere(); };
@@ -1932,18 +2454,23 @@ for (const [id, el] of Object.entries(hlEls)) {
 }
 showHl();
 const bioMinEl = document.getElementById("bioMin");
-bioMinEl.value = bioMin ?? "";
+const showBioMin = () => { bioMinEl.value = bioMinCfg ?? ""; bioMinEl.placeholder = bioMinNow(); };
+showBioMin();
 bioMinEl.onchange = () => {
   const v = Number(bioMinEl.value);
-  bioMin = bioMinEl.value.trim() === "" || !isFinite(v) || v < 0 ? ((data && data.defaults && data.defaults.bio_min) ?? 10000000) : Math.round(v);
-  bioMinEl.value = bioMin; store.set("bioMin", bioMin); render();
+  bioMinCfg = bioMinEl.value.trim() === "" || !isFinite(v) || v < 0 ? null : Math.round(v);
+  store.set("bioMinCfg", bioMinCfg); showBioMin(); render();
 };
 document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   e.preventDefault();   // the link sits inside a <label>: don't let the click also toggle or focus its input
   const id = r.dataset.reset;
-  if (id === "maxBonus") { maxBonusCfg = null; store.set("maxBonus", null); showMaxBonus(); renderHere(); }
+  if (id === "rebuy") {
+    unsoldCfg.rebuyWarn = unsoldCfg.rebuyUrgent = null; store.set("unsoldCfg", unsoldCfg);
+    document.getElementById("rebuyWarn").value = document.getElementById("rebuyUrgent").value = "";
+  }
+  else if (id === "maxBonus") { maxBonusCfg = null; store.set("maxBonus", null); showMaxBonus(); renderHere(); }
   else if (id === "hlBody" || id === "hlBio") { hlCfg[id === "hlBody" ? "body" : "bio"] = null; store.set("highlightCfg", hlCfg); showHl(); renderHere(); }
-  else if (id === "bioMin") { bioMin = (data && data.defaults && data.defaults.bio_min) ?? 10000000; bioMinEl.value = bioMin; store.set("bioMin", bioMin); }
+  else if (id === "bioMin") { bioMinCfg = null; store.set("bioMinCfg", null); showBioMin(); }
   else { unsoldCfg[id === "unsoldWarn" ? "warn" : "urgent"] = null; store.set("unsoldCfg", unsoldCfg); thresholdEls[id].dispatchEvent(new Event("focus")); }
   render();
 });
@@ -1960,12 +2487,44 @@ function setConnected(ok) {
   }
 }
 async function poll(once = false) {
+  let ok = false;
   try {
     const r = await fetch(`api/nearby?since=${runId}:${version}`);
     if (r.status === 200) { data = await r.json(); version = data.version; setConnected(true); onData(); render(); }
     else if (r.status === 204) setConnected(true);
     else setConnected(false);
+    ok = r.status === 200 || r.status === 204;
   } catch { setConnected(false); }
-  if (!once) setTimeout(poll, 1000);
+  // the server holds the request until something changes, so ask again at once; back off if it failed
+  if (!once) setTimeout(poll, ok ? 0 : 2000);
 }
 poll();
+
+// ---- keyboard reachability ----
+// Clickable things that are not real buttons (sort headers, ☆, ⌖/🔍 links, Bodies pin cells, copyable
+// names, bodies in search results) get focus and act on Enter/Space like a click. Not shortcuts: Tab to it.
+const KEYABLE = 'th[data-sort], [data-bm], .goto, td.bodies[data-pop], td.name[data-name], .copy[data-name], [data-sbodypop], #hereRows tr[data-body], .sbody[data-body]';
+let keyablePending = false;
+function markKeyable() {
+  keyablePending = false;
+  document.querySelectorAll(KEYABLE).forEach(el => {
+    if (el.tabIndex < 0) el.tabIndex = 0;
+    if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+  });
+}
+new MutationObserver(() => { if (!keyablePending) { keyablePending = true; requestAnimationFrame(markKeyable); } })
+  .observe(document.body, {childList: true, subtree: true});
+markKeyable();
+document.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.getAttribute && e.target.getAttribute("role") === "button"
+      && e.target.tagName !== "BUTTON") {
+    e.preventDefault(); e.target.click();
+  }
+});
+document.getElementById("matSources").addEventListener("click", e => {
+  const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);
+});
+document.addEventListener("click", async e => {
+  if (!e.target.closest || !e.target.closest("#nsClear")) return;
+  await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({clear: true})});
+});

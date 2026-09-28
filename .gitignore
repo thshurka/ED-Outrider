@@ -15,3 +15,14 @@ bio_rules.json.tmp
 
 # private planning notes, never committed
 project/
+
+# Python virtual environment and downloaded Piper voices (spoken alerts)
+.venv/
+piper-voices/
+
+# Backups made from the page (database + journals)
+backups/
+
+# Local install and launch scripts
+install.sh
+run.sh

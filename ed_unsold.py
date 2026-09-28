@@ -307,7 +307,6 @@ ORGANIC_VALUES = {
     '$Codex_Ent_Thargoid_Tower_High_Name': (2247100, 'Major Thargoid Spire'),
     '$Codex_Ent_Thargoid_Tower_Low_Name': (2247100, 'Minor Thargoid Spire'),
     '$Codex_Ent_Thargoid_Tower_ExtraHigh_Name': (2247100, 'Primary Thargoid Spire'),
-    '$Codex_Ent_Thargoid_Barnacle_Matrix_Name': (2313500, 'Thargoid Mega Barnacles'),
     '$Codex_Ent_Thargoid_Tower_Med_Name': (2247100, 'Thargoid Spire'),
     '$Codex_Ent_Thargoid_Tower_Name': (2247100, 'Thargoid Spires'),
     '$Codex_Ent_Thargoid_Barnacle_Matrix_Name': (2313500, 'Thargoid Barnacle Matrix'),
@@ -363,7 +362,7 @@ def parse_ts(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-# Parsed events per journal file, keyed by path -> (size, mtime, [(ts, commander, key, ev)]).
+# Parsed events per journal file, keyed by path -> (size, mtime, [(ts, commander, line hash, ev)]).
 # Old journals never change, so a long-running caller (ed_outrider) only re-reads the file
 # that is still growing.
 _FILE_CACHE = {}
@@ -391,7 +390,10 @@ def _read_file(path):
                 ts = parse_ts(ev["timestamp"])
             except (KeyError, ValueError):
                 continue
-            events.append((ts, commander, key, ev))
+            if name == "Scan":   # most of the volume: keep only what analyse() prices and judges by
+                ev = {k: ev[k] for k in ("event", "timestamp") + SCAN_KEEP if k in ev}
+            # a hash, not the line itself, de-duplicates across folders: the cache lives as long as the server
+            events.append((ts, commander, hash(key), ev))
     return events
 
 
@@ -536,7 +538,8 @@ def analyse(events, args):
     hard_cut = parse_ts(args.since) if args.since else None
     sales_by_system = {}
     for ts, ev in explo_sales:
-        names = [d.get("SystemName") for d in ev.get("Discovered") or []] or ev.get("Systems") or []
+        names = ev.get("Systems") or [d.get("SystemName") if isinstance(d, dict) else d
+                                          for d in ev.get("Discovered") or []]   # pre-3.3: Systems lists them all
         for n in names:
             sales_by_system.setdefault(n, []).append(ts)
     losses = [] if args.ignore_deaths else sorted(ts for ts, opt in deaths if is_ship_loss(opt))

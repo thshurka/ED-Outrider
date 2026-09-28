@@ -20,7 +20,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
   console.log(ok ? "OK" : "FAIL", "| header |", d.querySelector("#sub").textContent.slice(0, 80), "| errors:", errors);
   // every view: [button, element that must end up with content]
   const views = [["overview", "#ovPanes"], ["near", "#rows"], ["here", "#hereRows"], ["bio", "#bioRows"], ["bm", "#bmTable"],
-                 ["search", "#searchForm"], ["hist", "#histRows"], ["log", "#logRows"], ["mat", "#matGrid"], ["firsts", "#firstsRows"]];
+                 ["search", "#searchForm"], ["hist", "#histRows"], ["log", "#logRows"], ["mat", "#matGrid"], ["firsts", "#firstsRows"], ["now", "#nowView"]];
   let allOk = ok;
   for (const [v, sel] of views) {
     const btn = d.querySelector(`[data-view="${v}"]`);
@@ -34,7 +34,8 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && good;
     console.log(good ? "OK" : "FAIL", "|", v.padEnd(8), "|", (el ? el.textContent.trim().replace(/\s+/g, " ").slice(0, 90) : "missing " + sel), errors.slice(before));
   }
-  // the schematic toggle inside Here
+  // the schematic toggle inside Here (Now mode hides the view buttons: tap it to go back first)
+  if (!d.getElementById("nowView").hidden) { d.getElementById("nowView").click(); await sleep(500); }
   d.querySelector('[data-view="here"]').click(); await sleep(1500);
   const tog = d.querySelector('[data-mode="schematic"]');
   if (tog) {

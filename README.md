@@ -35,16 +35,19 @@ around you, then layers your own scans on top — nothing is ever uploaded.
 | 🔭 **Find the undiscovered** | Every known system within 25 ly is listed. If the galaxy map shows one that *isn't* on the page, nobody with an uploader has been there. |
 | 🔊 **Hear it before you jump** | Target a system and get a fanfare if it's a brand-new discovery, a cheerful note if it's known but unscanned, a thud if it's been done. |
 | 🪐 **See the whole system** | Every body: value as scanned and if mapped, gravity, atmosphere, rings with hotspots and density, and which exobiology species are likely — before you probe or land. |
-| ⚠️ **Don't leave money behind** | Target the next system with bodies unscanned, bio unsampled or a first-discovered water world unmapped, and the page says so. |
+| ⚠️ **Don't leave money behind** | Target the next system with mapping or exobiology worth over your thresholds still undone (or a first-discovered Earth-like, water or terraformable world unmapped) and the page says so, out loud if you like. Ordinary systems stay quiet. |
 | 💰 **Know what's on board** | Unsold cartographics and exobiology in credits, bonuses included, and how many of your 🏁 first-discovery tags are still unsold. Dock somewhere that buys it and it tells you to sell. |
 | 📜 **Your logbook** | Every journal event in a searchable log, every exobiology sample with what became of it, and a schematic of the system you're in. |
+| 🧭 **Decide where to go** | Visited systems nearby with work worth going back for, the nearest places that buy your data, your plotted route with its dry stretches, a bookmark as your next stop, notable stellar phenomena, and curiosities (ringed landables, close orbits, moons of moons…). |
+| 🌿 **On the ground** | Landed or on foot, a strip shows what is left to sample on that body and counts down the metres to the next colony, then says "clear to sample". |
+| 📈 **The long view** | Each trip from sale to sale with what it actually paid, what each ship loss cost, your most valuable finds, your ranks and the game's own career statistics. |
 | 🚢 **Everything else** | Fuel, jumps left and FSD boosts you can synthesise, your credits and ship, where your carrier is, the last codex entry, and a 3D map with your path, your discoveries and neutron stars for boosting. |
 
 ## 🚀 Getting started
 
 ```bash
-pip install aiohttp
-python3 ed_outrider.py
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python 3.11 or newer
+.venv/bin/python ed_outrider.py
 ```
 
 Open **<http://127.0.0.1:8025/>** and go fly.
@@ -81,7 +84,10 @@ dwarfs, with your boosted range drawn when you're at one.
 </td>
 <td width="50%" valign="top">
 <b>History</b> — your sessions: jumps, light-years, systems first discovered, bodies mapped,
-samples taken, codex entries, with an all-time row on top. Expand one for the list of systems.
+samples taken, codex entries, with an all-time row, a "since your last sale" row and the game's
+own career statistics on top. Below: every trip from sale to sale with what Universal Cartographics and
+Vista Genomics actually paid (and, from now on, how close Outrider's estimate was), the credits per hour
+and per jump, what each ship loss cost, and your 25 most valuable finds. Expand a session for its systems.
 <br><br><img src="docs/history.png" alt="History">
 </td>
 </tr>
@@ -127,20 +133,34 @@ rest pays over 1, 5 or 10 million, bonuses left out) within a radius. <i>Local</
 </td>
 <td width="50%" valign="top">
 <b>My firsts</b> — every visited system still holding first-discovery data you haven't sold, and
-what it's worth. Plus <b>Bookmarks</b>: star a system and leave yourself a note.
+what it's worth, and <b>Left behind</b>: visited systems nearby with bodies still to find, mapping or
+bio over your thresholds. Plus <b>Bookmarks</b>: star a system, leave yourself a note, and make it your
+<b>next stop</b> (its distance shows in the header until you arrive).
 <br><br><img src="docs/firsts.png" alt="My firsts">
 </td>
 </tr>
 </table>
 
 The **Overview** (top of the page) shows Here and Nearby together — drag the divider, swap sides,
-or stack them.
+or stack them. **Now** is the cockpit view for a second monitor or a tablet: the system, the target,
+fuel, and what is left here (or on the body you are standing on) in big text. Open it directly with
+`http://127.0.0.1:8025/?mode=now`; tap to go back.
+
+The header also shows the galactic region you are in, your ranks, a live countdown when your carrier has
+a jump booked, the hull when it is damaged, the FSD injections your materials allow, the nearest places to
+sell, and a one-click backup of the database and journals (into `backups/` next to the script).
 
 ## 🔔 Sounds and alerts
 
-The **🔔 alerts** button turns on desktop notifications — a new discovery targeted, unfinished work
-when you leave, low fuel with a non-scoopable star targeted, unsold data crossing a threshold, your
-carrier arriving, a new codex entry — and holds the thresholds:
+Alerts fire only for something out of the ordinary: a new discovery targeted, leaving a system with
+work worth coming back for (mapping or bio over your highlight levels, or a first-discovered Earth-like,
+water, ammonia or terraformable world), low fuel where you cannot scoop, a valuable body the moment the
+FSS resolves it, docking with data to sell and what you banked when you sold, hull damage, heat damage
+and interdiction, unsold data crossing a threshold, your carrier arriving, a new codex entry. Ordinary
+systems stay quiet.
+
+Each alert can play its own sound (🔊), show a desktop notification, and be **spoken** (🗣) — chosen per
+alert in the **🔔 alerts** dialog, which also holds the thresholds:
 
 - **Exobiology** — only count a body as unfinished if a single body could pay over a certain
   amount (default 10 million), so one bacterium doesn't nag you.
@@ -154,6 +174,15 @@ carrier arriving, a new codex entry — and holds the thresholds:
   `body_max_value_include_bonus` sets it. Now always includes the bonuses you have earned.
 
 Everything you change there is remembered by your browser.
+
+> [!TIP]
+> **Spoken alerts sound far better with Piper**, a neural voice that runs on your CPU. Without it the
+> browser's own voice is used (fine on Windows and macOS, robotic on Linux). To install it, next to the
+> script: `requirements.txt` includes it (`piper-tts`), so the install above already did; leave that line
+> out if you would rather not have it. A `.venv` next to the script is found even when you start Outrider
+> with plain `python3 ed_outrider.py`. The voice (`voice` in the config file,
+> default a southern English female voice, with `voice_fallback` as the backup) is downloaded into
+> `piper-voices/` the first time; the dialog lets you switch between installed voices.
 
 ## 🧭 Good to know
 
@@ -203,9 +232,14 @@ currently in effect, and command-line flags do the same for a single run
 | `ed_unsold.py` | The unsold-data estimate; also works on its own from the command line |
 | `ed_log.py` | One-line summaries of journal events for the Log view, and the file reader behind it |
 | `ed_materials.py` | Material names, grades and caps, synthesis recipes, and the running inventory |
+| `ed_tts.py` | Spoken alerts with Piper (optional): voice selection, first-use download, synthesis |
 | `ed_bio.py` | The exobiology predictor; `--backtest` scores the rules against your own journals, `--update-rules` fetches them by hand |
 | `bio_rules.json` | The spawn rules, nebula tables and region map, as fetched from BioScan and klightspeed's region map; refreshed automatically |
-| `tests/` | `python3 -m unittest discover tests` |
+| `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port>` for the page |
+
+For overlays and other tools, `GET /api/status` returns a compact JSON status, and
+`GET /api/status.txt?fields=system,region,fuel,target,unsold,body,sampling` one line for an OBS
+text source. Both are read-only.
 
 </details>
 
@@ -215,7 +249,8 @@ currently in effect, and command-line flags do the same for a single run
 Data from <a href="https://spansh.co.uk">Spansh</a> and <a href="https://www.edsm.net">EDSM</a>.
 Exobiology spawn conditions are the community's work, as gathered by the Canonn Research Group and maintained in
 <a href="https://github.com/Silarn/EDMC-BioScan">EDMC-BioScan</a>; the galactic region map is
-<a href="https://github.com/klightspeed/EliteDangerousRegionMap">klightspeed's</a> (MIT).<br>
+<a href="https://github.com/klightspeed/EliteDangerousRegionMap">klightspeed's</a> (MIT); sample colony
+distances are from <a href="https://github.com/Silarn/EDMC-ExploData">EDMC-ExploData</a> (GPL-2.0).<br>
 ED Outrider is free software under the <a href="LICENSE">GNU GPL v2 or later</a>.<br>
 Elite Dangerous © Frontier Developments — this is a fan-made tool, not affiliated with Frontier.
 </p>

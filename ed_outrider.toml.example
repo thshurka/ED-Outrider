@@ -44,6 +44,10 @@
 # body_max_value_include_bonus = true # Here: the Max column (and the system's max total) counts first-discovery,
 #                                    # first-mapped and first-footfall bonuses; false shows plain payouts.
 #                                    # Now always includes them: it is what a sale would actually pay.
+# voice = "en_GB-southern_english_female-low"   # spoken alerts (🗣 in the page): the Piper voice, downloaded
+#                                               # into piper-voices/ on first use; needs `pip install piper-tts`
+#                                               # (see ed_tts.py), otherwise the browser's own speech is used
+# voice_fallback = "en_GB-jenny_dioco-medium"   # used while the voice above is missing
 
 [spansh]
 # concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh)

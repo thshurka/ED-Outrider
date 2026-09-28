@@ -12,6 +12,7 @@ import os
 import sys
 import unittest
 import unittest.mock
+import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ed_bio  # noqa: E402
@@ -435,7 +436,8 @@ class Log(unittest.TestCase):
         self.assertIn("landable 0.19 g", ed_log.summary(self.SAMPLES[10]))
         self.assertEqual(ed_log.summary(self.SAMPLES[21], {(1, 7): "B 7"}), "Log: Bacterium Cerbrus on B 7")
         self.assertEqual(ed_log.fallback({"event": "X", "Thing": "$nice;", "Thing_Localised": "Nice", "Count": 3}),
-                         "Thing: Nice · Count: 3")
+                         "X · Thing: Nice · Count: 3")
+        self.assertEqual(ed_log.fallback({"event": "RepairDrone"}), "Repair drone")   # never blank
         self.assertEqual(ed_log.category("CarrierBankTransfer"), "carrier")
         self.assertEqual(ed_log.category("Music"), "noise")
 
@@ -596,3 +598,589 @@ class SpanshGenera(unittest.TestCase):
         b = {"name": "Sys 1", "type": "Planet", "subType": "Rocky body",
              "signals": {"genuses": ["$Codex_Ent_Bacterial_Genus_Name;", {"name": "Stratum"}]}}
         self.assertEqual(ed_outrider.record_from_dump("Sys", b)["genera"], ["Bacterium", "Stratum"])
+
+
+class LatestPickup(unittest.TestCase):
+    """Batch 0.2: data is judged by your latest scan, maps separately; lost data is recoverable."""
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        import types
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+    def ev(self, ts, **kw):
+        self.j.handle(dict(kw, timestamp=ts))
+
+    def body(self):
+        self.db.commit()
+        return next(b for b in self.state.system_detail(1)["bodies"] if b["name"] == "5")
+
+    def lose_ship(self, ts):
+        self.ev(ts, event="Died"); self.ev(ts, event="Resurrect", Option="rebuy")
+
+    def test_already_discovered_body_rescanned_after_loss_counts(self):
+        self.j.handle(scan("2026-01-01T00:01:00Z", "Sys", 1, 5, "Sys 5", disc=True)[2])
+        self.lose_ship("2026-01-02T00:00:00Z")
+        self.assertEqual(self.body()["value_parts"]["scan_state"], "lost")
+        self.j.handle(scan("2026-01-03T00:01:00Z", "Sys", 1, 5, "Sys 5", disc=True)[2])
+        b = self.body()
+        self.assertEqual(b["value_parts"]["scan_state"], "unsold")
+        self.assertGreater(b["value_now"], 0)
+
+    def test_map_lost_with_ship_is_not_counted_until_remapped(self):
+        self.j.handle(scan("2026-01-01T00:01:00Z", "Sys", 1, 5, "Sys 5")[2])
+        self.ev("2026-01-01T00:02:00Z", event="SAAScanComplete", SystemAddress=1, BodyID=5, BodyName="Sys 5")
+        mapped_now = self.body()["value_now"]
+        self.lose_ship("2026-01-02T00:00:00Z")
+        self.j.handle(scan("2026-01-03T00:01:00Z", "Sys", 1, 5, "Sys 5")[2])     # rescanned, not remapped
+        b = self.body()
+        self.assertFalse(b["mapped"]); self.assertFalse(b["first_mapped"])
+        self.assertEqual(b["map_state"], "lost")
+        self.assertLess(b["value_now"], mapped_now)                  # the scan only
+        self.assertEqual(b["value_now"] + b["value_parts"]["carto_left"], mapped_now)   # the map is still there to redo
+        self.ev("2026-01-03T00:02:00Z", event="SAAScanComplete", SystemAddress=1, BodyID=5, BodyName="Sys 5")
+        self.assertEqual(self.body()["value_now"], mapped_now)
+
+    def test_lost_scan_not_rescanned_is_recoverable_in_max(self):
+        self.j.handle(scan("2026-01-01T00:01:00Z", "Sys", 1, 5, "Sys 5")[2])
+        full = self.body()["value_max"]
+        self.lose_ship("2026-01-02T00:00:00Z")
+        b = self.body()
+        self.assertEqual(b["value_now"], 0)
+        self.assertEqual(b["value_max"], full)     # scan and map it again: the same credits are there
+
+    def test_sold_data_is_done(self):
+        self.j.handle(scan("2026-01-01T00:01:00Z", "Sys", 1, 5, "Sys 5")[2])
+        self.ev("2026-01-01T00:02:00Z", event="SAAScanComplete", SystemAddress=1, BodyID=5, BodyName="Sys 5")
+        self.j.handle(sale("2026-01-02T00:00:00Z", ["Sys"])[2])
+        b = self.body()
+        self.assertEqual((b["value_now"], b["value_max"]), (0, 0))
+        self.assertTrue(b["mapped"])
+
+
+class DumpPricing(unittest.TestCase):
+    """Batch 0.2: Spansh bodies are priced with the same formula as your scans."""
+
+    def test_dump_body_priced_like_a_scan(self):
+        dump = {"name": "Sys 1", "type": "Planet", "subType": "Water world", "earthMasses": 0.5,
+                "terraformingState": "Candidate for terraforming", "bodyId": 1}
+        r = ed_outrider.record_from_dump("Sys", dump)
+        cv = ed_outrider.carto_values(r, False, None, None, None)
+        expect = ed_unsold.body_value({"PlanetClass": "Water world", "MassEM": 0.5, "TerraformState": "Terraformable"},
+                                      True, False, True)
+        self.assertEqual(cv["left"], expect)
+        self.assertEqual(cv["now"], 0)
+        # the same body once you have scanned it (no bonuses: someone discovered it) is worth the same in total
+        f = {"was_discovered": 1, "was_mapped": 1}
+        scanned = ed_outrider.carto_values(r, True, f, "unsold", None)
+        self.assertEqual(scanned["now"] + scanned["left"], expect)
+
+    def test_star_and_unpriceable(self):
+        star = ed_outrider.record_from_dump("Sys", {"name": "Sys", "type": "Star", "subType": "Neutron Star", "solarMasses": 1.4})
+        self.assertEqual(star["ed"]["StarType"], "N")
+        self.assertGreater(ed_outrider.carto_values(star, False, None, None, None)["left"], 20000)
+        odd = ed_outrider.record_from_dump("Sys", {"name": "Sys 2", "type": "Planet", "subType": "Icy body"})   # no mass
+        self.assertIsNone(odd["ed"])
+
+
+class DumpRetries(unittest.TestCase):
+    """Batch 0.1: failed body-detail fetches are retried a few times, logged, then given up on."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.state = ed_outrider.State(self.db, ed_outrider.Journals(self.db),
+                                       types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def test_cap(self):
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            for _ in range(ed_outrider.DUMP_MAX_TRIES):
+                self.state.dump_failed(7, RuntimeError("boom"))
+                if 7 in self.state.failed_dumps and self.state.dump_tries[7] < ed_outrider.DUMP_MAX_TRIES:
+                    self.state.failed_dumps.discard(7)
+        self.assertNotIn(7, self.state.failed_dumps)
+        self.assertEqual(err.getvalue().count("RuntimeError"), 2)   # first failure and giving up, not every retry
+
+    def test_partial_while_details_pending(self):
+        self.db.execute("INSERT INTO visits VALUES (7, 'Sys', 0, 0, 0, 't', 't', 1)")
+        search_level = {"name": "Sys 1", "type": "Planet", "subtype": "Icy body", "full": False, "value": 1000,
+                        "scan_value": 500}
+        self.state.bases[7] = ("spansh", {"name": "Sys", "x": 0, "y": 0, "z": 0, "records": [search_level]})
+        self.assertTrue(self.state.system_detail(7)["partial"])
+        self.state.dump_tries[7] = ed_outrider.DUMP_MAX_TRIES     # given up: stop asking the page to poll
+        self.assertFalse(self.state.system_detail(7)["partial"])
+
+
+class TickSafety(unittest.TestCase):
+    """Batch 0.3: a bad file or a failed tick never loses or double-counts journal events."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+
+    def write(self, name, events):
+        import json as _j
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as f:
+            for e in events:
+                f.write(_j.dumps(e, separators=(",", ":")) + "\n")
+        return path
+
+    def jump(self, ts, id64, x):
+        return {"timestamp": ts, "event": "FSDJump", "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0],
+                "JumpDist": 10.0, "FuelUsed": 1.0}
+
+    def tick(self):
+        """What watch() does: scan, commit; on an exception roll back and reload."""
+        try:
+            self.j.scan_dir(self.dir)
+            self.db.commit()
+            return True
+        except Exception:
+            self.db.rollback()
+            self.j.reload()
+            return False
+
+    def test_unreadable_file_is_skipped_not_fatal(self):
+        import contextlib, io
+        self.write("Journal.2026-01-01T000000.01.log", [self.jump("2026-01-01T00:00:00Z", 1, 0)])
+        bad = self.write("Journal.2026-01-02T000000.01.log", [self.jump("2026-01-02T00:00:00Z", 2, 10)])
+        self.write("Journal.2026-01-03T000000.01.log", [self.jump("2026-01-03T00:00:00Z", 3, 20)])
+        os.chmod(bad, 0)
+        try:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertTrue(self.tick())
+                self.tick()
+            self.assertEqual(self.j.pos["id64"], 3)          # the newer file was still read
+            self.assertEqual(err.getvalue().count("journal skipped"), 1)   # reported once, not every tick
+        finally:
+            os.chmod(bad, 0o644)
+        self.tick()
+        self.assertEqual({r[0] for r in self.db.execute("SELECT id64 FROM visits")}, {1, 2, 3})
+
+    def test_failed_tick_is_retried_exactly(self):
+        self.write("Journal.2026-01-01T000000.01.log", [
+            self.jump("2026-01-01T00:00:00Z", 1, 0),
+            {"timestamp": "2026-01-01T00:01:00Z", "event": "MaterialCollected", "Category": "Raw", "Name": "iron", "Count": 3},
+            {"timestamp": "2026-01-01T00:02:00Z", "event": "LoadGame", "Commander": "J", "Credits": 100}])
+        self.write("Journal.2026-01-02T000000.01.log", [
+            {"timestamp": "2026-01-02T00:00:00Z", "event": "MultiSellExplorationData", "TotalEarnings": 50, "Discovered": []},
+            self.jump("2026-01-02T00:01:00Z", 2, 10)])
+        calls = {"n": 0}
+        # the first file's events land, then a database error in the second file fails the tick once
+        orig_handle = self.j.handle
+        def flaky(ev):
+            if ev.get("event") == "FSDJump" and ev.get("SystemAddress") == 2 and not calls["n"]:
+                calls["n"] += 1
+                raise sqlite3.OperationalError("database is locked")
+            return orig_handle(ev)
+        self.j.handle = flaky
+        self.assertFalse(self.tick())
+        self.assertTrue(self.tick())
+        self.assertEqual({r[0] for r in self.db.execute("SELECT id64 FROM visits")}, {1, 2})   # nothing lost
+        self.assertEqual(self.j.materials["counts"].get("iron"), 3)                             # nothing doubled
+        self.assertEqual(self.j.fuel_hist, [[10.0, 1.0], [10.0, 1.0]])                          # one per jump
+        self.assertEqual(self.j.commander["earned"], 50)
+
+
+class ConfigRobustness(unittest.TestCase):
+    """Batch 0.3: config mistakes are reported and survived, not tracebacks or silent nonsense."""
+
+    ARGS = dict(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+
+    def settings(self, cfg):
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            st = ed_outrider.settings_from(cfg, argparse.Namespace(**self.ARGS), None, ([], []))
+        return st, err.getvalue()
+
+    def test_single_folder_string(self):
+        st, _ = self.settings({"journals": {"live": "C:/Games/Elite Dangerous"}})
+        self.assertEqual(st["live"], ["C:/Games/Elite Dangerous"])
+
+    def test_wrong_types_fall_back_with_a_message(self):
+        st, err = self.settings({"server": {"port": "8025x", "radius": "far", "radius_choices": 25},
+                                 "defaults": {"bio_min": "ten million"}})
+        self.assertEqual((st["port"], st["radius"], st["bio_min"]), (8025, 25.0, ed_outrider.BIO_MIN))
+        self.assertEqual(st["radius_choices"], [20.0, 25.0, 30.0, 40.0, 50.0])
+        for key in ("port", "radius", "radius_choices", "bio_min"):
+            self.assertIn(key, err)
+
+    def test_quoted_number_still_works(self):
+        st, err = self.settings({"server": {"port": "9000"}})
+        self.assertEqual((st["port"], err), (9000, ""))
+
+
+class LogTailRace(unittest.TestCase):
+    def test_line_written_during_the_scan_is_not_lost(self):
+        import tempfile, json as _j
+        d = tempfile.mkdtemp(); now = dt.datetime.now(dt.timezone.utc)
+        p = os.path.join(d, now.strftime("Journal.%Y-%m-%dT%H%M%S.01.log"))
+        line = lambda n: _j.dumps({"timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "FSDJump", "StarSystem": n}) + "\n"
+        with open(p, "w") as f:
+            f.write(line("S0"))
+        first = ed_log.read_log([d], days=1)
+        real = ed_log._load
+        calls = []
+        def racing(path):
+            e = real(path)
+            if not calls:
+                calls.append(1)
+                with open(p, "a") as f:
+                    f.write(line("S1"))
+            return e
+        with unittest.mock.patch.object(ed_log, "_load", racing):
+            t1 = ed_log.read_log([d], after=first["newest"])
+        t2 = ed_log.read_log([d], after=t1["newest"])
+        self.assertEqual([r["system"] for r in t1["rows"] + t2["rows"]], ["S1"])
+
+
+class NamedBodyPanel(unittest.TestCase):
+    def test_named_body_finds_its_scan(self):
+        import asyncio, types
+        db = ed_outrider.open_db(":memory:")
+        j = ed_outrider.Journals(db)
+        j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sol", "SystemAddress": 10,
+                  "StarPos": [0, 0, 0]})
+        ev = scan("2026-01-01T00:01:00Z", "Sol", 10, 3, "Earth")[2]
+        j.handle(ev)
+        db.commit()
+        async def lookup(id64, interactive=True):
+            return None
+        state = ed_outrider.State(db, j, types.SimpleNamespace(cached=lambda i: (None, None), lookup=lookup), 25)
+        d = asyncio.run(state.body_detail(10, "Earth"))
+        self.assertEqual(d["full_name"], "Earth")          # not the fabricated "Sol Earth"
+        self.assertIsNotNone(d["own"])                      # your raw scan was found
+
+
+class LogFixes(unittest.TestCase):
+    def folder(self, files):
+        import tempfile, json as _j
+        d = tempfile.mkdtemp()
+        for name, events in files.items():
+            with open(os.path.join(d, name), "w") as f:
+                for e in events:
+                    f.write(_j.dumps(e, separators=(",", ":")) + "\n")
+        return d
+
+    def test_search_ignores_json_keys(self):
+        now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        d = self.folder({dt.datetime.now(dt.timezone.utc).strftime("Journal.%Y-%m-%dT%H%M%S.01.log"): [
+            {"timestamp": now, "event": "FSDJump", "StarSystem": "Alpha", "StarPos": [0, 0, 0], "JumpDist": 5, "FuelUsed": 1},
+            {"timestamp": now, "event": "Scan", "BodyName": "Alpha 1", "StarSystem": "Alpha", "PlanetClass": "Icy body",
+             "WasMapped": False, "ScanType": "Detailed"}]})
+        self.assertEqual(len(ed_log.read_log([d], days=1, q="star")["rows"]), 0)     # only the StarSystem key has it
+        self.assertEqual(len(ed_log.read_log([d], days=1, q="alpha")["rows"]), 2)    # a value in both
+        self.assertEqual(len(ed_log.read_log([d], days=1, q="icy")["rows"]), 1)
+
+    def test_before_cursor_past_the_end(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        name = now.strftime("Journal.%Y-%m-%dT%H%M%S.01.log")
+        d = self.folder({name: [{"timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "Music"}]})
+        r = ed_log.read_log([d], days=1, before=f"{name}|999999", noise=True)   # no IndexError
+        self.assertEqual(len(r["rows"]), 1)
+
+    def test_files_ordered_by_first_line_not_local_name(self):
+        # DST fall-back: the newer session's local-time name sorts before the older one's
+        d = self.folder({"Journal.2026-10-25T013000.01.log": [{"timestamp": "2026-10-25T00:30:00Z", "event": "Music"}],
+                         "Journal.2026-10-25T011500.01.log": [{"timestamp": "2026-10-25T01:15:00Z", "event": "Music"}]})
+        order = [os.path.basename(p) for _, p in ed_log.journal_files([d])]
+        self.assertEqual(order, ["Journal.2026-10-25T013000.01.log", "Journal.2026-10-25T011500.01.log"])
+
+    def test_legacy_sale_counts_systems(self):
+        s = ed_log.summary({"event": "SellExplorationData", "Systems": ["A", "B", "C", "D", "E"], "Discovered": ["B"],
+                            "TotalEarnings": 1500, "Bonus": 500})
+        self.assertTrue(s.startswith("Sold data from 5 systems (1 new)"), s)
+
+    def test_organic_body_name_from_touchdown(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        d = self.folder({now.strftime("Journal.%Y-%m-%dT%H%M%S.01.log"): [
+            {"timestamp": ts, "event": "Touchdown", "Body": "Sys 8 g", "BodyID": 29, "SystemAddress": 5, "StarSystem": "Sys"},
+            {"timestamp": ts, "event": "ScanOrganic", "ScanType": "Sample", "Species_Localised": "Bacterium Aurasus",
+             "SystemAddress": 5, "Body": 29}]})
+        rows = ed_log.read_log([d], days=1, cats={"bio"})["rows"]
+        self.assertEqual(rows[0]["summary"], "Sample: Bacterium Aurasus on 8 g")
+
+
+class BrownDwarfPairLabel(unittest.TestCase):
+    def test_star_and_planet_sharing_a_centre(self):
+        # Scaulae GH-V e2-1: a numbered brown dwarf "15" and planet "16" circle a shared centre
+        bodies = [B("A", 1, [], "Star", True), B("15", 30, [("Null", 29), ("Star", 1)], "Star"),
+                  B("16", 31, [("Null", 29), ("Star", 1)])]
+        tree, _ = ed_outrider.build_tree("Sys", bodies)
+        bary = tree[0]["children"][0]
+        self.assertEqual(bary["label"], "15 + 16")
+
+
+class Batch1Server(unittest.TestCase):
+    """Batch 1: hull, danger moments, sales, finds and the priced leaving summary."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+    def test_hull_only_counts_your_ship(self):
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:01:00Z", "Health": 0.48, "PlayerPilot": True})
+        self.assertEqual(self.j.hull["pct"], 48)
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:02:00Z", "Health": 0.1, "PlayerPilot": True, "Fighter": True})
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:02:00Z", "Health": 0.2, "PlayerPilot": False})
+        self.assertEqual(self.j.hull["pct"], 48)                       # a fighter or the SRV is not the ship
+        self.j.handle({"event": "RepairAll", "timestamp": "2026-01-01T00:03:00Z", "Cost": 100})
+        self.assertEqual(self.j.hull["pct"], 100)
+
+    def test_sales_merge_into_one(self):
+        self.j.handle({"event": "MultiSellExplorationData", "timestamp": "2026-01-01T01:00:00Z", "TotalEarnings": 5000,
+                       "Discovered": [{"SystemName": "Sys", "NumBodies": 3}]})
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T01:04:00Z", "BioData": [{"Value": 100, "Bonus": 400}]})
+        self.assertEqual(self.j.last_sale["carto"], 5000)
+        self.assertEqual(self.j.last_sale["bio"], 500)                  # same visit: one sale
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-02T01:00:00Z", "BioData": [{"Value": 7, "Bonus": 0}]})
+        self.assertEqual((self.j.last_sale["carto"], self.j.last_sale["bio"]), (0, 7))
+
+    def test_moments_priced(self):
+        ev = scan("2026-01-01T00:05:00Z", "Sys", 1, 4, "Sys 4")[2]
+        ev.update(PlanetClass="Water world", MassEM=0.5, TerraformState="Terraformable")
+        self.j.handle(ev)
+        self.j.handle({"event": "HeatDamage", "timestamp": "2026-01-01T00:06:00Z"})
+        self.db.commit()
+        m = self.state.moments_summary()
+        scanm = next(x for x in m if x["kind"] == "scan")
+        self.assertEqual((scanm["body"], scanm["terraformable"]), ("4", True))
+        self.assertGreater(scanm["base_value"], 500000)
+        self.assertTrue(any(x["kind"] == "heat" for x in m))
+        self.assertEqual(m[-1]["seq"], self.j.moment_seq)
+
+    def test_leaving_lists_increments(self):
+        ev = scan("2026-01-01T00:05:00Z", "Sys", 1, 4, "Sys 4", disc=True)[2]
+        ev.update(PlanetClass="Sudarsky class II gas giant", MassEM=300)
+        self.j.handle(ev)
+        self.db.commit()
+        l = self.state.leaving_summary(1)
+        u = l["unmapped"][0]
+        self.assertEqual(u["body"], "4")
+        self.assertFalse(u["special"])
+        self.assertGreater(u["increment"], 0)
+
+
+class Batch2Server(unittest.TestCase):
+    """Batch 2: jet-cone boost, stellar phenomena, the on-body strip and the in-game destination."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+    def test_boost_until_the_next_jump(self):
+        self.j.handle({"event": "JetConeBoost", "timestamp": "2026-01-01T00:01:00Z", "BoostValue": 3.0})
+        self.assertEqual(self.state.payload()["boost"], 3.0)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:02:00Z", "StarSystem": "Two", "SystemAddress": 2,
+                       "StarPos": [100, 0, 0], "BoostUsed": 4})
+        self.assertIsNone(self.state.payload()["boost"])
+
+    def test_phenomena_found_then_reached(self):
+        self.j.handle({"event": "FSSSignalDiscovered", "timestamp": "2026-01-01T00:01:00Z", "SystemAddress": 1,
+                       "SignalName": "$Fixed_Event_Life_Cloud;", "SignalType": "Codex"})
+        self.j.handle({"event": "FSSSignalDiscovered", "timestamp": "2026-01-01T00:01:00Z", "SystemAddress": 1,
+                       "SignalName": "$USS_Type_Salvage;"})                                  # ordinary signal: ignored
+        rows = [dict(r) for r in self.db.execute("SELECT kind, reached_ts FROM phenomena")]
+        self.assertEqual(rows, [{"kind": "cloud", "reached_ts": None}])
+        self.j.handle({"event": "SupercruiseDestinationDrop", "timestamp": "2026-01-01T00:09:00Z", "Type": "$Fixed_Event_Life_Cloud;"})
+        self.assertEqual(self.db.execute("SELECT reached_ts FROM phenomena").fetchone()[0], "2026-01-01T00:09:00Z")
+
+    def test_phenomena_lines_pass_the_filter(self):
+        import tempfile, json as _j
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "Journal.2026-01-01T000000.01.log"), "w") as f:
+            f.write(_j.dumps({"timestamp": "2026-01-01T00:05:00Z", "event": "FSSSignalDiscovered", "SystemAddress": 1,
+                              "SignalName": "$Fixed_Event_Life_Ring;"}, separators=(",", ":")) + "\n")
+        self.j.scan_dir(d)
+        self.assertEqual(self.db.execute("SELECT kind FROM phenomena").fetchone()[0], "ring")
+
+    def status(self, **kw):
+        self.j.status_json = dict({"live": True, "fuel_main": 20, "flags": 0, "flags2": 0}, **kw)
+
+    def test_on_body(self):
+        self.status(body="Sys A 4", flags=2)                        # landed
+        self.assertEqual(self.state.on_body()["body"], "A 4")
+        self.status(body="Sys A 4", flags2=1)                       # on foot
+        self.assertEqual(self.state.on_body()["how"], "on foot")
+        self.status(body="Sys A 4")                                 # flying near it: not on it
+        self.assertIsNone(self.state.on_body())
+
+    def test_destination(self):
+        self.status(destination={"System": 1, "Body": 7, "Name": "Sys 7 a"})
+        self.assertEqual(self.state.destination(), {"body_id": 7, "name": "7 a"})
+        self.status(destination={"System": 99, "Body": 7, "Name": "Elsewhere 7"})   # another system: not a body here
+        self.assertIsNone(self.state.destination())
+
+
+class Batch4Ledger(unittest.TestCase):
+    """Batch 4: sale payouts, trips between sales, what a ship loss cost, ranks."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def jump(self, ts, id64, x):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def sell(self, ts, total, systems):
+        self.j.handle({"event": "MultiSellExplorationData", "timestamp": ts, "TotalEarnings": total, "BaseValue": total, "Bonus": 0,
+                       "Discovered": [{"SystemName": s, "NumBodies": 1} for s in systems]})
+
+    def test_trips_merge_batches_and_price_losses(self):
+        self.jump("2026-01-01T00:00:00Z", 1, 0)
+        self.j.handle(scan("2026-01-01T00:01:00Z", "S1", 1, 0, "S1", star=True)[2])
+        self.sell("2026-01-02T00:00:00Z", 100, ["S1"])
+        self.sell("2026-01-02T00:05:00Z", 50, [])                 # a second batch at the same station
+        self.jump("2026-01-03T00:00:00Z", 2, 10)
+        self.j.handle(scan("2026-01-03T00:01:00Z", "S2", 2, 0, "S2", star=True)[2])
+        self.j.handle({"event": "Died", "timestamp": "2026-01-04T00:00:00Z"})
+        self.j.handle({"event": "Resurrect", "timestamp": "2026-01-04T00:00:00Z", "Option": "rebuy"})
+        self.db.commit()
+        L = self.state.ledger()
+        self.assertEqual(len(L["trips"]), 1)
+        self.assertEqual(L["trips"][0]["paid"], 150)
+        self.assertEqual(len(L["losses"]), 1)
+        self.assertEqual(L["losses"][0]["bodies"], 1)              # S2's star died with the ship; S1's was sold
+        self.assertGreater(L["losses"][0]["value"], 0)
+        self.assertEqual(L["since_last_sale"]["jumps"], 1)
+
+    def test_ranks_named(self):
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:00:00Z", "Commander": "J", "Credits": 1})
+        self.j.handle({"event": "Rank", "timestamp": "2026-01-01T00:00:01Z", "Explore": 10, "Exobiologist": 7})
+        self.j.handle({"event": "Progress", "timestamp": "2026-01-01T00:00:01Z", "Explore": 24, "Exobiologist": 43})
+        r = self.state.commander_summary()["ranks"]
+        self.assertEqual((r["Explore"]["name"], r["Explore"]["progress"]), ("Elite II", 24))
+        self.j.handle({"event": "Promotion", "timestamp": "2026-01-02T00:00:00Z", "Explore": 11})
+        r = self.state.commander_summary()["ranks"]
+        self.assertEqual((r["Explore"]["name"], r["Explore"]["progress"]), ("Elite III", 0))
+
+
+class Curiosities(unittest.TestCase):
+    def test_flags(self):
+        star = {"name": "A", "type": "Star", "radius_km": 700000, "body_id": 0}
+        hot = {"name": "1", "type": "Planet", "subtype": "Class I gas giant", "sma_ls": 20, "radius_km": 70000}
+        self.assertIn("hot Jupiter", [t for t, _ in ed_outrider.curiosities(hot, star)])
+        ringed = {"name": "2", "type": "Planet", "subtype": "Icy body", "landable": True, "gravity": 3.5, "radius_km": 2000,
+                  "ring_details": [{"name": "A Ring", "inner": 3e6, "outer": 30e6}], "rings": 1}
+        tags = [t for t, _ in ed_outrider.curiosities(ringed)]
+        self.assertEqual(set(tags), {"ringed landable", "high g", "wide rings"})
+        moon = {"name": "3 a a", "type": "Planet", "parents_full": [{"kind": "Planet", "id": 5}, {"kind": "Planet", "id": 4}]}
+        self.assertEqual([t for t, _ in ed_outrider.curiosities(moon)], ["moon of a moon"])
+        spin = {"name": "4", "type": "Planet"}
+        self.assertEqual([t for t, _ in ed_outrider.curiosities(spin, raw={"RotationPeriod": 3600, "TidalLock": False})], ["fast spin"])
+        self.assertEqual(ed_outrider.curiosities({"name": "5", "type": "Planet", "subtype": "Rocky body"}), [])
+
+
+class Batch5(unittest.TestCase):
+    """Batch 5: route strip, next stop, left behind, jumponium sources."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.jump("2026-01-01T00:00:00Z", 1, 0)
+
+    def jump(self, ts, id64, x):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def test_route_summary(self):
+        hops = [{"id64": i, "name": f"S{i}", "star_class": c, "x": i * 10.0, "y": 0, "z": 0}
+                for i, c in ((1, "K"), (2, "N"), (3, "D"), (4, "Y"), (5, "M"))]
+        ed_outrider.meta_set(self.db, "route", {"ts": "t", "hops": hops})
+        r = self.state.route_summary()
+        self.assertEqual([h["name"] for h in r["hops"]], ["S2", "S3", "S4", "S5"])   # from where you are
+        self.assertEqual((r["next_scoop"], r["longest_dry"]), (4, 3))
+        self.j.handle({"event": "NavRouteClear", "timestamp": "2026-01-01T00:01:00Z"})
+        self.assertIsNone(self.state.route_summary())
+
+    def test_next_stop_clears_on_arrival(self):
+        self.jump("2026-01-01T00:01:00Z", 2, 30)
+        self.jump("2026-01-01T00:02:00Z", 1, 0)
+        self.assertTrue(self.state.set_next_stop(2))
+        self.assertEqual(self.state.next_stop_summary()["distance"], 30.0)
+        self.jump("2026-01-01T00:03:00Z", 2, 30)
+        self.assertIsNone(self.state.next_stop_summary())
+
+    def test_left_behind_and_sources(self):
+        self.jump("2026-01-01T00:01:00Z", 2, 30)
+        ev = scan("2026-01-01T00:02:00Z", "S2", 2, 4, "S2 4")[2]
+        ev.update(PlanetClass="High metal content body", MassEM=1.0, TerraformState="Terraformable", Landable=True,
+                  Materials=[{"Name": "polonium", "Percent": 0.8}, {"Name": "iron", "Percent": 20}])
+        self.j.handle(ev)
+        self.j.handle({"event": "SAASignalsFound", "timestamp": "2026-01-01T00:03:00Z", "SystemAddress": 2, "BodyID": 4,
+                       "BodyName": "S2 4", "Signals": [], "Genuses": [{"Genus": "$Codex_Ent_Stratum_Genus_Name;", "Genus_Localised": "Stratum"}]})
+        self.jump("2026-01-01T00:04:00Z", 1, 0)
+        self.db.commit()
+        left = self.state.left_behind(100)["systems"]
+        self.assertEqual(left[0]["name"], "S2")
+        self.assertEqual(left[0]["bio"][0]["genera"], ["Stratum"])
+        self.assertGreater(left[0]["maps"][0]["increment"], 500000)      # a terraformable HMC's map
+        src = self.state.material_sources()
+        self.assertEqual((src["polonium"][0]["body"], src["polonium"][0]["pct"]), ("4", 0.8))
+        self.assertEqual(src["arsenic"], [])
+
+
+class SampleSpacing(unittest.TestCase):
+    """Batch 6: positions are recorded live and the distance to go counts down as you walk."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+    def at(self, ts, lat, lon):
+        self.j.status_json = {"live": True, "ts": ts, "fuel_main": 10, "flags": 0, "flags2": 1, "body": "Sys 4",
+                              "lat": lat, "lon": lon, "planet_radius": 1_000_000}
+
+    def organic(self, ts, kind):
+        self.j.handle({"event": "ScanOrganic", "timestamp": ts, "SystemAddress": 1, "Body": 4, "ScanType": kind,
+                       "Genus": "$Codex_Ent_Tussocks_Genus_Name;", "Genus_Localised": "Tussock",
+                       "Species": "$Codex_Ent_Tussocks_01_Name;", "Species_Localised": "Tussock Pennata"})
+
+    def test_countdown(self):
+        self.at("2026-01-01T00:10:00Z", 0.0, 0.0)
+        self.organic("2026-01-01T00:10:00Z", "Log")
+        s = self.state.sampling_summary()
+        self.assertEqual((s["need"], s["to_go"], s["clear"]), (200, 200, False))
+        # 0.009 degrees on a 1,000 km body is about 157 m: 43 m still to go
+        self.at("2026-01-01T00:11:00Z", 0.0, 0.009)
+        s = self.state.sampling_summary()
+        self.assertEqual((s["nearest"], s["to_go"], s["clear"]), (157, 43, False))
+        self.at("2026-01-01T00:12:00Z", 0.0, 0.012)
+        self.assertTrue(self.state.sampling_summary()["clear"])
+        self.organic("2026-01-01T00:12:00Z", "Sample")                   # the second sample: now measured from both
+        self.at("2026-01-01T00:13:00Z", 0.0, 0.006)                      # back between them
+        self.assertFalse(self.state.sampling_summary()["clear"])
+        self.organic("2026-01-01T00:20:00Z", "Analyse")
+        self.assertIsNone(self.state.sampling_summary())                  # run complete
+
+    def test_no_position_from_an_old_line(self):
+        self.at("2026-01-02T00:00:00Z", 0.0, 0.0)                         # today's reading...
+        self.organic("2026-01-01T00:10:00Z", "Log")                      # ...does not belong to yesterday's sample
+        s = self.state.sampling_summary()
+        self.assertEqual((s["points"], s["to_go"]), (0, None))

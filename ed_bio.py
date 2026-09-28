@@ -210,6 +210,42 @@ def _genus_name(genus_id, species_name):
     return GENUS_NAMES.get(genus_id) or species_name.split()[0]
 
 
+# How far apart the samples of one species must be (metres): a colony counts as new only beyond this.
+# From EDMC-ExploData (Silarn, GPL-2.0), bio_data/genus.py, commit 3d2e2ee (2025-12-28), keyed by the
+# journal's genus code; the Horizons life forms have no genus code, so their species code stands in.
+COLONY_DISTANCE = {
+    "$Codex_Ent_Aleoids_Genus_Name;": 150, "$Codex_Ent_Bacterial_Genus_Name;": 500,
+    "$Codex_Ent_Cactoid_Genus_Name;": 300, "$Codex_Ent_Clypeus_Genus_Name;": 150,
+    "$Codex_Ent_Conchas_Genus_Name;": 150, "$Codex_Ent_Cone_Name;": 100,
+    "$Codex_Ent_Electricae_Genus_Name;": 1000, "$Codex_Ent_Fonticulus_Genus_Name;": 500,
+    "$Codex_Ent_Fumerolas_Genus_Name;": 100, "$Codex_Ent_Fungoids_Genus_Name;": 300,
+    "$Codex_Ent_Ground_Struct_Ice_Name;": 100, "$Codex_Ent_Osseus_Genus_Name;": 800,
+    "$Codex_Ent_Recepta_Genus_Name;": 150, "$Codex_Ent_Brancae_Name;": 100,
+    "$Codex_Ent_Shrubs_Genus_Name;": 150, "$Codex_Ent_Sphere_Name;": 100,
+    "$Codex_Ent_Stratum_Genus_Name;": 500, "$Codex_Ent_Tube_Name;": 100,
+    "$Codex_Ent_Tubus_Genus_Name;": 800, "$Codex_Ent_Tussocks_Genus_Name;": 200,
+    "$Codex_Ent_Vents_Name;": 100, "$Codex_Ent_Ingensradices_Genus_Name;": 15,
+}
+_COLONY_BY_NAME = {"aleoida": 150, "bacterium": 500, "cactoida": 300, "clypeus": 150, "concha": 150, "bark mounds": 100,
+                   "bark mound": 100, "electricae": 1000, "fonticulua": 500, "fumerola": 100, "fungoida": 300,
+                   "crystalline shards": 100, "osseus": 800, "recepta": 150, "brain trees": 100, "brain tree": 100,
+                   "frutexa": 150, "anemone": 100, "stratum": 500, "sinuous tubers": 100, "tubus": 800, "tussock": 200,
+                   "amphora plant": 100, "radicoida": 15}
+
+
+def colony_distance(genus_code=None, genus_name=None):
+    """Metres between samples of one species, by the journal's genus code (or its localised name)."""
+    return COLONY_DISTANCE.get(genus_code or "") or _COLONY_BY_NAME.get((genus_name or "").lower())
+
+
+def surface_distance(lat1, lon1, lat2, lon2, radius_m):
+    """Great-circle distance in metres between two latitude/longitude points on a body of `radius_m`."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * radius_m * math.asin(min(1.0, math.sqrt(a)))
+
+
 def genus_from_id(genus_id):
     """A DSS genus code ('$Codex_Ent_Bacterial_Genus_Name;', as Spansh dumps list them) -> its name
     ('Bacterium'). Unknown codes come back unchanged."""
