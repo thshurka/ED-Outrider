@@ -28,6 +28,8 @@
 # radius_choices = [20, 25, 30, 40, 50]   # ly: the page's radius dropdown; larger spheres (up to your jump range,
 #                                         # say) work but fetch and redraw more — ~1,500 systems at 100 ly in the black
 # db = "ed_outrider.sqlite"
+# backup_dir = "backups"   # where the header's "back up now" writes the database and a copy of the journals
+# speech_file = "speech.json"   # the spoken alerts' lines, per personality (edit it, or point this at your own copy)
 
 [defaults]
 # What a browser uses until its user changes it in the page's 🔔 alerts & thresholds dialog.
@@ -48,6 +50,28 @@
 #                                               # into piper-voices/ on first use; needs `pip install piper-tts`
 #                                               # (see ed_tts.py), otherwise the browser's own speech is used
 # voice_fallback = "en_GB-jenny_dioco-medium"   # used while the voice above is missing
+# speech_styles = ["business"]   # spoken alerts' personalities, picked from at random: any of the styles in
+#                                # speech.json ("business", "sarcastic", "sweet", or one you add)
+# speech_profanity = false       # also use the swearing versions (sarcastic and sweet have them)
+# speech_profanity_pct = 50      # with profanity on: how often (%) a line comes from the swearing versions
+# speak_bio_signals = true        # say "2 Biological Signals on body A 3" as the FSS finds them
+# speak_geo_signals = true        # and the geological ones
+# speech_speed = 1.0              # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
+# speech_names = "Boss, Hefay, Sir"   # what the voice calls you, comma separated; one is picked at random
+#                                    # each time (commander names are often unpronounceable)
+
+[autohonk]
+# Hold Primary Fire on arriving in a system by hyperspace, so the Discovery Scanner fires (Linux; ed_honk.py).
+# IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump.
+# Primary Fire needs a keyboard binding in Elite's controls (as its second binding, keeping your trigger first).
+# enabled = false        # the page's 🔔 alerts dialog switches it on and off too (and remembers)
+# key = "auto"           # "auto": Primary Fire's keyboard binding from your controls preset (modifiers too);
+#                        # or a combination such as KEY_KP0 or KEY_LEFTALT+KEY_K
+# delay = 2.0            # seconds after arriving before the press (the jump tunnel ignores input)
+# hold = 6.0             # seconds to hold the trigger (the scanner fires once charged)
+# skip_honked = true     # leave systems you have already honked alone
+# announce = true        # when it completes, say "System Scan Completed, 12 Bodies discovered" (or "...all
+#                        # bodies were found" when the honk found everything); the dialog can switch it per browser
 
 [spansh]
 # concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh)

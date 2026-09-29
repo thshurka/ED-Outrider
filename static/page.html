@@ -221,7 +221,7 @@
   </div>
   <div id="mapWrap"><canvas id="mapCanvas"></canvas></div>
   <div id="mLegend"></div>
-  <div class="hint">Drag to rotate · scroll to zoom · hover for details · click a system to copy its name.
+  <div class="hint">Left-drag to rotate · right-drag to move · scroll to zoom · hover for details · click a system to copy its name.
     The grid is the galactic plane through your position; stalks drop each system onto it.</div>
 </section>
 <section id="searchView" hidden>
@@ -280,6 +280,32 @@
     <h4>Spoken alerts <span id="ttsEngine" class="unk"></span></h4>
     <label class="mod">Voice <select id="ttsVoice"></select> <span id="ttsStatus" class="hint"></span></label>
     <div class="hint" id="ttsHint"></div>
+    <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
+      <span class="profrow"><label><input type="checkbox" id="speechProfanity"> with profanity <span id="speechProfanityWho" class="unk"></span></label>
+      <label title="how often a line comes from the swearing versions instead of the clean ones"><input type="number" id="speechProfanityPct" min="0" max="100" step="5" style="width:4.5em">% of the time</label></span></div>
+    <div class="mod inlineopts">Say signals as the FSS finds them:
+      <label><input type="checkbox" id="sayBio"> biological</label>
+      <label><input type="checkbox" id="sayGeo"> geological</label>
+      <span class="hint">"2 Biological and 1 Geological Signals found on body A 3" (when 🗣 is on)</span></div>
+    <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
+      <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
+      <span class="hint">1× is the voice's own pace; reset goes back to the config file's speech_speed</span></label>
+    <label class="mod">Call me <input type="text" id="speechNames" style="width:18em" placeholder="Boss, Hefay, Sir">
+      <span class="hint">comma separated; each line uses one at random, in place of your commander name (which a voice often cannot say); empty goes back to the default</span></label>
+    <div class="hint" id="speechHint"></div>
+    <div class="hint" id="speechTried"></div>
+    <h4>Auto honk</h4>
+    <label class="mod"><input type="checkbox" id="autoHonk"> Honk automatically on arriving in a system by hyperspace
+      <span id="autoHonkStatus" class="hint"></span></label>
+    <label class="mod"><input type="checkbox" id="autoHonkSay"> When it completes, say how many bodies it found
+      <span class="hint">"System Scan Completed, 12 Bodies discovered", or "System scan complete, and all bodies were found" when the honk found everything</span></label>
+    <div class="hint"><b>The Discovery Scanner must be on primary fire</b> in the fire group that is active when you jump.
+      Outrider presses Primary Fire's keyboard binding from your controls preset (<b id="autoHonkKey"></b>); give Primary
+      Fire one as its second binding if it has none, keeping your trigger as the first ([autohonk] key in the config file
+      overrides it). Systems you have already honked are left alone. The keys go to whichever window has focus, so switch
+      this off before alt-tabbing away mid-jump.
+      <button type="button" class="try" id="autoHonkTest" title="press Primary Fire once, 5 seconds from now">▶ test in 5 s</button>
+      <span id="autoHonkTestMsg"></span></div>
     <h4>Sounds</h4>
     <div class="opts inline">Try them:
       <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>

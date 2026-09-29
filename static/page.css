@@ -531,3 +531,12 @@ body.nowmode header, body.nowmode main { display: none; }
 @media (prefers-color-scheme: light) { #nowView .now-sys { color: #9a4a00; } }
 
 .synth .boostline { font-size: 12px; margin-top: 1px; }
+.sstyles label { margin-right: 10px; white-space: nowrap; }
+.profrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.profrow label { display: inline-flex !important; align-items: center; gap: 4px; margin: 0; }
+/* the alerts dialog holds a lot: wider, so it is less of a scroll */
+#alertDialog { width: min(820px, calc(100vw - 32px)); }
+#alertDialog .alerttable { width: 100%; }
+#alertDialog .inlineopts label, #alertDialog .sstyles label { display: inline-flex; align-items: center; gap: 4px; margin: 0 12px 0 0; }
+#alertDialog .inlineopts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; }
+#alertDialog .inlineopts > .hint { flex-basis: 100%; }

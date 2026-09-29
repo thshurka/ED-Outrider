@@ -51,6 +51,10 @@ class Speaker:
     def __init__(self, voice=DEFAULT_VOICE, fallback=DEFAULT_FALLBACK, voices_dir=VOICES_DIR, on_change=None):
         self.on_change = on_change or (lambda: None)   # called (from the thread) when status changes
         self.PiperVoice = _import_piper()
+        self.SynthesisConfig = None
+        if self.PiperVoice:
+            from piper import SynthesisConfig   # importable once _import_piper found Piper
+            self.SynthesisConfig = SynthesisConfig
         self.preferred, self.fallback, self.dir = voice, fallback, voices_dir
         self.voice_name = None
         self._voice = None
@@ -127,20 +131,24 @@ class Speaker:
             print(f"spoken alerts: could not download {name}: {type(e).__name__}: {e}", file=sys.stderr)
             return False
 
-    def say(self, text):
-        """WAV bytes for `text`, or None if no voice is ready yet. Recent phrases are cached."""
+    def say(self, text, speed=1.0):
+        """WAV bytes for `text` at `speed` (1 = the voice's own pace), or None if no voice is ready yet.
+        Recent phrases are cached."""
         text = " ".join((text or "").split())[:400]
         if not text or not self.ready:
             return None
+        speed = min(2.0, max(0.5, float(speed or 1.0)))
+        key = (text, round(speed, 2))
         with self._lock:
-            if text in self._cache:
-                self._cache.move_to_end(text)
-                return self._cache[text]
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
             buf = io.BytesIO()
+            cfg = self.SynthesisConfig(length_scale=1.0 / speed) if speed != 1.0 else None
             with wave.open(buf, "wb") as wf:
-                self._voice.synthesize_wav(text, wf)
+                self._voice.synthesize_wav(text, wf, syn_config=cfg)
             audio = buf.getvalue()
-            self._cache[text] = audio
+            self._cache[key] = audio
             while len(self._cache) > CACHE_PHRASES:
                 self._cache.popitem(last=False)
             return audio

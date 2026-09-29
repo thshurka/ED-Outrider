@@ -9,12 +9,18 @@ about its system) this module lists the species that could be there, grouped by 
 most valuable candidate first, so you know before you drop a probe whether a body's bio
 signals might be a 19M Stratum Tectonicas or a 1M Bacterium Aurasus.
 
+On top of the spawn rules it applies BioScan's colour check: each species' colour variants depend on
+the class of star the body orbits (or, for some genera, on a surface material), so a species with no
+variant for this body's star or materials has never been seen in such a place and is ruled out --
+Stratum, for instance, has no variant for a G star. When the stars or materials are not known nothing
+is ruled out on that account. The colour tables come from EDMC-ExploData
+(https://github.com/Silarn/EDMC-ExploData, GPL-2.0-or-later) and are fetched with the rules.
+
 The spawn conditions are the community's work, maintained in the BioScan plugin for EDMC
 (https://github.com/Silarn/EDMC-BioScan, GPL-2.0-or-later). They are not shipped with this
-tool: `--update-rules` downloads them (plus the galactic region map from
-https://github.com/klightspeed/EliteDangerousRegionMap, MIT) into bio_rules.json next to this
-file, and ED Outrider does that itself on first start. Run it again now and then to pick up
-refinements.
+tool: `--update-rules` downloads them (plus ExploData's colour variants and the galactic region map
+from https://github.com/klightspeed/EliteDangerousRegionMap, MIT) into bio_rules.json next to this
+file, and ED Outrider does that itself on first start and refreshes it whenever upstream changes.
 
     python3 ed_bio.py --update-rules     fetch the latest spawn rules
     python3 ed_bio.py --backtest         check the rules against your own journals
@@ -37,6 +43,7 @@ Body dict used by predict():
     atmosphere_composition  {"SulphurDioxide": 1.2, ...} percentages (optional; Recepta care)
     parents       star types of the stars this body orbits, journal codes (optional)
     star          arrival star type (journal code) -- used when `system` gives no stars
+    materials     surface materials, lower case ("iron", "polonium", ...) (optional; colour check)
 
 System dict (optional second argument; everything in it is optional too):
     name, x, y, z   coordinates decide the region, nebulae and Guardian/tuber zones
@@ -72,6 +79,11 @@ BIOSCAN = "https://raw.githubusercontent.com/Silarn/EDMC-BioScan/master/src/bio_
 BIOSCAN_API = "https://api.github.com/repos/Silarn/EDMC-BioScan/"
 BIOSCAN_PATHS = ["src/bio_scan/bio_data", "src/bio_scan/nebula_data"]  # the parts we take
 REGIONMAP = "https://raw.githubusercontent.com/klightspeed/EliteDangerousRegionMap/master/RegionMapData.py"
+# Colour variants per species, by parent star class or surface material: BioScan also uses these to rule a
+# species out (never seen around that kind of star / without those materials), e.g. Stratum at a G star.
+EXPLODATA_PATH = "src/ExploData/explo_data/bio_data/genus.py"
+EXPLODATA = "https://raw.githubusercontent.com/Silarn/EDMC-ExploData/master/" + EXPLODATA_PATH
+EXPLODATA_API = "https://api.github.com/repos/Silarn/EDMC-ExploData/"
 REGIONMAP_API = "https://api.github.com/repos/klightspeed/EliteDangerousRegionMap/"
 RULESET_FILES = ["aleoida", "anemone", "bacterium", "brain_tree", "cactoida", "clypeus", "concha", "electricae",
                  "fonticulua", "frutexa", "fumerola", "fungoida", "osseus", "recepta", "shard", "stratum",
@@ -168,6 +180,8 @@ def star_matches(query, code):
     """BioScan's star_check: a class letter also covers its giant variants."""
     if not code:
         return False
+    if query == "Ae":   # the colour tables' Herbig code; the journal's is AeBe
+        return code.startswith("Ae")
     if query in ("A", "B", "F", "G", "K", "M"):
         return code == query or code.startswith(query + "_")
     if query in ("D", "C", "W"):
@@ -267,7 +281,8 @@ def _latest_commit(api, path):
 def remote_versions():
     """The newest upstream commits touching the data we use (three small GitHub API calls)."""
     return {"bioscan": ",".join(_latest_commit(BIOSCAN_API, p) for p in BIOSCAN_PATHS),
-            "regionmap": _latest_commit(REGIONMAP_API, "RegionMapData.py")}
+            "regionmap": _latest_commit(REGIONMAP_API, "RegionMapData.py"),
+            "explodata": _latest_commit(EXPLODATA_API, EXPLODATA_PATH)}
 
 
 def update_if_newer(path=None, log=print):
@@ -313,17 +328,37 @@ def update_rules(path=None, log=print, versions=None):
     sectors = _literals(_get(BIOSCAN + "nebula_data/sectors.py")).get("data") or []
     log("bio rules: nebulae and regions")
     grid = _literals(_get(REGIONMAP))
+    try:
+        genus_data = _literals(_get(EXPLODATA)).get("data") or {}
+        log("bio rules: colour variants")
+    except Exception as e:  # noqa: BLE001 -- without them species are simply not ruled out by colour
+        log(f"bio rules: could not fetch colour variants ({e})")
+        genus_data = {}
+
+    def colours(genus_id, species_id):
+        """{"star": {class: colour}} or {"element": {material: colour}} for a species, or None (no check)."""
+        c = (genus_data.get(genus_id) or {}).get("colors")
+        if not c:
+            return None
+        if "species" in c:
+            return c["species"].get(species_id)
+        return {"star": c["star"]} if "star" in c else None
+
     species = []
     for genus_id, members in catalog.items():
         for species_id, d in members.items():
             species.append({"id": species_id, "genus_id": genus_id, "genus": _genus_name(genus_id, d["name"]),
-                            "name": d["name"], "value": d.get("value"), "rulesets": d.get("rulesets") or []})
+                            "name": d["name"], "value": d.get("value"), "rulesets": d.get("rulesets") or [],
+                            "colors": colours(genus_id, species_id)})
     data = {
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "sources": [
             {"name": "EDMC-BioScan", "url": "https://github.com/Silarn/EDMC-BioScan",
              "commit": versions.get("bioscan", ""), "licence": "GPL-2.0-or-later",
              "what": "species spawn rules, nebula and region tables"},
+            {"name": "EDMC-ExploData", "url": "https://github.com/Silarn/EDMC-ExploData",
+             "commit": versions.get("explodata", ""), "licence": "GPL-2.0-or-later",
+             "what": "colour variants by parent star and surface material"},
             {"name": "EliteDangerousRegionMap", "url": "https://github.com/klightspeed/EliteDangerousRegionMap",
              "commit": versions.get("regionmap", ""), "licence": "MIT", "what": "galactic region map"},
         ],
@@ -579,7 +614,32 @@ def _body_facts(body):
             "orbital_period_s": body.get("orbital_period_s"),
             "composition": ({norm_atmosphere(k): v for k, v in body["atmosphere_composition"].items()}
                             if body.get("atmosphere_composition") is not None else None),
-            "parents": [star_code(p) for p in body["parents"]] if body.get("parents") is not None else None}
+            "parents": [star_code(p) for p in body["parents"]] if body.get("parents") is not None else None,
+            "materials": ({str(m).lower() for m in body["materials"]} if body.get("materials") is not None else None)}
+
+
+def _colour_ok(col, b, s):
+    """BioScan's colour check: a species with colour variants needs one for this body -- by the star it
+    orbits (or the system's main star, which BioScan also counts) or by a surface material. Unknown stars
+    or materials rule nothing out; nor does a black hole primary (orbiting stars colour those bios)."""
+    if not col:
+        return True
+    if "star" in col:
+        main = (s.get("main") or {}).get("type")
+        if main and (main == "H" or main.startswith("SupermassiveBlackHole")):
+            return True
+        if b["parents"] is not None:
+            stars = [c for c in b["parents"] if c] + ([main] if main else [])
+        elif len(s.get("stars") or []) == 1 and main:
+            stars = [main]   # a single-star system: the body can only orbit that one
+        else:
+            return True
+        if not stars:
+            return True
+        return any(star_matches(q, c) for q in col["star"] for c in stars)
+    if "element" in col:
+        return b["materials"] is None or any(e in b["materials"] for e in col["element"])
+    return True
 
 
 def _system_facts(system, body):
@@ -615,7 +675,7 @@ def predict(body, system=None):
     out = []
     for sp in R["species"]:
         for ruleset in sp["rulesets"]:
-            if all(_check(k, v, b, s) is not False for k, v in ruleset.items()):
+            if all(_check(k, v, b, s) is not False for k, v in ruleset.items()) and _colour_ok(sp.get("colors"), b, s):
                 out.append({"name": sp["name"], "genus": sp["genus"],
                             "value": species_value(sp["name"]) or sp.get("value")})
                 break
@@ -699,6 +759,7 @@ def body_from_scan(ev, star=None, star_types=None):
             "atmosphere_composition": {c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
             if "AtmosphereComposition" in ev else None,
             "parents": [star_types[p] for p in parents if p in star_types] if star_types else None,
+            "materials": [m["Name"] for m in ev["Materials"]] if ev.get("Materials") else None,
             "star": star}
 
 

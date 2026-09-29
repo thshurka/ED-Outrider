@@ -8,6 +8,7 @@ losses, re-scans, abandoned bio runs, crew cuts, ring naming and bio spawn rules
 """
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 import unittest
@@ -20,6 +21,7 @@ import ed_materials  # noqa: E402
 import ed_log  # noqa: E402
 import ed_outrider  # noqa: E402
 import ed_unsold  # noqa: E402
+import ed_speech  # noqa: E402
 
 
 def T(s):
@@ -1090,6 +1092,258 @@ class Curiosities(unittest.TestCase):
         spin = {"name": "4", "type": "Planet"}
         self.assertEqual([t for t, _ in ed_outrider.curiosities(spin, raw={"RotationPeriod": 3600, "TidalLock": False})], ["fast spin"])
         self.assertEqual(ed_outrider.curiosities({"name": "5", "type": "Planet", "subtype": "Rocky body"}), [])
+
+    def test_system_pair_not_close_orbit(self):
+        # two planets round a barycentre that circles the star: a pair, and never a "close orbit" of the star
+        # (their small orbit is around the shared centre, not the star's surface)
+        star = {"name": "A", "type": "Star", "radius_km": 700000, "body_id": 1, "parents_full": []}
+        via = [{"kind": "Null", "id": 7}, {"kind": "Star", "id": 1}]
+        p5 = {"name": "5", "type": "Planet", "body_id": 8, "sma_ls": 1.0, "radius_km": 3000, "parents_full": via}
+        p6 = {"name": "6", "type": "Planet", "body_id": 9, "sma_ls": 1.0, "radius_km": 3000, "parents_full": via}
+        moon = {"name": "6 a", "type": "Planet", "body_id": 10, "sma_ls": 0.02,
+                "parents_full": [{"kind": "Planet", "id": 9}] + via}
+        got = ed_outrider.system_curiosities("S", [star, p5, p6, moon])
+        self.assertEqual([t for t, _ in got["5"]], ["planet pair"])
+        self.assertEqual([t for t, _ in got["6"]], ["planet pair"])
+        self.assertEqual([t for t, _ in got["6 a"]], ["close orbit"])   # 6 a really does hug planet 6
+        # a star sharing the centre stops it being a planet pair
+        s2 = {"name": "B", "type": "Star", "body_id": 11, "parents_full": [{"kind": "Null", "id": 7}]}
+        self.assertNotIn("5", ed_outrider.system_curiosities("S", [star, p5, s2]))
+
+
+class BioColours(unittest.TestCase):
+    """BioScan's colour check (a species needs a colour variant for its star or materials) and the
+    undecided-genus options shown before the DSS."""
+
+    def test_colour_ok(self):
+        stratum = {"star": {"F": "Emerald", "K": "Lime", "M": "Green", "Ae": "Teal"}}
+        b = lambda parents, mats=None: {"parents": parents, "materials": mats}
+        s = lambda main, n=1: {"main": {"type": main} if main else None, "stars": [{}] * n}
+        self.assertFalse(ed_bio._colour_ok(stratum, b(["G"]), s("G")))         # never seen at a G star
+        self.assertTrue(ed_bio._colour_ok(stratum, b(["K_OrangeGiant"]), s("G")))   # giant variants count
+        self.assertTrue(ed_bio._colour_ok(stratum, b(["G"]), s("M")))          # the main star counts too
+        self.assertTrue(ed_bio._colour_ok(stratum, b(["AeBe"]), s("AeBe")))    # Ae is the journal's AeBe
+        self.assertTrue(ed_bio._colour_ok(stratum, b(None), s("G", 2)))        # parents unknown, 2 stars: no call
+        self.assertFalse(ed_bio._colour_ok(stratum, b(None), s("G", 1)))       # one star: it must be that one
+        self.assertTrue(ed_bio._colour_ok(stratum, b(["G"]), s("H")))          # black hole primary: no call
+        fung = {"element": {"polonium": "Yellow", "tin": "Grey"}}
+        self.assertTrue(ed_bio._colour_ok(fung, b(["G"], None), s("G")))       # materials unknown: no call
+        self.assertFalse(ed_bio._colour_ok(fung, b(["G"], {"iron", "nickel"}), s("G")))
+        self.assertTrue(ed_bio._colour_ok(fung, b(["G"], {"iron", "tin"}), s("G")))
+        self.assertTrue(ed_bio._colour_ok(None, b(["G"]), s("G")))            # no colour table: no check
+
+    def test_options(self):
+        cands = [{"name": "Stratum Tectonicas", "genus": "Stratum", "value": 19010800},
+                 {"name": "Bacterium Aurasus", "genus": "Bacterium", "value": 1000000}]
+        with unittest.mock.patch.object(ed_bio, "predict", return_value=cands):
+            r = {"type": "Planet", "bio": 1}
+            o = ed_outrider.bio_options(r)
+            self.assertEqual((o["low"], o["high"], [g["genus"] for g in o["genera"]]),
+                             (1000000, 19010800, ["Stratum", "Bacterium"]))
+            self.assertIsNone(ed_outrider.bio_options(dict(r, bio=2)))   # two signals, two genera: both are there
+            self.assertIsNone(ed_outrider.bio_options(dict(r, bio=0)))
+
+
+class HonkBinding(unittest.TestCase):
+    """Auto honk reads Primary Fire's keyboard binding (with modifiers) from the active controls preset."""
+
+    def test_reads_preset(self):
+        import tempfile
+        import ed_honk
+        self.assertEqual([ed_honk.elite_key(k) for k in ("Key_K", "Key_Numpad_0", "Key_LeftAlt", "Key_RightControl", "Joy_1")],
+                         ["KEY_K", "KEY_KP0", "KEY_LEFTALT", "KEY_RIGHTCTRL", None])
+        with tempfile.TemporaryDirectory() as root:
+            journals = os.path.join(root, "steamuser", "Saved Games", "Frontier Developments", "Elite Dangerous")
+            binds = os.path.join(root, "steamuser", "AppData", "Local", "Frontier Developments", "Elite Dangerous",
+                                 "Options", "Bindings")
+            os.makedirs(journals)
+            os.makedirs(binds)
+            with open(os.path.join(binds, "StartPreset.4.start"), "w") as f:
+                f.write("My X56\nMy X56\nMy X56\nMy X56")
+
+            def preset(secondary):
+                with open(os.path.join(binds, "My X56.4.2.binds"), "w") as f:
+                    f.write(f"""<?xml version="1.0" encoding="UTF-8" ?><Root PresetName="My X56"><PrimaryFire>
+                        <Primary Device="SaitekX56Joystick" Key="Joy_1" />{secondary}</PrimaryFire></Root>""")
+            preset('<Secondary Device="Keyboard" Key="Key_K"><Modifier Device="Keyboard" Key="Key_LeftAlt" />'
+                   '<Modifier Device="Keyboard" Key="Key_RightAlt" /></Secondary>')
+            keys, what = ed_honk.primary_fire_binding([journals])
+            self.assertEqual(keys, ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_K"])
+            self.assertIn("Left Alt + Right Alt + K", what)
+            preset('<Secondary Device="{NoDevice}" Key="" />')
+            keys, what = ed_honk.primary_fire_binding([journals])
+            self.assertIsNone(keys)
+            self.assertIn("no keyboard binding", what)
+        self.assertEqual(ed_honk.parse_combo("alt+k"), ["KEY_LEFTALT", "KEY_K"])
+
+
+class Speech(unittest.TestCase):
+    """Spoken alerts: the lines file, and the game / arrival triggers."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def jump(self, ts, id64, x):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def test_game_moments(self):
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:00:00Z", "Commander": "Briadin",
+                       "ShipName": "Out There", "Ship": "krait_light", "GameMode": "Solo", "Credits": 5})
+        self.j.handle({"event": "Shutdown", "timestamp": "2026-01-01T02:00:00Z"})
+        kinds = [(m["kind"], m.get("cmdr"), m.get("ship")) for m in self.state.moments_summary()]
+        self.assertEqual(kinds, [("game_start", "Briadin", "Out There"), ("game_exit", None, None)])
+        self.assertTrue(any(b'"event":"Shutdown"' == w for w in ed_outrider.WANTED))
+
+    def test_arrival_on_a_route(self):
+        # targeted and announced as new, then the route re-targets the next hop before the arrival star scan:
+        # the arrival must not play the fanfare again
+        self.state.target_verdicts = {5: "unreported", 6: "partial"}
+        self.state.last_target = {"id64": 99, "name": "next hop", "status": "partial"}
+        self.jump("2026-01-01T00:05:00Z", 5, 10)
+        self.j.handle(scan("2026-01-01T00:05:05Z", "S5", 5, 0, "S5", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        a = self.state.arrival
+        self.assertEqual((a["undiscovered"], a["wrong"], a["sound"]), (True, False, None))
+        # announced as known but nobody had been there: the surprise gets its fanfare on arrival
+        self.jump("2026-01-01T00:06:00Z", 6, 20)
+        self.j.handle(scan("2026-01-01T00:06:05Z", "S6", 6, 0, "S6", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        a = self.state.arrival
+        self.assertEqual((a["undiscovered"], a["wrong"], a["sound"]), (True, True, "fanfare"))
+
+    def test_fsd_charge_moment(self):
+        # hyperspace jumps only (supercruise also writes StartJump), with the destination's star class
+        self.j.handle({"event": "StartJump", "timestamp": "2026-01-01T00:00:00Z", "JumpType": "Supercruise"})
+        self.j.handle({"event": "StartJump", "timestamp": "2026-01-01T00:00:10Z", "JumpType": "Hyperspace",
+                       "StarSystem": "Drojau LL-O b26-3", "SystemAddress": 7, "StarClass": "K"})
+        got = [(m["kind"], m.get("system"), m.get("star_class")) for m in self.state.moments_summary()]
+        self.assertEqual(got, [("fsd_charge", "Drojau LL-O b26-3", "K")])
+
+    def test_signals_moment(self):
+        self.jump("2026-01-01T00:00:00Z", 9, 0)
+        sig = lambda body, bio, geo: {"event": "FSSBodySignals", "timestamp": "2026-01-01T00:01:00Z", "BodyName": body,
+                                      "BodyID": 3, "SystemAddress": 9, "Signals": [
+                                          {"Type": ed_outrider.BIO, "Count": bio}, {"Type": ed_outrider.GEO, "Count": geo}]}
+        self.j.handle(sig("S9 A 3", 2, 1))
+        self.j.handle(sig("S9 B 1", 0, 0))   # nothing found: nothing to say
+        got = [(m["kind"], m["body"], m["bio"], m["geo"]) for m in self.state.moments_summary() if m["kind"] == "signals"]
+        self.assertEqual(got, [("signals", "A 3", 2, 1)])
+
+    def test_autohonk(self):
+        import asyncio, datetime as _dt
+        now = lambda s=0: (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        j = self.j
+
+        class FakeHonker:
+            ready, available, status, presses = True, True, "ready", []
+
+            def __init__(self, game_answers):
+                self.game_answers = game_answers
+
+            def press(self):
+                self.presses.append(j.jump_arrival["id64"])
+                if self.game_answers:   # the game writes FSSDiscoveryScan (set directly: sqlite is per thread)
+                    j.last_honk = {"id64": j.jump_arrival["id64"], "ts": now(), "bodies": 12,
+                                   "progress": 1.0 if self.game_answers == "all" else 0.2}
+                return True
+
+        def arrive(id64, age=0, answers=True):
+            FakeHonker.presses = []
+            self.state.honker = FakeHonker(answers)
+            self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
+            self.state.honk_confirm = 0.3
+            self.j.handle({"event": "FSDJump", "timestamp": now(age), "StarSystem": f"S{id64}", "SystemAddress": id64,
+                           "StarPos": [id64, 0, 0]})
+
+            async def go():
+                self.state.maybe_honk()
+                await asyncio.sleep(0.5)
+            asyncio.run(go())
+            honks = [m for m in self.state.moments_summary() if m["kind"] == "honk" and m["system"] == f"S{id64}"]
+            self.last_honks = honks
+            return FakeHonker.presses, [(m["ok"], bool(m["why"])) for m in honks]
+
+        self.assertEqual(arrive(21), ([21], [(True, False)]))            # live arrival: pressed, confirmed
+        self.assertEqual((self.last_honks[0]["bodies"], self.last_honks[0]["all_found"]), (12, False))
+        self.assertEqual(arrive(25, answers="all"), ([25], [(True, False)]))   # the honk found everything
+        self.assertTrue(self.last_honks[0]["all_found"])
+        self.assertEqual(arrive(22, age=120), ([], []))                  # an old journal line: never pressed
+        self.assertEqual(arrive(23, answers=False), ([23], [(False, True)]))   # no scan followed: says so
+        self.j.handle({"event": "FSSDiscoveryScan", "timestamp": now(), "SystemName": "S24", "SystemAddress": 24,
+                       "BodyCount": 3, "Progress": 1.0})
+        self.assertEqual(arrive(24), ([], []))                           # honked here before: left alone
+
+    def test_arrival_without_target(self):
+        self.jump("2026-01-01T00:01:00Z", 2, 30)
+        self.j.handle(scan("2026-01-01T00:01:05Z", "S2", 2, 0, "S2", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        a = self.state.arrival
+        self.assertEqual((a["name"], a["undiscovered"], a["first_visit"], a["wrong"], a["sound"]),
+                         ("S2", True, True, False, None))   # never announced: voice only, no fanfare
+        # back again before selling: still undiscovered in the journal, but no longer news
+        self.jump("2026-01-01T00:02:00Z", 3, 60)
+        self.jump("2026-01-01T00:03:00Z", 2, 30)
+        self.j.handle(scan("2026-01-01T00:03:05Z", "S2", 2, 0, "S2", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        a = self.state.arrival
+        self.assertEqual((a["undiscovered"], a["first_visit"], a["sound"]), (True, False, None))
+
+    def test_lines_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "speech.json")
+            sl = ed_speech.SpeechLines(path)
+            self.assertIsNone(sl.info()["version"])
+            doc = {"styles": {"business": "Business"}, "lines": {"hull": {"business": ["Hull {pct} percent."]}}}
+            with open(path, "w") as f:
+                json.dump(doc, f)
+            self.assertTrue(sl.info()["version"])
+            self.assertEqual(sl.lines()["lines"]["hull"]["business"], ["Hull {pct} percent."])
+            with open(path, "w") as f:
+                f.write("{ broken")
+            os.utime(path, ns=(1, 1))   # a new modification time, whatever the clock's resolution
+            info = sl.info()
+            self.assertIn("last good copy", info["error"])
+            self.assertEqual(sl.lines()["lines"]["hull"]["business"], ["Hull {pct} percent."])
+        bad = {"styles": {"business": 1}, "lines": {"hull": {"business": ["{body} is hot"], "pirate": ["arr"]}, "nope": {}}}
+        probs = " ".join(ed_speech.check(bad))
+        self.assertIn("{body}", probs)
+        self.assertIn('"pirate"', probs)
+        self.assertIn('"nope"', probs)
+
+    def test_fill_and_spoken_text(self):
+        import random
+        rng = random.Random(3)
+        got = {ed_speech.fill("{name}", {}, "Boss, Hefay, Sir", rng) for _ in range(60)}
+        self.assertEqual(got, {"Boss", "Hefay", "Sir"})   # each {name} is its own random pick
+        self.assertEqual(ed_speech.fill("{name}, hull {pct}. {missing}", {"pct": 40}, " , "), "Commander, hull 40. ")
+        self.assertEqual(ed_speech.spoken_text("⚠ Sold 12.6M cr · 3k left <b>now</b>"),
+                         "Sold 12.6 million credits, 3 thousand left now")
+        self.assertEqual(ed_speech.spoken_text("52.0M unsold, 12.64B banked, 1.96M left, 0.04M, 7.25 ly, 1.4M to map"),
+                         "52 million unsold, 12.6 billion banked, 2 million left, 0 million, 7.2 ly, 1.4 million to map")
+        for key in ed_speech.KEYS:   # the voice lab's sample values fill every placeholder an alert has
+            self.assertLessEqual(ed_speech.fills(key) - set(ed_speech.ALWAYS), set(ed_speech.SAMPLES.get(key, {})), key)
+
+    def test_shipped_lines(self):
+        # speech.json covers every alert in every personality, and the page asks for exactly those alerts
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "speech.json"), encoding="utf-8") as f:
+            doc = json.load(f)
+        self.assertEqual(ed_speech.check(doc), [])
+        for key in ed_speech.KEYS:
+            for style in list(doc["styles"]) + [s + "_profane" for s in ("sarcastic", "sweet")]:
+                self.assertGreaterEqual(len(doc["lines"][key].get(style, [])), 10, f"{key}/{style}")
+        # the voice calls you by your chosen names ({name}): commander names are often unpronounceable
+        said = [x for e in doc["lines"].values() for k, v in e.items() if k != "when" for x in v]
+        self.assertEqual([x for x in said if "{cmdr}" in x], [])
+        with open(os.path.join(here, "static", "page.js"), encoding="utf-8") as f:
+            js = f.read()
+        import re
+        used = set(re.findall(r'line\("(\w+)"', js)) | set(re.findall(r'"(unsold_\w+)"', js))
+        self.assertEqual(used, set(ed_speech.KEYS))
 
 
 class Batch5(unittest.TestCase):

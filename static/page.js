@@ -40,7 +40,7 @@ function notable(s) {
     `<span class="nb ${k}" title="${names[k]}${n[k] > 1 ? "s" : ""}">${k}${n[k] > 1 ? "×" + n[k] : ""}</span>`).join("") +
     (s.bio_potential ? `<span class="nb bio" title="exobiology: up to this much across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"}, from spawn rules">🧬≤${credits(s.bio_potential)}</span>` : "") +
     phenomenaTag(s.phenomena) +
-    (s.curiosities ? `<span class="nb cur" title="curiosities (Observatory-style): ringed landables, high-g, close orbits, wide rings, hot Jupiters, moons of moons…">🔭${s.curiosities > 1 ? "×" + s.curiosities : ""}</span>` : "");
+    (s.curiosities ? `<span class="nb cur" title="${(s.curiosity_list || []).map(c => esc(`${c.body}: ${c.tag} (${c.why})`)).join("&#10;")}">🔭${s.curiosities > 1 ? "×" + s.curiosities : ""}</span>` : "");
 }
 // 🌀 notable stellar phenomena your FSS found in a system (life clouds, rings); dimmed once you have been to it
 function phenomenaTag(list) {
@@ -116,7 +116,8 @@ function renderCarrier() {
     if (urgent && carrierWarned !== pl.departure) {   // once per booking, only if you are not aboard
       carrierWarned = pl.departure;
       alertOut("carrier", `${c.name} departs in ${Math.ceil(left / 60)} minutes`, `for ${pl.system}; you are not aboard`,
-               {sound: "alert", say: `Your carrier departs in ${Math.ceil(left / 60)} minutes, and you are not aboard.`});
+               {sound: "alert", say: () => line("carrier_departs", {minutes: Math.ceil(left / 60), carrier: c.name},
+                                                `Your carrier departs in ${Math.ceil(left / 60)} minutes, and you are not aboard.`)});
     }
   }
   cl.innerHTML = val(esc(c.name), esc(c.callsign || "")) + ln(where) + ln(meet) + ln(plan) +
@@ -379,13 +380,20 @@ let viewBeforeNow = view === "now" ? "overview" : view;
 if (new URLSearchParams(location.search).get("mode") === "now") view = "now";   // the only URL parameter the page reads
 // Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
 // per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
-const ALERTS = [["discovery", "a targeted system is a new discovery", null], ["arrival", "an arrival contradicts what was announced", null],
+const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has reported it (upbeat or thud if it is known)", "fanfare"],
+  ["arrival", "arriving somewhere undiscovered (first visit); the sound only corrects a targeting call that was wrong", null],
+  ["game", "loading into the game and quitting it", null],
+  ["jump", "the frame shift drive charging for a jump (and whether the star there is scoopable)", null],
+  ["honk", "the auto honk's result (when it is on)", null],
   ["leaving", "leaving a system with work worth coming back for", "alert"], ["fuel", "fuel low where you cannot scoop", "alert"],
   ["find", "a valuable body just scanned (over your highlight levels)", "find"],
   ["sell", "docked where you can sell, and what you banked", "cash"],
   ["unsold", "unsold data crosses a threshold", "cash"], ["hull", "hull damage, heat damage, interdiction", "danger"],
   ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"]];
-const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alerts", {}));
+const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is what gets spoken
+const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
+  {jump: false, honk: false},   // a notification on every jump would be noise; spoken by default
+  store.get("alerts", {}));
 const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSound", {}));
 const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSpeak", {}));
 let speechOn = store.get("speech", false);
@@ -394,18 +402,22 @@ function notify(kind, title, body) {
   try { new Notification(title, {body, tag: "ed-" + kind}); } catch {}
 }
 // One path for every alert: its sound (if sounds are on and the kind's sound is ticked), a desktop
-// notification (if enabled), and speech (if 🗣 is on and the kind is ticked). `say` defaults to the title.
+// notification (if enabled), and speech (if 🗣 is on and the kind is ticked). `say` defaults to the title;
+// it may be a function (a personality line from speech.json), called only when the alert is spoken.
 let lastAlert = null;
 function alertOut(kind, title, body, {sound, say, delay = 0} = {}) {
   lastAlert = {kind, title, body, at: Date.now()};
   const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
   if (snd && soundOn && alertSound[kind]) setTimeout(() => play(snd), delay);
   notify(kind, title, body);
-  if (speechOn && alertSpeak[kind]) speak(say || title, snd ? delay + 900 : delay);
+  if (speechOn && alertSpeak[kind] && !UNSPOKEN.has(kind)) speak((typeof say === "function" ? say() : say) || title, snd ? delay + 900 : delay);
 }
 // ---- speech: Piper on the server when it has a voice ready, else the browser's own ----
 let speechQueue = Promise.resolve();
+// numbers are spoken to a tenth at most, and "52.0" as "52" (12.64B is "12.6 billion", 52.0M "52 million")
+const spokenNumber = m => String(Math.round(Number(m) * 10) / 10);
 const spokenText = t => String(t).replace(/<[^>]+>/g, "").replace(/[⚠📖🚢💰🧬🏁🗺👣⛽🌋🪨✦★☆]/gu, "")
+  .replace(/(?<![\d.])\d+\.\d+(?![\d.])/g, spokenNumber)
   .replace(/(\d+(?:\.\d+)?)M\b/g, "$1 million").replace(/(\d+(?:\.\d+)?)k\b/g, "$1 thousand")
   .replace(/(\d+(?:\.\d+)?)B\b/g, "$1 billion").replace(/\bcr\b/g, "credits").replace(/\s·\s/g, ", ").replace(/\s+/g, " ").trim();
 function speak(text, delay = 0) {
@@ -414,7 +426,7 @@ function speak(text, delay = 0) {
     const tts = data && data.tts;
     if (tts && tts.engine === "piper") {
       try {
-        const r = await fetch(`api/say?text=${encodeURIComponent(words)}`);
+        const r = await fetch(`api/say?text=${encodeURIComponent(words)}&speed=${speechSpeed()}`);
         if (r.ok) {
           const ctx = audio(); if (!ctx || ctx.state !== "running") return;
           const buf = await ctx.decodeAudioData(await r.arrayBuffer());
@@ -425,9 +437,83 @@ function speak(text, delay = 0) {
       } catch {}
     }
     if (typeof speechSynthesis === "undefined") return;
-    await new Promise(res => { const u = new SpeechSynthesisUtterance(words); u.onend = u.onerror = res; speechSynthesis.speak(u); setTimeout(res, 15000); });
+    await new Promise(res => { const u = new SpeechSynthesisUtterance(words); u.rate = speechSpeed(); u.onend = u.onerror = res; speechSynthesis.speak(u); setTimeout(res, 15000); });
   }).catch(() => {});
 }
+// ---- spoken lines: speech.json's versions of each alert, per personality (see ed_speech.py) ----
+let speechLib = {styles: {}, lines: {}, version: null}, speechLibWanted = null;
+const speechStyles = () => store.get("speechStyles", null) ?? (data && data.defaults && data.defaults.speech_styles) ?? ["business"];
+const speechProfane = () => store.get("speechProfanity", null) ?? (data && data.defaults && data.defaults.speech_profanity) ?? false;
+// how often (percent) a line comes from the swearing versions when profanity is on
+const speechProfanePct = () => Math.min(100, Math.max(0, Number(store.get("speechProfanityPct", null)
+  ?? (data && data.defaults && data.defaults.speech_profanity_pct) ?? 50)));
+// what the voice calls you: commander names are often unpronounceable, so {name} is one of these at random
+const speechNames = () => String(store.get("speechNames", null) ?? (data && data.defaults && data.defaults.speech_names) ?? "Boss, Hefay, Sir")
+  .split(",").map(x => x.trim()).filter(Boolean);
+// the voice's pace: 1 is its own, 1.3 is 30% faster
+const speechSpeed = () => Math.min(2, Math.max(0.5, Number(store.get("speechSpeed", null) ?? (data && data.defaults && data.defaults.speech_speed) ?? 1) || 1));
+// say signal counts as the FSS finds them: "bio" and "geo", each its own tick
+const saySignals = k => !!(store.get(k === "bio" ? "sayBio" : "sayGeo", null)
+  ?? (data && data.defaults && data.defaults[k === "bio" ? "speak_bio_signals" : "speak_geo_signals"]) ?? true);
+const recentLines = {};
+async function loadSpeechLib() {
+  try { const r = await fetch("api/speech"); if (r.ok) { speechLib = await r.json(); drawSpeechStyles(); } } catch {}
+}
+// a line's {placeholders}; {name}, {cmdr}, {ship} and {here} are always there when known
+function lineVars(vars) {
+  const names = speechNames();
+  // a function: every {name} in a line is its own random pick
+  const all = {name: () => names.length ? names[Math.floor(Math.random() * names.length)] : "Commander",
+               cmdr: data && data.commander && data.commander.name, ship: data && data.ship && data.ship.name,
+               here: data && data.position && data.position.name};
+  for (const [k, v] of Object.entries(vars)) if (v != null && v !== "") all[k] = v;
+  return all;
+}
+const fillLine = (text, all) => text.replace(/\{(\w+)\}/g, (_, k) => all[k] == null ? "" : String(typeof all[k] === "function" ? all[k]() : all[k]));
+const allFilled = (text, all) => [...text.matchAll(/\{(\w+)\}/g)].every(m => all[m[1]] != null);
+// A random version of alert `key` from every personality ticked (and their swearing versions when
+// profanity is on), not one of the last few heard; `plain` when the file has nothing for it.
+function line(key, vars = {}, plain = "") {
+  const entry = speechLib.lines && speechLib.lines[key];
+  const lists = suffix => !entry || typeof entry !== "object" ? [] : speechStyles().flatMap(st =>
+    Array.isArray(entry[st + suffix]) ? entry[st + suffix].filter(x => typeof x === "string" && x.trim()) : []);
+  // with profanity on, roll first: the swearing versions this share of the time, the clean ones otherwise
+  // (whichever side has nothing for this alert gives way to the other)
+  const clean = lists(""), rude = speechProfane() ? lists("_profane") : [];
+  let pool = rude.length && (!clean.length || Math.random() * 100 < speechProfanePct()) ? rude : clean;
+  if (!pool.length) return plain;
+  const all = lineVars(vars), whole = pool.filter(x => allFilled(x, all));
+  if (whole.length) pool = whole;   // a line that needs a value this alert lacks only as a last resort
+  const recent = recentLines[key] || (recentLines[key] = []);
+  const fresh = pool.filter(x => !recent.includes(x));
+  const pick = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+  recent.push(pick);
+  while (recent.length > Math.min(4, Math.floor(pool.length / 2))) recent.shift();
+  return fillLine(pick, all);
+}
+// a star class as words, for {star}
+const spokenStar = c => !c ? "star" : /^D/.test(c) ? "white dwarf" : c === "N" ? "neutron star"
+  : /^(H|BH|SupermassiveBlackHole)$/.test(c) ? "black hole" : /^W/.test(c) ? "Wolf-Rayet star" : /^(C|CN|CJ|CH|CHd|CS)$/.test(c) ? "carbon star"
+  : /^[LTY]$/.test(c) ? "brown dwarf" : c === "TTS" ? "T Tauri star" : c === "AeBe" ? "Herbig star" : /^(S|MS)$/.test(c) ? "S-type star" : `${c} star`;
+// sample values for the ▶ try button
+const LINE_SAMPLES = {
+  speech_on: {}, game_start: {}, game_exit: {}, heat: {},
+  arrival_undiscovered: {system: "Drojau LL-O b26-3"}, arrival_discovered: {system: "Drojau LL-O b26-3"},
+  leaving: {text: "A 2, a class two gas giant, plus 1.4M to map"},
+  find_body: {what: "Water world, terraformable, undiscovered", body: "A 3", value: "2.3M"},
+  find_bio: {body: "B 7", value: "19.0M"}, sample_clear: {genus: "Stratum"},
+  codex: {entry: "Stratum Tectonicas", what: "new to your codex for this region"},
+  fuel_low: {pct: 18}, fuel_star: {pct: 22, star: "white dwarf"}, fuel_target: {pct: 22, system: "Drojau LL-O b26-3"},
+  hull: {pct: 42}, interdicted: {by: "someone"},
+  docked_sell: {value: "114.1M", station: "Jaques Station"}, undocked_unsold: {value: "260.4M"},
+  sold: {sold: "12.6M cr cartographics and 4.1M cr exobiology", still: ""},
+  unsold_warn: {value: "52.0M"}, unsold_urgent: {value: "251.3M"},
+  carrier_departs: {minutes: 4, carrier: "Out Of The Blue"}, carrier_arrived: {carrier: "Out Of The Blue", system: "Smojooe AR-E b25-8"},
+};
+// Before the DSS, fewer signals than possible genera: which it is cannot be told, so say so ("one of these,
+// 1.0M to 19.0M") instead of naming the most valuable as the likely one.
+const optLabel = (n, opt) => `${n === 1 ? "one" : n} of these, ${credits(opt.low)} to ${credits(opt.high)}`;
+const bioRange = b => b.bio_options ? ` · ${credits(b.bio_options.low)} to ${credits(b.bio_options.high)}` : b.bio_potential ? ` · up to ${credits(b.bio_potential)}` : "";
 const bmMap = () => Object.fromEntries((data.bookmarks || []).map(b => [b.id, b]));
 const day = ts => (ts || "").slice(0, 10);
 function firstsIcon(f) {
@@ -870,11 +956,10 @@ function renderHere() {
     for (const o of b.organics) if (!b.genera.includes(o.genus))
       bio.push(`<span class="sp ${o.done ? "done" : "part"}">${esc(o.genus)} ${o.samples}/3${o.done ? " ✓" : ""}</span>`);
     if (!bio.length && b.bio) {
-      const gl = (b.bio_guess || []).slice(0, b.bio);
+      const opt = b.bio_options, gl = opt ? opt.genera : (b.bio_guess || []).slice(0, b.bio);
       bio.push(`<span class="unk">${b.bio} signal${b.bio === 1 ? "" : "s"}, not DSS'd</span>` + (gl.length
-        ? `<br><span class="unk">likely: </span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits(x.value || 0)}${codexMark(x, h.region)}</span>`).join("")}` : ""));
+        ? `<br><span class="unk">${opt ? `${optLabel(b.bio, opt)}: ` : "likely: "}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits(x.value || 0)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
     }
-    if (b.bio_potential) bio.push(`<span class="unk">· up to <b>${credits(b.bio_potential)}</b></span>`);
     const codex = b.codex.map(c => `<span class="sp" title="codex">📖 ${esc(c.name)}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
@@ -898,7 +983,8 @@ function renderHere() {
     || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
   // the body targeted in-game: a line saying what it is worth going to, and its row brought into view
   if (destBody) {
-    const b = destBody, bio = (b.bio_guess || []).slice(0, b.bio || b.genera.length).map(x => x.best ? `${x.best.split(" ")[0]}? ${credits(x.value || 0)}` : x.genus);
+    const b = destBody, bio = b.bio_options ? [`${b.bio_options.genera.map(x => x.genus).join(" or ")}, ${credits(b.bio_options.low)} to ${credits(b.bio_options.high)}`]
+      : (b.bio_guess || []).slice(0, b.bio || b.genera.length).map(x => x.best ? `${x.best.split(" ")[0]}? ${credits(x.value || 0)}` : x.genus);
     const bits = [b.subtype, b.gravity != null && b.type === "Planet" && `${b.gravity.toFixed(2)} g`,
       b.atmosphere && b.atmosphere !== "None" && b.atmosphere, (b.bio || b.genera.length) && `${b.bio || b.genera.length} bio${bio.length ? ` (${bio.join(", ")})` : ""}`,
       b.geo && `${b.geo} geo`, b.dist_ls != null && `${Math.round(b.dist_ls).toLocaleString()} ls`, maxOf(b) && `max ${credits(maxOf(b))}`].filter(Boolean);
@@ -906,7 +992,7 @@ function renderHere() {
     const dk = `${h.id64}|${b.body_id}`;
     if (dk !== lastDestKey) {
       lastDestKey = dk;
-      const tr = document.querySelector("#hereRows tr.dest"); if (tr) tr.scrollIntoView({block: "nearest"});
+      const tr = document.querySelector("#hereRows tr.dest"); if (tr && tr.scrollIntoView) tr.scrollIntoView({block: "nearest"});
     }
   } else lastDestKey = null;
 }
@@ -1074,9 +1160,13 @@ function bodyPopHtml(b) {
       const o = (b.organics || []).find(o => o.genus === g), x = (b.bio_guess || []).find(x => x.genus === g);
       lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")} ${o.samples}/3${o.done ? " ✓" : ""}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}` : ""}</span><b>${x && x.value ? credits(x.value) : ""}</b></li>`);
     }
-    if (!(b.genera || []).length && b.bio) lines.push(...(b.bio_guess || []).slice(0, b.bio).map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})${codexMark(x, hereData && hereData.region)}</span><b>≤${credits(x.value || 0)}</b></li>`));
-    h += `<div class="sec"><div class="lbl">🧬 Bio${b.bio ? ` · ${b.bio} signal${b.bio === 1 ? "" : "s"}` : ""}${b.bio_potential ? ` · up to ${credits(b.bio_potential)}` : ""}</div><ul>${lines.join("")}</ul></div>`;
+    if (!(b.genera || []).length && b.bio) {
+      if (b.bio_options) lines.push(`<li><span class="unk">${optLabel(b.bio, b.bio_options)}; the DSS tells which</span></li>`);
+      lines.push(...(b.bio_options ? b.bio_options.genera : (b.bio_guess || []).slice(0, b.bio)).map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})${codexMark(x, hereData && hereData.region)}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    }
+    h += `<div class="sec"><div class="lbl">🧬 Bio${b.bio ? ` · ${b.bio} signal${b.bio === 1 ? "" : "s"}` : ""}${bioRange(b)}</div><ul>${lines.join("")}</ul></div>`;
   }
+  h += curiosityList(b.curiosities);
   if (b.geo) h += `<div class="sec">${b.geo} geological signal${b.geo === 1 ? "" : "s"}</div>`;
   const flags = [b.first_discovered && "🏁 first discovered", b.first_mapped && "🗺 first mapped", !b.first_mapped && b.mapped && "mapped", b.first_footfall && "👣 first footfall", !b.scanned && "not scanned by you"].filter(Boolean);
   h += `<div class="sec"><span>${maxOf(b) ? `now ${credits(b.value_now || 0)} · max ${credits(maxOf(b))}` : ""}</span>` +
@@ -1192,11 +1282,15 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
       lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}` : ""}</span>` +
                  `<b>${priced ? credits(o.value) : x && x.value ? "≤" + credits(x.value) : ""}</b></li>`);
     }
-    if (!(row.genera || []).length && row.bio) lines.push(...(row.bio_guess || []).slice(0, row.bio).map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}${codexMark(x)}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    if (!(row.genera || []).length && row.bio) {
+      if (row.bio_options) lines.push(`<li><span class="unk">${optLabel(row.bio, row.bio_options)}; the DSS tells which</span></li>`);
+      lines.push(...(row.bio_options ? row.bio_options.genera : (row.bio_guess || []).slice(0, row.bio)).map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}${codexMark(x)}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    }
     for (const c of row.codex || []) lines.push(`<li><span>📖 ${esc(c.name)}</span><b>${c.voucher ? "voucher " + c.voucher.toLocaleString() + " cr" : c.new ? "new to your codex" : ""}</b></li>`);
-    bioSec = sec("bio", `🧬 Exobiology${row.bio ? ` · ${row.bio} signal${row.bio === 1 ? "" : "s"}` : ""}${row.bio_potential ? ` · up to ${credits(row.bio_potential)}` : ""}`, `<ul>${lines.join("")}</ul>`);
+    bioSec = sec("bio", `🧬 Exobiology${row.bio ? ` · ${row.bio} signal${row.bio === 1 ? "" : "s"}` : ""}${bioRange(row)}`, `<ul>${lines.join("")}</ul>`);
   }
-  h += bioSec + ringSec + compSec + `<div class="two">${physSec}${orbitSec}</div>`;
+  const curSec = (row.curiosities || []).length ? sec("curiosities", "🔭 Curiosities", row.curiosities.map(c => `<div><b>${esc(c.tag)}</b> · ${esc(c.why)}</div>`).join("")) : "";
+  h += curSec + bioSec + ringSec + compSec + `<div class="two">${physSec}${orbitSec}</div>`;
   h += sec("value", "Value and discovery", kv([
     ["Pays now", has(row.value_now) ? credits(row.value_now) + " cr" : null], ["Could pay", has(row.value_max) ? credits(row.value_max) + " cr" + (has(row.value_max_base) && row.value_max_base !== row.value_max ? ` (${credits(row.value_max_base)} without bonuses)` : "") : null],
     ["Of which", row.value_parts ? `${credits(row.value_parts.carto_now)} + ${credits(row.value_parts.bio_now)} bio held · ${credits(row.value_parts.carto_left)} + ${credits(row.value_parts.bio_left)} bio still there (bio ×${row.value_parts.bio_factor})` : null],
@@ -1568,7 +1662,7 @@ document.getElementById("histRows").addEventListener("click", e => {
 });
 
 // ---- 3D map ----
-const M = {data: null, key: null, loading: false, proj: [], hover: null, drag: null,
+const M = {data: null, key: null, loading: false, proj: [], hover: null, drag: null, panX: 0, panY: 0,
            yaw: -0.5, pitch: 0.45, zoom: 1};
 const mEl = id => document.getElementById(id);
 const mapCanvas = mEl("mapCanvas");
@@ -1579,8 +1673,8 @@ mEl("mLabels").checked = mSettings.labels; mEl("mStalks").checked = mSettings.st
 for (const [id, key, prop] of [["mRadius", "radius", "value"], ["mPath", "path", "value"], ["mColor", "color", "value"],
                                ["mLabels", "labels", "checked"], ["mStalks", "stalks", "checked"], ["mBoost", "boost", "checked"]])
   mEl(id).onchange = () => { mSettings[key] = mEl(id)[prop]; store.set("map", mSettings); loadMap(); drawMap(); };
-mEl("mTop").onclick = () => { M.yaw = 0; M.pitch = Math.PI / 2; drawMap(); };
-mEl("mReset").onclick = () => { M.yaw = -0.5; M.pitch = 0.45; M.zoom = 1; drawMap(); };
+mEl("mTop").onclick = () => { M.yaw = 0; M.pitch = Math.PI / 2; M.panX = M.panY = 0; drawMap(); };
+mEl("mReset").onclick = () => { M.yaw = -0.5; M.pitch = 0.45; M.zoom = 1; M.panX = M.panY = 0; drawMap(); };
 
 async function loadMap() {
   const p = data && data.position; if (!p) return;
@@ -1627,9 +1721,22 @@ function drawMap() {
              info: col("--info"), good: col("--good"), bg: col("--bg"), gold: "#f2c94c"};
   const dpr = window.devicePixelRatio || 1;
   const w = mEl("mapWrap").clientWidth;
-  const h = Math.max(360, Math.min(innerHeight - mapCanvas.getBoundingClientRect().top - 90, 900));
+  // fill the window down to the legend and hint beneath it (measured, since the legend's length varies)
+  const top = mapCanvas.getBoundingClientRect().top + scrollY;
+  const below = [mEl("mLegend"), mapCanvas.closest("section").querySelector(".hint")]
+    .reduce((n, el) => n + (el ? el.offsetHeight + (parseFloat(getComputedStyle(el).marginTop) || 0) : 0), 0);
+  const sizeKey = `${innerHeight}|${Math.round(top)}|${below}|${w}`;
+  if (M.sizeKey !== sizeKey) {   // only when the window or what is around the map changed (not on every drag frame)
+    M.sizeKey = sizeKey;
+    M.h = Math.max(360, Math.floor(innerHeight - top - below - 4));
+    mapCanvas.style.height = M.h + "px";
+    // whatever padding sits below the map (the page's own) still makes it scroll: take exactly that off
+    const over = document.documentElement.scrollHeight - innerHeight;
+    if (over > 0) { M.h = Math.max(360, M.h - over); mapCanvas.style.height = M.h + "px"; }
+  }
+  const h = M.h;
   if (mapCanvas.width !== Math.round(w * dpr) || mapCanvas.height !== Math.round(h * dpr)) {
-    mapCanvas.width = Math.round(w * dpr); mapCanvas.height = Math.round(h * dpr); mapCanvas.style.height = h + "px";
+    mapCanvas.width = Math.round(w * dpr); mapCanvas.height = Math.round(h * dpr);
   }
   const g = mapCanvas.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
@@ -1642,7 +1749,7 @@ function drawMap() {
     const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
     const y2 = y * cp + z1 * sp, depth = z1 * cp - y * sp;
     const k = D / (D + depth);
-    return {sx: w / 2 + x1 * scale * k, sy: h / 2 - y2 * scale * k, depth, k, ok: D + depth > D * 0.05};
+    return {sx: w / 2 + M.panX + x1 * scale * k, sy: h / 2 + M.panY - y2 * scale * k, depth, k, ok: D + depth > D * 0.05};
   };
   const rel = pt => [pt.x - c.x, pt.y - c.y, pt.z - c.z];
   const line = (a, b) => { if (a.ok && b.ok) { g.moveTo(a.sx, a.sy); g.lineTo(b.sx, b.sy); } };
@@ -1811,16 +1918,23 @@ function mapPopHtml(pt) {
     (pt.arrived ? `<div class="unk">on your path: arrived ${esc(pt.arrived.replace("T", " ").replace("Z", ""))}</div>` : "") +
     (b ? `<div class="sec">★ ${esc(b.note) || "bookmarked"}</div>` : "") + `<div class="sec unk">click to copy name</div>`;
 }
+// left drag rotates; right (or middle) drag moves the picture; the wheel zooms
+mapCanvas.addEventListener("contextmenu", e => e.preventDefault());
 mapCanvas.addEventListener("pointerdown", e => {
-  M.drag = {x: e.clientX, y: e.clientY, yaw: M.yaw, pitch: M.pitch, moved: false};
+  M.drag = {x: e.clientX, y: e.clientY, yaw: M.yaw, pitch: M.pitch, panX: M.panX, panY: M.panY,
+            pan: e.button === 2 || e.button === 1, moved: false};
+  if (M.drag.pan) e.preventDefault();
   mapCanvas.setPointerCapture(e.pointerId); mapCanvas.classList.add("dragging");
 });
 mapCanvas.addEventListener("pointermove", e => {
   if (M.drag) {
     const dx = e.clientX - M.drag.x, dy = e.clientY - M.drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) M.drag.moved = true;
-    M.yaw = M.drag.yaw + dx * 0.008;
-    M.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, M.drag.pitch + dy * 0.008));
+    if (M.drag.pan) { M.panX = M.drag.panX + dx; M.panY = M.drag.panY + dy; }
+    else {
+      M.yaw = M.drag.yaw + dx * 0.008;
+      M.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, M.drag.pitch + dy * 0.008));
+    }
     hidePop(); M.hover = null; drawMap(); return;
   }
   const q = mapHit(e);
@@ -1829,7 +1943,7 @@ mapCanvas.addEventListener("pointermove", e => {
   else if (popId === "map") hidePop();
 });
 mapCanvas.addEventListener("pointerup", e => {
-  const click = M.drag && !M.drag.moved; M.drag = null; mapCanvas.classList.remove("dragging");
+  const click = M.drag && !M.drag.moved && !M.drag.pan; M.drag = null; mapCanvas.classList.remove("dragging");
   if (click) { const q = mapHit(e); if (q) copyText(q.pt.name); }
 });
 mapCanvas.addEventListener("pointerleave", () => { if (!M.drag) { M.hover = null; if (popId === "map") hidePop(); drawMap(); } });
@@ -2023,6 +2137,9 @@ function hotspotList(d) {
       `<span class="hs">${Object.entries(h.minerals).map(([k, v]) => `${esc(mineral(k))} ${v}`).join(" · ")}</span>` +
       `</span></li>`).join("") + `</ul></div>`;
 }
+// curiosities as a list: [{body?, tag, why}]
+const curiosityList = (items, withBody) => !(items || []).length ? "" :
+  `<div class="sec"><div class="lbl">🔭 Curiosities</div><ul>${items.map(c => `<li><span>${withBody ? `<b>${esc(c.body)}</b> ` : ""}<b>${esc(c.tag)}</b> · ${esc(c.why)}</span></li>`).join("")}</ul></div>`;
 function popHtml(s) {
   const src = s.source === "own" ? "not in Spansh · your scans" : s.own_scans ? "Spansh + your scans" : "";
   let h = `<h3>${esc(s.name)}${src ? ` <span class="src">${src}</span>` : ""}</h3>`;
@@ -2030,6 +2147,7 @@ function popHtml(s) {
   h += `<div>${s.body_count ? `${s.bodies_known} of ${s.body_count} bodies known`
                              : `${s.bodies_known} bod${s.bodies_known > 1 ? "ies" : "y"} known, total unknown (no FSS honk reported)`}</div>`;
   h += firstsHtml(s.firsts) + list("Stars", s.star_types) + list("Planets", s.planet_types);
+  h += curiosityList(s.curiosity_list, true);
   if (s.bio_potential) h += `<div class="sec"><div class="lbl">🧬 Exobiology</div><div>up to ${credits(s.bio_potential)} cr across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"} <span class="unk">(spawn-rule estimate; the Here view shows which genera)</span></div></div>`;
   const d = s.detail;
   if (!d) return h + `<div class="sec unk">Loading ring, belt and signal details…</div>`;
@@ -2203,6 +2321,8 @@ function scoopHint() {
 }
 function onData() {
   drawTts();
+  const sv = data.speech && data.speech.version;
+  if (sv && sv !== speechLib.version && sv !== speechLibWanted) { speechLibWanted = sv; loadSpeechLib(); }
   const br = data.bio_rules, brEl = document.getElementById("bioRules");
   if (brEl) brEl.textContent = br
     ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
@@ -2228,11 +2348,12 @@ function onData() {
   if (dk && dk.ts !== lastDockTs) {   // just docked: the moment to sell, if it is worth it
     if (lastDockTs !== undefined && (dk.has_uc || dk.has_vista) && dl && dl !== "ok")
       alertOut("sell", `Docked at ${dk.station} — ${credits(data.unsold.total)} cr to sell`, dk.has_uc ? "Universal Cartographics is here." : "Vista Genomics is here.",
-               {say: `Docked. ${credits(data.unsold.total)} credits to sell here.`});
+               {say: () => line("docked_sell", {value: credits(data.unsold.total), station: dk.station}, `Docked. ${credits(data.unsold.total)} credits to sell here.`)});
     lastDockTs = dk.ts;
   } else if (!dk) {
     if (lastDockTs && dl === "urgent")   // undocked with a red-level haul still aboard
-      alertOut("sell", `Undocked with ${credits(data.unsold.total)} cr still aboard`, "Nothing was sold.", {sound: "alert"});
+      alertOut("sell", `Undocked with ${credits(data.unsold.total)} cr still aboard`, "Nothing was sold.",
+               {sound: "alert", say: () => line("undocked_unsold", {value: credits(data.unsold.total)})});
     lastDockTs = null;
   }
   const sale = data.last_sale;
@@ -2242,7 +2363,8 @@ function onData() {
     const still = sale.carto && !sale.bio && bioLeft > 0 ? `Exobiology still aboard: ${credits(bioLeft)} cr (Vista Genomics)`
                 : sale.bio && !sale.carto && cartoLeft > 0 ? `Cartographics still aboard: ${credits(cartoLeft)} cr (Universal Cartographics)` : "";
     saleBanner = {text: `💰 Sold ${parts.join(" · ")}${sale.systems ? ` · ${sale.systems} systems` : ""}${still ? ` — ${still}` : ""}`, until: Date.now() + 60000};
-    alertOut("sell", `Sold ${parts.join(" and ")}`, still, {say: `Sold ${parts.join(" and ")}. ${still}`});
+    alertOut("sell", `Sold ${parts.join(" and ")}`, still,
+             {say: () => line("sold", {sold: parts.join(" and "), still: still ? still.replace(/ \((.+)\)$/, " at $1") + "." : ""}, `Sold ${parts.join(" and ")}. ${still}`)});
     lastSaleTs = sale.ts;
   }
   // arrival: low fuel at a star you cannot scoop (the target-time warning only covers plotted jumps)
@@ -2250,11 +2372,11 @@ function onData() {
   if (pos && pos.id64 !== lastPosId) {
     const hs = data.here_star;
     if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && f0.pct < 30 && hs && !/^[OBAFGKM](_|$)/.test(hs))
-      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {say: `Fuel ${f0.pct} percent, and this star cannot be scooped.`});
+      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`)});
     lastPosId = pos.id64;
   }
   const low = !!(f0 && f0.low_flag);
-  if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {say: "Fuel low."});
+  if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {say: () => line("fuel_low", {pct: f0 && f0.pct}, "Fuel low.")});
   lastLowFlag = low;
   // moments: valuable finds (priced by the server, judged against your highlight levels), heat, interdiction
   for (const m of (data.moments || []).filter(m => m.seq > lastMomentSeq)) {
@@ -2262,66 +2384,97 @@ function onData() {
       const special = (m.notable || m.terraformable) && m.first_discovered;
       if (special || (m.base_value != null && m.base_value >= hlLevel("body"))) {
         const what = [m.subtype, m.terraformable && "terraformable", m.first_discovered && "undiscovered"].filter(Boolean).join(", ");
-        alertOut("find", `${m.body}: ${what}`, m.base_value ? `${credits(m.base_value)} cr scanned and mapped` : "", {say: `${what}, ${m.body}.`});
+        alertOut("find", `${m.body}: ${what}`, m.base_value ? `${credits(m.base_value)} cr scanned and mapped` : "", {say: () => line("find_body", {what, body: m.body, value: m.base_value ? credits(m.base_value) : ""}, `${what}, ${m.body}.`)});
         toast(`✦ ${m.body}: ${what}`);
       }
     } else if (m.kind === "bio" && m.bio_value != null && m.bio_value >= hlLevel("bio")) {
       alertOut("find", `Bio on ${m.body}: up to ${credits(m.bio_value)} cr`, `${m.signals} signal${m.signals === 1 ? "" : "s"}`,
-               {say: `Biology on ${m.body}, worth up to ${credits(m.bio_value)} credits.`});
+               {say: () => line("find_bio", {body: m.body, value: credits(m.bio_value)}, `Biology on ${m.body}, worth up to ${credits(m.bio_value)} credits.`)});
       toast(`🧬 ${m.body}: up to ${credits(m.bio_value)} cr`);
-    } else if (m.kind === "heat") alertOut("hull", "Heat damage", "", {say: "Heat damage."});
-    else if (m.kind === "interdicted") alertOut("hull", `Interdicted${m.by ? " by " + m.by : ""}`, m.submitted ? "you submitted" : "", {say: "Interdicted."});
+    } else if (m.kind === "heat") alertOut("hull", "Heat damage", "", {say: () => line("heat", {}, "Heat damage.")});
+    else if (m.kind === "interdicted") alertOut("hull", `Interdicted${m.by ? " by " + m.by : ""}`, m.submitted ? "you submitted" : "",
+                                                {say: () => line("interdicted", {by: m.by || "someone"}, "Interdicted.")});
+    else if (m.kind === "game_start") alertOut("game", `Game loaded${m.cmdr ? ": CMDR " + m.cmdr : ""}`, m.ship ? `flying ${m.ship}` : "",
+                                               {say: () => line("game_start", {cmdr: m.cmdr, ship: m.ship}, "Welcome back, Commander.")});
+    else if (m.kind === "signals") {   // the FSS found signals on a body: counts only, per the two ticks
+      const b = saySignals("bio") && m.bio, g = saySignals("geo") && m.geo;
+      const n = (c, what) => `${c} ${what} Signal${c === 1 ? "" : "s"}`;
+      const text = b && g ? `${m.bio} Biological and ${m.geo} Geological Signals found on body ${m.body}.`
+        : b ? `${n(m.bio, "Biological")} on body ${m.body}.` : g ? `${n(m.geo, "Geological")} on body ${m.body}.` : "";
+      if (text && speechOn) speak(text);
+    }
+    else if (m.kind === "honk") {
+      const n = m.bodies, count = m.all_found ? "all bodies found" : n != null ? `${n} bod${n === 1 ? "y" : "ies"}` : "";
+      alertOut("honk", m.ok ? `Honked ${m.system}${count ? " · " + count : ""}` : `Auto honk failed in ${m.system}`, m.why || "",
+               {say: !m.ok ? "Honk failed. Is the discovery scanner on primary fire?"
+                     : !honkAnnounce() ? "System honked."
+                     : m.all_found ? "System scan complete, and all bodies were found."
+                     : n != null ? `System Scan Completed, ${n} Bod${n === 1 ? "y" : "ies"} discovered.` : "System scan completed."});
+    }
+    else if (m.kind === "fsd_charge") {
+      const scoop = /^[OBAFGKM](_|$)/.test(m.star_class || "");
+      alertOut("jump", `Jumping to ${m.system}`, m.star_class ? `${spokenStar(m.star_class)}${scoop ? ", scoopable" : ", not scoopable"}` : "",
+               {say: `Frame Shift Drive charging to jump to ${m.system}.${scoop ? " This star is scoopable." : ""}`});
+    }
+    else if (m.kind === "game_exit") alertOut("game", "Game closed", "", {say: () => line("game_exit", {}, "Game closed. Fly safe, Commander.")});
     lastMomentSeq = Math.max(lastMomentSeq, m.seq);
   }
   // sample spacing: say so once when you are far enough from every earlier sample of the species
   const sm = data.sampling, smKey = sm && `${sm.species}|${sm.samples}`;
   if (sm && sm.clear && smKey !== clearAnnounced) {
     clearAnnounced = smKey;
-    alertOut("find", `Clear to sample ${sm.genus}`, `${sm.nearest} m from the nearest sample (${sm.need} m needed)`, {sound: "upbeat", say: `Clear to sample ${sm.genus}.`});
+    alertOut("find", `Clear to sample ${sm.genus}`, `${sm.nearest} m from the nearest sample (${sm.need} m needed)`, {sound: "upbeat", say: () => line("sample_clear", {genus: sm.genus}, `Clear to sample ${sm.genus}.`)});
   }
   // hull: once below half, once below a quarter (re-armed by a repair)
   const band = hullBand(data.hull);
   if (band > hullLatch) {
     const reps = data.materials && data.materials.repairs;
-    alertOut("hull", `Hull ${data.hull.pct}%`, reps ? `${reps} basic repairs can be synthesised` : "", {say: `Hull at ${data.hull.pct} percent.`});
+    alertOut("hull", `Hull ${data.hull.pct}%`, reps ? `${reps} basic repairs can be synthesised` : "", {say: () => line("hull", {pct: data.hull.pct}, `Hull at ${data.hull.pct} percent.`)});
   }
   hullLatch = band;
   const t = data.target;
   if (t && t.seq !== lastSeq) {
-    if (t.fresh && soundOn && t.sound) play(t.sound);
-    if (t.fresh && t.status === "unreported")   // the fanfare above is the sound; this adds notification and speech
-      alertOut("discovery", "New discovery targeted", `${t.name} is not in Spansh or EDSM`, {sound: null, say: "New discovery targeted.", delay: 1500});
+    if (t.fresh && soundOn && t.sound && alertSound.discovery) play(t.sound);   // the targeting sound
+    if (t.fresh && t.status === "unreported")   // the fanfare above is the sound; this adds the notification (never
+                                                // spoken: arriving in an undiscovered system is announced instead)
+      alertOut("discovery", "New discovery targeted", `${t.name} is not in Spansh or EDSM`, {sound: null});
     const l = worthLeavingFor(t.leaving);
     if (t.fresh && l && !l.clean) {
       const text = leavingText(t.leaving).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, "");
-      alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: `Leaving with unfinished work: ${text}`});
+      alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: () => line("leaving", {text}, `Leaving with unfinished work: ${text}`)});
     }
     const f = data.fuel;
     if (t.fresh && f && f.live && f.pct != null && f.pct < 30 && t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class))
       alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
-               {delay: 800, say: `Fuel ${f.pct} percent, and the target cannot be scooped.`});
+               {delay: 800, say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
     lastSeq = t.seq;
   }
   const a = data.arrival;
   if (a && a.seq !== lastArrival) {
-    if (a.wrong)   // correct a wrong call out loud
-      alertOut("arrival", a.undiscovered ? `${a.name}: actually undiscovered` : `${a.name}: already discovered`,
-               a.undiscovered ? "the fanfare was deserved after all" : "someone was here before you", {sound: a.sound || null});
+    if (a.undiscovered && a.first_visit)   // nobody has been here before you (your own unsold find does not count twice)
+      alertOut("arrival", `${a.name}: ${a.wrong ? "actually undiscovered" : "undiscovered"}`,
+               a.wrong ? "the fanfare was deserved after all" : "you are the first here",
+               {sound: a.sound || null, say: () => line("arrival_undiscovered", {system: a.name}, `${a.name} is undiscovered. You are the first here.`)});
+    else if (a.wrong && !a.undiscovered)   // correct a wrong fanfare out loud
+      alertOut("arrival", `${a.name}: already discovered`, "someone was here before you",
+               {sound: a.sound || null, say: () => line("arrival_discovered", {system: a.name}, `${a.name}: already discovered`)});
     lastArrival = a.seq;
   }
   const u = data.unsold, ulvl = unsoldLevel(u);
   if (ulvl && ulvl !== lastUnsoldLevel) {
-    if (lastUnsoldLevel && ulvl !== "ok") alertOut("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.");
+    if (lastUnsoldLevel && ulvl !== "ok") alertOut("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.",
+                                                   {say: () => line(ulvl === "urgent" ? "unsold_urgent" : "unsold_warn", {value: credits(u.total)})});
     lastUnsoldLevel = ulvl;
   }
   const c = data.carrier;
   if (c && c.ts !== lastCarrierTs) {
-    if (lastCarrierTs) { alertOut("carrier", `${c.name} is at ${c.system}`, c.distance != null ? `${c.distance} ly from you` : ""); toast(`🚢 ${c.name} arrived at ${c.system}`); }
+    if (lastCarrierTs) { alertOut("carrier", `${c.name} is at ${c.system}`, c.distance != null ? `${c.distance} ly from you` : "",
+                                  {say: () => line("carrier_arrived", {carrier: c.name, system: c.system})}); toast(`🚢 ${c.name} arrived at ${c.system}`); }
     lastCarrierTs = c.ts;
   }
   const k = (data.codex_recent || [])[0];
   if (k && k.ts !== lastCodexTs) {
-    if (lastCodexTs) { const what = k.voucher ? `codex voucher · ${k.voucher.toLocaleString()} cr` : "new to your codex for this region"; alertOut("codex", `📖 ${k.name}`, what, {say: `Codex: ${k.name}, ${what}.`}); toast(`📖 ${k.name} — ${what}`); }
+    if (lastCodexTs) { const what = k.voucher ? `codex voucher · ${k.voucher.toLocaleString()} cr` : "new to your codex for this region"; alertOut("codex", `📖 ${k.name}`, what, {say: () => line("codex", {entry: k.name, what}, `Codex: ${k.name}, ${what}.`)}); toast(`📖 ${k.name} — ${what}`); }
     lastCodexTs = k.ts;
   }
 }
@@ -2329,8 +2482,8 @@ function onData() {
 const alertDialog = document.getElementById("alertDialog");
 document.getElementById("alertOpts").innerHTML = ALERTS.map(([k, label, snd]) =>
   `<tr><td>${esc(label)}</td><td><input type="checkbox" data-alert="${k}" aria-label="notify"></td>` +
-  `<td>${snd || k === "arrival" ? `<input type="checkbox" data-asound="${k}" aria-label="sound">` : `<span class="unk" title="the target sound">·</span>`}</td>` +
-  `<td><input type="checkbox" data-aspeak="${k}" aria-label="speak"></td></tr>`).join("");
+  `<td>${snd || k === "arrival" ? `<input type="checkbox" data-asound="${k}" aria-label="sound">` : `<span class="unk" title="${k === "discovery" ? "the target sound" : "no sound"}">·</span>`}</td>` +
+  `<td>${UNSPOKEN.has(k) ? `<span class="unk" title="not spoken: arriving there is">·</span>` : `<input type="checkbox" data-aspeak="${k}" aria-label="speak">`}</td></tr>`).join("");
 for (const [attr, cfg, key] of [["asound", alertSound, "alertSound"], ["aspeak", alertSpeak, "alertSpeak"]])
   alertDialog.querySelectorAll(`[data-${attr}]`).forEach(cb => {
     cb.checked = !!cfg[cb.dataset[attr]];
@@ -2344,8 +2497,83 @@ function drawSpeechBtn() {
   speechBtn.title = (speechOn ? "spoken alerts on" : "spoken alerts off") + " — " +
     (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see ed_tts.py)");
 }
-speechBtn.onclick = () => { speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn(); if (speechOn) speak("Spoken alerts on."); };
-document.getElementById("trySpeak").onclick = () => { audio(); speak("Leaving with unfinished work: A 2, a class two gas giant, plus 1.4M to map."); };
+speechBtn.onclick = () => { speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn(); if (speechOn) speak(line("speech_on", {}, "Spoken alerts on.")); };
+// ▶ voice: a random alert in the chosen personalities, with made-up values (the words are shown too)
+document.getElementById("trySpeak").onclick = () => {
+  audio();
+  const keys = Object.keys(LINE_SAMPLES).filter(k => line(k, LINE_SAMPLES[k]));
+  const key = keys[Math.floor(Math.random() * keys.length)] || "leaving";
+  const text = line(key, LINE_SAMPLES[key], "Leaving with unfinished work: A 2, a class two gas giant, plus 1.4M to map.");
+  document.getElementById("speechTried").textContent = `${key}: “${spokenText(text)}”`;
+  speak(text);
+};
+// personalities: one box per style in speech.json, plus profanity for the styles with swearing versions
+function drawSpeechStyles() {
+  const box = document.getElementById("speechStyles"), on = speechStyles();
+  const styles = Object.entries(speechLib.styles || {});
+  box.innerHTML = styles.map(([k, v]) => `<label><input type="checkbox" data-sstyle="${esc(k)}"${on.includes(k) ? " checked" : ""}> ${esc(typeof v === "string" ? v : (v && v.label) || k)}</label>`).join(" ");
+  box.querySelectorAll("[data-sstyle]").forEach(cb => cb.onchange = () => {
+    store.set("speechStyles", [...box.querySelectorAll("[data-sstyle]:checked")].map(x => x.dataset.sstyle)); drawSpeechStyles();
+  });
+  const lines = Object.values(speechLib.lines || {});
+  const swear = styles.map(([k]) => k).filter(k => lines.some(e => e && Array.isArray(e[k + "_profane"]) && e[k + "_profane"].length));
+  if (document.activeElement !== namesBox) namesBox.value = speechNames().join(", ");
+  document.getElementById("sayBio").checked = saySignals("bio"); document.getElementById("sayGeo").checked = saySignals("geo");
+  speedBox.value = speechSpeed(); speedOut.textContent = speechSpeed().toFixed(2) + "×";
+  const pr = document.getElementById("speechProfanity");
+  pr.checked = !!speechProfane(); pr.disabled = !swear.length;
+  const pct = document.getElementById("speechProfanityPct");
+  if (document.activeElement !== pct) pct.value = speechProfanePct();
+  pct.disabled = !swear.length || !speechProfane();
+  document.getElementById("speechProfanityWho").textContent = swear.length ? `(${swear.join(", ")})` : "";
+  const err = speechLib.error || (speechLib.problems || []).slice(0, 3).join("; ");
+  document.getElementById("speechHint").innerHTML =
+    (err ? `<span class="noscoop">${esc(err)}</span><br>` : "") +
+    (!styles.length ? "No lines file, so alerts use plain wording." :
+     !on.some(k => speechLib.styles[k]) ? "No personality ticked, so alerts use plain wording. " : "") +
+    (styles.length ? `A line is picked at random from every personality ticked. The lines live in ${esc((data && data.speech && data.speech.file) || "speech.json")} next to the script: edit it to change or add lines (or whole personalities) and the page picks the changes up on its own. Notifications keep the plain wording.` : "");
+}
+document.getElementById("speechProfanity").onchange = e => { store.set("speechProfanity", e.target.checked); drawSpeechStyles(); };
+document.getElementById("speechProfanityPct").onchange = e => {
+  const v = e.target.value.trim() === "" ? null : Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0)));
+  store.set("speechProfanityPct", v); drawSpeechStyles();   // blank goes back to the config file's default
+};
+const namesBox = document.getElementById("speechNames");
+const speedBox = document.getElementById("speechSpeed"), speedOut = document.getElementById("speechSpeedOut");
+speedBox.oninput = () => { speedOut.textContent = Number(speedBox.value).toFixed(2) + "×"; };
+speedBox.onchange = () => { store.set("speechSpeed", Number(speedBox.value)); drawSpeechStyles(); };
+for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"]])
+  document.getElementById(id).onchange = e => store.set(key, e.target.checked);
+namesBox.onchange = () => { store.set("speechNames", namesBox.value.trim() ? namesBox.value : null); drawSpeechStyles(); };
+drawSpeechStyles();
+// auto honk: the server holds Primary Fire on arrival; this is its on/off and status
+const honkBox = document.getElementById("autoHonk"), honkSayBox = document.getElementById("autoHonkSay");
+// say the body count when an auto honk completes: per browser, the config's [autohonk] announce by default
+const honkAnnounce = () => !!(store.get("honkAnnounce", null) ?? (data && data.autohonk && data.autohonk.announce) ?? true);
+honkSayBox.onchange = () => store.set("honkAnnounce", honkSayBox.checked);
+function drawHonk() {
+  const a = data && data.autohonk;
+  honkBox.checked = !!(a && a.wanted); honkBox.disabled = !(a && a.available);
+  honkSayBox.checked = honkAnnounce(); honkSayBox.disabled = !(a && a.wanted);   // only means anything with auto honk on
+  honkSayBox.closest("label").style.opacity = honkSayBox.disabled ? .5 : 1;
+  document.getElementById("autoHonkStatus").textContent = a ? a.status : "";
+  document.getElementById("autoHonkKey").textContent = a ? (a.pressing || a.key) : "";
+  document.getElementById("autoHonkTest").disabled = !(a && a.available);
+}
+document.getElementById("autoHonkTest").onclick = async () => {
+  const msg = document.getElementById("autoHonkTestMsg");
+  try {
+    const r = await fetch("api/autohonk/test", {method: "POST"}), j = await r.json();
+    if (!r.ok) { msg.textContent = j.error || "could not test"; return; }
+    let n = j.in;
+    const tick = () => { msg.textContent = n > 0 ? `click into the game: pressing ${j.pressing} in ${n} s` : `holding ${j.pressing}…`; if (n-- > 0) setTimeout(tick, 1000); };
+    tick();
+  } catch { msg.textContent = "could not reach Outrider"; }
+};
+honkBox.onchange = async () => {
+  try { await apiJson("api/autohonk", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled: honkBox.checked})}); }
+  catch { toast("could not switch auto honk"); }
+};
 function drawTts() {
   const t = data && data.tts, sel = document.getElementById("ttsVoice");
   document.getElementById("ttsEngine").textContent = t && t.engine === "piper" ? "· Piper" : "· browser speech";
@@ -2361,6 +2589,7 @@ function drawTts() {
   if (t && t.voice && document.activeElement !== sel) sel.value = t.voice;
   sel.disabled = !opts.length;
   drawSpeechBtn();
+  drawHonk();
 }
 drawSpeechBtn();
 document.getElementById("ttsVoice").onchange = e => apiJson("api/voice", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({voice: e.target.value})});
@@ -2471,11 +2700,12 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   else if (id === "maxBonus") { maxBonusCfg = null; store.set("maxBonus", null); showMaxBonus(); renderHere(); }
   else if (id === "hlBody" || id === "hlBio") { hlCfg[id === "hlBody" ? "body" : "bio"] = null; store.set("highlightCfg", hlCfg); showHl(); renderHere(); }
   else if (id === "bioMin") { bioMinCfg = null; store.set("bioMinCfg", null); showBioMin(); }
+  else if (id === "speechSpeed") { store.set("speechSpeed", null); drawSpeechStyles(); }
   else { unsoldCfg[id === "unsoldWarn" ? "warn" : "urgent"] = null; store.set("unsoldCfg", unsoldCfg); thresholdEls[id].dispatchEvent(new Event("focus")); }
   render();
 });
 function drawAlertsBtn() { document.getElementById("alertsBtn").classList.toggle("on", !!alertCfg.enabled); }
-document.getElementById("alertsBtn").onclick = () => alertDialog.showModal();
+document.getElementById("alertsBtn").onclick = () => { drawSpeechStyles(); alertDialog.showModal(); };
 drawAlertsBtn();
 
 let disconnected = null;

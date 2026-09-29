@@ -13,15 +13,18 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              scoopability, body and ring icons, notable bodies (ELW/WW/AW/terraformable), Spansh's
              credit estimate, your 🏁 first-discovery markers (sold / unsold / lost), bookmarks
   Here       every body in the current system: value as scanned and if mapped, gravity, atmosphere,
-             bio genera with 0/3..3/3 sampling progress and which species they are likely to be
-             (ed_bio.py spawn rules, with credit values), ring hotspots, codex entries, your firsts;
-             or as a schematic: stars, planets, moons and barycentres in their hierarchy
+             bio genera with 0/3..3/3 sampling progress and which species they could be (ed_bio.py
+             spawn rules plus BioScan's colour check, with credit values; "one of these" with a range
+             when a body has fewer signals than possible genera), ring hotspots, codex entries,
+             curiosities (ringed landables, close orbits, planet pairs...), your firsts; as a list,
+             a tree in orbital order, or a schematic of stars, planets, moons and barycentres
   Samples    every exobiology sample run (aboard / sold / lost, with value) and codex entry
   Bookmarks  systems you starred, with a note each
   Search     local database or Spansh: star classes (scoopable shortcut), planet types, ring types,
              ring hotspot minerals
   Map        3D canvas of the neighbourhood with your path, first discoveries, boost stars
-             (neutron / white dwarf) and your carrier
+             (neutron / white dwarf) and your carrier; fills the window; left-drag rotates,
+             right-drag moves, the wheel zooms
   History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row; exports
   Log        every journal event with a one-line summary (ed_log.py), filtered by category, time and
@@ -36,8 +39,17 @@ sales since, ship), fuel (with jumps left, jumps since the last scoop and FSD bo
 carrier (distance, UC / Vista services), the latest codex first, unsold firsts, and the unsold
 cartographic + exobiology estimate from ed_unsold.py. Targeting a system plays a sound: fanfare if
 neither Spansh nor EDSM has heard of it, upbeat if it is not fully scanned, thud if you have been
-there or it is fully scanned, plus an alert if you are leaving unfinished work behind. Desktop
-notifications are optional (🔔 alerts).
+there or it is fully scanned, plus an alert if you are leaving unfinished work behind. Arriving
+somewhere undiscovered is announced by the voice (a sound only corrects a targeting call that was
+wrong). Desktop notifications are optional (🔔 alerts).
+
+Alerts can be spoken (🗣): with Piper (ed_tts.py) when it is installed, else the browser's voice, in
+the personalities of speech.json (ed_speech.py: business, sarcastic, sweet, with swearing versions at
+a chosen rate), calling you by the names you choose. Besides the alerts the voice can say signal
+counts as the FSS finds them, where the frame shift drive is taking you and whether that star is
+scoopable, and greet you on loading into the game. voice_lab.py is a separate window for trying
+voices and lines. Auto honk (ed_honk.py, Linux, optional) holds Primary Fire's keyboard binding on
+arriving by hyperspace so the Discovery Scanner fires, and says how many bodies it found.
 
 Body data is Spansh's merged with your own journal scans, so what you scan shows up immediately,
 even for systems Spansh has never heard of. Your own data wins where both exist.
@@ -64,7 +76,8 @@ The page itself is static/page.html + page.css + page.js next to this script (ed
 Tests: python3 -m unittest discover tests; ed_bio.py --backtest scores the bio rules against
 your journals.
 
-Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp.
+Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp;
+piper-tts (spoken alerts) and evdev (auto honk, Linux) are optional.
 """
 
 from __future__ import annotations
@@ -93,6 +106,8 @@ except ImportError:
     ed_bio = None
 import ed_materials  # engineering materials and synthesis recipes (no dependencies)
 import ed_tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
+import ed_speech     # the words for spoken alerts, per personality (speech.json)
+import ed_honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
 try:  # one-line summaries of every journal event, for the Log view
     import ed_log
 except ImportError:
@@ -167,6 +182,18 @@ RADIUS_CHOICES = (20, 25, 30, 40, 50)
 # Spoken alerts: the Piper voice, and the one used when it is missing (see ed_tts.py).
 VOICE, VOICE_FALLBACK = ed_tts.DEFAULT_VOICE, ed_tts.DEFAULT_FALLBACK
 BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups")   # where "Back up now" writes (git-ignored)
+# Spoken alerts' wording: the lines file, and the personalities a browser starts with (see ed_speech.py).
+SPEECH_FILE = os.path.join(SCRIPT_DIR, "speech.json")
+SPEECH_STYLES, SPEECH_PROFANITY = ("business",), False
+SPEECH_PROFANITY_PCT = 50   # with profanity on: how often (%) a line comes from the swearing versions
+SPEECH_NAMES = "Boss, Hefay, Sir"   # what the voice calls you ({name}), one at random per line
+# Auto honk (see ed_honk.py): on arriving by hyperspace, hold a key bound to Primary Fire so the Discovery
+# Scanner fires. The D-Scanner MUST be on PRIMARY FIRE in the active fire group when you jump.
+AUTOHONK = {"enabled": False, "key": ed_honk.DEFAULT_KEY, "delay": 2.0, "hold": 6.0, "skip_honked": True,
+            "announce": True}   # announce: say the body count (or "all bodies were found") when it completes
+AUTOHONK_MAX_AGE = 30   # s: an arrival older than this is a journal being caught up on, not a live jump
+SPEAK_BIO_SIGNALS = SPEAK_GEO_SIGNALS = True   # say "2 Biological Signals on body A 3" as the FSS finds them
+SPEECH_SPEED = 1.0   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 
 
 # --------------------------------------------------------------------------
@@ -221,6 +248,7 @@ def _config_value(section, key, value, conv, default):
 def settings_from(cfg, args, env_journals=None, detected=((), ())):
     """Resolve every setting with the precedence flag > env > config > default/auto-detect."""
     j, sv, df, sp = cfg.get("journals", {}), cfg.get("server", {}), cfg.get("defaults", {}), cfg.get("spansh", {})
+    ah = cfg.get("autohonk", {})
     j = dict(j, live=_config_folders(j.get("live"), "live"), legacy=_config_folders(j.get("legacy"), "legacy"))
     num = lambda sec, table, key, conv, default: _config_value(sec, key, table.get(key), conv, default)
     choices = sv.get("radius_choices", RADIUS_CHOICES)
@@ -256,10 +284,26 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "bio_highlight": num("defaults", df, "biology_highlight_value", int, BIO_HIGHLIGHT),
         "max_include_bonus": bool(df.get("body_max_value_include_bonus", MAX_INCLUDE_BONUS)),
         "voice": str(df.get("voice") or VOICE), "voice_fallback": str(df.get("voice_fallback") or VOICE_FALLBACK),
+        "speech_styles": [str(x) for x in (df.get("speech_styles") if isinstance(df.get("speech_styles"), list)
+                                           else SPEECH_STYLES)],
+        "speech_profanity": bool(df.get("speech_profanity", SPEECH_PROFANITY)),
+        "speech_profanity_pct": min(100, max(0, num("defaults", df, "speech_profanity_pct", int, SPEECH_PROFANITY_PCT))),
+        "speak_bio_signals": bool(df.get("speak_bio_signals", SPEAK_BIO_SIGNALS)),
+        "speak_geo_signals": bool(df.get("speak_geo_signals", SPEAK_GEO_SIGNALS)),
+        "speech_speed": min(2.0, max(0.5, num("defaults", df, "speech_speed", float, SPEECH_SPEED))),
+        "speech_names": ", ".join(str(x) for x in df["speech_names"]) if isinstance(df.get("speech_names"), list)
+                        else str(df.get("speech_names", SPEECH_NAMES)),
+        "speech_file": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("speech_file") or SPEECH_FILE))),
         "backup_dir": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("backup_dir") or BACKUP_DIR))),
         "concurrency": num("spansh", sp, "concurrency", int, SPANSH_CONCURRENCY),
         "map_max_radius": num("spansh", sp, "map_max_radius", float, MAP_MAX_RADIUS),
         "map_max_pages": num("spansh", sp, "map_max_pages", int, MAP_MAX_PAGES),
+        "autohonk": {"enabled": bool(ah.get("enabled", AUTOHONK["enabled"])),
+                     "key": str(ah.get("key") or AUTOHONK["key"]),
+                     "delay": max(0.0, num("autohonk", ah, "delay", float, AUTOHONK["delay"])),
+                     "hold": min(20.0, max(0.5, num("autohonk", ah, "hold", float, AUTOHONK["hold"]))),
+                     "skip_honked": bool(ah.get("skip_honked", AUTOHONK["skip_honked"])),
+                     "announce": bool(ah.get("announce", AUTOHONK["announce"]))},
     }
 
 
@@ -280,6 +324,7 @@ port = {st["port"]}
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
 radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
 backup_dir = {q(st["backup_dir"])}   # where "Back up now" writes the database and a copy of the journals
+speech_file = {q(os.path.basename(st["speech_file"]) if os.path.dirname(st["speech_file"]) == SCRIPT_DIR else st["speech_file"])}   # the spoken alerts' lines, per personality
 db = {q(os.path.basename(st["db"]) if os.path.dirname(st["db"]) == SCRIPT_DIR else st["db"])}
 
 [defaults]   # what a browser uses until its user changes it (page settings stay per browser)
@@ -292,11 +337,28 @@ biology_highlight_value = {st["bio_highlight"]}  # Here: a body's bio turns viol
 body_max_value_include_bonus = {"true" if st["max_include_bonus"] else "false"}  # Here: Max counts first-discovery/mapped/footfall bonuses
 voice = {q(st["voice"])}          # spoken alerts: Piper voice (downloaded into piper-voices/ on first use)
 voice_fallback = {q(st["voice_fallback"])}  # used while the voice above is missing
+speech_styles = [{", ".join(q(x) for x in st["speech_styles"])}]   # spoken alerts' personalities: any of the styles in the speech file
+speech_profanity = {"true" if st["speech_profanity"] else "false"}   # also use the swearing versions (sarcastic, sweet)
+speech_profanity_pct = {st["speech_profanity_pct"]}   # with profanity on: how often (%) a line is a swearing one
+speak_bio_signals = {"true" if st["speak_bio_signals"] else "false"}   # say biological signal counts as the FSS finds them
+speak_geo_signals = {"true" if st["speak_geo_signals"] else "false"}   # and geological ones
+speech_speed = {st["speech_speed"]:g}   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
+speech_names = {q(st["speech_names"])}   # what the voice calls you, comma separated: one is picked at random each time
 
 [spansh]
 concurrency = {st["concurrency"]}          # body-detail fetches in flight after an arrival
 map_max_radius = {st["map_max_radius"]:g}    # ly: the largest 3D map the page may ask for
 map_max_pages = {st["map_max_pages"]}        # pages of 500 systems fetched for the map
+
+[autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see ed_honk.py)
+# IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
+# and Primary Fire needs a keyboard binding (key = "auto" reads it, modifiers too, from your controls preset).
+enabled = {"true" if st["autohonk"]["enabled"] else "false"}   # the page's alerts dialog can switch it on and off too
+key = {q(st["autohonk"]["key"])}   # "auto": Primary Fire's keyboard binding from your controls preset; or e.g. KEY_KP0, KEY_LEFTALT+KEY_K
+delay = {st["autohonk"]["delay"]:g}   # seconds after arriving before the press (the jump tunnel ignores input)
+hold = {st["autohonk"]["hold"]:g}    # seconds to hold the trigger (the scanner fires once charged)
+skip_honked = {"true" if st["autohonk"]["skip_honked"] else "false"}   # leave systems you have already honked alone
+announce = {"true" if st["autohonk"]["announce"] else "false"}   # say "System scan completed, 12 bodies discovered" (or all found) afterwards
 """
 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")
@@ -327,10 +389,10 @@ MATERIAL_EVENTS = ("Materials", "MaterialCollected", "MaterialDiscarded", "Synth
                    "EngineerContribution")
 WANTED = tuple(f'"event":"{e}"'.encode()
                for e in POSITION_EVENTS + STAR_CLASS_EVENTS + SCAN_EVENTS + DATA_EVENTS + SHIP_EVENTS
-               + CMDR_EVENTS + MATERIAL_EVENTS + ("Loadout",))
+               + CMDR_EVENTS + MATERIAL_EVENTS + ("Loadout", "Shutdown"))
 
 # Bump when the journal parser learns new events: forces a one-off re-read of every journal.
-PARSER_VERSION = 20
+PARSER_VERSION = 21
 
 SCOOPABLE = set("OBAFGKM")
 FUEL_HISTORY = 20          # recent jumps used to estimate fuel per jump
@@ -786,6 +848,7 @@ def record_from_dump(system, b):
         "parents": [p["Star"] for p in b.get("parents") or [] if "Star" in p],
         "orbital_period_s": round(b["orbitalPeriod"] * 86400) if b.get("orbitalPeriod") else None,
         "atmo_comp": b.get("atmosphereComposition"),
+        "materials": surface_materials(b.get("materials")),   # some bios' colours (and so their chances) depend on them
         # the system schematic: hierarchy, size, orbit
         "parents_full": parents_full(b.get("parents")),
         "radius_km": b.get("radius") or (b["solarRadius"] * SOLAR_RADIUS_KM if b.get("solarRadius") else None),
@@ -833,6 +896,7 @@ def record_from_scan(ev):
         "sma_ls": ev["SemiMajorAxis"] / LIGHT_SPEED if ev.get("SemiMajorAxis") else None,
         "atmo_comp": ({c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
                       if "AtmosphereComposition" in ev else None),
+        "materials": surface_materials(ev.get("Materials")),
         # what ed_unsold.body_value needs to price it
         "ed": {k: ev.get(k) for k in ("StarType", "StellarMass", "PlanetClass", "TerraformState", "MassEM")},
     }
@@ -907,6 +971,9 @@ class Journals:
         # recent moments the page may announce: {seq, ts, kind, ...}; kinds: scan, bio (a body worth a
         # look, priced by State), heat, interdicted. seq only grows; the page remembers the last it saw.
         self.moments = collections.deque(maxlen=16)
+        self.jump_arrival = None   # the latest hyperspace arrival {id64, name, ts} (auto honk)
+        self.last_honk = None      # the latest discovery scan {id64, ts, bodies, progress}
+        self.last_all_found = None # the latest FSSAllBodiesFound {id64, ts}
         self.moment_seq = 0
         self.reload()
 
@@ -1027,6 +1094,9 @@ class Journals:
         if name in CMDR_EVENTS:
             self.handle_cmdr(name, ev, ts)
             return
+        if name == "Shutdown":   # a clean quit to the desktop (a crash writes nothing)
+            self.moment("game_exit", ts)
+            return
         if name in MATERIAL_EVENTS:
             if ed_materials.apply(self.materials, ev):
                 meta_set(self.db, "materials", self.materials)
@@ -1042,6 +1112,8 @@ class Journals:
                                 (ev["SystemAddress"], ev["StarClass"]))
             if name == "StartJump" and ev.get("SystemAddress"):
                 self.jump_class = {ev["SystemAddress"]: ev.get("StarClass")}
+            if name == "StartJump" and ev.get("JumpType") == "Hyperspace":   # the FSD is charging (not supercruise)
+                self.moment("fsd_charge", ts, system=ev.get("StarSystem") or "", star_class=ev.get("StarClass") or "")
             if name == "FSDTarget" and ev.get("SystemAddress"):
                 self.target = {"id64": ev["SystemAddress"], "name": ev.get("Name"),
                                "star_class": ev.get("StarClass"), "ts": ts}
@@ -1132,6 +1204,8 @@ class Journals:
                 meta_set(self.db, "prev", self.prev)
             self.pos = {"name": ev.get("StarSystem"), "id64": id64, "x": x, "y": y, "z": z, "ts": ts}
             meta_set(self.db, "pos", self.pos)
+        if ev.get("event") == "FSDJump":
+            self.jump_arrival = {"id64": id64, "name": ev.get("StarSystem"), "ts": ts}
 
     def note_sample_point(self, system, body, species, genus, kind, n, ts):
         """Remember where a sample was taken, from the live Status.json reading (at most a second old at
@@ -1188,6 +1262,9 @@ class Journals:
         elif name == "Commander":
             c.update(name=ev.get("Name") or c.get("name"), fid=ev.get("FID") or c.get("fid"))
         else:  # LoadGame: the credit balance at login is the baseline; sales since are added to it
+            self.moment("game_start", ts, cmdr=ev.get("Commander") or c.get("name") or "",
+                        ship=ev.get("ShipName") or ev.get("Ship_Localised") or ev.get("Ship") or "",
+                        mode=ev.get("GameMode") or "")
             c.update(name=ev.get("Commander") or c.get("name"), fid=ev.get("FID") or c.get("fid"),
                      credits=ev.get("Credits"), loan=ev.get("Loan"), login_ts=ts, earned=0,
                      mode=ev.get("GameMode"))
@@ -1366,11 +1443,13 @@ class Journals:
                 return
             self.db.execute("INSERT OR IGNORE INTO own_footfall VALUES (?, ?, ?)", (system, ev["BodyID"], ts))
         elif name == "FSSDiscoveryScan":
+            self.last_honk = {"id64": system, "ts": ts, "bodies": ev.get("BodyCount"), "progress": ev.get("Progress")}
             self.db.execute(
                 """INSERT INTO own_systems (id64, name, body_count, all_found) VALUES (?, ?, ?, 0)
                    ON CONFLICT(id64) DO UPDATE SET body_count = excluded.body_count""",
                 (system, ev.get("SystemName"), ev.get("BodyCount")))
         elif name == "FSSAllBodiesFound":
+            self.last_all_found = {"id64": system, "ts": ts}
             self.db.execute(
                 """INSERT INTO own_systems (id64, name, body_count, all_found) VALUES (?, ?, ?, 1)
                    ON CONFLICT(id64) DO UPDATE SET all_found = 1,
@@ -1385,6 +1464,8 @@ class Journals:
             else:
                 self.db.execute("INSERT OR REPLACE INTO own_signals VALUES (?, ?, ?, ?, ?)",
                                 (system, body, signals.get(BIO, 0), signals.get(GEO, 0), ts))
+                if name == "FSSBodySignals" and (signals.get(BIO) or signals.get(GEO)):   # the FSS just found them
+                    self.moment("signals", ts, system=system, body_name=body, bio=signals.get(BIO, 0), geo=signals.get(GEO, 0))
                 if signals.get(BIO) and ev.get("BodyID") is not None and name == "FSSBodySignals":
                     self.moment("bio", ts, system=system, body_id=ev["BodyID"], signals=signals[BIO])
                 for g in ev.get("Genuses") or []:
@@ -1624,6 +1705,31 @@ def curiosities(r, parent=None, raw=None, binary=False):
     return out
 
 
+def system_curiosities(system, records, raws=None):
+    """{short body name: [(tag, why)]} for a system, the same for Here and Nearby. A body's parent is the
+    body it directly orbits (never through a barycentre: an orbit around a shared centre is measured from
+    that centre, so comparing it with a star's radius would be meaningless); planets that share a
+    barycentre with only other planets are a planet pair."""
+    raws = raws or {}
+    by_id = {x.get("body_id"): x for x in records if x.get("body_id") is not None}
+    first = lambda x: next((q for q in x.get("parents_full") or [] if q["kind"] != "Ring"), None)
+    centres = {}
+    for x in records:
+        f = first(x)
+        if f and f["kind"] == "Null":
+            centres.setdefault(f["id"], []).append(x.get("type"))
+    out = {}
+    for x in records:
+        f = first(x)
+        parent = by_id.get(f["id"]) if f and f["kind"] in ("Star", "Planet") else None
+        members = centres.get(f["id"], []) if f and f["kind"] == "Null" else []
+        binary = len(members) >= 2 and all(t == "Planet" for t in members)
+        c = curiosities(x, parent, raws.get(x["name"]), binary)
+        if c:
+            out[x["name"]] = c
+    return out
+
+
 def bio_context(name, records, x=None, y=None, z=None, star=None):
     """What the exobiology rules want to know about a system as a whole: where it is (region,
     nebulae), its stars, and which planet classes it holds. `star` is the arrival star class
@@ -1642,21 +1748,52 @@ def bio_context(name, records, x=None, y=None, z=None, star=None):
             "star_types": star_types}
 
 
-def bio_guess(r, star=None, genera=None, ctx=None):
-    """What a body's bio signals could be: (upper-bound credits, genus groups) or (None, [])."""
-    if not ed_bio or r.get("type") != "Planet":
-        return None, []
+def surface_materials(m):
+    """A body's surface materials as lower-case names, from a journal list ([{Name, Percent}]), a Spansh
+    dump dict ({Iron: 20.1}) or a search list ([{name, share}]); None when not known."""
+    if isinstance(m, dict):
+        return sorted(str(k).lower() for k in m)
+    if isinstance(m, list) and m:
+        return sorted(str(x.get("Name") or x.get("name") or "").lower() for x in m if isinstance(x, dict)) or None
+    return None
+
+
+def _bio_body(r, star, ctx):
     star_types = (ctx or {}).get("star_types") or {}
     parents = r.get("parent_star_types") or [star_types[p] for p in r.get("parents") or [] if p in star_types]
     body = {"class": r.get("subtype"), "atmosphere": r.get("atmosphere"), "gravity": r.get("gravity"),
             "temperature": r.get("temperature"), "volcanism": r.get("volcanism"), "dist_ls": r.get("dist_ls"),
             "pressure": r.get("pressure"), "orbital_period_s": r.get("orbital_period_s"),
-            "atmosphere_composition": r.get("atmo_comp"), "parents": parents or None, "star": star}
-    cands = ed_bio.predict(body, ctx)
+            "atmosphere_composition": r.get("atmo_comp"), "parents": parents or None, "star": star,
+            "materials": r.get("materials")}
+    return body
+
+
+def bio_guess(r, star=None, genera=None, ctx=None):
+    """What a body's bio signals could be: (upper-bound credits, genus groups) or (None, [])."""
+    if not ed_bio or r.get("type") != "Planet":
+        return None, []
+    cands = ed_bio.predict(_bio_body(r, star, ctx), ctx)
     if not cands and not genera:
         return None, []
     val, groups = ed_bio.potential(cands, signals=r.get("bio") or None, genera=genera)
     return (val if any(g.get("value") for g in groups) else None), groups
+
+
+def bio_options(r, star=None, ctx=None):
+    """Before the DSS, when a body has fewer signals than genera the rules allow, which genus it is cannot
+    be told: {low, high, genera} -- every possible genus (most valuable first) and the range the signals
+    could pay, from the cheapest to the most valuable. None when the signals already cover the choices."""
+    n = r.get("bio") or 0
+    if not ed_bio or r.get("type") != "Planet" or not n:
+        return None
+    groups = ed_bio.by_genus(ed_bio.predict(_bio_body(r, star, ctx), ctx))
+    if len(groups) <= n:
+        return None
+    lows = sorted(g.get("min_value") or 0 for g in groups)
+    return {"low": sum(lows[:n]), "high": sum(g.get("value") or 0 for g in groups[:n]),
+            "genera": [{"genus": g["genus"], "best": g["best"], "value": g["value"],
+                        "species": [ed_bio.short_species(x["name"], g["genus"]) for x in g["species"]]} for g in groups]}
 
 
 def summarise(records, body_count, star=None, ctx=None):
@@ -1908,6 +2045,11 @@ class State:
         self.target_task = None
         self.searcher = None       # set once the Searcher exists
         self.speaker = None        # ed_tts.Speaker, set at start (None in tests)
+        self.speech = None         # ed_speech.SpeechLines, set at start (None in tests)
+        self.honker = None         # ed_honk.Honker, set at start (None in tests)
+        self.autohonk = dict(AUTOHONK)
+        self._honk_arrival = None  # the arrival the auto honk last looked at
+        self.honk_confirm = 10.0   # s to wait for the journal's discovery scan after the press
         self.db_path = None        # for backups (a second connection reads it on a worker thread)
         self.backup_task = None
         self.seller_task = None
@@ -1927,6 +2069,7 @@ class State:
         self.dump_updated = {}     # id64 -> Spansh updated_at from the sphere search (for retries)
         self.dump_tries = {}       # id64 -> failed body-detail fetches this stay
         self.last_target = None    # the target we announced, kept after arrival clears it
+        self.target_verdicts = {}  # id64 -> status for recent targets: a route re-targets on arrival
         self.arrival = None        # reconciliation of that announcement with the arrival scan
         self.arrival_seq = 0
         self.tail_error = None     # last journal-tailing exception, shown on the page
@@ -1948,6 +2091,8 @@ class State:
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
             "tts": self.speaker.info() if self.speaker else None,
+            "speech": self.speech.info() if self.speech else None,
+            "autohonk": self.autohonk_info(),
             "region": self.region_info(),
             "boost": (self.journals.boost or {}).get("value"),
             "on_body": self.on_body(),
@@ -1975,7 +2120,11 @@ class State:
             "docked": self.docked_summary(),
             "defaults": {"unsold_warn": UNSOLD_WARN, "unsold_urgent": UNSOLD_URGENT, "bio_min": BIO_MIN, "sounds": SOUNDS_DEFAULT,
                          "body_highlight": BODY_HIGHLIGHT, "bio_highlight": BIO_HIGHLIGHT,
-                         "max_include_bonus": MAX_INCLUDE_BONUS},
+                         "max_include_bonus": MAX_INCLUDE_BONUS,
+                         "speech_styles": list(SPEECH_STYLES), "speech_profanity": SPEECH_PROFANITY,
+                         "speech_profanity_pct": SPEECH_PROFANITY_PCT,
+                         "speech_names": SPEECH_NAMES, "speech_speed": SPEECH_SPEED,
+                         "speak_bio_signals": SPEAK_BIO_SIGNALS, "speak_geo_signals": SPEAK_GEO_SIGNALS},
             "bio_rules": ed_bio.rules_info() if ed_bio else None,
             "fuel": self.fuel_summary(),
             "ship": self.journals.ship,
@@ -2094,6 +2243,9 @@ class State:
         out, ctxs = [], {}
         for m in list(self.journals.moments)[-10:]:
             m = dict(m)
+            if m["kind"] == "signals":
+                where = self.locate(m["system"])
+                m.update(system=str(m["system"]), body=short_name(where[0], m["body_name"]) if where else m["body_name"])
             if m["kind"] in ("scan", "bio"):
                 row = self.db.execute("SELECT name, record FROM own_bodies WHERE system=? AND body_id=?",
                                       (m["system"], m["body_id"])).fetchone()
@@ -2492,6 +2644,8 @@ class State:
                                "codex_new": bool(region and g.get("best") and g["best"].lower() not in known_species
                                                  and g["genus"] not in got)} for g in bio_groups],
                 "bio_potential": bio_val,
+                # undecided before the DSS: every genus it could be, and the range ("Stratum or Bacterium")
+                "bio_options": bio_options(r, star, ctx) if r.get("bio") and not known_genera else None,
                 "organics": organics.get(bid, []), "codex": codex.get(bid, []),
                 "scanned": bid is not None, "first_discovered": first_disc, "mapped": is_mapped,
                 "first_mapped": first_map, "map_state": map_state, "footfall": bool(f and f["foot_ts"]),
@@ -2504,25 +2658,15 @@ class State:
         out.sort(key=lambda b: -(b["value_max"] or 0))
         tree, parent_of = build_tree(name, out)
         types = {b["name"]: b["type"] for b in out}
-        by_name = {b["name"]: b for b in out}
         raws = {}
         for r_ in self.db.execute("SELECT name, raw FROM own_bodies WHERE system=?", (id64,)):
             if r_["raw"]:
                 raws[short_name(name, r_["name"])] = json.loads(r_["raw"])
-        pair_centres = {}   # barycentres shared by planets only: planet pairs
-        for bn, p in parent_of.items():
-            if p[0] == "n":
-                pair_centres.setdefault(p, []).append(types.get(bn))
+        cur = system_curiosities(name, out, raws)
         for b in out:
             p = parent_of.get(b["name"])
             b["is_moon"] = bool(p and p[0] == "b" and types.get(p[1]) == "Planet")
-            parent = by_name.get(p[1]) if p and p[0] == "b" else None
-            if not parent and b.get("parents_full"):   # through a barycentre: the first body up the chain
-                pb = next((q for q in b["parents_full"] if q["kind"] in ("Star", "Planet")), None)
-                parent = next((x for x in out if pb and x.get("body_id") == pb["id"]), None)
-            members = pair_centres.get(p, []) if p and p[0] == "n" else []
-            binary = len(members) >= 2 and all(t == "Planet" for t in members)
-            b["curiosities"] = [{"tag": t, "why": w} for t, w in curiosities(b, parent, raws.get(b["name"]), binary)]
+            b["curiosities"] = [{"tag": t, "why": w} for t, w in cur.get(b["name"], [])]
             del b["parents_full"]
         # Spansh knows bodies here but their details have not landed yet (a refresh is fetching them):
         # the page asks again until they have, instead of keeping search-level rows and a guessed tree
@@ -3020,11 +3164,11 @@ class State:
                      (id64,)).fetchone()[0])
         s.update(self.system_value(id64, base["name"], records, star, ctx))
         s["phenomena"] = [dict(r) for r in self.db.execute("SELECT kind, reached_ts FROM phenomena WHERE system=?", (id64,))]
-        by_id = {x.get("body_id"): x for x in records if x.get("body_id") is not None}
-        def parent_of(x):
-            pb = next((q for q in x.get("parents_full") or [] if q["kind"] in ("Star", "Planet")), None)
-            return by_id.get(pb["id"]) if pb else None
-        s["curiosities"] = sum(len(curiosities(x, parent_of(x))) for x in records)
+        raws = {short_name(base["name"], r_["name"]): json.loads(r_["raw"]) for r_ in self.db.execute(
+            "SELECT name, raw FROM own_bodies WHERE system=? AND raw IS NOT NULL", (id64,))}
+        cur = system_curiosities(base["name"], records, raws)
+        s["curiosity_list"] = [{"body": bn, "tag": t, "why": w} for bn, lst in cur.items() for t, w in lst]
+        s["curiosities"] = len(s["curiosity_list"])
         if not s["bodies_known"]:
             s["status"] = "unreported" if source == "route" else "no bodies"
         elif s["body_count"] is None or s["bodies_known"] < s["body_count"]:
@@ -3099,6 +3243,9 @@ class State:
                 count = system.get("bodyCount")
                 status = ("no bodies" if not known
                           else "explored" if count and known >= count else "partial")
+        self.target_verdicts[id64] = status
+        while len(self.target_verdicts) > 50:
+            self.target_verdicts.pop(next(iter(self.target_verdicts)))
         if key != self.target_key:
             # A newer target, or we already arrived: no sound, but keep the verdict so the
             # arrival star can still be checked against it.
@@ -3316,23 +3463,102 @@ class State:
     def reconcile_arrival(self):
         """Check the sound we played for a target against the arrival star's WasDiscovered."""
         scan, t, pos = self.journals.arrival_scan, self.last_target, self.journals.pos
-        if not (scan and t and pos) or scan["id64"] != t["id64"] or pos["id64"] != scan["id64"]:
+        if not (scan and pos) or pos["id64"] != scan["id64"]:
             return
         if self.arrival and self.arrival["ts"] == scan["ts"]:
             return
-        expected_new = t.get("status") == "unreported"
+        # what was announced when this system was targeted (a plotted route has already targeted the next
+        # hop by now, so the current target is no guide); a jump nobody announced still gets its verdict
+        t = t if t and t["id64"] == scan["id64"] else None
+        announced = self.target_verdicts.get(scan["id64"]) or (t or {}).get("status")
+        expected_new = announced == "unreported"
         actually_new = not scan["was_discovered"]
         self.arrival_seq += 1
-        self.arrival = {"name": t["name"], "id64": str(t["id64"]), "ts": scan["ts"], "seq": self.arrival_seq,
-                        "announced": t.get("status"), "undiscovered": actually_new,
-                        "wrong": expected_new != actually_new,
-                        # a wrong fanfare gets corrected out loud; a pleasant surprise gets the fanfare
-                        "sound": "thud" if expected_new and not actually_new
-                                 else "fanfare" if actually_new and not expected_new else None}
+        self.arrival = {"name": pos.get("name") or (t or {}).get("name"), "id64": str(scan["id64"]),
+                        "ts": scan["ts"], "seq": self.arrival_seq,
+                        "announced": announced, "undiscovered": actually_new,
+                        # your own unsold discovery still reads as undiscovered: only the first visit is news
+                        "first_visit": self.visit_count(scan["id64"]) <= 1,
+                        "wrong": bool(announced) and expected_new != actually_new,
+                        # sounds belong to targeting: on arrival only a wrong call is corrected (a thud for
+                        # a fanfare that was not deserved, the fanfare for a surprise); the voice does the rest
+                        "sound": None if not announced
+                                 else "thud" if expected_new and not actually_new
+                                 else "fanfare" if actually_new and not expected_new
+                                 and self.visit_count(scan["id64"]) <= 1 else None}
+        self.bump()
+
+    # ---- auto honk ----
+    def autohonk_info(self):
+        h = self.honker
+        return {"available": bool(h and h.available), "enabled": bool(self.autohonk["enabled"] and h and h.ready),
+                "wanted": bool(self.autohonk["enabled"]), "status": h.status if h else "not started",
+                "key": self.autohonk["key"], "hold": self.autohonk["hold"], "announce": bool(self.autohonk.get("announce", True)),
+                "pressing": (h.combo()[1] if h and h.available else None)}
+
+    def set_autohonk(self, enabled):
+        """Switch auto honk on or off (the page's toggle; remembered over restarts)."""
+        self.autohonk["enabled"] = bool(enabled)
+        meta_set(self.db, "autohonk_enabled", bool(enabled))
+        if self.honker:
+            if enabled:
+                self.honker.open()
+            else:
+                self.honker.close()
+                self.honker.status = "off"
+        self.bump()
+
+    def maybe_honk(self):
+        """A live hyperspace arrival: hold Primary Fire (after `delay`), unless you honked here before."""
+        a = self.journals.jump_arrival
+        if not a or a is self._honk_arrival:
+            return
+        self._honk_arrival = a
+        if not (self.autohonk["enabled"] and self.honker and self.honker.ready):
+            return
+        if time.time() - ts_seconds(a["ts"]) > AUTOHONK_MAX_AGE:
+            return   # catching up on journals, not a jump happening now
+        if self.autohonk["skip_honked"] and self.db.execute(
+                "SELECT 1 FROM own_systems WHERE id64=?", (a["id64"],)).fetchone():
+            return
+        asyncio.get_running_loop().create_task(self.honk_task(a))
+
+    async def honk_task(self, a):
+        honked = lambda: (self.journals.last_honk or {}).get("id64") == a["id64"] \
+            and self.journals.last_honk["ts"] >= a["ts"]
+        await asyncio.sleep(self.autohonk["delay"])
+        if honked():
+            return   # you beat it to it
+        if self.journals.jump_arrival is not a:
+            return   # already somewhere else
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, self.honker.press)
+        except ValueError as e:   # nothing to press: Primary Fire has no keyboard binding, say
+            self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=str(e))
+            self.bump()
+            return
+        except Exception as e:  # noqa: BLE001 -- say so on the page rather than die quietly
+            self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=f"{type(e).__name__}: {e}")
+            self.bump()
+            return
+        deadline = time.time() + self.honk_confirm   # the journal confirms a discovery scan within a few seconds
+        while not honked() and time.time() < deadline:
+            await asyncio.sleep(0.1)
+        info, all_found = self.journals.last_honk or {}, False
+        if honked():   # a honk that finds everything is followed by FSSAllBodiesFound (a lone star, say)
+            found = lambda: (self.journals.last_all_found or {}).get("id64") == a["id64"] \
+                and self.journals.last_all_found["ts"] >= a["ts"] or (info.get("progress") or 0) >= 0.999
+            end = time.time() + min(1.5, self.honk_confirm)
+            while not (all_found := found()) and time.time() < end:
+                await asyncio.sleep(0.1)
+        self.journals.moment("honk", a["ts"], ok=honked(), system=a["name"],
+                             bodies=info.get("bodies") if honked() else None, all_found=all_found,
+                             why="" if honked() else "no discovery scan followed: is the D-Scanner on primary fire?")
         self.bump()
 
     def apply_own_changes(self):
         """Re-merge rows whose systems you just scanned, so the page updates as you go."""
+        self.maybe_honk()
         self.reconcile_arrival()
         dirty, self.journals.dirty = self.journals.dirty, set()
         if self.journals.sales_changed:
@@ -3752,7 +3978,8 @@ def record_from_body_search(b):
             "parent_star_types": [p.get("subtype") for p in b.get("parents") or [] if p.get("type") == "Star" and p.get("subtype")],
             "orbital_period_s": round(b["orbital_period"] * 86400) if b.get("orbital_period") else None,
             "atmo_comp": ({a.get("name"): a.get("share") for a in b["atmosphere_composition"]}
-                          if isinstance(b.get("atmosphere_composition"), list) else b.get("atmosphere_composition"))}
+                          if isinstance(b.get("atmosphere_composition"), list) else b.get("atmosphere_composition")),
+            "materials": surface_materials(b.get("materials"))}
 
 
 def bio_hits(db, id64, system, x, y, z, records, threshold):
@@ -4210,10 +4437,51 @@ def make_app(state):
         sp = state.speaker
         if not sp or not sp.ready or not text.strip():
             return web.json_response({"error": "no Piper voice ready" if text.strip() else "no text"}, status=503)
-        audio = await asyncio.get_running_loop().run_in_executor(None, sp.say, text)
+        try:
+            speed = float(request.query.get("speed") or SPEECH_SPEED)
+        except ValueError:
+            speed = SPEECH_SPEED
+        audio = await asyncio.get_running_loop().run_in_executor(None, sp.say, text, speed)
         if not audio:
             return web.json_response({"error": "no Piper voice ready"}, status=503)
         return web.Response(body=audio, content_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+    async def speech_view(_):
+        """The spoken alerts' lines (speech.json): the page asks again when the payload's version changes."""
+        return web.json_response(state.speech.lines() if state.speech else {"styles": {}, "lines": {}, "version": None})
+
+    async def autohonk_test_view(request):
+        """Hold Primary Fire once after a countdown (time to click into the game), whether or not auto honk
+        is on: the dialog's test button."""
+        h = state.honker
+        if not h or not h.available:
+            return web.json_response({"error": h.status if h else "not started"}, status=400)
+        keys, what = h.combo()
+        if not keys:
+            return web.json_response({"error": what}, status=400)
+        was_open = h.ready
+        if not h.open():
+            return web.json_response({"error": h.status}, status=400)
+
+        async def later():
+            await asyncio.sleep(5)
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, h.press)
+            finally:
+                if not was_open and not state.autohonk["enabled"]:
+                    h.close()
+                    h.status = "off"
+                state.bump()
+        asyncio.get_running_loop().create_task(later())
+        return web.json_response({"pressing": what, "in": 5})
+
+    async def autohonk_view(request):
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"error": "expected JSON"}, status=400)
+        state.set_autohonk(bool(body.get("enabled")))
+        return web.json_response(state.autohonk_info())
 
     async def voice_view(request):
         try:
@@ -4286,11 +4554,14 @@ def make_app(state):
     app.router.add_get("/api/materials", materials_view)
     app.router.add_post("/api/radius", radius_view)
     app.router.add_get("/api/say", say_view)
+    app.router.add_get("/api/speech", speech_view)
     app.router.add_post("/api/backup", backup_view)
     app.router.add_post("/api/nextstop", next_stop_view)
     app.router.add_get("/api/status", status_view)
     app.router.add_get("/api/status.txt", status_txt_view)
     app.router.add_post("/api/voice", voice_view)
+    app.router.add_post("/api/autohonk", autohonk_view)
+    app.router.add_post("/api/autohonk/test", autohonk_test_view)
     app.router.add_get("/api/firsts", firsts_view)
     app.router.add_get("/api/left", left_view)
     app.router.add_get("/api/body", body_view)
@@ -4333,6 +4604,7 @@ def port_free(host, port):
 
 async def run(args, st):
     global LIVE_DIRS, LEGACY_DIRS, UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT, BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS, RADIUS_CHOICES, VOICE, VOICE_FALLBACK, BACKUP_DIR
+    global SPEECH_STYLES, SPEECH_PROFANITY, SPEECH_NAMES, SPEECH_SPEED, SPEAK_BIO_SIGNALS, SPEAK_GEO_SIGNALS, SPEECH_PROFANITY_PCT
     global SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES
     LIVE_DIRS = [d for d in st["live"] if os.path.isdir(d)]
     LEGACY_DIRS = [d for d in st["legacy"] if os.path.isdir(d)]
@@ -4343,6 +4615,9 @@ async def run(args, st):
     BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS = st["body_highlight"], st["bio_highlight"], st["max_include_bonus"]
     RADIUS_CHOICES = tuple(st["radius_choices"])
     VOICE, VOICE_FALLBACK = st["voice"], st["voice_fallback"]
+    SPEECH_STYLES, SPEECH_PROFANITY, SPEECH_NAMES = tuple(st["speech_styles"]), st["speech_profanity"], st["speech_names"]
+    SPEECH_SPEED, SPEECH_PROFANITY_PCT = st["speech_speed"], st["speech_profanity_pct"]
+    SPEAK_BIO_SIGNALS, SPEAK_GEO_SIGNALS = st["speak_bio_signals"], st["speak_geo_signals"]
     BACKUP_DIR = st["backup_dir"]
     SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES = st["concurrency"], st["map_max_radius"], st["map_max_pages"]
     radius_flag = args.radius   # --radius on the command line beats a radius chosen on the page
@@ -4399,6 +4674,20 @@ async def run(args, st):
     print("spoken alerts: " + ("Piper found, preparing a voice" if state.speaker.available else
                                "Piper not installed, the page uses browser speech (see ed_tts.py)"))
     state.speaker.start()
+    state.autohonk = dict(st["autohonk"])
+    saved = meta_get(db, "autohonk_enabled")   # the page's toggle beats the config file once used
+    if saved is not None:
+        state.autohonk["enabled"] = bool(saved)
+    state.honker = ed_honk.Honker(state.autohonk["key"], state.autohonk["hold"], LIVE_DIRS)
+    if state.autohonk["enabled"]:
+        state.honker.open()
+    print("auto honk: " + (state.honker.status if state.autohonk["enabled"] else "off")
+          + (" (the D-Scanner must be on primary fire)" if state.honker.ready else ""))
+    state.speech = ed_speech.SpeechLines(st["speech_file"])
+    sp = state.speech.info()
+    print(f"spoken alerts: wording from {sp['file']}" if sp["version"] else f"spoken alerts: {sp['error']}")
+    for msg in sp["problems"]:
+        print(f"  {sp['file']}: {msg}", file=sys.stderr)
     rules_task = asyncio.create_task(check_bio_rules(state)) if ed_bio else None
     watcher = asyncio.create_task(state.watch())
 
