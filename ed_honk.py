@@ -39,6 +39,10 @@ ELITE_KEYS = {
     "ScrollLock": "SCROLLLOCK", "NumLock": "NUMLOCK", "Backspace": "BACKSPACE", "Space": "SPACE", "Tab": "TAB",
     "Escape": "ESC", "Insert": "INSERT", "Delete": "DELETE", "Home": "HOME", "End": "END", "Minus": "MINUS",
     "Comma": "COMMA", "Slash": "SLASH", "Pause": "PAUSE",
+    # names with no same-named evdev key (upper-casing them gives a code evdev does not have)
+    "Apps": "COMPOSE", "Numpad_Equals": "KPEQUAL", "Numpad_Comma": "KPCOMMA", "OEM_102": "102ND",
+    "Hash": "BACKSLASH", "PrintScreen": "SYSRQ", "PrevTrack": "PREVIOUSSONG", "NextTrack": "NEXTSONG",
+    "MediaStop": "STOPCD", "Calculator": "CALC", "WebHome": "HOMEPAGE",
 }
 
 
@@ -89,42 +93,78 @@ def bindings_dir(journal_dirs=()):
     return None
 
 
+_binding_cache = {}   # controls folder -> (its files' names and mtimes, primary_fire_binding's answer)
+
+
 def primary_fire_binding(journal_dirs=()):
     """Primary Fire's keyboard binding in the active controls preset: (["KEY_LEFTALT", ..., "KEY_K"], text)
-    with modifiers first, or (None, why not)."""
+    with modifiers first, or (None, why not). Called for every page update, so the answer is kept until a
+    file in the controls folder changes; a file Elite is rewriting at that moment is a reason, not an error."""
     d = bindings_dir(journal_dirs)
     if not d:
         return None, "Elite's controls folder was not found"
-    starts = sorted(glob.glob(os.path.join(d, "StartPreset*.start")), key=os.path.getmtime)
+    try:
+        stamp = tuple(sorted((p, os.path.getmtime(p)) for p in glob.glob(os.path.join(glob.escape(d), "*.start"))
+                             + glob.glob(os.path.join(glob.escape(d), "*.binds"))))
+        hit = _binding_cache.get(d)
+        if hit and hit[0] == stamp:
+            return hit[1]
+        answer = _read_binding(d)
+    except OSError as e:   # a file removed or rewritten between listing and reading it
+        return None, f"Elite's controls could not be read ({e})"
+    _binding_cache[d] = (stamp, answer)
+    return answer
+
+
+def _read_binding(d):
+    """primary_fire_binding for the controls folder d, read from disk (OSError passes through)."""
+    starts = sorted(glob.glob(os.path.join(glob.escape(d), "StartPreset*.start")), key=os.path.getmtime)
     preset = None
     if starts:
         with open(starts[-1], encoding="utf-8", errors="replace") as f:
-            preset = (f.readline() or "").strip()
-    files = sorted(glob.glob(os.path.join(d, glob.escape(preset) + ".*binds")) if preset else [], key=os.path.getmtime) \
-        or sorted(glob.glob(os.path.join(d, "Custom*.binds")), key=os.path.getmtime)
-    if not files:
-        return None, f"no .binds file for the controls preset {preset!r}" if preset else "no controls preset found"
+            lines = [x.strip() for x in f.read().splitlines()]
+        # Odyssey's StartPreset.4.start has one preset per line: General, Ship, SRV, On foot. Primary Fire
+        # is a Ship control; an older file has a single line for everything
+        preset = (lines[1] if len(lines) >= 4 and lines[1] else lines[0] if lines else "") or None
+    if preset:
+        files = sorted(glob.glob(os.path.join(glob.escape(d), glob.escape(preset) + ".*binds")), key=os.path.getmtime)
+        if not files:   # the built-in presets live in the game's install folder, not here
+            return None, (f"the controls preset {preset!r} is a built-in one (no .binds file in the controls folder): "
+                          "bind Primary Fire in a custom preset, or set [autohonk] key")
+    else:
+        files = sorted(glob.glob(os.path.join(glob.escape(d), "Custom*.binds")), key=os.path.getmtime)
+        if not files:
+            return None, "no controls preset found"
     try:
         node = ET.parse(files[-1]).getroot().find("PrimaryFire")
     except ET.ParseError as e:
         return None, f"{os.path.basename(files[-1])} could not be read ({e})"
+    mixed = False   # a keyboard key held with a joystick/HOTAS modifier: a virtual keyboard cannot press it
     for slot in ("Primary", "Secondary"):
         b = node.find(slot) if node is not None else None
         if b is None or b.get("Device") != "Keyboard":
             continue
+        modifiers = b.findall("Modifier")
+        if any(m.get("Device") != "Keyboard" for m in modifiers):
+            mixed = True   # pressing the bare key would be some other control, not Primary Fire
+            continue
         key = elite_key(b.get("Key"))
-        mods = [elite_key(m.get("Key")) for m in b.findall("Modifier") if m.get("Device") == "Keyboard"]
+        mods = [elite_key(m.get("Key")) for m in modifiers]
         if key and all(mods):
             return mods + [key], f"{' + '.join(key_label(k) for k in mods + [key])} ({slot.lower()} binding of Primary Fire in {preset or 'your preset'})"
-    return None, (f"Primary Fire has no keyboard binding in {preset or 'your preset'}: give it one as its second "
-                  "binding in Elite's controls, or set [autohonk] key")
+    return None, (f"Primary Fire has no keyboard binding in {preset or 'your preset'}"
+                  + (" (a key with a joystick modifier cannot be pressed from here)" if mixed else "")
+                  + ": give it one as its second binding in Elite's controls, or set [autohonk] key")
 
 
 def key_label(name):
     """'KEY_LEFTALT' -> 'Left Alt', 'KEY_KP0' -> 'Numpad 0', 'KEY_K' -> 'K' (for messages)."""
     n = str(name)[4:] if str(name).startswith("KEY_") else str(name)
     special = {"LEFTALT": "Left Alt", "RIGHTALT": "Right Alt", "LEFTCTRL": "Left Ctrl", "RIGHTCTRL": "Right Ctrl",
-               "LEFTSHIFT": "Left Shift", "RIGHTSHIFT": "Right Shift", "LEFTMETA": "Left Super", "RIGHTMETA": "Right Super"}
+               "LEFTSHIFT": "Left Shift", "RIGHTSHIFT": "Right Shift", "LEFTMETA": "Left Super", "RIGHTMETA": "Right Super",
+               "COMPOSE": "Menu (Apps)", "KPPLUS": "Numpad +", "KPMINUS": "Numpad -", "KPASTERISK": "Numpad *",
+               "KPSLASH": "Numpad /", "KPDOT": "Numpad .", "KPENTER": "Numpad Enter", "KPCOMMA": "Numpad ,",
+               "KPEQUAL": "Numpad =", "SYSRQ": "Print Screen", "102ND": "OEM 102"}
     if n in special:
         return special[n]
     m = re.fullmatch(r"KP(\d)", n)
@@ -159,7 +199,8 @@ class Honker:
         self.key, self.hold, self.journal_dirs = key, hold, list(journal_dirs or ())
         self.evdev = _import_evdev() if sys.platform.startswith("linux") else None
         self.ui = None
-        self.lock = threading.Lock()
+        self.lock = threading.Lock()   # held by press() for the whole hold
+        self.stop = threading.Event()  # close() during a hold: let go now, then close the device
         self.status = ("Linux only for now" if not sys.platform.startswith("linux")
                        else "needs the python evdev package (pip install evdev)" if not self.evdev else "off")
 
@@ -169,13 +210,19 @@ class Honker:
 
     @property
     def ready(self):
-        return self.ui is not None
+        return self.ui is not None and not self.stop.is_set()
 
     def combo(self):
         """(keys, description) to press now: read from the controls preset for "auto" (so a rebind is
         picked up without a restart), else the configured combination. keys is None when there is none."""
         if str(self.key).strip().lower() == "auto":
-            return primary_fire_binding(self.journal_dirs)
+            keys, what = primary_fire_binding(self.journal_dirs)
+            # checked here too, or the status says ready and every press fails on a key evdev lacks
+            bad = [k for k in keys if key_code(self.evdev, k) is None] if keys and self.evdev else []
+            if bad:
+                return None, (f"no evdev equivalent for {', '.join(bad)} (Primary Fire's keyboard binding): "
+                              "bind it to another key, or set [autohonk] key")
+            return keys, what
         keys = parse_combo(self.key)
         bad = [k for k in keys if key_code(self.evdev, k) is None] if self.evdev else []
         if not keys or bad:
@@ -185,6 +232,8 @@ class Honker:
     def open(self):
         """Create the virtual keyboard (once, with every key, so a changed binding needs no restart)."""
         if self.ui or not self.evdev:
+            if self.ui and self.stop.is_set():   # reopened while a press was still letting go: keep the device
+                self.stop.clear()
             return bool(self.ui)
         keys, what = self.combo()
         e = self.evdev.ecodes
@@ -198,17 +247,32 @@ class Honker:
         return True
 
     def close(self):
+        """Close the virtual keyboard. Called on the event loop, so it never waits for a press: during a hold it
+        cuts the hold short and press() closes the device once it has let go of the keys."""
+        self.stop.set()
+        if not self.lock.acquire(blocking=False):
+            return   # press() is holding keys: it sees `stop` and closes after releasing them
+        try:
+            if self.stop.is_set():   # not reopened meanwhile
+                self._close_now()
+        finally:
+            self.lock.release()
+
+    def _close_now(self):
+        """With self.lock held."""
         if self.ui:
             try:
                 self.ui.close()
             except OSError:
                 pass
         self.ui = None
+        self.stop.clear()
 
     def press(self):
         """Hold Primary Fire's keys for `hold` seconds (blocking: run it on a worker thread). Returns the
-        description of what was pressed; raises ValueError when there is nothing to press."""
-        if not self.ui:
+        description of what was pressed, or None when close() cut the hold short; raises ValueError when there
+        is nothing to press."""
+        if not self.ready:
             raise ValueError("the virtual keyboard is not open")
         keys, what = self.combo()
         if not keys:
@@ -217,18 +281,31 @@ class Honker:
         codes = [key_code(self.evdev, k) for k in keys]
         e = self.evdev.ecodes
         with self.lock:
+            ui = self.ui   # a press queued behind another finds the device closed by then
+            if ui is None or self.stop.is_set():
+                if ui is not None:
+                    self._close_now()
+                raise ValueError("the virtual keyboard is not open")
             done = []
             try:
                 for c in codes:            # modifiers first, the key last, as a person would
-                    self.ui.write(e.EV_KEY, c, 1)
-                    self.ui.syn()
+                    ui.write(e.EV_KEY, c, 1)
+                    ui.syn()
                     done.append(c)
                     time.sleep(0.03)
-                time.sleep(self.hold)
+                self.stop.wait(self.hold)  # close() ends the hold early
             finally:
                 for c in reversed(done):   # always let go, whatever happened
-                    self.ui.write(e.EV_KEY, c, 0)
-                    self.ui.syn()
+                    ui.write(e.EV_KEY, c, 0)
+                    ui.syn()
+                stopped = self.stop.is_set()
+                if stopped:
+                    self._close_now()
+        if stopped:
+            return None
+        if self.stop.is_set():   # close() came just after the check above, while the lock was still held
+            self.close()
+            return None
         self.status = f"ready: holds {what} for {self.hold:g} s"
         return what
 
@@ -239,18 +316,31 @@ def main(argv=None):
     p.add_argument("--show", action="store_true", help="print the binding it would press")
     p.add_argument("--test", type=float, metavar="SECONDS", help="count down, then hold Primary Fire once")
     p.add_argument("--hold", type=float, default=6.0, help="seconds to hold (default 6)")
-    p.add_argument("--key", default=DEFAULT_KEY, help="'auto' (default) or a combination such as KEY_LEFTALT+KEY_K")
+    p.add_argument("--key", help="'auto' or a combination such as KEY_LEFTALT+KEY_K (default: [autohonk] key "
+                                 "in ed_outrider.toml, else auto)")
     p.add_argument("--journals", action="append", default=[], help="journal folder (to find the controls preset)")
     a = p.parse_args(argv)
+    cfg = {}
+    try:   # ed_outrider's config, when it can be read: the same folders and key the server uses
+        import tomllib
+        with open(os.path.join(HERE, "ed_outrider.toml"), "rb") as f:
+            cfg = tomllib.load(f)
+    except Exception:   # no file, no tomllib (Python before 3.11), a broken file
+        pass
+    sec = lambda n: cfg.get(n) if isinstance(cfg.get(n), dict) else {}   # a section that is not a table: ignored
     dirs = a.journals
-    if not dirs:   # the folders from ed_outrider's config, when it can be read
+    if not dirs:
+        live = sec("journals").get("live")
+        dirs = [live] if isinstance(live, str) else [d for d in live if isinstance(d, str)] if isinstance(live, list) else []
+    if not dirs and sec("journals").get("live") is None:   # as the server does: auto-detect
         try:
-            import tomllib
-            with open(os.path.join(HERE, "ed_outrider.toml"), "rb") as f:
-                dirs = list((tomllib.load(f).get("journals") or {}).get("live") or [])
+            import ed_unsold
+            dirs = ed_unsold.find_journal_dirs()[0]
         except Exception:
             dirs = []
-    h = Honker(a.key, a.hold, dirs)
+    dirs = [os.path.expanduser(d) for d in dirs]
+    key = a.key or str(sec("autohonk").get("key") or DEFAULT_KEY)
+    h = Honker(key, a.hold, dirs)
     keys, what = h.combo()
     print(f"Primary Fire: {what}" if keys else f"no key to press: {what}")
     if not keys or a.test is None:

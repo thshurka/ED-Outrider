@@ -10,6 +10,10 @@
 # for Elite (app 359320), and, for legacy folders, any mounted Windows drive's Users/*/Saved Games.
 # You only need [journals] if that does not find yours. `python3 ed_outrider.py --write-config`
 # writes the settings that are in effect right now as a starting point.
+#
+# Switches take a bare true or false (no quotes: "false" in quotes is text, not off). A value of the wrong
+# type is reported when the server starts and the default is used instead (numbers out of range are brought
+# into it).
 
 [journals]
 # Folders holding Journal.*.log that are read live. Typical locations:
@@ -19,21 +23,33 @@
 
 # Folders of older journals (an old PC, a backup) imported once on the first run and never re-read.
 # legacy = ["D:/old-pc/Saved Games/Frontier Developments/Elite Dangerous"]
+# legacy = []  turns off the auto-detected legacy folders (a missing key auto-detects; the same goes for live).
 
 [server]
 # host = "127.0.0.1"   # "0.0.0.0" makes the page reachable from other devices on your network
                        # (no authentication: it exposes your journals' contents and lets anyone edit bookmarks)
 # port = 8025
-# radius = 25          # ly: the sphere of nearby systems the page lists (Spansh is asked once per jump)
+# allowed_hosts = ["mypc.lan"]   # extra names the page may be opened by. Outrider answers to any IP address,
+#                      # but by name only to localhost and the host above (with "0.0.0.0": this machine's own
+#                      # name too), so another web site cannot read it through DNS rebinding; list the names a
+#                      # phone or tablet uses if those are not enough. A bare name gets the port added.
+# radius = 25          # ly: the sphere of nearby systems the page lists (Spansh is asked once per jump; at least 1)
 # radius_choices = [20, 25, 30, 40, 50]   # ly: the page's radius dropdown; larger spheres (up to your jump range,
 #                                         # say) work but fetch and redraw more — ~1,500 systems at 100 ly in the black
-# db = "ed_outrider.sqlite"
-# backup_dir = "backups"   # where the header's "back up now" writes the database and a copy of the journals
+# db = "ed_outrider.sqlite"   # relative to ed_outrider.py here (a relative --db is relative to the current folder)
+# backup_dir = "backups"   # backups: dated zips of the database, and every live journal copied once into
+#                          # backups/journals (restore: --legacy backups/journals; see the README)
+# backup_keep = 7          # dated database zips kept (outrider-<database name>-*.zip; older ones are deleted
+#                          # after a new one is written); the journal archive is never pruned
+# backup_every_days = 1    # an automatic backup at start when the last one is older than this, and when the game
+#                          # quits (its Shutdown event); 0 turns automatic backups off ("back up now" still works)
 # speech_file = "speech.json"   # the spoken alerts' lines, per personality (edit it, or point this at your own copy)
 
 [defaults]
 # What a browser uses until its user changes it in the page's 🔔 alerts & thresholds dialog.
-# Page settings (views, layout, thresholds once changed, notification choices) stay in that browser.
+# Page settings (views, layout, thresholds once changed, notification choices) stay in that browser; the dialog
+# can export them to a file, import one, or save them on the server as browser_defaults.json (next to the
+# database) for new browsers, which then comes before these defaults.
 # unsold_warn = 50000000      # amber "worth selling soon": credits of unsold data on board
 # unsold_urgent = 250000000   # red "go sell"
 # bio_min = 10000000          # a body only counts as unfinished bio if a single body could pay over this
@@ -46,14 +62,20 @@
 # body_max_value_include_bonus = true # Here: the Max column (and the system's max total) counts first-discovery,
 #                                    # first-mapped and first-footfall bonuses; false shows plain payouts.
 #                                    # Now always includes them: it is what a sale would actually pay.
+# high_gravity = 2.0              # g (0.1 or more): dropping into orbital cruise at a landable body this heavy or more warns
+#                                    # you when the data aboard is over the amber level or the rebuy multiple
 # voice = "en_GB-southern_english_female-low"   # spoken alerts (🗣 in the page): the Piper voice, downloaded
 #                                               # into piper-voices/ on first use; needs `pip install piper-tts`
-#                                               # (see ed_tts.py), otherwise the browser's own speech is used
+#                                               # (see ed_tts.py), otherwise the browser's own speech is used;
+#                                               # a voice picked in the page's alerts dialog wins over this
 # voice_fallback = "en_GB-jenny_dioco-medium"   # used while the voice above is missing
 # speech_styles = ["business"]   # spoken alerts' personalities, picked from at random: any of the styles in
-#                                # speech.json ("business", "sarcastic", "sweet", or one you add)
+#                                # speech.json ("business", "sarcastic", "sweet", or one you add); a single
+#                                # style may also be written as a plain string, speech_styles = "sarcastic"
 # speech_profanity = false       # also use the swearing versions (sarcastic and sweet have them)
 # speech_profanity_pct = 50      # with profanity on: how often (%) a line comes from the swearing versions
+# speech_danger_business = true # danger lines (hull, heat, interdiction, fuel low or unscoopable, your
+#                                # carrier leaving without you, the ship-loss debrief) come only from the business lists, never swearing
 # speak_bio_signals = true        # say "2 Biological Signals on body A 3" as the FSS finds them
 # speak_geo_signals = true        # and the geological ones
 # speech_speed = 1.0              # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
@@ -65,8 +87,9 @@
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump.
 # Primary Fire needs a keyboard binding in Elite's controls (as its second binding, keeping your trigger first).
 # enabled = false        # the page's 🔔 alerts dialog switches it on and off too (and remembers)
-# key = "auto"           # "auto": Primary Fire's keyboard binding from your controls preset (modifiers too);
-#                        # or a combination such as KEY_KP0 or KEY_LEFTALT+KEY_K
+# key = "auto"           # "auto": Primary Fire's keyboard binding from your controls preset (modifiers too;
+#                        # the Ship line of a preset per mode; a built-in preset has no file to read, so bind it
+#                        # in a custom one); or a combination such as KEY_KP0 or KEY_LEFTALT+KEY_K
 # delay = 2.0            # seconds after arriving before the press (the jump tunnel ignores input)
 # hold = 6.0             # seconds to hold the trigger (the scanner fires once charged)
 # skip_honked = true     # leave systems you have already honked alone
@@ -74,6 +97,6 @@
 #                        # bodies were found" when the honk found everything); the dialog can switch it per browser
 
 [spansh]
-# concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh)
+# concurrency = 4       # body-detail fetches in flight after an arrival (be kind to Spansh; at least 1)
 # map_max_radius = 250  # ly: the largest 3D map the page may ask for (Spansh caps a search at 10,000 systems)
 # map_max_pages = 6     # pages of 500 systems fetched for the map; near the bubble each page is several MB

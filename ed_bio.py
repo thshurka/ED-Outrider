@@ -37,11 +37,13 @@ Body dict used by predict():
     gravity       g
     temperature   K
     pressure      atmospheres (optional)
-    volcanism     journal Volcanism string or Spansh volcanismType ("" / None for none)
+    volcanism     journal Volcanism string or Spansh volcanismType ("" or "No volcanism" for none;
+                  None or missing when not known, which rules nothing out)
     dist_ls       distance from arrival
     orbital_period_s  seconds (optional; only Sinuous Tubers care)
     atmosphere_composition  {"SulphurDioxide": 1.2, ...} percentages (optional; Recepta care)
-    parents       star types of the stars this body orbits, journal codes (optional)
+    parents       star types of the stars this body orbits, journal codes (optional; leave it out when
+                  any of them is not known)
     star          arrival star type (journal code) -- used when `system` gives no stars
     materials     surface materials, lower case ("iron", "polonium", ...) (optional; colour check)
 
@@ -49,7 +51,10 @@ System dict (optional second argument; everything in it is optional too):
     name, x, y, z   coordinates decide the region, nebulae and Guardian/tuber zones
     region          region number 1-42 if you already know it (else derived from x, y, z)
     stars           [{"type": "M", "luminosity": "Va", "main": True}, ...]
-    planet_types    PlanetClass of every planet in the system (some species need e.g. a water world)
+    planet_types    PlanetClass of every planet in the system (some species need e.g. a water world);
+                    leave it out unless every planet there is known
+    complete        True when every body in the system is known (a lone known star is then the one
+                    a body orbits)
 """
 
 from __future__ import annotations
@@ -65,7 +70,7 @@ import os
 import re
 import sys
 import urllib.request
-from glob import glob
+from glob import glob, escape as glob_escape
 
 try:
     from ed_unsold import ORGANIC_VALUES, find_journal_dirs
@@ -287,7 +292,8 @@ def remote_versions():
 
 def update_if_newer(path=None, log=print):
     """Refresh bio_rules.json when upstream has changed (or the file is missing). Returns True if
-    it was rewritten. Offline or rate-limited: keeps whatever is there and says so."""
+    it was rewritten, False if it was already current, None if it could not check or update (offline,
+    rate-limited, a download failing midway): the copy there is kept and used, and the log says so."""
     current = load_rules(path)
     try:
         remote = remote_versions()
@@ -295,11 +301,17 @@ def update_if_newer(path=None, log=print):
         log(f"bio rules: could not check for updates ({e}); "
             + (f"using the copy from {(current.get('generated') or '')[:10]}" if current else "no rules available"))
         if current:
-            return False
+            return None
         raise
     if current and current.get("versions") == remote:
         return False
-    update_rules(path, log=lambda *_: None, versions=remote)
+    try:
+        update_rules(path, log=lambda *_: None, versions=remote)
+    except Exception as e:  # noqa: BLE001 -- the old file is only replaced once everything has arrived
+        if not current:
+            raise
+        log(f"bio rules: the update failed ({e}); using the copy from {(current.get('generated') or '')[:10]}")
+        return None
     return True
 
 
@@ -312,12 +324,16 @@ def update_rules(path=None, log=print, versions=None):
         except Exception as e:  # noqa: BLE001
             log(f"bio rules: could not read upstream versions ({e})")
             versions = {}
+    # A source whose data did not arrive is recorded with no version, so the next start sees a mismatch
+    # and tries again (its current upstream version would make the gap look up to date for good).
+    versions = dict(versions)
     try:
         files = [f["name"][:-3] for f in json.loads(_get(BIOSCAN_API + "contents/src/bio_scan/bio_data/rulesets"))
                  if f.get("name", "").endswith(".py") and not f["name"].startswith("_")]
     except Exception as e:  # noqa: BLE001 -- the listing is a nicety; the known file names do
         log(f"bio rules: could not list rulesets ({e}); using the known file names")
         files = RULESET_FILES
+        versions["bioscan"] = ""   # a ruleset added upstream since would be missing
     catalog = {}
     for name in files:
         catalog.update(_literals(_get(f"{BIOSCAN}bio_data/rulesets/{name}.py")).get("catalog") or {})
@@ -328,15 +344,27 @@ def update_rules(path=None, log=print, versions=None):
     sectors = _literals(_get(BIOSCAN + "nebula_data/sectors.py")).get("data") or []
     log("bio rules: nebulae and regions")
     grid = _literals(_get(REGIONMAP))
+    kept = None   # (genus id, species id) -> colours from the current file, when ExploData did not arrive
     try:
         genus_data = _literals(_get(EXPLODATA)).get("data") or {}
         log("bio rules: colour variants")
     except Exception as e:  # noqa: BLE001 -- without them species are simply not ruled out by colour
-        log(f"bio rules: could not fetch colour variants ({e})")
         genus_data = {}
+        versions["explodata"] = ""   # still retried at the next start
+        # Keep the colour tables the current file has rather than turning the colour check off until then.
+        try:
+            with open(path, encoding="utf-8") as fh:
+                kept = {(sp.get("genus_id"), sp.get("id")): sp["colors"]
+                        for sp in json.load(fh).get("species") or [] if sp.get("colors")}
+        except (OSError, ValueError, AttributeError, TypeError):
+            kept = None
+        log(f"bio rules: could not fetch colour variants ({e})"
+            + (f"; keeping the {len(kept)} colour tables already there" if kept else ""))
 
     def colours(genus_id, species_id):
         """{"star": {class: colour}} or {"element": {material: colour}} for a species, or None (no check)."""
+        if kept is not None:
+            return kept.get((genus_id, species_id))
         c = (genus_data.get(genus_id) or {}).get("colors")
         if not c:
             return None
@@ -402,6 +430,19 @@ def load_rules(path=None, force=False):
     except (OSError, ValueError):
         _rules = None
         return None
+    try:
+        return _prepare_rules(data)
+    except (KeyError, TypeError, AttributeError, ValueError):
+        # parses but is not a rules file this version understands (an older schema, a hand edit):
+        # treat it as absent so update_if_newer() fetches a fresh copy instead of every call raising
+        _rules = None
+        return None
+
+
+def _prepare_rules(data):
+    global _rules
+    for key in ("guardian_nebulae", "tuber_zones", "sectors", "region_names", "region_grid"):
+        data[key]   # read later by the evaluator: a file without one is incomplete (KeyError)
     for s in data["species"]:
         for r in s["rulesets"]:
             if "region" in r and "regions" not in r:  # a typo in one BioScan file; clearly meant
@@ -533,6 +574,8 @@ def _check(key, want, b, s):
         return SKIP if op is None else op < want
     if key == "volcanism":
         v = b["volc"]
+        if v is None:   # not known (a Spansh body search leaves it out): neither none nor some
+            return SKIP
         if isinstance(want, list):
             return any((v == w[1:]) if w.startswith("=") else (w in v) for w in want)
         if want == "Any":
@@ -570,7 +613,10 @@ def _check(key, want, b, s):
             return SKIP
         return any(t in want for t in s["planet_types"])
     if key == "main_star":
-        return _star_list_matches(want, [s["main"]] if s["main"] else [])
+        main = [s["main"]] if s["main"] else []
+        if _star_list_matches(want, main):
+            return True
+        return SKIP if _star_class_only(want, main) else False
     if key == "parent_star":
         if s["main"] and any(star_matches(w, s["main"]["type"]) for w in want):
             return True
@@ -579,9 +625,15 @@ def _check(key, want, b, s):
             return SKIP
         return any(star_matches(w, p) for w in want for p in parents)
     if key == "star":
-        if not s["stars"]:
+        if _star_list_matches(want, s["stars"]):
+            return True
+        # no known star matches: ruled out only once every body (every star) is known; an unscanned
+        # companion may be the one (Anemone, Crystalline Shards and Amphora need a particular star).
+        # A star of the right class whose luminosity is not known (an EDSM/Spansh record without it,
+        # the arrival placeholder) does not tell us either
+        if not s["complete"] or _star_class_only(want, s["stars"]):
             return SKIP
-        return _star_list_matches(want, s["stars"])
+        return False
     if key == "nebula":
         if want not in ("all", "large"):
             return True
@@ -606,11 +658,19 @@ def _star_list_matches(want, stars):
     return False
 
 
+def _star_class_only(want, stars):
+    """True when a [code, luminosity] pair in `want` matches a star's class but that star's
+    luminosity is unknown: a missing fact, so the rule must not eliminate on it."""
+    return any(isinstance(w, (list, tuple)) and star_matches(w[0], st["type"]) and not st.get("luminosity")
+               for st in stars for w in (want if isinstance(want, list) else [want]))
+
+
 def _body_facts(body):
     g = body.get("gravity")
     return {"cls": landable_class(body.get("class")), "atm": norm_atmosphere(body.get("atmosphere")),
             "g": g, "t": body.get("temperature"), "p": body.get("pressure"),
-            "volc": norm_volcanism(body.get("volcanism")), "dist": body.get("dist_ls"),
+            "volc": norm_volcanism(body["volcanism"]) if body.get("volcanism") is not None else None,
+            "dist": body.get("dist_ls"),
             "orbital_period_s": body.get("orbital_period_s"),
             "composition": ({norm_atmosphere(k): v for k, v in body["atmosphere_composition"].items()}
                             if body.get("atmosphere_composition") is not None else None),
@@ -630,8 +690,8 @@ def _colour_ok(col, b, s):
             return True
         if b["parents"] is not None:
             stars = [c for c in b["parents"] if c] + ([main] if main else [])
-        elif len(s.get("stars") or []) == 1 and main:
-            stars = [main]   # a single-star system: the body can only orbit that one
+        elif s.get("complete") and len(s.get("stars") or []) == 1 and main:
+            stars = [main]   # every body known and one star: the body can only orbit that one
         else:
             return True
         if not stars:
@@ -640,6 +700,47 @@ def _colour_ok(col, b, s):
     if "element" in col:
         return b["materials"] is None or any(e in b["materials"] for e in col["element"])
     return True
+
+
+def _variants(col, b, s):
+    """The colours a species with colour table `col` can take on this body, or [] when unsure."""
+    if not col:
+        return []
+    if "element" in col:
+        # the material-keyed genera: one colour per matching material the body has (the game picks one of them)
+        if b["materials"] is None:
+            return []
+        return list(dict.fromkeys(c for e, c in col["element"].items() if e in b["materials"]))
+    if "star" not in col:
+        return []
+    main = (s.get("main") or {}).get("type")
+    if main and (main == "H" or main.startswith("SupermassiveBlackHole")):
+        return []
+    if b["parents"] is not None:
+        near = b["parents"][0] if b["parents"] else None
+    elif s.get("complete") and len(s.get("stars") or []) == 1 and main:
+        near = main   # every body known and one star: the body can only orbit that one
+    else:
+        near = None
+    if not near:
+        return []
+    colours = lambda code: {c for q, c in col["star"].items() if star_matches(q, code)}
+    got = colours(near)
+    # Settled only when no other star could colour it. The nearest parent star is not always the one: in the
+    # author's journals a Y dwarf parent never gave its own colour (the system's F star did) and an M parent
+    # once took a neutron star's. So every star of a complete system must agree, else it stays unsure.
+    if len(got) != 1 or not s.get("complete"):
+        return []
+    if any(colours(st["type"]) - got for st in s.get("stars") or [] if st.get("type")):
+        return []
+    return sorted(got)
+
+
+def variant_names(sp, b, s):
+    """The colour variants a species could show on this body, as the codex names them ("Bacterium Aurasus -
+    Teal"): one for a star-keyed species whose colour is settled, one per matching surface material for a
+    material-keyed one, [] whenever it cannot be told (then only the species can be checked)."""
+    return [f"{sp['name']} - {c}" for c in _variants(sp.get("colors"), b, s)]
 
 
 def _system_facts(system, body):
@@ -657,7 +758,7 @@ def _system_facts(system, body):
         region = region_number(x, y, z)
     pt = system.get("planet_types")
     return {"name": system.get("name") or "", "pos": (x, y, z) if x is not None else None, "region": region,
-            "stars": stars, "main": main,
+            "stars": stars, "main": main, "complete": bool(system.get("complete")),
             "planet_types": [journal_class(t) for t in pt] if pt is not None else None}
 
 
@@ -665,7 +766,7 @@ def predict(body, system=None):
     """Species that could live on this body, most valuable first.
 
     Returns [] for a body that cannot host anything (gas giant, not landable) or when the rules
-    have not been downloaded. Each entry: {name, genus, value}.
+    have not been downloaded. Each entry: {name, genus, value, variants} (variants: see variant_names).
     """
     R = load_rules()
     b = _body_facts(body)
@@ -677,7 +778,8 @@ def predict(body, system=None):
         for ruleset in sp["rulesets"]:
             if all(_check(k, v, b, s) is not False for k, v in ruleset.items()) and _colour_ok(sp.get("colors"), b, s):
                 out.append({"name": sp["name"], "genus": sp["genus"],
-                            "value": species_value(sp["name"]) or sp.get("value")})
+                            "value": species_value(sp["name"]) or sp.get("value"),
+                            "variants": variant_names(sp, b, s)})
                 break
     out.sort(key=lambda x: -(x["value"] or 0))
     return out
@@ -702,8 +804,15 @@ def genus_value(genus):
 
 def species_value(name):
     """Credits for a species (max over colour variants for the Horizons ones)."""
+    if not name:   # a ScanOrganic without Species_Localised
+        return None
+    # the journal names the Horizons forms in the plural ("Bark Mounds") where the price list has
+    # the singular ("Bark Mound"): compare with a trailing s dropped on both sides
+    one = lambda t: t[:-1] if t.endswith("s") else t
+    name = one(name)
     best = 0
     for value, vname in ORGANIC_VALUES.values():
+        vname = one(vname)
         if vname == name or vname.endswith(" " + name):
             best = max(best, value)
     return best or None
@@ -724,7 +833,8 @@ def short_species(name, genus):
 
 
 def by_genus(candidates, genera=None):
-    """Group candidates by genus: [{genus, best (name), value, species:[...]}], most valuable first.
+    """Group candidates by genus: [{genus, best (name), value, species:[...], variants, variant}], most
+    valuable first (variants: the best species' colour candidates, variant the first of them or None).
 
     If `genera` (the DSS's list) is given, only those genera are kept -- and a genus the DSS
     found that no rule predicts is still listed, with no value guess.
@@ -733,8 +843,11 @@ def by_genus(candidates, genera=None):
     for c in candidates:
         if genera is not None and c["genus"] not in genera:
             continue
+        # the best species' colour candidates ride along: the codex is checked per variant when they are settled
+        vs = c.get("variants") or []
         gr = groups.setdefault(c["genus"], {"genus": c["genus"], "best": c["name"], "value": c["value"],
-                                            "min_value": c["value"], "species": []})
+                                            "min_value": c["value"], "species": [],
+                                            "variants": vs, "variant": vs[0] if vs else None})
         gr["species"].append(c)
         if c["value"] and (gr["min_value"] is None or c["value"] < gr["min_value"]):
             gr["min_value"] = c["value"]
@@ -743,7 +856,8 @@ def by_genus(candidates, genera=None):
             # No rule predicts it (a gap in the rules, or unknown system context): bound it by the
             # price table so it still counts, and flag that the rules had nothing to say.
             v = genus_value(g)
-            groups[g] = {"genus": g, "best": None, "value": v, "min_value": v, "species": [], "unruled": True}
+            groups[g] = {"genus": g, "best": None, "value": v, "min_value": v, "species": [], "unruled": True,
+                         "variants": [], "variant": None}
     return sorted(groups.values(), key=lambda gr: -(gr["value"] or 0))
 
 
@@ -758,7 +872,8 @@ def body_from_scan(ev, star=None, star_types=None):
             "orbital_period_s": ev.get("OrbitalPeriod"),
             "atmosphere_composition": {c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
             if "AtmosphereComposition" in ev else None,
-            "parents": [star_types[p] for p in parents if p in star_types] if star_types else None,
+            # only when every star it orbits is known (an unscanned companion may be the one)
+            "parents": ([star_types[p] for p in parents] or None) if star_types and all(p in star_types for p in parents) else None,
             "materials": [m["Name"] for m in ev["Materials"]] if ev.get("Materials") else None,
             "star": star}
 
@@ -767,6 +882,15 @@ def body_from_scan(ev, star=None, star_types=None):
 # Backtest against the journals
 # --------------------------------------------------------------------------
 
+def _json_line(line):
+    """A journal line as a dict, or None for a truncated or corrupt one (a game crash mid-write)."""
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        return None
+    return ev if isinstance(ev, dict) else None
+
+
 def backtest(dirs, verbose=False, since=None):
     """since: only score samples/DSS results at or after this 'YYYY-MM' (an out-of-sample check)."""
     if not load_rules():
@@ -774,39 +898,57 @@ def backtest(dirs, verbose=False, since=None):
         return
     scans, systems, analysed, genera = {}, {}, [], collections.defaultdict(set)
     for d in dirs:
-        for path in sorted(glob(os.path.join(d, "Journal*.log"))):
+        for path in sorted(glob(os.path.join(glob_escape(d), "Journal*.log"))):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     if '"event":"Scan"' in line:
-                        ev = json.loads(line)
+                        ev = _json_line(line)
+                        if ev is None:
+                            continue
                         sysd = systems.setdefault(ev.get("SystemAddress"), {"stars": {}, "planets": set()})
                         if ev.get("PlanetClass"):
                             scans[(ev.get("SystemAddress"), ev.get("BodyID"))] = ev
                             sysd["planets"].add(ev["PlanetClass"])
+                            sysd.setdefault("planet_ids", set()).add(ev.get("BodyID"))
                         elif ev.get("StarType"):
                             sysd["stars"][ev.get("BodyID")] = {"type": ev["StarType"], "luminosity": ev.get("Luminosity"),
                                                               "main": not ev.get("DistanceFromArrivalLS")}
+                    elif '"event":"FSSDiscoveryScan"' in line:
+                        ev = _json_line(line)
+                        if ev is None:
+                            continue
+                        sysd = systems.setdefault(ev.get("SystemAddress"), {"stars": {}, "planets": set()})
+                        sysd["body_count"] = ev.get("BodyCount")
                     elif '"StarPos"' in line and ('"FSDJump"' in line or '"Location"' in line or '"CarrierJump"' in line):
-                        ev = json.loads(line)
+                        ev = _json_line(line)
+                        if ev is None:
+                            continue
                         sysd = systems.setdefault(ev.get("SystemAddress"), {"stars": {}, "planets": set()})
                         sysd["name"] = ev.get("StarSystem")
                         sysd["x"], sysd["y"], sysd["z"] = ev["StarPos"]
                     elif '"event":"ScanOrganic"' in line and '"Analyse"' in line:
-                        ev = json.loads(line)
+                        ev = _json_line(line)
+                        if ev is None:
+                            continue
                         if not since or ev.get("timestamp", "") >= since:
                             analysed.append(ev)
                     elif '"event":"SAASignalsFound"' in line and "Genuses" in line:
-                        ev = json.loads(line)
+                        ev = _json_line(line)
+                        if ev is None:
+                            continue
                         if since and ev.get("timestamp", "") < since:
                             continue
                         for g in ev.get("Genuses") or []:
                             genera[(ev["SystemAddress"], ev["BodyID"])].add(g.get("Genus_Localised"))
 
     def context(addr):
+        # as the server does it: the planet list (and a lone star) only counts once every body is known
         sysd = systems.get(addr) or {}
         stars = list(sysd.get("stars", {}).values())
+        complete = bool(sysd.get("body_count")) and len(stars) + len(sysd.get("planet_ids", ())) >= sysd["body_count"]
         return ({"name": sysd.get("name"), "x": sysd.get("x"), "y": sysd.get("y"), "z": sysd.get("z"),
-                 "stars": stars, "planet_types": sorted(sysd.get("planets", ()))},
+                 "stars": stars, "planet_types": sorted(sysd.get("planets", ())) if complete else None,
+                 "complete": complete},
                 {bid: st["type"] for bid, st in sysd.get("stars", {}).items()})
 
     def describe(sc):
@@ -816,6 +958,7 @@ def backtest(dirs, verbose=False, since=None):
 
     seen = set()
     sp_hit = sp_total = 0
+    v_total = v_set = v_hit = v_size = 0   # colour variants: logged, predicted (a candidate set), right
     misses = collections.Counter()
     ranks = []
     for o in analysed:
@@ -832,6 +975,13 @@ def backtest(dirs, verbose=False, since=None):
         sp_total += 1
         if o["Species_Localised"] in names:
             sp_hit += 1
+            if o.get("Variant_Localised"):
+                v_total += 1
+                vs = next(c for c in cands if c["name"] == o["Species_Localised"])["variants"]
+                if vs:
+                    v_set += 1
+                    v_hit += o["Variant_Localised"] in vs
+                    v_size += len(vs)
             same = [c["name"] for c in cands if c["genus"] == o["Genus_Localised"]]
             ranks.append(same.index(o["Species_Localised"]) + 1 if o["Species_Localised"] in same else 0)
         else:
@@ -859,6 +1009,10 @@ def backtest(dirs, verbose=False, since=None):
         top = sum(1 for r in ranks if r == 1)
         print(f"         when the genus was right, the actual species was the top-valued candidate of that genus "
               f"{top}/{len(ranks)} times; candidates per genus: {sum(ranks) / len(ranks):.1f} avg rank")
+    if v_total:
+        print(f"variants: a colour was predicted for {v_set}/{v_total} of those samples; the logged variant was in the "
+              f"set {v_hit}/{v_set} times ({100 * v_hit / max(v_set, 1):.0f}%), {v_size / max(v_set, 1):.2f} per set; "
+              f"the rest fall back to the species check")
     print(f"genera:  {g_hit}/{g_total} of the genera the DSS found were predicted ({100 * g_hit / max(g_total, 1):.0f}%); "
           f"on average {sum(extra) / max(len(extra), 1):.1f} predicted genera per body did not show up")
     if misses:

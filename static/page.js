@@ -1,8 +1,37 @@
+// Settings live in this browser's localStorage. A setting it has never set comes from the server's copy
+// ("use these for new browsers" in the alerts dialog, inlined into the page as SERVER_DEFAULTS), then from
+// the config file's [defaults] (data.defaults) where the page asks for one. Only SETTINGS_KEYS are shared:
+// per-device ones (the view, layouts, the search form, which screen speaks) never are. ed_outrider.py has the
+// same list (BROWSER_SETTINGS).
+const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechStyles", "speechNames", "speechSpeed",
+  "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
+  "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
+  "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
+  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays"];
+const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
+  return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
+// The shape a shared setting must have to be used: a hand-edited import or server copy with, say, a string for
+// the personalities would otherwise throw in every spoken alert. A value of the wrong type reads as unset.
+const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
+const SETTING_SHAPES = {alerts: isObj, alertSound: isObj, alertSpeak: isObj, speechStyles: Array.isArray, unsoldCfg: isObj,
+  highlightCfg: isObj, streakCfg: isObj, sorts: isObj, map: isObj, log: isObj, bioSort: isObj};
+// null is a fine value for a plain setting (a reset stores it: "follow the default"), but a key with a shape is
+// read as an object or list at start-up, so a null there reads as unset too (else `lSaved.days` stops the script)
+const settingOk = (k, v) => !SETTING_SHAPES[k] || SETTING_SHAPES[k](v);
 const store = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  get(k, d) {
+    let v = null;
+    try { v = localStorage.getItem(k); } catch {}   // storage blocked: the server copy still applies
+    if (v !== null) { try { const x = JSON.parse(v); return !settingOk(k, x) ? d : x; } catch { return d; } }
+    const sv = serverSettings();
+    return SETTINGS_KEYS.includes(k) && Object.prototype.hasOwnProperty.call(sv, k) && settingOk(k, sv[k]) ? sv[k] : d;
+  },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 let data = null, version = -1;
+// Where you are, as the exact id64 string (position.id). The JSON number position.id64 loses the last digits above
+// 2^53, so string comparisons with the server's exact ids (arrival, Here, moments) must use this.
+const posId = () => data && data.position ? data.position.id ?? String(data.position.id64) : null;
 // Each sortable table keeps its own sort (a value sort chosen in My firsts must not re-sort Nearby).
 const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search"};
 const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance"},
@@ -20,6 +49,20 @@ async function apiJson(url, opts) {
   return {error: r.ok ? "unexpected non-JSON response" : `HTTP ${r.status} — see the terminal`};
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Lists are redrawn on every payload, which replaces the element that had keyboard focus. focusKey(id) notes
+// which one it was (by tag and data attributes) before the redraw, refocus(id, key) finds its new copy after.
+function focusKey(id) {
+  const box = document.getElementById(id), a = document.activeElement;
+  if (!box || !a || a === box || !box.contains(a)) return null;
+  const attrs = [...a.attributes].filter(x => x.name.startsWith("data-"));
+  return attrs.length ? a.tagName.toLowerCase() + attrs.map(x => `[${x.name}="${x.value.replace(/["\\]/g, "\\$&")}"]`).join("") : null;
+}
+function refocus(id, key) {
+  if (!key) return;
+  const el = document.getElementById(id).querySelector(key); if (!el) return;
+  markKeyable();   // the new copy gets its tabindex now, not at the next animation frame
+  el.focus({preventScroll: true});
+}
 const icon = (cls, id, n, title) =>
   `<span class="ic ${cls}" title="${title}"><svg><use href="#${id}"/></svg>${n}</span>`;
 const q = v => v === null || v === undefined ? "?" : v;
@@ -61,13 +104,19 @@ const SHIP_NAMES = {sidewinder: "Sidewinder", eagle: "Eagle", hauler: "Hauler", 
   cutter: "Imperial Cutter", mandalay: "Mandalay", type8: "Type-8 Transporter", cobramkv: "Cobra Mk V", corsair: "Corsair",
   panthermkii: "Panther Clipper Mk II", explorer_nx: "Caspian Explorer", lakonminer: "Type-11 Prospector", smallcombat01_nx: "Kestrel Mk II"};
 const shipName = t => SHIP_NAMES[(t || "").toLowerCase()] || (t || "").replace(/_/g, " ");
+// what to call a ship: its own name, or its type's proper name when it has none (the journal gives an unnamed
+// ship its type id as the name, "krait_mkii", which reads and speaks badly)
+const shipLabel = (name, type) => { const n = String(name || "").trim();
+  return !n || (type && n.toLowerCase() === String(type).toLowerCase()) || SHIP_NAMES[n.toLowerCase()] ? shipName(type || n) : n; };
 // FSD injections you could synthesise now (from the materials you carry).
-// Hull, when it is not full: the percentage and how many basic repairs your materials allow.
+// Hull, when it is not full: the percentage. (No synthesis repairs the ship: "Repair basic" is the SRV's.)
 function hullLine() {
-  const h = data.hull; if (!h || h.pct == null || h.pct >= 100) return "";
-  const reps = data.materials && data.materials.repairs;
+  const h = data.hull;
+  if (h && h.pct == null && h.repaired)   // repair limpets: the journal gives no new %
+    return `<div class="ln" title="repaired by limpets: the journal gives the new hull % only at the next Loadout (docking, SRV/fighter return) or hull damage">hull <b>repaired</b> · % unknown</div>`;
+  if (!h || h.pct == null || h.pct >= 100) return "";
   const cls = h.pct < 25 ? "noscoop" : h.pct < 50 ? "warnc" : "";
-  return `<div class="ln" title="hull integrity, from the journal">hull <b class="${cls}">${h.pct}%</b>${reps != null ? ` · repair basic ×${reps}` : ""}</div>`;
+  return `<div class="ln" title="hull integrity, from the journal">hull <b class="${cls}">${h.pct}%</b></div>`;
 }
 function boostLine() {
   const m = data.materials; if (!m || !m.boosts) return "";
@@ -95,11 +144,13 @@ function renderCarrier() {
   const fmtLy = d => d.toLocaleString("en-US", {maximumFractionDigits: 1});
   let where = c.aboard ? "<b>aboard</b>" : c.here ? "<b>in this system</b>"
     : `<span class="copy" data-name="${esc(c.system)}" title="click to copy">${esc(c.system)}</span>` + (c.distance != null ? ` · <b>${fmtLy(c.distance)} ly</b>` : "");
+  // the game was not running when a booked jump left: this is where it was booked to go
+  if (c.assumed) where += ` <span class="unk" title="the booked jump's destination: the journal confirms it at your next login">(booked jump, not yet confirmed)</span>`;
   // straight-line lower bounds: the real route is never shorter
   let meet = "";
   if (!c.here && c.distance) {
     const jr = effRange(), f = data.fuel;
-    const mine = jr ? Math.ceil(c.distance / jr) : null, theirs = Math.ceil(c.distance / (c.jump_range || 500));
+    const mine = jr ? jumpsFor(c.distance) : null, theirs = Math.ceil(c.distance / (c.jump_range || 500));
     const tank = f && f.jumps_max != null ? f.jumps_max : null;
     meet = (mine != null ? `you → it ≈ <b>${mine}</b> jump${mine === 1 ? "" : "s"}` +
              (tank != null ? ` <span class="${tank < mine ? "warnc" : "unk"}" title="jumps at max range your tank covers now">(tank ${tank})</span>` : "") : "") +
@@ -116,7 +167,7 @@ function renderCarrier() {
     if (urgent && carrierWarned !== pl.departure) {   // once per booking, only if you are not aboard
       carrierWarned = pl.departure;
       alertOut("carrier", `${c.name} departs in ${Math.ceil(left / 60)} minutes`, `for ${pl.system}; you are not aboard`,
-               {sound: "alert", say: () => line("carrier_departs", {minutes: Math.ceil(left / 60), carrier: c.name},
+               {sound: "alert", tag: "carrier_departs", say: () => line("carrier_departs", {minutes: Math.ceil(left / 60), carrier: c.name},
                                                 `Your carrier departs in ${Math.ceil(left / 60)} minutes, and you are not aboard.`)});
     }
   }
@@ -127,16 +178,72 @@ function renderCarrier() {
 setInterval(() => { if (data && data.carrier && data.carrier.planned) renderCarrier(); }, 1000);
 document.addEventListener("click", async e => {
   if (!e.target.closest || !e.target.closest("#backupBtn")) return;
-  const r = await apiJson("api/backup", {method: "POST"});
+  let r;
+  try { r = await apiJson("api/backup", {method: "POST"}); }
+  catch (err) { r = {error: err.message}; }   // the server is not answering (restarting, stopped)
   toast(r.error ? `Backup failed: ${r.error}` : "Backing up the database and journals…");
 });
+// The Data tile's backup line: when, how many dated zips are kept, how far the journal archive goes. Red when
+// the last backup failed (no zip written); amber when it is overdue (twice the automatic interval, or 30 days
+// with it off) or when it worked but left something out (a journal it could not archive: `warning`).
+function backupHtml(bk) {
+  if (bk.running) return "backing up…";
+  const h = bk.ts ? (Date.now() - Date.parse(bk.ts)) / 3600000 : null;
+  const ago = h == null ? "" : h < 1 ? `${Math.max(1, Math.round(h * 60))} min ago` : h < 48 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} d ago`;
+  const every = Number(bk.every_days) || 0, late = h == null || h > 24 * (every > 0 ? 2 * every : 30);
+  // a journal not archived was an error before it became a warning: an older record of one still reads as a warning
+  const oldWarn = bk.error && /^(\d+ journals? not archived|journal archive:)/.test(bk.error);
+  const error = oldWarn ? null : bk.error, warning = bk.warning || (oldWarn ? bk.error : null);
+  const cls = error ? "badc" : warning || late ? "warnc" : "unk";
+  const title = (error ? `last backup failed${bk.error_ts ? ` (${bk.error_ts.replace("T", " ").slice(0, 16)} UTC)` : ""}: ${error}\n` : "") +
+    (warning && !error ? `the last backup worked, but: ${warning}\n` : "") +
+    (bk.path ? `latest: ${bk.path}` : "no backup made yet") +
+    // what that zip holds (the database, and your browser defaults, lines and settings when they exist)
+    (bk.path && Array.isArray(bk.files) && bk.files.length ? `\nholds: ${bk.files.join(", ")}` : "") + (bk.journals_dir ? `\njournals archived in ${bk.journals_dir} (restore: --legacy that folder)` : "") +
+    (every > 0 ? `\nautomatic: at start when the last is over ${every} day${every === 1 ? "" : "s"} old, and when the game quits` : "\nautomatic backups are off (backup_every_days = 0)");
+  // the warning's detail (which file, why) is in the title: the line keeps "1 journal not archived (…)"
+  const warnShort = warning && !error ? warning.replace(/\s*\(.*$/s, "") + (/\(/.test(warning) ? " (…)" : "") : "";
+  const bits = [bk.ts ? `backed up ${ago}` : "no backup yet", bk.ts && bk.kept && !warnShort ? `${bk.kept} kept` : "",
+                bk.journals_to && !warnShort ? `journals to ${bk.journals_to}` : "", warnShort].filter(Boolean);
+  return `<span class="${cls}" title="${esc(title)}">${esc(bits.join(" · "))}${error ? " · last one failed" : ""}</span> <button type="button" id="backupBtn" class="mini">back up now</button>`;
+}
+// The discovery streak: the last 20 arrivals as dots, each coloured when its arrival star was scanned and never
+// again: gold new (nobody had discovered it), amber known with bodies Spansh had not heard of, blue fully
+// reported, grey visited before, hollow known but Spansh had nothing on it at the time, blank not scanned.
+const STREAK_WORDS = {new: "first discovery", partial: "known, bodies unreported", complete: "fully reported",
+                      visited: "visited before", known: "known (Spansh had no data then)"};
+function streakHtml(sk) {
+  if (!sk || !sk.arrivals || !sk.arrivals.length) return "";
+  const dots = sk.arrivals.map(a => `<span class="sk ${a.verdict || "none"}" title="${esc(a.name)} · ${esc(STREAK_WORDS[a.verdict] || "arrival star not scanned")}` +
+    `${a.firsts ? ` · ${a.firsts} first discover${a.firsts === 1 ? "y" : "ies"}` : ""}${a.value ? ` · ${credits(a.value)} cr scanned` : ""} · ${esc(a.ts.replace("T", " ").slice(0, 16))}"></span>`).join("");
+  return `<b>${sk.new}/${sk.total}</b> new <span class="streak" title="your last ${sk.total} arrivals, oldest first">${dots}</span>`;
+}
+// The unreported horizon: the nearest system Spansh or EDSM know that you have not visited. Any unvisited star
+// on the galaxy map closer than that is one nobody has reported. Never "undiscovered": the game may know it.
+// Only once the sphere search has come back (while it runs the list is empty or partial); honours sphere_cut
+// (the list is complete only to there, so the claim stops there).
+function horizon() {
+  const p = data && data.position;
+  if (!p || /^(starting|asking|Spansh search failed|refresh failed)/.test(data.status || "")) return null;
+  const cut = data.sphere_cut, r = cut != null ? Math.min(cut, data.radius) : data.radius;
+  const n = (Array.isArray(data.systems) ? data.systems : []).filter(s => s.id64 !== p.id64 && !s.visited && s.source !== "route")
+    .sort((a, b) => a.distance - b.distance)[0];
+  const ly = x => `${Number(x).toLocaleString("en-US", {maximumFractionDigits: 1})} ly`;
+  const why = "Systems on the galaxy map that are not in this list have never been reported to Spansh or EDSM (the game itself may still know them).";
+  if (!n || (cut != null && n.distance > cut)) {
+    const lead = n ? `nearest known unvisited: ${n.name} ${ly(n.distance)} (the list is complete only to ${ly(cut)})` : `no known unvisited star within ${ly(r)}`;
+    return {text: `${lead} — any unvisited star on the map within ${ly(r)} is unreported`, why, system: n || null};
+  }
+  const star = n.main_class ? ` · ${n.main_class}${n.main_scoopable ? " ⛽" : ""}` : "";
+  return {text: `nearest known unvisited: ${n.name} ${ly(n.distance)}${star} — unvisited stars closer than this aren't reported to Spansh or EDSM`, why, system: n};
+}
 function renderStrip() {
   const val = (v, title) => `<div class="val"${title ? ` title="${title}"` : ""}>${v}</div>`, ln = v => v ? `<div class="ln">${v}</div>` : "";
   // commander tile: credits at login plus exploration sales since, and the ship
   const cm = data.commander, sh = data.ship, cmEl = document.getElementById("cmdrLine");
   document.getElementById("cmdrLbl").textContent = cm && cm.name ? `Cmdr ${cm.name}` : "Commander";
-  const shipLine = sh ? `<span title="${esc(shipName(sh.type))}${data.jump_range ? ` · ${data.jump_range.toFixed(1)} ly max jump` : ""}">${esc(sh.name || shipName(sh.type))}` +
-    `${sh.type && shipName(sh.type) !== sh.name ? ` <span class="unk">· ${esc(shipName(sh.type))}</span>` : ""}</span>` : "";
+  const shipLine = sh ? `<span title="${esc(shipName(sh.type))}${data.jump_range ? ` · ${data.jump_range.toFixed(1)} ly max jump` : ""}">${esc(shipLabel(sh.name, sh.type))}` +
+    `${sh.type && shipName(sh.type) !== shipLabel(sh.name, sh.type) ? ` <span class="unk">· ${esc(shipName(sh.type))}</span>` : ""}</span>` : "";
   cmEl.innerHTML = !cm ? val(`<span class="unk">no login seen</span>`) + ln(shipLine) :
     val(cm.credits != null ? `≈ ${credits(cm.credits)} cr` : `<span class="unk">credits unknown</span>`,
         `Credits at login (${esc((cm.login_ts || "").replace("T", " ").slice(0, 16))} UTC)${cm.credits_login != null ? ": " + cm.credits_login.toLocaleString() : ""}` +
@@ -146,18 +253,21 @@ function renderStrip() {
       return `<span title="${k === "Explore" ? "exploration" : "exobiology"} rank${r.progress != null ? `, ${r.progress}% to the next` : ""}">${k === "Explore" ? "Explorer" : "Exobiologist"}: <b>${esc(r.name)}</b>${r.progress != null ? ` <span class="unk">${r.progress}%</span>` : ""}</span>`; }).join(" · "));
   const ns = data.next_stop, nsEl = document.getElementById("nextStopLn"), jr0 = effRange();
   nsEl.innerHTML = ns ? `<span title="your chosen next stop (clears when you arrive)">next stop:</span> <span class="copy" data-name="${esc(ns.name)}" title="click to copy">${esc(ns.name)}</span>` +
-    (ns.distance != null ? ` · <b>${ns.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>${jr0 ? ` ≈ ${Math.max(1, Math.ceil(ns.distance / jr0))} jumps` : ""}` : "") +
+    (ns.distance != null ? ` · <b>${ns.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>${jr0 ? ` ≈ ${jumpsFor(ns.distance)} jump${jumpsFor(ns.distance) === 1 ? "" : "s"}` : ""}` : "") +
     ` <span class="unk" id="nsClear" title="clear the next stop" style="cursor:pointer">✕</span>` : "";
   const p0 = data.position, wl = document.getElementById("whereLn");
   wl.innerHTML = p0 ? `<span title="galactic coordinates (x / y / z)">Coord: ${[p0.x, p0.y, p0.z].map(v => v.toFixed(2)).join(" / ")}</span>` +
     (p0.visits ? ` · <span title="arrivals in this system, from your journals">visit ${p0.visits}</span>` : "") : "";
+  document.getElementById("streakLn").innerHTML = streakHtml(data.streak);
+  const hz = horizon();
+  document.getElementById("horizonLn").innerHTML = hz ? `<span title="${esc(hz.text + ".\n" + hz.why)}">${esc(hz.text)}</span>` : "";
   // fuel tile
   const f = data.fuel, tf = document.getElementById("tFuel"), el = document.getElementById("fuelLine");
   tf.className = "tile"; tf.title = "";
   if (!f) el.innerHTML = val(`<span class="unk">—</span>`);
   else if (!f.live) el.innerHTML = val(`<span class="unk">${f.main != null ? f.main.toFixed(1) + " t (last reading)" : "no reading"}</span>`) + ln("game not running") + boostLine();
   else {
-    tf.className = "tile " + (f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");
+    tf.className = "tile " + (f.pct == null ? "" : f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");   // null < 15 is true
     el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) + hullLine() +
       ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
       ln(f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "") + boostLine();
@@ -175,24 +285,27 @@ function renderStrip() {
   } else text = fr && !fr.dirs.length ? "no journal folder — pass --journals" : "waiting for a journal";
   const failed = /failed|error/.test(data.status || "");
   const problems = [disconnected && `NOT CONNECTED since ${disconnected}`, data.tail_error && "journal tailing error — see the terminal",
+                    pageError && `page error (${esc(pageError)}) — see the browser console`,
                     failed && esc(data.status)].filter(Boolean);
-  if (problems.length) { dot = disconnected || data.tail_error ? "bad" : "warn"; tcls = dot === "bad" ? "urgent" : "warn"; }
+  if (problems.length) { dot = disconnected || data.tail_error || pageError ? "bad" : "warn"; tcls = dot === "bad" ? "urgent" : "warn"; }
   td.className = "tile " + tcls; td.title = data.tail_error || data.status || "";
   fl.innerHTML = val(`<span class="dot ${dot}"></span>${text}`);
   sl.innerHTML = problems.length ? problems.join(" · ") : /^asking|^fetching/.test(data.status || "") ? esc(data.status) : "Spansh ok";
-  const bk = data.backup || {};
-  const bkAge = bk.ts ? Math.floor((Date.now() - Date.parse(bk.ts)) / 86400000) : null;
-  document.getElementById("backupLine").innerHTML = bk.running ? "backing up…" :
-    `<span class="${bkAge == null || bkAge > 30 ? "warnc" : "unk"}" title="${bk.error ? "last backup failed: " + esc(bk.error) : bk.path ? esc(bk.path) : "no backup made yet"}">` +
-    `${bk.ts ? `backup ${bkAge ? bkAge + " d" : "today"}` : "no backup yet"}${bk.error ? " (failed)" : ""}</span> <button type="button" id="backupBtn" class="mini">back up now</button>`;
+  document.getElementById("backupLine").innerHTML = backupHtml(data.backup || {});
   // docked somewhere that buys data with a worthwhile amount aboard: say so plainly
-  const dk = data.docked, u = data.unsold, lvl = unsoldLevel(u), se = document.getElementById("sell");
-  if (saleBanner && Date.now() < saleBanner.until) {
+  const dk = data.docked, sellHere = sellableHere(dk, data.unsold), se = document.getElementById("sell");
+  if (lossCard && Date.now() < lossCard.until) {
+    const m = lossCard.m;
+    se.className = "urgent";
+    se.innerHTML = `💀 ${esc(lossCard.text)}` + (m.top && m.top.length ? `<br><span class="unk">most valuable lost: ${m.top.map(x =>
+      `${esc(x.name)} ${credits(x.value)} cr${x.distance != null ? ` · ${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` : ""}`).join("; ")}</span>` : "") +
+      ` <a href="#" data-lossfirsts>My firsts (lost)</a> <a href="#" data-lossclose title="close">✕</a>`;
+  } else if (saleBanner && Date.now() < saleBanner.until) {
     se.className = "ok"; se.textContent = saleBanner.text;
-  } else if (dk && (dk.has_uc || dk.has_vista) && lvl && lvl !== "ok") {
-    se.className = lvl;
+  } else if (sellHere && sellHere.level && sellHere.level !== "ok") {
+    se.className = sellHere.level;
     se.innerHTML = `💰 Docked at ${esc(dk.station)}${dk.has_uc ? " with Universal Cartographics" : ""}${dk.has_vista ? (dk.has_uc ? " and" : " with") + " Vista Genomics" : ""}: ` +
-      `<b>${credits(u.total)} cr</b> on board — sell before you undock.`;
+      `<b>${credits(sellHere.value)} cr</b> to sell here — sell before you undock.`;
   } else se.innerHTML = "";
   // tab title: what a background tab needs to know
   const p = data.position;
@@ -216,6 +329,15 @@ function worthLeavingFor(l) {
   const maps = (l.unmapped || []).filter(u => u.special || (u.increment != null && u.increment >= hlLevel("body")));
   return {...l, bio_pending: bio, maps, clean: !maps.length && !bio.length};
 }
+// what a bio_pending body could pay with its first-footfall factor (the server's potential is bonus-free, so the
+// bio threshold compares what it always did; the order, the per-minute figure and the "up to" use this)
+const pendingWorth = b => (b.potential || 0) * (b.factor || 1);
+const ffMark = b => b.factor === 5 ? " 👣×5" : "";   // the figure before it includes the x5 (spokenText drops the glyph)
+// the DSS genera not started yet: a genus with samples under way is already listed as "Stratum 2/3"
+const unstarted = b => (b.genera || []).filter(g => !(g in (b.partial || {})));
+// a body with no DSS: the runs under way, then the signals nobody has identified ("Stratum 1/3, 2 signals not DSS'd")
+const noDssText = (b, parts) => [...parts, b.signals ? `${b.signals} signal${b.signals === 1 ? "" : "s"}${parts.length ? "" : ","} not DSS'd` : ""]
+  .filter(Boolean).join(", ");
 function leavingText(l) {
   l = worthLeavingFor(l);
   if (!l || l.clean) return "";
@@ -223,28 +345,78 @@ function leavingText(l) {
   if (l.maps.length) bits.push("unmapped " + l.maps.map(u => `<b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}` +
     (u.increment ? `, +${credits(u.increment)}` : "") + ")").join(", "));
   for (const b of l.bio_pending) {
-    const parts = Object.entries(b.partial).map(([g, n]) => `${esc(g)} ${n}/3`).concat((b.genera || []).map(esc));
-    bits.push(`bio on <b>${esc(b.body)}</b>${b.genera === null ? ` (${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd)` : parts.length ? ` (${parts.join(", ")})` : ""}` +
-              (b.potential ? ` up to ${credits(b.potential)}` : b.potential == null && !Object.keys(b.partial || {}).length ? " (value unknown)" : "") +
+    const parts = Object.entries(b.partial).map(([g, n]) => `${esc(g)} ${n}/3`).concat(unstarted(b).map(esc));
+    bits.push(`bio on <b>${esc(b.body)}</b>${b.genera === null ? ` (${noDssText(b, parts)})` : parts.length ? ` (${parts.join(", ")})` : ""}` +
+              (b.potential ? ` up to ${credits(pendingWorth(b))}${ffMark(b)}` : b.potential == null && !Object.keys(b.partial || {}).length ? " (value unknown)" : "") +
               (b.codex_new ? " ✦ new to your codex here" : ""));
   }
   return `Leaving with unfinished work: ${bits.join(" · ")}`;
 }
+// ---- the suggested order in a system (Here's to-do list, Now's Next) ----
+// Supercruise time from the arrival star on a fixed community curve: about 7.5·ln(d) − 20 s up to 2,000 ls, then
+// roughly linear to 6 minutes at 100,000 ls; never under 15 s, and never shorter for a farther body. Only a rough
+// guide (it ignores where you are now and the time spent mapping or on foot): "suggested order", not a route.
+const SC_KNEE = 7.5 * Math.log(2000) - 20;   // ~37 s at 2,000 ls
+const scSeconds = ls => ls == null || !isFinite(ls) || ls < 0 ? null
+  : ls <= 2000 ? Math.max(15, 7.5 * Math.log(Math.max(ls, 1)) - 20) : SC_KNEE + (ls - 2000) * (360 - SC_KNEE) / 98000;
+// the spoken discovery streak: "10 known systems in a row" and "5 undiscovered systems in a row" (0 = off; a 1 from
+// an older save or an import reads as 2, the smallest run that can fire)
+const STREAK_DEFAULTS = {known: 10, new: 5};
+const streakCfg = () => { const c = store.get("streakCfg", {}) || {}, v = k => { const n = Number(c[k] ?? STREAK_DEFAULTS[k]); const r = Math.max(0, Math.round(n)); return !isFinite(n) ? STREAK_DEFAULTS[k] : r === 1 ? 2 : r; };
+  return {known: v("known"), new: v("new")}; };
+// items under this many credits per minute of supercruise get a muted "skip?" (per browser; blank = 100k)
+const skipFloor = () => { const v = Number(store.get("skipFloor", null) ?? 100000); return isFinite(v) && v >= 0 ? v : 100000; };
+const scText = sec => sec < 90 ? `~${Math.max(10, Math.round(sec / 5) * 5)} s` : `~${Math.round(sec / 60)} min`;
+// the map and bio items worth doing by your thresholds, nearest to the arrival star first, value per minute of
+// supercruise breaking ties, a body with no distance last (in the server's order)
+function planItems(l) {
+  const w = worthLeavingFor(l);
+  if (!w) return [];
+  const items = [...w.maps.map(u => ({kind: "map", body: u.body, dist: u.dist_ls, value: u.increment, keep: u.special, u})),
+                 ...w.bio_pending.map(b => ({kind: "bio", body: b.body, dist: b.dist_ls, value: b.potential == null ? null : pendingWorth(b),
+                                             keep: !!Object.keys(b.partial || {}).length || !!b.codex_new, b}))];
+  for (const it of items) {
+    it.sec = scSeconds(it.dist);
+    it.perMin = it.sec && it.value ? it.value / (it.sec / 60) : null;
+    it.skip = !it.keep && it.perMin != null && it.perMin < skipFloor();   // started samples and specials never
+  }
+  return items.map((it, i) => [it, i]).sort(([a, i], [b, j]) => (a.dist == null) - (b.dist == null) || (a.dist || 0) - (b.dist || 0)
+    || (b.perMin ?? -1) - (a.perMin ?? -1) || i - j).map(([it]) => it);
+}
+function planText(it) {
+  if (it.kind === "map") { const u = it.u; return `map <b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}${u.increment ? `, +${credits(u.increment)}` : ""})`; }
+  const b = it.b, parts = Object.entries(b.partial || {}).map(([g, n]) => `${esc(g)} ${n}/3`).concat(unstarted(b).map(esc));
+  // gravity and atmosphere: whether the landing is worth it is decided before the supercruise, not at the approach
+  const g = b.gravity != null ? ` · <span class="${b.gravity >= highGravity() ? "warnc" : ""}" title="surface gravity${b.gravity >= highGravity() ? ": at or over your high-gravity level" : ""}">${b.gravity.toFixed(1)} g</span>` : "";
+  const atm = b.atmosphere && b.atmosphere !== "None" ? ` · ${esc(b.atmosphere)}` : "";
+  return `bio on <b>${esc(b.body)}</b>` + (b.genera === null ? ` (${noDssText(b, parts)})` : parts.length ? `: ${parts.join(", ")}` : "") +
+    (b.potential ? ` up to ${credits(pendingWorth(b))}` + (b.factor === 5 ? ` <span class="ok" title="nobody had set foot here when you scanned it: exobiology pays ×5 (included)">👣×5</span>` : "") : "") +
+    (b.codex_new ? ` <span class="cxnew">✦</span>` : "") + g + atm;
+}
+const planCost = it => it.sec == null ? "" : ` <span class="unk" title="supercruise from the arrival star (${Math.round(it.dist).toLocaleString("en-US")} ls), and what it pays per minute of that">· ${scText(it.sec)}${it.perMin ? ` · ${credits(it.perMin)}/min` : ""}</span>` +
+  (it.skip ? ` <span class="unk skipq" title="under your ${credits(skipFloor())} cr per minute of supercruise">skip?</span>` : "");
+// The honk's body count against the bodies Spansh has on record (l.base_known, in Here's data only): whether the FSS
+// is worth it in a known system. A count only, never "first discovery": the Scan's WasDiscovered decides that, and
+// Spansh is a snapshot. "" when either side is unknown.
+function spanshNote(l) {
+  if (!l || !l.honked || !l.body_count || l.base_known == null) return "";
+  const n = Math.max(0, l.body_count - l.base_known);
+  return n === 0 ? (l.unscanned > 0 ? "all on Spansh, nothing hidden" : "all on Spansh") : l.base_known === 0 ? "none on Spansh" : `${n} not on Spansh`;
+}
+const spanshNoteHtml = l => { const t = spanshNote(l);
+  return t ? ` <span class="unk" title="the honk's body count against the bodies Spansh has on record (as of its last update)">· ${t}</span>` : ""; };
 // Here's to-do list for the system: ticks itself off as you honk, find, map and sample. Items worth
-// doing by your thresholds are listed; the rest are summarised so nothing is hidden.
+// doing by your thresholds are listed in a suggested order; the rest are summarised so nothing is hidden.
 function checklistHtml(l) {
   const w = worthLeavingFor(l);
   const item = (done, text) => `<li class="${done ? "done" : "todo"}">${done ? "✓" : "○"} ${text}</li>`;
   const items = [item(l.honked, l.honked ? "honked" : "honk (FSS discovery scan)"),
-    item(!l.unscanned && l.honked, l.unscanned ? `${l.unscanned} bod${l.unscanned === 1 ? "y" : "ies"} left to find in the FSS` : l.all_found ? "all bodies found" : "bodies found")];
-  for (const u of w.maps) items.push(item(false, `map <b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}${u.increment ? `, +${credits(u.increment)}` : ""})`));
+    item(!l.unscanned && l.honked, (l.unscanned ? `${l.unscanned} bod${l.unscanned === 1 ? "y" : "ies"} left to find in the FSS` : l.all_found ? "all bodies found" : "bodies found") + spanshNoteHtml(l))];
+  const plan = planItems(l);
+  if (plan.length > 1) items.push(`<li class="unk" title="nearest to the arrival star first, then the best value per minute of supercruise; a rough guide, not a route">suggested order:</li>`);
+  for (const it of plan) items.push(item(false, planText(it) + planCost(it)));
   const smallMaps = (l.unmapped || []).length - w.maps.length;
   if (!w.maps.length) items.push(item(true, "no mapping worth doing" + (smallMaps ? ` <span class="unk">(${smallMaps} small, under your ${credits(hlLevel("body"))} level)</span>` : "")));
-  for (const b of w.bio_pending) {
-    const parts = Object.entries(b.partial || {}).map(([g, n]) => `${esc(g)} ${n}/3`).concat((b.genera || []).map(esc));
-    items.push(item(false, `bio on <b>${esc(b.body)}</b>` + (b.genera === null ? ` (${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd)` : parts.length ? `: ${parts.join(", ")}` : "") +
-      (b.potential ? ` up to ${credits(b.potential)}` : "") + (b.codex_new ? ` <span class="cxnew">✦</span>` : "")));
-  }
   const smallBio = l.bio_pending.length - w.bio_pending.length;
   if (!w.bio_pending.length) items.push(item(true, "no bio worth sampling" + (smallBio ? ` <span class="unk">(${smallBio} under your ${credits(bioMinNow())} threshold)</span>` : "")));
   return `<ul class="checklist">${items.join("")}</ul>`;
@@ -257,7 +429,8 @@ async function loadOnBody() {
   const key = `${ob.system}|${data.scan_version}`;
   if (key === obKey) return renderOnBody();
   obKey = key;
-  try { obData = await apiJson(`api/system/${ob.system}`); } catch { obData = null; }
+  // a thrown fetch (the server restarting, a dropped connection) is an error like a JSON one: asked again next time
+  try { obData = await apiJson(`api/system/${ob.system}`); } catch (err) { obData = {error: err.message}; }
   if (obData && obData.error) obKey = null;
   renderOnBody();
 }
@@ -265,6 +438,8 @@ async function loadOnBody() {
 function samplingHtml() {
   const sm = data.sampling; if (!sm || !sm.samples || sm.samples >= 3) return "";
   const head = `<b>${esc(sm.genus || "")}</b> <span class="unk">${esc((sm.species || "").split(" ").slice(1).join(" "))}</span> · sample ${sm.samples}/3`;
+  // no colony distance for this genus (one ed_bio does not know): the positions may well be recorded
+  if (sm.need == null && sm.points > 0) return `<div class="spacing unk">${head} · spacing unknown for this genus</div>`;
   if (sm.to_go == null) return `<div class="spacing unk">${head} · ${sm.need ? `need ${sm.need} m from the last sample` : "spacing unknown"}` +
     ` <span title="the position of your earlier samples was not recorded (they were taken before Outrider was running)">(position unknown)</span></div>`;
   return `<div class="spacing ${sm.clear ? "clear" : ""}">${head} · ` +
@@ -277,14 +452,15 @@ function renderOnBody() {
   if (!ob) { el.innerHTML = ""; return; }
   const b = obData && !obData.error && obData.bodies.find(x => x.name === ob.body);
   if (!b) { el.innerHTML = `On <b>${esc(ob.body)}</b> (${ob.how})`; return; }
-  const bits = [];
-  for (const g of b.genera) {
+  const bits = [], f = bioFactor(b);
+  for (const g of bioGenera(b)) {
     const o = b.organics.find(o => o.genus === g), x = (b.bio_guess || []).find(q => q.genus === g);
     bits.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` +
                   `${o.species ? ` <span class="unk">${esc(o.species.split(" ").slice(1).join(" "))}</span>` : ""}</span>`
-               : `<span class="sp">${esc(g)} 0/3${x && x.best ? ` <span class="unk">likely ${esc(x.best.split(" ").slice(1).join(" "))} ${credits(x.value || 0)}</span>` : ""}${codexMark(x, obData.region)}</span>`);
+               : `<span class="sp">${esc(g)} 0/3${x && x.best ? ` <span class="unk">likely ${esc(x.best.split(" ").slice(1).join(" "))} ${credits((x.value || 0) * f)}</span>${variantTxt(x)}` : ""}${codexMark(x, obData.region)}</span>`);
   }
-  if (!b.genera.length && b.bio) bits.push(`<span class="unk">${b.bio} bio signal${b.bio === 1 ? "" : "s"}, not DSS'd</span>`);
+  const unk = bioUnknown(b);
+  if (unk) bits.push(`<span class="unk">${unk.label.replace(/ signals?/, m => " bio" + m)}</span>`);
   if (b.geo) bits.push(`<span class="sp geo">🪨 ${b.geo} geo</span>`);
   const x5 = b.value_parts && b.value_parts.bio_factor === 5;
   el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> <span class="unk">(${ob.how})</span>: ` + (bits.join(" ") || `<span class="unk">no bio or geo signals known</span>`) +
@@ -309,7 +485,7 @@ function renderNow() {
   if (!p) { el.innerHTML = `<div class="now-sys">waiting for your first jump…</div>`; return; }
   const lines = [`<div class="now-sys">${esc(p.name)}</div>`];
   // the arrival verdict, for twenty seconds after a jump
-  if (a && a.id64 === String(p.id64) && Date.now() - Date.parse(a.ts) < 20000)
+  if (a && a.id64 === posId() && Date.now() - Date.parse(a.ts) < 20000)
     lines.push(`<div class="now-card ${a.undiscovered ? "yes" : "no"}">${a.undiscovered ? "🏁 Undiscovered — first discovery is yours" : "Already discovered"}</div>`);
   if (t) {
     const label = {"unreported": "never reported — new discovery!", "no bodies": "no scan data", "partial": "partly scanned",
@@ -327,20 +503,56 @@ function renderNow() {
   if (data.on_body) lines.push(`<div class="now-line now-body">${document.getElementById("onbody").innerHTML}</div>`);
   else {
     const here = data.systems.find(s => s.id64 === p.id64);
-    const w = hereData && hereData.id64 === String(p.id64) ? worthLeavingFor(hereData.leaving) : null;
-    lines.push(`<div class="now-line">${w && !w.clean ? `<span class="warnc">${leavingText(hereData.leaving).replace(/^Leaving with unfinished work: /, "Still here: ")}</span>`
+    // the all-clear only once Here's data is for this system and the honk has found every body: before that
+    // (just after a jump, a failed lookup, an unhonked system) there is nothing to be clear about yet
+    const hd = hereData && !hereData.error && hereData.id64 === posId() ? hereData : null, l = hd && hd.leaving;
+    const w = l ? worthLeavingFor(l) : null;
+    const plan = w && !w.clean ? planItems(l) : [];
+    const dest = hd && data.destination ? hd.bodies.find(b => b.body_id === data.destination.body_id) : null;
+    const destIsNext = !!(dest && plan.length && plan[0].body === dest.name);
+    lines.push(`<div class="now-line">${plan.length ? `<span class="warnc">Next: ${destIsNext ? `<span title="the body you have targeted">➜</span> ` : ""}${planText(plan[0])}${plan[0].sec != null ? ` <span class="unk">${scText(plan[0].sec)}</span>` : ""}` +
+      `${plan.length > 1 ? ` <span class="unk">· ${plan.length - 1} more</span>` : ""}</span>`
+      : !hd ? `<span class="unk">checking…</span>`
+      : !l || !l.honked ? `<span class="warnc">Next: honk</span> <span class="unk">(FSS discovery scan)</span>`
+      : l.unscanned > 0 ? `<span class="warnc">Next: ${nBodies(l.unscanned)} to find in the FSS</span>${spanshNoteHtml(l)}`
       : `<span class="ok">✓ nothing worth staying for</span>`}${here && here.value_now ? ` · <span class="unk">${credits(here.value_now)} cr aboard from here</span>` : ""}</div>`);
+    // a body targeted that is not the next item: an extra line, never in place of Next (Status.json keeps the target
+    // after you finish a body, so Next must stay visible)
+    if (dest && !destIsNext) lines.push(`<div class="now-line now-small">${nowDestText(hd, l, plan, dest)}</div>`);
   }
+  const hz = horizon(), sk = data.streak;
+  if (hz || (sk && sk.total)) lines.push(`<div class="now-line now-small">${[sk && sk.total ? `<b>${sk.new}/${sk.total}</b> new` : "",
+    hz ? esc(hz.system ? `nearest known unvisited: ${hz.system.name} ${hz.system.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly` : hz.text.split(" — ")[0]) : ""].filter(Boolean).join(" · ")}</div>`);
+  const ls = data.last_session;
+  if (ls) lines.push(`<div class="now-line now-small">Last session: ${esc(sessionLine(ls))}</div>`);
   if (lastAlert && Date.now() - lastAlert.at < 15000)
     lines.push(`<div class="now-card alert">${esc(lastAlert.title)}${lastAlert.body ? ` <span class="unk">${esc(lastAlert.body)}</span>` : ""}</div>`);
   el.innerHTML = lines.join("");
+}
+// Now's heading-to line: what the targeted body is, the supercruise time (only from the arrival star or open space:
+// the curve is star-relative) and what the suggested order makes of it
+function nowDestText(hd, l, plan, b) {
+  const it = plan.find(x => x.body === b.name);
+  const listed = l && [...(l.bio_pending || []), ...(l.unmapped || [])].some(x => x.body === b.name);
+  const verdict = it ? (it.skip ? `<span class="unk skipq">skip?${it.perMin ? ` ${credits(it.perMin)}/min` : ""}</span>`
+                                : `<span class="ok">worth it${it.perMin ? ` · ${credits(it.perMin)}/min` : ""}</span>`)
+    : listed ? `<span class="unk">under your threshold</span>`
+    : b.type === "Star" ? (b.scoopable ? `<span class="ok">scoopable star</span>` : `<span class="unk">not scoopable</span>`)
+    : `<span class="unk">nothing to do here</span>`;
+  const near = data.destination && data.destination.near, main = hd.bodies.find(x => x.main);
+  const eta = (!near || (main && near === main.name)) && near !== b.name ? scSeconds(b.dist_ls) : null;
+  return `➜ <b>${esc(b.name)}</b> · ${destBits(b).map(esc).join(" · ")}${eta != null ? ` · ${scText(eta)}` : ""} · ${verdict}`;
 }
 document.getElementById("nowView").addEventListener("click", () => {
   view = viewBeforeNow || "overview"; store.set("view", view);
   if (new URLSearchParams(location.search).get("mode") === "now") history.replaceState(null, "", location.pathname);
   render();
 });
-setInterval(() => { if (view === "now" && data) renderNow(); }, 2000);   // arrival card and alert card expire
+setInterval(() => {   // arrival card and alert card expire; a failed system lookup is asked again
+  if (view !== "now" || !data) return;
+  if (hereData && hereData.error) loadHere();
+  renderNow();
+}, 2000);
 function renderLeaving(l) {
   const t = leavingText(l);
   document.getElementById("leaving").innerHTML = t ? "⚠ " + t : "";
@@ -381,68 +593,276 @@ if (new URLSearchParams(location.search).get("mode") === "now") view = "now";   
 // Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
 // per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
 const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has reported it (upbeat or thud if it is known)", "fanfare"],
-  ["arrival", "arriving somewhere undiscovered (first visit); the sound only corrects a targeting call that was wrong", null],
+  ["arrival", "arriving somewhere undiscovered (first visit), and a run of new or fully known systems in a row (the streak thresholds below); the sound only corrects a targeting call that was wrong", null],
   ["game", "loading into the game and quitting it", null],
   ["jump", "the frame shift drive charging for a jump (and whether the star there is scoopable)", null],
-  ["honk", "the auto honk's result (when it is on)", null],
+  ["honk", "the auto honk's result (when it is on; unspoken while the arrival briefing is)", null],
+  ["brief", "a one-sentence briefing on arriving: discovered or not, bodies, the star, the best unmapped planet and bio (after the honk, or 12 s after arriving without one)", null],
+  ["fss", "the FSS finished (what is worth mapping, or nothing worth staying for), or closed with bodies still hidden", null],
   ["leaving", "leaving a system with work worth coming back for", "alert"], ["fuel", "fuel low where you cannot scoop", "alert"],
+  ["scoop", "fuel scooping filled the tank", null],
+  ["scoopstop", "fuel scooping stopped early (not above 90%, nor when you jump)", null],
+  ["supercharge", "the frame shift drive supercharged in a neutron star or white dwarf cone", null],
   ["find", "a valuable body just scanned (over your highlight levels)", "find"],
+  ["sampling", "leaving a body with exobiology unfinished (untouched genera only if you landed there); a species completed", "alert"],
+  ["approach", "approaching a landable body at or over your high-gravity level with unsold data over the amber level or rebuy multiple", "alert"],
+  ["bodybrief", "approaching a body with biological signals: what they could be (the FSS already said so, so off by default)", null],
   ["sell", "docked where you can sell, and what you banked", "cash"],
   ["unsold", "unsold data crosses a threshold", "cash"], ["hull", "hull damage, heat damage, interdiction", "danger"],
-  ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"]];
+  ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"],
+  ["loss", "your ship was destroyed with data aboard (or samples died with you): what was lost, and the nearest system to rescan", "danger"]];
 const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is what gets spoken
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
-  {jump: false, honk: false},   // a notification on every jump would be noise; spoken by default
+  // a notification on every jump (or scoop, or FSS) would be noise: these are spoken by default, not notified
+  {jump: false, honk: false, brief: false, fss: false, scoop: false, scoopstop: false, supercharge: false,
+   sampling: false, approach: false, bodybrief: false},
   store.get("alerts", {}));
 const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSound", {}));
-const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSpeak", {}));
+// not spoken until you tick them: they repeat what the game (or another alert) already told you
+const QUIET_KINDS = {scoopstop: false, supercharge: false, bodybrief: false};
+const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), QUIET_KINDS, store.get("alertSpeak", {}));
 let speechOn = store.get("speech", false);
 function notify(kind, title, body) {
-  if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try { new Notification(title, {body, tag: "ed-" + kind}); } catch {}
+  if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return false;
+  try { new Notification(title, {body, tag: "ed-" + kind}); return true; } catch { return false; }
 }
+// ---- one speaker: with the page open in several windows (the second screen at ?mode=now, a forgotten tab),
+// only one of them speaks and plays the alert sounds; every window still shows the cards and notifications.
+// The browser's Web Locks pick it: the first window holds "ed-speaker" until it closes, then the next one in
+// line gets it, with no heartbeats to go stale. Without Web Locks (an old browser, a plain-http LAN address,
+// the jsdom smoke test) every window speaks, as before. "This screen speaks" in the alerts dialog (per browser)
+// can make this browser always speak or never.
+let isSpeaker = !(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request);
+let speakerWait = null;   // this window's place in the queue for the lock (an AbortController)
+function claimSpeaker(steal = false) {
+  if (!(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request)) return;
+  if (speakerWait) { const w = speakerWait; speakerWait = null; w.abort(); }   // stealing: leave the queue first
+  const ac = steal ? null : new AbortController();
+  speakerWait = ac;
+  navigator.locks.request("ed-speaker", steal ? {steal: true} : {signal: ac.signal}, () => {
+    if (speakerWait === ac) speakerWait = null;
+    isSpeaker = true; drawSpeaker();
+    return new Promise(() => {});   // held for the life of the window (or until another window takes it)
+  }).catch(() => {
+    if (ac && ac.signal.aborted) return;   // we left the queue ourselves, to steal it
+    isSpeaker = false; drawSpeaker(); claimSpeaker();   // another window took it: wait in line again
+  });
+}
+const speakMode = () => { const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
+const speakerHere = () => speakMode() === "always" || (speakMode() === "auto" && isSpeaker);
 // One path for every alert: its sound (if sounds are on and the kind's sound is ticked), a desktop
 // notification (if enabled), and speech (if 🗣 is on and the kind is ticked). `say` defaults to the title;
 // it may be a function (a personality line from speech.json), called only when the alert is spoken.
+// Sound and speech only in the speaking window. `tag` (a speech.json key) and `still` go to the speech queue.
+// Returns whether the alert reached you: spoken (queued) or notified.
 let lastAlert = null;
-function alertOut(kind, title, body, {sound, say, delay = 0} = {}) {
-  lastAlert = {kind, title, body, at: Date.now()};
-  const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
-  if (snd && soundOn && alertSound[kind]) setTimeout(() => play(snd), delay);
-  notify(kind, title, body);
-  if (speechOn && alertSpeak[kind] && !UNSPOKEN.has(kind)) speak((typeof say === "function" ? say() : say) || title, snd ? delay + 900 : delay);
+// ---- the spoken-line transcript ("Spoken lines" at the bottom of the alerts dialog): the last 100 alerts and
+// lines in this window, each with its fate (said, cut short, dropped and why, silent and why), so the first live
+// session can answer "why did it not say X". In memory only: a reload starts it afresh.
+const SPEECH_LOG_MAX = 100;
+const speechLog = [];
+let speechPlaying = null;   // the entry of the line being said now: whatever cuts it short marks it
+function logSpeech(e) {
+  const entry = Object.assign({t: Date.now(), kind: "manual", tag: null, style: null, voice: null, words: "", fate: null}, e);
+  speechLog.push(entry);
+  if (speechLog.length > SPEECH_LOG_MAX) speechLog.shift();
+  drawSpeechLogSoon();
+  return entry;
 }
-// ---- speech: Piper on the server when it has a voice ready, else the browser's own ----
-let speechQueue = Promise.resolve();
+// the first fate given is the one kept (a line cut short is not then also "said")
+function setFate(entry, fate) { if (entry && !entry.fate) { entry.fate = fate; drawSpeechLogSoon(); } }
+// the queued lines a step took out, each given its fate (a string, or a function of the item)
+function dropFates(before, after, fate) {
+  for (const it of before) if (!after.includes(it)) setFate(it.log, typeof fate === "function" ? fate(it) : fate);
+}
+// how long each sound plays before the voice starts (the fanfare's held chord runs to 1.7 s); others 900 ms
+const SOUND_LEAD = {fanfare: 1700, chime: 1000};
+function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still = null, quiet = false} = {}) {
+  lastAlert = {kind, title, body, at: Date.now()};
+  const entry = logSpeech({kind, tag, words: title});
+  const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
+  const loud = speakerHere();
+  const plays = !!(loud && snd && soundOn && alertSound[kind]);   // no sound, no wait before the words
+  if (plays) setTimeout(() => play(snd), delay);
+  const notified = notify(kind, title, body);
+  if (loud && speechOn && alertSpeak[kind] && !UNSPOKEN.has(kind) && !quiet) {
+    lineStyle = null;
+    const words = (typeof say === "function" ? say() : say) || title;
+    entry.style = lineStyle;
+    speak(words, {delay: plays ? delay + (SOUND_LEAD[snd] ?? 900) : delay, kind, tag, still, log: entry, ...styleVoice(lineStyle)});
+    return true;
+  }
+  setFate(entry, !loud ? "silent: another window speaks" : !speechOn ? "silent: speech off" : UNSPOKEN.has(kind) ? "not spoken (the arrival is)"
+    : quiet ? "merged into another line (quiet)" : "silent: not ticked to speak");
+  return notified;
+}
+// ---- the speech queue: the most urgent line first, stale ones dropped ----
+// Danger (hull, heat, interdiction, fuel, the carrier leaving without you) goes first, then a line you asked
+// for, then arrivals, jumps, the honk, selling; finds, signals and codex last. Oldest first within a level.
+// A line is dropped when it comes up if it waited over 20 s, if it is about a system you have since left
+// (a find, signals, the honk, "FSD charging" once you arrived), or if its `still` check fails (clear to
+// sample after the next sample). A newer line with the same tag replaces a queued one, and heat and
+// interdiction are said at most once in 30 s, so a flapping condition cannot keep repeating.
+const SPEECH_MAX_AGE = 20000;
+const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
+const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "approach", "bodybrief"]);
+const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" ? 1
+  : ["find", "signals", "codex", "bodybrief", "supercharge"].includes(kind) ? 3 : 2;
+// the queue without what went stale by `now` with the ship at `pos`
+const speechExpire = (items, now, pos) => items.filter(it => now - it.notBefore <= SPEECH_MAX_AGE
+  && (it.sys == null || it.sys === pos) && (!it.still || it.still()));
+// the index of the next line: the most urgent, then the oldest
+const speechPick = items => items.reduce((b, it, i) => b < 0 || it.prio < items[b].prio || (it.prio === items[b].prio && it.at < items[b].at) ? i : b, -1);
+// may a line with this tag be queued now? (only the cooled-down kinds are ever refused)
+const speechCooled = (last, tag, now) => !(tag in SPEECH_COOLDOWN) || last[tag] == null || now - last[tag] >= SPEECH_COOLDOWN[tag];
+// a new line joins the queue, replacing a waiting one with the same tag (the newer news wins)
+const speechAdd = (items, item) => [...items.filter(it => !item.tag || it.tag !== item.tag), item];
+let speechItems = [], speechBusy = false, speechWake = null, speechNow = null, speechLast = {};
 // numbers are spoken to a tenth at most, and "52.0" as "52" (12.64B is "12.6 billion", 52.0M "52 million")
 const spokenNumber = m => String(Math.round(Number(m) * 10) / 10);
+// a procedural system name's sector suffix, letter by letter: "Drojau LL-O b26-3" is said "Drojau L L O, b 26 3"
+// (read as written, a voice mangles "LL-O b26-3"). It needs the space, mass code and number after the letters,
+// so a carrier id ("K7F-3XZ") and a hand-named system ("Jaques") are left alone. ed_speech.spoken_text has the twin.
+const PROC_NAME = /\b([A-Z])([A-Z])-([A-Z]) ([a-h])(\d+)(?:-(\d+))?\b/g;
+const procSpoken = (_, a, b, c, mass, n, m) => `${a} ${b} ${c}, ${mass} ${n}${m ? " " + m : ""}`;
 const spokenText = t => String(t).replace(/<[^>]+>/g, "").replace(/[⚠📖🚢💰🧬🏁🗺👣⛽🌋🪨✦★☆]/gu, "")
   .replace(/(?<![\d.])\d+\.\d+(?![\d.])/g, spokenNumber)
   .replace(/(\d+(?:\.\d+)?)M\b/g, "$1 million").replace(/(\d+(?:\.\d+)?)k\b/g, "$1 thousand")
-  .replace(/(\d+(?:\.\d+)?)B\b/g, "$1 billion").replace(/\bcr\b/g, "credits").replace(/\s·\s/g, ", ").replace(/\s+/g, " ").trim();
-function speak(text, delay = 0) {
-  const words = spokenText(text); if (!words) return;
-  speechQueue = speechQueue.then(() => new Promise(res => setTimeout(res, delay))).then(async () => {
+  .replace(/(\d+(?:\.\d+)?)B\b/g, "$1 billion").replace(/\bcr\b/g, "credits").replace(/\s·\s/g, ", ")
+  .replace(PROC_NAME, procSpoken).replace(/\s+/g, " ").trim();
+// Piper's audio plays through the AudioContext, which the browser keeps suspended until you click the page.
+// Wait up to a second for it to resume; if it will not, the line goes to the browser's own voice instead
+// of being dropped, and the page says once what unlocks Piper.
+let piperBlockedSaid = false;
+async function runningAudio() {
+  const ctx = audio(); if (!ctx) return null;
+  if (ctx.state !== "running") { try { await Promise.race([ctx.resume(), new Promise(res => setTimeout(res, 1000))]); } catch {} }
+  return ctx.state === "running" ? ctx : null;
+}
+// Queue a line. `delay` (ms) holds it back without holding up the lines behind it (it lets an alert's sound
+// play first); `kind` is the alert kind ("manual" for a click in this window), `tag` its speech.json key.
+// `log` is the transcript entry alertOut made for it (a line spoken some other way gets its own).
+function speak(text, {delay = 0, kind = "manual", tag = null, still = null, voice = null, pace = 1, log = null} = {}) {
+  const words = spokenText(text);
+  const entry = log || logSpeech({kind, tag});
+  if (words) entry.words = words;
+  if (voice) entry.voice = voice;
+  if (!words) return setFate(entry, "nothing to say");
+  const now = Date.now();
+  if (tag && !speechCooled(speechLast, tag, now)) return setFate(entry, `refused: said under ${SPEECH_COOLDOWN[tag] / 1000} s ago`);
+  if (tag) speechLast[tag] = now;
+  const item = {words, kind, tag, still, voice, pace, prio: speechPrio(kind, tag), at: now, notBefore: now + delay,
+                sys: SPEECH_SYS_BOUND.has(kind) && data && data.position ? data.position.id64 : null, log: entry};
+  const before = speechItems;
+  speechItems = speechAdd(speechItems, item);
+  dropFates(before, speechItems, `replaced by a newer ${tag}`);
+  if (item.prio === 0 && speechNow && speechNow.prio >= 3) { setFate(speechPlaying, "cut short by danger"); speechNow.stop(); }   // danger cuts a find short
+  if (speechWake) speechWake();
+  if (!speechBusy) speechWorker();
+}
+// The FSD is charging for a jump: whatever was queued or playing is about where you are leaving, so it goes
+// and the charging line takes its place. Danger lines stay (a low tank or an unscoopable target matters most
+// now), and so does anything asked for in this window (the ▶ try button).
+const speechForJump = items => items.filter(it => it.prio === 0 || it.kind === "manual");
+function clearForJump() {
+  const before = speechItems;
+  speechItems = speechForJump(speechItems);
+  dropFates(before, speechItems, "dropped: the FSD charged for a jump");
+  if (speechNow && speechNow.prio !== 0 && speechNow.kind !== "manual") { setFate(speechPlaying, "cut short: the FSD charged"); speechNow.stop(); }
+}
+const hushReason = () => !speechOn ? "speech off" : "another window speaks";
+// Speech turned off, or this window no longer the one speaking: the alerts queued (and the one playing) go
+// quiet at once; `all` also drops lines asked for here (the ▶ try button). The worker checks it too.
+function hushSpeech(all = false) {
+  const before = speechItems;
+  speechItems = all ? [] : speechItems.filter(it => it.kind === "manual");
+  dropFates(before, speechItems, `dropped: ${hushReason()}`);
+  if (speechNow && (all || speechNow.kind !== "manual")) { setFate(speechPlaying, `cut short: ${hushReason()}`); speechNow.stop(); }
+}
+// the one worker: says a line at a time until the queue is empty
+async function speechWorker() {
+  speechBusy = true;
+  try {
+    for (;;) {
+      if (!speechOn || !speakerHere()) {
+        const before = speechItems;
+        speechItems = speechItems.filter(it => it.kind === "manual");
+        dropFates(before, speechItems, `dropped: ${hushReason()}`);
+      }
+      // speechExpire stays pure (the smoke test calls it): what it took out is told apart here
+      const before = speechItems, now = Date.now(), pos = data && data.position && data.position.id64;
+      speechItems = speechExpire(speechItems, now, pos);
+      dropFates(before, speechItems, it => now - it.notBefore > SPEECH_MAX_AGE ? `dropped: waited over ${SPEECH_MAX_AGE / 1000} s`
+        : it.sys != null && it.sys !== pos ? "dropped: you left the system" : "dropped: no longer true");
+      const i = speechPick(speechItems); if (i < 0) break;
+      const wait = speechItems[i].notBefore - Date.now();
+      if (wait > 0) {   // a new line wakes it early: it may be more urgent
+        await new Promise(res => { speechWake = res; setTimeout(res, wait); });
+        speechWake = null; continue;
+      }
+      const [item] = speechItems.splice(i, 1);
+      const e = item.log, t0 = Date.now();
+      if (e) e.waited = t0 - item.at;
+      speechPlaying = e || null;
+      try { await sayNow(item); } catch {}
+      speechPlaying = null;
+      if (e) {
+        e.took = Date.now() - t0; e.engine = item.engine || null;
+        setFate(e, item.unsaid ? `not said: ${item.unsaid}` : item.timedOut ? "timed out (the browser voice hung)" : "said");
+      }
+    }
+  } finally { speechBusy = false; }
+}
+// say one line: Piper on the server when it has a voice ready, else the browser's own; stop() cuts it short
+async function sayNow(item) {
+  const cur = speechNow = {prio: item.prio, kind: item.kind, stopped: false, halt: null, stop() { this.stopped = true; if (this.halt) this.halt(); }};
+  try {
     const tts = data && data.tts;
-    if (tts && tts.engine === "piper") {
+    const ctx = tts && tts.engine === "piper" ? await runningAudio() : null;
+    if (tts && tts.engine === "piper" && !ctx && !piperBlockedSaid) {
+      piperBlockedSaid = true; toast("Click the page to allow Piper audio (the browser's voice speaks until then)");
+    }
+    if (ctx) {
       try {
-        const r = await fetch(`api/say?text=${encodeURIComponent(words)}&speed=${speechSpeed()}`);
+        const speed = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
+        const r = await fetch(`api/say?text=${encodeURIComponent(item.words)}&speed=${speed}${item.voice ? `&voice=${encodeURIComponent(item.voice)}` : ""}`);
         if (r.ok) {
-          const ctx = audio(); if (!ctx || ctx.state !== "running") return;
           const buf = await ctx.decodeAudioData(await r.arrayBuffer());
+          if (cur.stopped) return;
           const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
-          await new Promise(res => { src.onended = res; src.start(); });
+          item.engine = "Piper";
+          await new Promise(res => { src.onended = res; cur.halt = () => { try { src.stop(); } catch {} res(); }; src.start(); });
           return;
         }
       } catch {}
     }
-    if (typeof speechSynthesis === "undefined") return;
-    await new Promise(res => { const u = new SpeechSynthesisUtterance(words); u.rate = speechSpeed(); u.onend = u.onerror = res; speechSynthesis.speak(u); setTimeout(res, 15000); });
-  }).catch(() => {});
+    if (cur.stopped) return;
+    if (typeof speechSynthesis === "undefined") { item.unsaid = "no voice in this browser"; return; }
+    item.engine = tts && tts.engine === "piper" ? (ctx ? "browser voice (Piper failed)" : "browser voice (Piper audio blocked)") : "browser voice";
+    await new Promise(res => {
+      let done = false; const finish = () => { if (!done) { done = true; res(); } };
+      const rate = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
+      const u = new SpeechSynthesisUtterance(item.words); u.rate = rate; u.onend = u.onerror = finish;
+      cur.halt = () => { speechSynthesis.cancel(); finish(); };
+      speechSynthesis.speak(u);
+      // The end event does not always come (Chrome drops it on long lines). After 15 s go by what the browser
+      // says it is doing, and past a cap from the line's length (about 11 characters a second) cancel it: the
+      // next line must never wait inside the browser's own queue, where expiry and priority cannot reach it.
+      const cap = Date.now() + Math.max(15000, Math.min(60000, 5000 + item.words.length * 90 / rate));
+      const check = () => {
+        if (done) return;
+        if (Date.now() > cap) { item.timedOut = true; speechSynthesis.cancel(); finish(); }
+        else if (!speechSynthesis.speaking && !speechSynthesis.pending) finish();
+        else setTimeout(check, 250);
+      };
+      setTimeout(check, 15000);
+    });
+  } finally { if (speechNow === cur) speechNow = null; }
 }
 // ---- spoken lines: speech.json's versions of each alert, per personality (see ed_speech.py) ----
 let speechLib = {styles: {}, lines: {}, version: null}, speechLibWanted = null;
-const speechStyles = () => store.get("speechStyles", null) ?? (data && data.defaults && data.defaults.speech_styles) ?? ["business"];
+const speechStyles = () => { const v = store.get("speechStyles", null) ?? (data && data.defaults && data.defaults.speech_styles);
+  return Array.isArray(v) ? v.filter(x => typeof x === "string") : ["business"]; };   // store.get already drops a non-list
 const speechProfane = () => store.get("speechProfanity", null) ?? (data && data.defaults && data.defaults.speech_profanity) ?? false;
 // how often (percent) a line comes from the swearing versions when profanity is on
 const speechProfanePct = () => Math.min(100, Math.max(0, Number(store.get("speechProfanityPct", null)
@@ -457,44 +877,83 @@ const saySignals = k => !!(store.get(k === "bio" ? "sayBio" : "sayGeo", null)
   ?? (data && data.defaults && data.defaults[k === "bio" ? "speak_bio_signals" : "speak_geo_signals"]) ?? true);
 const recentLines = {};
 async function loadSpeechLib() {
-  try { const r = await fetch("api/speech"); if (r.ok) { speechLib = await r.json(); drawSpeechStyles(); } } catch {}
+  // a failed load forgets the version it wanted, so the next payload tries again
+  try { const r = await fetch("api/speech"); if (r.ok) { speechLib = await r.json(); drawSpeechStyles(); return; } } catch {}
+  speechLibWanted = null;
 }
 // a line's {placeholders}; {name}, {cmdr}, {ship} and {here} are always there when known
 function lineVars(vars) {
   const names = speechNames();
   // a function: every {name} in a line is its own random pick
   const all = {name: () => names.length ? names[Math.floor(Math.random() * names.length)] : "Commander",
-               cmdr: data && data.commander && data.commander.name, ship: data && data.ship && data.ship.name,
+               cmdr: data && data.commander && data.commander.name, ship: data && data.ship ? shipLabel(data.ship.name, data.ship.type) : null,
                here: data && data.position && data.position.name};
   for (const [k, v] of Object.entries(vars)) if (v != null && v !== "") all[k] = v;
   return all;
 }
 const fillLine = (text, all) => text.replace(/\{(\w+)\}/g, (_, k) => all[k] == null ? "" : String(typeof all[k] === "function" ? all[k]() : all[k]));
 const allFilled = (text, all) => [...text.matchAll(/\{(\w+)\}/g)].every(m => all[m[1]] != null);
+// Danger lines: a joke at 20% hull costs clarity, so with "Danger alerts always down to business" ticked (the
+// default) these come only from the business lists and never swear, whatever personalities are ticked.
+// (ship_lost too: a debrief after a rebuy is no time for a joke; it also jumps the queue like the others)
+const DANGER = new Set(["hull", "heat", "interdicted", "fuel_low", "fuel_star", "fuel_target", "carrier_departs", "ship_lost"]);
+const speechDangerBusiness = () => !!(store.get("speechDangerBusiness", null) ?? (data && data.defaults && data.defaults.speech_danger_business) ?? true);
+// "One personality per system": the personality is drawn at game start and at each arrival and says every line
+// until the next one, so a character (and its own voice) holds through a system. In memory only: a reload draws
+// afresh on its first line. Danger lines still come from business when that box is ticked.
+const speechShift = () => !!store.get("speechShift", false);
+let shiftStyle = null;
+function pickShift() {
+  const lines = Object.values(speechLib.lines || {});
+  const has = st => lines.some(e => e && [st, st + "_profane"].some(k => Array.isArray(e[k]) && e[k].length));
+  const pool = speechStyles().filter(has);
+  shiftStyle = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
 // A random version of alert `key` from every personality ticked (and their swearing versions when
 // profanity is on), not one of the last few heard; `plain` when the file has nothing for it.
 function line(key, vars = {}, plain = "") {
   const entry = speechLib.lines && speechLib.lines[key];
-  const lists = suffix => !entry || typeof entry !== "object" ? [] : speechStyles().flatMap(st =>
-    Array.isArray(entry[st + suffix]) ? entry[st + suffix].filter(x => typeof x === "string" && x.trim()) : []);
+  const listOf = name => !entry || typeof entry !== "object" || !Array.isArray(entry[name]) ? []
+    : entry[name].filter(x => typeof x === "string" && x.trim());
+  // a danger line: business alone (a custom speech.json without business lines falls back to the ticked ones)
+  const serious = DANGER.has(key) && speechDangerBusiness();
+  const ticked = speechStyles(), shift = speechShift();
+  if (shift && !(shiftStyle && ticked.includes(shiftStyle))) pickShift();   // first line, or its personality unticked
+  // the personality on shift, unless it has nothing for this alert (then every ticked one, as without the tick)
+  const onShift = shift && shiftStyle && (listOf(shiftStyle).length || (speechProfane() && listOf(shiftStyle + "_profane").length));
+  const styles = serious && listOf("business").length ? ["business"] : onShift ? [shiftStyle] : ticked;
+  const lists = suffix => styles.flatMap(st => listOf(st + suffix).map(x => [st, x]));   // [personality, line]
   // with profanity on, roll first: the swearing versions this share of the time, the clean ones otherwise
   // (whichever side has nothing for this alert gives way to the other)
-  const clean = lists(""), rude = speechProfane() ? lists("_profane") : [];
+  const clean = lists(""), rude = speechProfane() && !serious ? lists("_profane") : [];
   let pool = rude.length && (!clean.length || Math.random() * 100 < speechProfanePct()) ? rude : clean;
   if (!pool.length) return plain;
-  const all = lineVars(vars), whole = pool.filter(x => allFilled(x, all));
+  const all = lineVars(vars), whole = pool.filter(x => allFilled(x[1], all));
   if (whole.length) pool = whole;   // a line that needs a value this alert lacks only as a last resort
   const recent = recentLines[key] || (recentLines[key] = []);
-  const fresh = pool.filter(x => !recent.includes(x));
-  const pick = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+  const fresh = pool.filter(x => !recent.includes(x[1]));
+  const [style, pick] = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
   recent.push(pick);
   while (recent.length > Math.min(4, Math.floor(pool.length / 2))) recent.shift();
+  lineStyle = style;
   return fillLine(pick, all);
+}
+// The personality of the line line() picked last, and the voice it asks for: a style in speech.json may be
+// {label, voice, speed}, a Piper voice of its own (only if installed; it wins over the dialog's voice) and a
+// pace multiplying yours. The browser's own speech ignores the voice.
+let lineStyle = null;
+function styleVoice(style) {
+  const st = style && speechLib.styles && speechLib.styles[style];
+  return st && typeof st === "object" ? {voice: typeof st.voice === "string" ? st.voice : null,
+                                         pace: Number(st.speed) >= 0.5 && Number(st.speed) <= 2 ? Number(st.speed) : 1} : {voice: null, pace: 1};
 }
 // a star class as words, for {star}
 const spokenStar = c => !c ? "star" : /^D/.test(c) ? "white dwarf" : c === "N" ? "neutron star"
   : /^(H|BH|SupermassiveBlackHole)$/.test(c) ? "black hole" : /^W/.test(c) ? "Wolf-Rayet star" : /^(C|CN|CJ|CH|CHd|CS)$/.test(c) ? "carbon star"
-  : /^[LTY]$/.test(c) ? "brown dwarf" : c === "TTS" ? "T Tauri star" : c === "AeBe" ? "Herbig star" : /^(S|MS)$/.test(c) ? "S-type star" : `${c} star`;
+  : /^[LTY]$/.test(c) ? "brown dwarf" : c === "TTS" ? "T Tauri star" : c === "AeBe" ? "Herbig star" : /^(S|MS)$/.test(c) ? "S-type star"
+  // giants and supergiants: K_OrangeGiant is "K orange giant", A_BlueWhiteSuperGiant "A blue white supergiant"
+  : /^[OBAFGKM]_\w+$/.test(c) ? `${c[0]} ${c.slice(2).replace(/SuperGiant/g, "Supergiant").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()}`
+  : `${c} star`;
 // sample values for the ▶ try button
 const LINE_SAMPLES = {
   speech_on: {}, game_start: {}, game_exit: {}, heat: {},
@@ -509,11 +968,176 @@ const LINE_SAMPLES = {
   sold: {sold: "12.6M cr cartographics and 4.1M cr exobiology", still: ""},
   unsold_warn: {value: "52.0M"}, unsold_urgent: {value: "251.3M"},
   carrier_departs: {minutes: 4, carrier: "Out Of The Blue"}, carrier_arrived: {carrier: "Out Of The Blue", system: "Smojooe AR-E b25-8"},
+  fss_done: {count: 14, text: "B 1, Earth-like world, 3.1M to map, and biology on C 2, up to 19.0M"},
+  fss_nothing: {count: 14}, fss_unfinished: {left: "3 bodies"},
+  left_body: {body: "A 3", text: "Stratum 2 of 3, and Tussock untouched, up to 4.1M"},
+  bio_done_more: {species: "Stratum Tectonicas", value: "19.2M", left: "Bacterium and Fungoida"},
+  bio_done_last: {species: "Stratum Tectonicas", value: "19.2M"},
+  tank_full: {jumps: 8}, scoop_stopped: {pct: 64}, supercharged: {mult: "4 times"},
+  body_brief: {body: "B 7", text: "3 biological signals, one of Stratum, Bacterium or Fungoida, 1.0M to 19.0M"},
+  high_g: {gravity: "2.6", value: "480.2M", rebuys: "3.2"},
+  arrival_brief: {text: "Undiscovered. 14 bodies. Scoopable K star."},
+  session_recap: {text: "142 jumps, 3,100 light-years, 12 systems nobody had seen, 9 species sampled"},
+  streak_known: {count: 10}, streak_new: {count: 5},
+  welcome_back: {text: "Away 3 days. 412.0M aboard, unsold for 5 days. Fuel 64 percent. Docked at Jaques Station."},
+  ship_lost: {text: "Lost 212.4M: 148.1M cartographics and 64.3M exobiology, 31 systems and 9 first discoveries. The nearest lost system is Drojau LL-O b26-3, 42 light-years."},
 };
+// ---- the words of the composed call-outs: the server sends the facts, these apply your thresholds ----
+// The login greeting after a long break: how long, what is at stake, the tank, where you are. The amount aboard
+// only past the amber level, and not when the dock alert on the same payload says it (one line carries it).
+function welcomeText(away, dockSays) {
+  const u = data.unsold, lvl = unsoldLevel(u), ss = data.since_sale, f = data.fuel, dk = data.docked, ob = data.on_body;
+  const parts = [`Away ${away}.`];
+  if (u && !u.error && lvl && lvl !== "ok" && !dockSays) {
+    const d = ss && ss.days >= 1 ? Math.round(ss.days) : 0;
+    parts.push(`${credits(u.total)} aboard${d ? `, unsold for ${d} day${d === 1 ? "" : "s"}` : ""}.`);
+  }
+  if (f && f.pct != null) parts.push(`Fuel ${f.pct} percent.`);
+  if (dk && dk.station) parts.push(`Docked at ${dk.station}.`);
+  else if (ob && ob.body) parts.push(`${ob.how === "on foot" ? "On foot" : ob.how === "in the SRV" ? "In the SRV" : "Landed"} on ${ob.body}.`);
+  return parts.join(" ");
+}
+// The ship-loss debrief: what died with the ship (the server's totals, the same as History's) and the nearest
+// system whose scans were lost. A death on foot that cost only samples says just that.
+function lossText(m) {
+  const kinds = [m.carto && [credits(m.carto), "cartographics"], m.bio && [credits(m.bio), "exobiology"]].filter(Boolean);
+  const what = [m.systems && `${m.systems} system${m.systems === 1 ? "" : "s"}`,
+                m.firsts && `${m.firsts} first discover${m.firsts === 1 ? "y" : "ies"}`,
+                m.bio_runs && `${m.bio_runs} species sampled`].filter(Boolean);
+  const n = m.nearest;
+  return `Lost ${credits(m.value)}${kinds.length > 1 ? `: ${kinds.map(k => k.join(" ")).join(" and ")}` : kinds.length ? ` of ${kinds[0][1]}` : ""}` +
+    `${what.length ? `, ${andList(what)}` : ""}.` + (n && n.distance != null ? ` The nearest lost system is ${n.name}, ${Math.round(n.distance)} light-years.` : "");
+}
+let lossCard = null;   // the debrief card under the header: {m, text, until}, until closed or half an hour
+const andList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "";
+const orList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}` : xs[0] || "";
+const nBodies = n => `${n} bod${n === 1 ? "y" : "ies"}`;
+// a planet class for the voice: "Earth-like world", "terraformable high metal content world"
+const spokenClass = (sub, tf) => `${tf ? "terraformable " : ""}${String(sub || "planet").replace(/^(?!Earth)\w/, c => tf ? c.toLowerCase() : c)}`;
+// what the FSS debrief names: the maps and the bio your thresholds keep, most valuable first, three at most
+function worthSaying(l) {
+  const w = worthLeavingFor(l); if (!w || w.clean) return "";
+  const maps = w.maps.map(u => ({v: u.increment || 0, t: `${u.body}, ${spokenClass(u.subtype, u.terraformable)}${u.increment ? `, ${credits(u.increment)} to map` : ""}`}));
+  const bio = w.bio_pending.map(b => ({v: pendingWorth(b), t: `biology on ${b.body}${b.potential ? `, up to ${credits(pendingWorth(b))}${b.factor === 5 ? " with first footfall" : ""}` : ""}`}));
+  const items = [...maps.sort((a, b) => b.v - a.v).slice(0, 2), ...bio.sort((a, b) => b.v - a.v).slice(0, 2)].slice(0, 3).map(x => x.t);
+  const more = w.maps.length + w.bio_pending.length - items.length;
+  return andList(items) + (more > 0 ? `, and ${more} more` : "");
+}
+// the leaving alert's spoken words: three items at most, picked as the FSS debrief picks them (the two best maps,
+// then the two best bio bodies, a sampling run under way first), then "and N more"; the notification keeps the
+// whole list. A long line is slow to hear, and Piper cuts one past 1,000 characters at a sentence end.
+function leavingSaid(l) {
+  const w = worthLeavingFor(l); if (!w || w.clean) return "";
+  const maps = w.maps.map(u => ({v: u.increment || 0, t: `${u.body}, ${spokenClass(u.subtype, u.terraformable)}${u.increment ? `, ${credits(u.increment)} to map` : ""}`}));
+  const bio = w.bio_pending.map(b => { const runs = Object.entries(b.partial || {}).map(([g, n]) => `${g} ${n} of 3`);
+    return {v: runs.length ? Infinity : pendingWorth(b), t: `biology on ${b.body}${runs.length ? ` (${andList(runs)})` : ""}${b.potential ? `, up to ${credits(pendingWorth(b))}${b.factor === 5 ? " with first footfall" : ""}` : ""}`}; });
+  const items = [...maps.sort((a, b) => b.v - a.v).slice(0, 2), ...bio.sort((a, b) => b.v - a.v).slice(0, 2)].slice(0, 3).map(x => x.t);
+  const more = maps.length + bio.length - items.length;
+  return andList(items) + (more > 0 ? `, and ${more} more` : "");
+}
+// leaving a body: runs under way always; the DSS's untouched genera (over your bio threshold, or unpriced) only
+// when you touched down or sampled there this visit
+function leftBodyText(m) {
+  const parts = Object.entries(m.partial || {}).map(([g, n]) => `${g} ${n} of 3`);
+  if (m.touched) {
+    for (const u of m.untouched || [])
+      if (u.value == null || u.value >= bioMinNow()) parts.push(`${u.genus} untouched${u.value ? `, up to ${credits(u.value * (m.factor || 1))}` : ""}`);
+    if (m.unidentified) parts.push(`${m.unidentified} signal${m.unidentified === 1 ? "" : "s"} not identified`);
+  }
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}` : parts[0] || "";
+}
+// what is still worth sampling on a body after a species is done: "" only when nothing at all is left (with only
+// genera under your bio threshold left: "only 1 small one", so the line never says the body is finished);
+// signals no DSS has named (unidentified) are always left, whatever they turn out to be
+function bioLeftText(m) {
+  const all = [...Object.keys(m.partial || {}).map(g => ({genus: g, value: null, started: true})), ...(m.untouched || [])];
+  const big = all.filter(u => u.started || u.value == null || u.value >= bioMinNow()), small = all.length - big.length;
+  const names = big.map(u => u.genus);
+  if (m.unidentified > 0) names.push(`${m.unidentified} more signal${m.unidentified === 1 ? "" : "s"} not identified`);
+  if (!names.length) return small ? `only ${small} small one${small === 1 ? "" : "s"}` : "";
+  return andList(names) + (small ? `, plus ${small} small one${small === 1 ? "" : "s"}` : "");
+}
+// the approach: what the bio signals could be ("" without any)
+function bodyBriefText(m) {
+  if (!m.signals && !(m.genera || []).length) return "";
+  const n = m.signals ? `${m.signals} biological signal${m.signals === 1 ? "" : "s"}` : "biology";
+  const x = m.factor === 5 ? ", first footfall times five" : "";   // the values are before the bonus
+  if ((m.genera || []).length) return `${n}: ${andList(m.genera)}${m.bio_value ? `, up to ${credits(m.bio_value)}` : ""}${x}`;
+  if (m.bio_options) return `${n}, ${m.signals === 1 ? "one" : m.signals} of ${orList(m.bio_options.genera.slice(0, 4))}${m.bio_options.genera.length > 4 ? " or others" : ""}, ` +
+    `${credits(m.bio_options.low)} to ${credits(m.bio_options.high)}${x}`;
+  return n + (m.bio_value ? `, up to ${credits(m.bio_value)}` : "") + x;
+}
+// the approach's stakes: a landable body at or over the high-g level while the data aboard is over the amber
+// level or the rebuy multiple; null when it is not worth a word
+const highGravity = () => { const v = Number(store.get("highG", null) ?? (data && data.defaults && data.defaults.high_gravity) ?? 2); return isFinite(v) && v > 0 ? v : 2; };
+function highGStakes(m) {
+  const u = data && data.unsold, rebuy = data && data.ship && data.ship.rebuy;
+  if (!m.landable || m.gravity == null || m.gravity < highGravity() || !u || u.error || u.total == null) return null;
+  const lvl = unsoldLevel(u); if (lvl !== "warn" && lvl !== "urgent") return null;
+  return {gravity: String(Math.round(m.gravity * 10) / 10), value: credits(u.total), rebuys: rebuy ? (u.total / rebuy).toFixed(1) : ""};
+}
+// the arrival briefing: verdict, body count, star, then the best unmapped planet and the richest bio over your levels
+function arrivalBriefText(m) {
+  const verdict = m.undiscovered && !(m.visits > 1) ? "Undiscovered." : m.visits > 1 ? "Visited before." : m.status === "explored" ? "Fully scanned."
+    : m.in_spansh ? "Known." : m.undiscovered === false ? "Known, not in Spansh." : "";
+  const bits = [verdict];
+  if (m.body_count) bits.push(m.all_found ? `All ${nBodies(m.body_count)} found.` : `${nBodies(m.body_count)}.`);
+  // how many of them Spansh has no record of (a count: the tags are still yours to scan, whatever Spansh says)
+  const unrep = m.in_spansh && m.body_count && m.base_known != null ? m.body_count - m.base_known : 0;
+  if (unrep > 0) bits.push(m.base_known === 0 ? "None of them on Spansh." : `${unrep} of them not on Spansh.`);
+  if (m.star_class) { const sc = /^[OBAFGKM](_|$)/.test(m.star_class), st = spokenStar(m.star_class);
+    bits.push(sc ? `Scoopable ${st}.` : st[0].toUpperCase() + st.slice(1) + "."); }
+  const w = (m.worth || []).filter(x => x.notable || x.terraformable || (x.value != null && x.value >= hlLevel("body")))
+    .sort((a, b) => (b.value || 0) - (a.value || 0))[0];
+  if (w) bits.push(`The ${spokenClass(w.subtype, w.terraformable)} at ${w.body} is unmapped${w.value ? `, ${credits(w.value)}` : ""}.`);
+  if (m.bio && m.bio.value >= bioMinNow()) bits.push(`Biology on ${m.bio.body}, up to ${credits(m.bio.value)}.`);
+  if (!w && !(m.bio && m.bio.value >= bioMinNow()) && m.status === "explored") bits.push("Nothing here for you.");
+  return bits.filter(Boolean).join(" ");
+}
+// the session recap at quit: "" under three jumps (a quick relog is not a session); zero counts are left out
+function recapText(st) {
+  if (!st || (st.jumps || 0) < 3) return "";
+  const n = (k, one, many) => st[k] ? `${st[k].toLocaleString("en-US")} ${st[k] === 1 ? one : many}` : null;
+  return andList([`${st.jumps.toLocaleString("en-US")} jumps`, st.ly ? `${Math.round(st.ly).toLocaleString("en-US")} light-years` : null,
+    n("firsts", "system nobody had seen", "systems nobody had seen"), n("mapped", "body mapped", "bodies mapped"),
+    n("samples", "species sampled", "species sampled"), n("codex_new", "new codex entry", "new codex entries")].filter(Boolean));
+}
+// the FSD-charging line's hazard: "Neutron star ahead: throttle down on arrival." ("" for an ordinary star)
+const sayHazard = () => !!(store.get("sayHazard", null) ?? true);
+const hazardSaid = sc => { const h = hazardNote(sc); return h ? `${h[0].toUpperCase()}${h.slice(1).replace(/:/, " ahead:")}.` : ""; };
+// "system|body" -> what the left-body warning named there ({genera, unidentified: the count it gave, null when it
+// could not say}), once it reached you: the
+// system's leaving alert leaves those out (not the rest of the body). Cleared when you arrive in that system.
+const leftWarned = new Map();
+// a bio_pending entry without what the left-body warning already said; null when nothing is left to say
+function unwarned(sys, b) {
+  const said = leftWarned.get(`${sys}|${b.body}`); if (!said) return b;
+  const partial = Object.fromEntries(Object.entries(b.partial || {}).filter(([g]) => !said.genera.has(g)));
+  const genera = b.genera === null ? null : (b.genera || []).filter(g => !said.genera.has(g));
+  // before a DSS the signals left are only covered if the warning counted them (it does once you touched down)
+  const rest = Object.keys(partial).length + (genera === null ? (b.signals && said.unidentified == null ? 1 : 0) : genera.filter(g => !(g in partial)).length);
+  return rest ? {...b, partial, genera} : null;
+}
 // Before the DSS, fewer signals than possible genera: which it is cannot be told, so say so ("one of these,
 // 1.0M to 19.0M") instead of naming the most valuable as the likely one.
-const optLabel = (n, opt) => `${n === 1 ? "one" : n} of these, ${credits(opt.low)} to ${credits(opt.high)}`;
-const bioRange = b => b.bio_options ? ` · ${credits(b.bio_options.low)} to ${credits(b.bio_options.high)}` : b.bio_potential ? ` · up to ${credits(b.bio_potential)}` : "";
+// every genus known on a body: the DSS's, plus any you sampled without a DSS
+const bioGenera = b => [...new Set([...(b.genera || []), ...(b.organics || []).map(o => o.genus)])];
+const bioFactor = b => (b.value_parts && b.value_parts.bio_factor) || 1;   // x5 on a first footfall
+// Bio figures carry the body's first-footfall factor everywhere they are shown (the server's are x1), so a row,
+// its pop-up and the body panel never show x1 and x5 side by side
+const optLabel = (n, opt, f = 1) => `${n === 1 ? "one" : n} of these, ${credits(opt.low * f)} to ${credits(opt.high * f)}`;
+const bioRange = b => { const f = bioFactor(b);
+  return b.bio_options ? ` · ${credits(b.bio_options.low * f)} to ${credits(b.bio_options.high * f)}` : b.bio_potential ? ` · up to ${credits(b.bio_potential * f)}` : ""; };
+// Signals no genus accounts for yet (before the DSS, less any genus sampled without one): how many, and what they
+// could be (the server's options already leave out the sampled genera). null when every signal is named.
+function bioUnknown(b) {
+  const known = bioGenera(b), n = (b.bio || 0) - known.length;
+  if (n <= 0) return null;
+  const opt = b.bio_options, list = opt ? opt.genera.filter(x => !known.includes(x.genus))
+    : (b.bio_guess || []).filter(x => !known.includes(x.genus)).slice(0, n);
+  const label = known.length ? `${n} more signal${n === 1 ? "" : "s"} not identified` : `${n} signal${n === 1 ? "" : "s"}, not DSS'd`;
+  return {n, opt, list, label};
+}
 const bmMap = () => Object.fromEntries((data.bookmarks || []).map(b => [b.id, b]));
 const day = ts => (ts || "").slice(0, 10);
 function firstsIcon(f) {
@@ -556,14 +1180,24 @@ function bmIcon(id, name, bms) {
     ` title="${b ? "" : "bookmark this system"}">${b ? "★" : "☆"}</span>`;
 }
 
-const credits = n => n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M"
-                    : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(Math.round(n));
+// the unit is picked by what the value rounds to: 999,600 is "1.0M", not "1000k"
+const credits = n => n >= 999.95e6 ? (n / 1e9).toFixed(2) + "B" : n >= 999.5e3 ? (n / 1e6).toFixed(1) + "M"
+                    : n >= 999.5 ? Math.round(n / 1e3) + "k" : String(Math.round(n));
 // Your own thresholds for the unsold-data warning; the server's defaults apply until you change them.
 const unsoldCfg = Object.assign({warn: null, urgent: null}, store.get("unsoldCfg", {}));
 function unsoldThresholds(u) {
   const [dw, du] = (u && u.thresholds) || [50000000, 250000000];
   return [unsoldCfg.warn ?? dw, unsoldCfg.urgent ?? du];
 }
+// What the station you are docked at buys of your unsold data (cartographics at Universal Cartographics,
+// exobiology at Vista Genomics), and its level: a UC-only carrier is no place to sell 300M of bio.
+function sellableHere(dk, u) {
+  if (!dk || !(dk.has_uc || dk.has_vista) || !u || u.error || u.total == null) return null;
+  const value = (dk.has_uc ? (u.carto || {}).estimated_payout || 0 : 0) + (dk.has_vista ? (u.bio || {}).estimated_value || 0 : 0);
+  return {value, level: unsoldLevel({...u, total: value})};
+}
+const leftToSell = u => [(u.carto || {}).estimated_payout && `${credits(u.carto.estimated_payout)} cr cartographics (Universal Cartographics)`,
+                         (u.bio || {}).estimated_value && `${credits(u.bio.estimated_value)} cr exobiology (Vista Genomics)`].filter(Boolean).join(", ");
 function unsoldLevel(u) {
   if (!u || u.error || u.total == null) return null;
   const [w, g] = unsoldThresholds(u);
@@ -587,7 +1221,7 @@ function renderUnsold() {
 }
 // The nearest places to sell (Spansh station search): the nearest trustworthy one of each kind.
 const sellerTxt = x => !x ? "" : `${esc(x.name)}${x.yours ? " (your carrier)" : x.carrier ? " (carrier)" : ""} · ${esc(x.system)} · ${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` +
-  (effRange() ? ` ≈ ${Math.max(1, Math.ceil(x.distance / effRange()))} jump${Math.ceil(x.distance / effRange()) > 1 ? "s" : ""}` : "") +
+  (effRange() ? ` ≈ ${jumpsFor(x.distance)} jump${jumpsFor(x.distance) > 1 ? "s" : ""}` : "") +
   (x.carrier && !x.yours && x.age_days != null ? ` <span class="unk">(seen ${x.age_days < 1 ? "today" : Math.round(x.age_days) + " d ago"})</span>` : "");
 function sellersLine() {
   const s = data.sellers; if (!s || !s.uc) return "";
@@ -643,10 +1277,12 @@ function render() {
   const rg = data.region;
   document.getElementById("refLn").innerHTML = p ? (rg && rg.name ? `<span title="galactic region (codex entries are per region)${rg.nebula ? "; inside a nebula zone" : ""}">${esc(rg.name)}${rg.nebula ? " · nebula" : ""}</span> · ` : "") +
     `Sol <b>${lyTo(0, 0, 0)}</b> ly · Colonia <b>${lyTo(-9530.5, -910.28125, 19808.125)}</b> ly` : "";
+  const fkHere = focusKey("here");
   document.getElementById("here").innerHTML = !p ? "waiting for your first jump…" :
     `<span class="copy" data-name="${esc(p.name)}" title="click to copy"` +
-    (known ? ` data-pop data-id="${p.id64}"` : "") + `>${esc(p.name)}</span>` + (here ? firstsIcon(here.firsts) : "") +
+    (known ? ` data-pop data-id="${esc(here.id)}"` : "") + `>${esc(p.name)}</span>` + (here ? firstsIcon(here.firsts) : "") +
     (here ? bmIcon(here.id, here.name, bms) : "");
+  refocus("here", fkHere);
   placeOverview();
   document.getElementById("nearWrap").hidden = !(view === "near" || view === "overview");
   document.getElementById("overView").hidden = view !== "overview";
@@ -670,7 +1306,7 @@ function render() {
     loadHere();
     if (hereData && lastHereCtx !== hereCtx()) renderHere();   // tab and pane keep different modes
   }
-  if (view === "hist") loadHistory();
+  if (view === "hist") { renderLastSession(); loadHistory(); }
   renderStrip();
   loadOnBody();
   document.getElementById("searchView").hidden = view !== "search";
@@ -734,17 +1370,18 @@ function render() {
   renderLeaving(t && t.leaving);
   renderRoute();
   const a = data.arrival, aEl = document.getElementById("arrival");
-  aEl.innerHTML = !a || !p || a.id64 !== String(p.id64) ? "" :
+  aEl.innerHTML = !a || !p || a.id64 !== posId() ? "" :
     `Arrived at <b>${esc(a.name)}</b>: ` + (a.undiscovered
       ? `<span class="yes">arrival star undiscovered — first discovery is yours to sell</span>`
       : `<span class="no">already discovered by someone` + (a.announced === "unreported" ? " — Spansh just hadn't heard of it" : "") + `</span>`);
+  const fkRows = focusKey("rows");
   document.getElementById("rows").innerHTML = rows.map(s => {
     const isPrev = prev && s.id64 === prev.id64;
     const far = jr && s.distance > jr;
-    const jumps = jr ? Math.ceil(s.distance / jr) : null;
+    const jumps = jr ? jumpsFor(s.distance) : null;
     const cls = [s.visited && "visited", far && "far", isPrev && "prev", scoopNext && s.id64 === scoopNext.id64 && "scoopnext",
-                 data.next_stop && String(s.id64) === data.next_stop.id && "nextstop",
-                 pinnedSystem === String(s.id64) && "pinned",
+                 data.next_stop && s.id === data.next_stop.id && "nextstop",
+                 pinnedSystem === s.id && "pinned",
                  data.target && s.id64 === data.target.id64 && "target"]
       .filter(Boolean).join(" ");
     const known = s.body_count ? `${s.bodies_known}/${s.body_count}` : (s.bodies_known || "");
@@ -757,9 +1394,10 @@ function render() {
       <td>${statusPill(s)}${s.mapped ? `<span class="badge s-mapped" title="DSS-mapped bodies, from your own journal">${s.mapped} mapped</span>` : ""}${s.source === "own"
         ? `<span class="badge s-own" title="Spansh doesn't have this system; data is from your own scans">yours only</span>` : ""}${s.source === "edsm"
         ? `<span class="badge s-edsm" title="Spansh is unreachable; this comes from EDSM (no body data)">EDSM</span>` : ""}</td>
-      <td>${star(s)}</td><td class="bodies" data-pop data-id="${s.id64}">${bodies(s)}</td>
+      <td>${star(s)}</td><td class="bodies" data-pop data-id="${esc(s.id)}">${bodies(s)}</td>
       <td class="notable">${notable(s)}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm">${known}</td></tr>`;
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
+  refocus("rows", fkRows);
 }
 function emptyMessage(rows) {
   const others = data.systems.filter(s => s.id64 !== (data.position && data.position.id64)).length;
@@ -774,6 +1412,7 @@ function renderBookmarks(bms) {
   list.sort(sortKeys.bm === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
     : (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9));
+  const fk = focusKey("bmRows");
   document.getElementById("bmRows").innerHTML = list.map(b => `<tr>
       <td class="bmcell">${bmIcon(b.id, b.name, bms)}</td>
       <td class="name" data-name="${esc(b.name)}" title="click to copy">${esc(b.name)}</td>
@@ -781,6 +1420,7 @@ function renderBookmarks(bms) {
       <td class="note">${esc(b.note) || `<span class="unk">no note</span>`}</td>
       <td class="hide-sm unk">${esc((b.created || "").slice(0, 10))}</td></tr>`).join("") ||
     `<tr><td colspan="5" class="unk">No bookmarks yet. Click ☆ beside any system to add one.</td></tr>`;
+  refocus("bmRows", fk);
 }
 
 // ---- Bookmark dialog ----
@@ -804,7 +1444,9 @@ bmDialog.addEventListener("close", async () => {
   const action = bmDialog.returnValue, id = bmTarget;
   bmTarget = null;
   if (id && action === "next") {   // the dialog's "Set as next stop"
-    const r = await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})});
+    let r;
+    try { r = await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})}); }
+    catch (err) { r = {error: err.message}; }   // the server is not answering
     toast(r.error ? `could not set the next stop: ${r.error}` : "next stop set");
     return;
   }
@@ -821,6 +1463,7 @@ bmDialog.addEventListener("close", async () => {
 document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
   if (b.dataset.view !== view && pinnedSystem) { pinnedSystem = null; if (selectedBody) closeBody(); }  // a pin belongs to the view it was made in
   if (b.dataset.view === "now" && view !== "now") viewBeforeNow = view;
+  if (b.dataset.view === "hist" && view !== "hist") histKey = null;   // fresh numbers each time the tab opens
   view = b.dataset.view; store.set("view", view); render();
 });
 
@@ -829,14 +1472,15 @@ let hereKey = null, hereData = null;
 // The system panel normally shows where you are; clicking a nearby row's Bodies cell pins
 // another system into it until the ✕ is clicked.
 let pinnedSystem = null;
-const shownSystem = () => pinnedSystem || (data && data.position ? String(data.position.id64) : null);
+const shownSystem = () => pinnedSystem || posId();
 function pinSystem(id) {
   // the system you are in is not "pinned": Here shows it anyway, with its to-do line
-  pinnedSystem = data && data.position && String(data.position.id64) === String(id) ? null : String(id);
+  pinnedSystem = posId() === String(id) ? null : String(id);
   if (view === "overview" && ovState.collapsed) { ovState.collapsed = false; saveOv(); }   // else the pin shows nothing
   if (selectedBody) closeBody(); hidePop(); render(); renderHere();
 }
 function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); renderHere(); }
+let hereRefreshError = null;
 async function loadHere() {
   const id = shownSystem(); if (!id) return;
   // Only your own scans change this view, except while Spansh's body details are still arriving
@@ -849,6 +1493,10 @@ async function loadHere() {
   try { fresh = await apiJson(`api/system/${id}`); } catch (err) { fresh = {error: err.message}; }
   if (key !== hereKey) return;   // a newer request is already on its way
   if (fresh.error) hereKey = null;   // a failed fetch is retried at the next render, not kept
+  // a failed refresh of the system already shown keeps the last good view (and the open body panel): the error
+  // goes in the heading only
+  if (fresh.error && hereData && !hereData.error && hereData.id64 === id) { hereRefreshError = fresh.error; renderHere(); return; }
+  hereRefreshError = null;
   hereData = fresh;
   renderHere();
   // the open body panel belongs to a system: close it on a jump, refresh it after a scan
@@ -920,14 +1568,18 @@ function renderHere() {
     if (selectedBody) closeBody();
     return;
   }
-  const bioPot = h.bodies.reduce((n, b) => n + (b.bio_potential || 0), 0);
-  const pinned = !!pinnedSystem, row = pinned && data.systems.find(s => String(s.id64) === pinnedSystem);
+  const pinned = !!pinnedSystem, row = pinned && data.systems.find(s => s.id === pinnedSystem);
+  // a system opened by name from Search may be far outside the sphere: its distance is the lookup's
+  const away = row ? row.distance : pinned && foundSys[pinnedSystem] ? foundSys[pinnedSystem].distance : null;
   head.innerHTML = (pinned ? `<button type="button" class="unpin" onclick="unpinSystem()" title="back to the system you are in">✕</button><span class="pintag">viewing</span> ` : "") +
-    `<b>${esc(h.name)}</b>` + (pinned && row ? ` <span class="unk">· ${row.distance.toFixed(2)} ly away</span>` : "") +
+    // the bookmark star (its dialog also sets the next stop) for a viewed system, which may be in no other list
+    (pinned ? bmIcon(pinnedSystem, h.name, bmMap()) + " " : "") +
+    `<b>${esc(h.name)}</b>` + (away != null ? ` <span class="unk">· ${away.toFixed(2)} ly away</span>` : "") +
     ` · ${h.bodies.length} bod${h.bodies.length === 1 ? "y" : "ies"} known · ` + (h.phenomena && h.phenomena.length ? phenomenaTag(h.phenomena) + " · " : "") +
     `<span title="what selling now would pay for data you hold from here / the most this system could pay">now <b>${credits(h.value_now || 0)} cr</b> · max <b>${credits(maxOf(h) || 0)} cr</b>${maxBonus() ? "" : ` <span class="unk" title="Max leaves out first-discovery, first-mapped and first-footfall bonuses (alerts & thresholds dialog)">no bonus</span>`}</span>` +
     `<span class="modes">${HERE_MODES.filter(([m]) => m !== "split" || hereCtx() === "tab").map(([m, label, title]) =>
-      `<button type="button" data-mode="${m}" title="${title}"${(m === "split" ? hereMode().split : hereMode().top === m) ? ' class="on"' : ""}>${label}</button>`).join("")}</span>`;
+      `<button type="button" data-mode="${m}" title="${title}"${(m === "split" ? hereMode().split : hereMode().top === m) ? ' class="on"' : ""}>${label}</button>`).join("")}</span>` +
+    (hereRefreshError && h.id64 === shownSystem() ? ` <span class="unk" title="${esc(hereRefreshError)}">· refresh failed</span>` : "");
   const l = h.leaving;
   const firstsBlock = h.firsts ? firstsHtml(h.firsts).replace(/<div class="lbl">Your firsts<\/div>/, "") : "";
   lv.innerHTML = firstsBlock + (pinned ? (!h.firsts ? `<span class="unk">${row ? esc(row.status) : ""}${row && row.visited ? " · you have been here" : ""}</span>` : "")
@@ -940,34 +1592,35 @@ function renderHere() {
   const sEl = document.getElementById("hereSchematic");
   sEl.hidden = !showSch; sEl.classList.toggle("split", showTable && showSch);
   if (showSch) sEl.innerHTML = schematicHtml(h);
-  const dest = data.destination && data.position && String(data.position.id64) === h.id64 ? data.destination : null;
+  const dest = data.destination && posId() === h.id64 ? data.destination : null;
   const destBody = dest && h.bodies.find(b => b.body_id === dest.body_id);
   const rowHtml = (b, ind = "") => {
-    const done = b.organics.filter(o => o.done).map(o => o.genus);
-    const bio = [];
+    const bio = [], f = bioFactor(b);
     const guessOf = g => (b.bio_guess || []).find(x => x.genus === g);
-    const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value)})</span>` + codexMark(x, h.region);
-    for (const g of b.genera) {
+    const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value * f)})</span>` + codexMark(x, h.region);
+    for (const g of bioGenera(b)) {
       const o = b.organics.find(o => o.genus === g);
-      bio.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}" title="${esc(o.species || "")}${o.variant ? " · " + esc(o.variant) : ""}${o.lost ? " · lost with the ship, sample again" : ""}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}${o.done && o.value ? ` <span class="unk">${credits(o.value)}</span>` : ""}</span>` +
-                   (o.done && !o.lost ? "" : guessTxt(guessOf(g)))
+      bio.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}" title="${esc(o.species || "")}${o.variant ? " · " + esc(o.variant) : ""}${o.lost ? " · lost with the ship, sample again" : ""}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}${!o.lost && o.value ? ` <span class="unk">${credits(o.value * f)}</span>` : ""}</span>` +
+                   // a run under way prices the species you logged (known from its first sample), like the pop-up and
+                   // the panel; the predictor's guess is only for a lost run or one whose species has no price
+                   (o.lost || (!o.done && !o.value) ? guessTxt(guessOf(g)) : "")
                  : `<span class="sp">${esc(g)} 0/3</span>` + guessTxt(guessOf(g)));
     }
-    for (const o of b.organics) if (!b.genera.includes(o.genus))
-      bio.push(`<span class="sp ${o.done ? "done" : "part"}">${esc(o.genus)} ${o.samples}/3${o.done ? " ✓" : ""}</span>`);
-    if (!bio.length && b.bio) {
-      const opt = b.bio_options, gl = opt ? opt.genera : (b.bio_guess || []).slice(0, b.bio);
-      bio.push(`<span class="unk">${b.bio} signal${b.bio === 1 ? "" : "s"}, not DSS'd</span>` + (gl.length
-        ? `<br><span class="unk">${opt ? `${optLabel(b.bio, opt)}: ` : "likely: "}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits(x.value || 0)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
+    // signals no genus accounts for: before a DSS, and after a sample taken without one (that genus is listed above)
+    const unk = bioUnknown(b);
+    if (unk) {
+      const {opt, list: gl} = unk;
+      bio.push((bio.length ? "<br>" : "") + `<span class="unk">${unk.label}</span>` + (gl.length
+        ? `<br><span class="unk">${opt ? `${optLabel(unk.n, opt, f)}: ` : "likely: "}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits((x.value || 0) * f)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
     }
     const codex = b.codex.map(c => `<span class="sp" title="codex">📖 ${esc(c.name)}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
                     b.first_footfall && `<span class="fl" title="first footfall">👣</span>`, !b.scanned && `<span class="unk" title="known to Spansh, not scanned by you">—</span>`].filter(Boolean).join("");
-    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${destBody === b ? " dest" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name">${ind}${esc(b.name)}${(b.curiosities || []).length ? ` <span class="cur" title="${b.curiosities.map(c => esc(c.tag + ": " + c.why)).join("&#10;")}">🔭</span>` : ""}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
+    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${destBody === b ? " dest" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name" data-name="${esc(b.name)}">${ind}${esc(b.name)}${(b.curiosities || []).length ? ` <span class="cur" title="${b.curiosities.map(c => esc(c.tag + ": " + c.why)).join("&#10;")}">🔭</span>` : ""}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
       <td>${esc(b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}</td>
       <td class="num">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
-      <td class="num${b.gravity > 2 ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
+      <td class="num${b.gravity >= highGravity() ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
       <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}</td>
       <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}</td>
       <td>${b.rings ? `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}` : ""}</td>
@@ -979,16 +1632,14 @@ function renderHere() {
     ? "the most it could pay once scanned, mapped and sampled, including first-discovery, first-mapped and first-footfall (×5 bio) bonuses where they apply"
     : "the most it could pay once scanned, mapped and sampled, with no bonuses: plain Universal Cartographics and Vista Genomics payouts";
   const byMax = maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => (maxOf(b) || 0) - (maxOf(a) || 0));
+  const fk = focusKey("hereRows");
   document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
     || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
+  refocus("hereRows", fk);
   // the body targeted in-game: a line saying what it is worth going to, and its row brought into view
   if (destBody) {
-    const b = destBody, bio = b.bio_options ? [`${b.bio_options.genera.map(x => x.genus).join(" or ")}, ${credits(b.bio_options.low)} to ${credits(b.bio_options.high)}`]
-      : (b.bio_guess || []).slice(0, b.bio || b.genera.length).map(x => x.best ? `${x.best.split(" ")[0]}? ${credits(x.value || 0)}` : x.genus);
-    const bits = [b.subtype, b.gravity != null && b.type === "Planet" && `${b.gravity.toFixed(2)} g`,
-      b.atmosphere && b.atmosphere !== "None" && b.atmosphere, (b.bio || b.genera.length) && `${b.bio || b.genera.length} bio${bio.length ? ` (${bio.join(", ")})` : ""}`,
-      b.geo && `${b.geo} geo`, b.dist_ls != null && `${Math.round(b.dist_ls).toLocaleString()} ls`, maxOf(b) && `max ${credits(maxOf(b))}`].filter(Boolean);
-    lv.insertAdjacentHTML("afterbegin", `<div class="destline">➜ Heading to <b>${esc(b.name)}</b> · ${bits.map(esc).join(" · ")}</div>`);
+    const b = destBody;
+    lv.insertAdjacentHTML("afterbegin", `<div class="destline">➜ Heading to <b>${esc(b.name)}</b> · ${destBits(b).map(esc).join(" · ")}</div>`);
     const dk = `${h.id64}|${b.body_id}`;
     if (dk !== lastDestKey) {
       lastDestKey = dk;
@@ -997,6 +1648,14 @@ function renderHere() {
   } else lastDestKey = null;
 }
 let lastDestKey = null;
+// what the body targeted in-game is (plain text bits): Here's heading-to line and Now's
+function destBits(b) {
+  const f = bioFactor(b), bio = b.bio_options ? [`${b.bio_options.genera.map(x => x.genus).join(" or ")}, ${credits(b.bio_options.low * f)} to ${credits(b.bio_options.high * f)}`]
+    : (b.bio_guess || []).slice(0, b.bio || b.genera.length).map(x => x.best ? `${x.best.split(" ")[0]}? ${credits((x.value || 0) * f)}` : x.genus);
+  return [b.subtype, b.gravity != null && b.type === "Planet" && `${b.gravity.toFixed(2)} g`,
+    b.atmosphere && b.atmosphere !== "None" && b.atmosphere, (b.bio || b.genera.length) && `${b.bio || b.genera.length} bio${bio.length ? ` (${bio.join(", ")})` : ""}`,
+    b.geo && `${b.geo} geo`, b.dist_ls != null && `${Math.round(b.dist_ls).toLocaleString()} ls`, maxOf(b) && `max ${credits(maxOf(b))}`].filter(Boolean);
+}
 document.getElementById("hereRows").addEventListener("click", e => {
   const tr = e.target.closest("tr[data-body]"); if (!tr) return;
   tr.dataset.body === selectedBody ? closeBody() : openBody(tr.dataset.body);
@@ -1138,7 +1797,8 @@ document.getElementById("hereSchematic").addEventListener("click", e => {
 
 // ---- body hover summary ----
 const fmtK = n => n == null ? "?" : Math.round(n).toLocaleString();
-function bodyPopHtml(b) {
+// region: the region of the system the body is in (a search result may be elsewhere than Here)
+function bodyPopHtml(b, region) {
   const isStar = b.type === "Star";
   const phys = [
     b.dist_ls != null && `${fmtK(b.dist_ls)} ls from arrival`,
@@ -1156,13 +1816,18 @@ function bodyPopHtml(b) {
       (r.hotspots && Object.keys(r.hotspots).length ? `<b>${Object.entries(r.hotspots).map(([k, v]) => `${esc(k)} ${v}`).join(", ")}</b>` : r.mapped ? `<b class="unk">mapped, no hotspots</b>` : `<b class="unk">not mapped</b>`) + `</li>`).join("") + `</ul></div>`;
   if (b.bio || (b.genera || []).length || (b.organics || []).length) {
     const lines = [];
-    for (const g of b.genera || []) {
+    const f = bioFactor(b);
+    for (const g of bioGenera(b)) {
       const o = (b.organics || []).find(o => o.genus === g), x = (b.bio_guess || []).find(x => x.genus === g);
-      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")} ${o.samples}/3${o.done ? " ✓" : ""}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}` : ""}</span><b>${x && x.value ? credits(x.value) : ""}</b></li>`);
+      // a logged species pays its own price (a lost one again once resampled); the best guess only bounds the rest
+      const price = o ? (o.value ? (o.lost ? `<span class="unk">${credits(o.value * f)}</span>` : credits(o.value * f)) : "")
+                      : x && x.value ? "≤" + credits(x.value * f) : "";
+      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}${variantTxt(x)}` : ""}</span><b>${price}</b></li>`);
     }
-    if (!(b.genera || []).length && b.bio) {
-      if (b.bio_options) lines.push(`<li><span class="unk">${optLabel(b.bio, b.bio_options)}; the DSS tells which</span></li>`);
-      lines.push(...(b.bio_options ? b.bio_options.genera : (b.bio_guess || []).slice(0, b.bio)).map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})${codexMark(x, hereData && hereData.region)}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    const unk = bioUnknown(b);   // signals no genus above accounts for, and what they could be
+    if (unk) {
+      lines.push(`<li><span class="unk">${unk.label}${unk.opt ? `: ${optLabel(unk.n, unk.opt, f)}; the DSS tells which` : ""}</span></li>`);
+      lines.push(...unk.list.map(x => `<li><span>${esc(x.genus)} possible (${esc(x.species.join("/"))})${codexMark(x, region)}</span><b>≤${credits((x.value || 0) * f)}</b></li>`));
     }
     h += `<div class="sec"><div class="lbl">🧬 Bio${b.bio ? ` · ${b.bio} signal${b.bio === 1 ? "" : "s"}` : ""}${bioRange(b)}</div><ul>${lines.join("")}</ul></div>`;
   }
@@ -1276,15 +1941,17 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
   let bioSec = "";
   if (row.bio || (row.genera || []).length || (row.organics || []).length || (row.codex || []).length) {
     const lines = [];
-    for (const g of row.genera || []) {
+    const f = bioFactor(row);
+    for (const g of bioGenera(row)) {
       const o = (row.organics || []).find(o => o.genus === g), x = (row.bio_guess || []).find(x => x.genus === g);
-      const priced = o && o.done && !o.lost && o.value;
-      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}` : ""}</span>` +
-                 `<b>${priced ? credits(o.value) : x && x.value ? "≤" + credits(x.value) : ""}</b></li>`);
+      const priced = o && !o.lost && o.value;   // the species is known from its first sample on
+      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}${x.best && (x.variants || []).length ? ` <span class="unk" title="expected colour variant of the likeliest species">(${esc(x.variants.join(" or "))})</span>` : ""}` : ""}</span>` +
+                 `<b>${priced ? credits(o.value * f) : x && x.value ? "≤" + credits(x.value * f) : ""}</b></li>`);
     }
-    if (!(row.genera || []).length && row.bio) {
-      if (row.bio_options) lines.push(`<li><span class="unk">${optLabel(row.bio, row.bio_options)}; the DSS tells which</span></li>`);
-      lines.push(...(row.bio_options ? row.bio_options.genera : (row.bio_guess || []).slice(0, row.bio)).map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}${codexMark(x)}</span><b>≤${credits(x.value || 0)}</b></li>`));
+    const unk = bioUnknown(row);   // signals no genus above accounts for, and what they could be
+    if (unk) {
+      lines.push(`<li><span class="unk">${unk.label}${unk.opt ? `: ${optLabel(unk.n, unk.opt, f)}; the DSS tells which` : ""}</span></li>`);
+      lines.push(...unk.list.map(x => `<li><span>${esc(x.genus)} possible: ${esc(x.species.join(" / "))}${codexMark(x)}</span><b>≤${credits((x.value || 0) * f)}</b></li>`));
     }
     for (const c of row.codex || []) lines.push(`<li><span>📖 ${esc(c.name)}</span><b>${c.voucher ? "voucher " + c.voucher.toLocaleString() + " cr" : c.new ? "new to your codex" : ""}</b></li>`);
     bioSec = sec("bio", `🧬 Exobiology${row.bio ? ` · ${row.bio} signal${row.bio === 1 ? "" : "s"}` : ""}${bioRange(row)}`, `<ul>${lines.join("")}</ul>`);
@@ -1357,7 +2024,9 @@ function renderLeft() {
     const worth = maps.reduce((n, m) => n + m.increment, 0) + bio.reduce((n, b) => n + b.value, 0);
     const bits = [r.unfound ? `${r.unfound} bod${r.unfound === 1 ? "y" : "ies"} not found` : "",
       maps.length ? "map " + maps.map(m => `<b>${esc(m.body)}</b> <span class="unk">${esc(m.subtype)}${m.terraformable ? " T" : ""} +${credits(m.increment)}</span>`).join(", ") : "",
-      bio.length ? "bio " + bio.map(b => `<b>${esc(b.body)}</b> <span class="unk">${b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : ""].filter(Boolean);
+      // genera null: FSS signals nobody DSS'd, priced as the leaving alert prices them (an upper bound)
+      bio.length ? "bio " + bio.map(b => `<b>${esc(b.body)}</b> <span class="unk">${b.genera === null ? `${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd`
+        : b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : ""].filter(Boolean);
     return {r, bits, worth, keep: maps.length || bio.length || r.unfound};
   }).filter(x => x.keep && x.bits.length);
   el.innerHTML = rows.map(({r, bits, worth}) => `<tr><td><span class="name" data-name="${esc(r.name)}" title="click to copy">${esc(r.name)}</span><span class="goto" data-goto="${esc(r.id)}" title="open in Here">⌖</span></td>
@@ -1379,7 +2048,9 @@ mHeld.checked = store.get("mHeld", false);
 mHeld.onchange = () => { store.set("mHeld", mHeld.checked); renderMat(); };
 mFilter.oninput = () => renderMat();
 async function loadMat() {
-  const key = `${data && data.materials && data.materials.version}|${data && data.run_id}`;
+  // the sources list depends on where you are and what you have scanned; the stale note on the materials snapshot
+  const m0 = data && data.materials;
+  const key = `${m0 && m0.version}|${m0 && m0.stale}|${data && data.scan_version}|${data && data.position && data.position.id64}|${data && data.run_id}`;
   if (key === matKey) return;
   matKey = key;
   document.getElementById("matStatus").textContent = "loading…";
@@ -1395,11 +2066,14 @@ function renderMat() {
     `${held.length} materials held, ${held.reduce((n, r) => n + r.count, 0).toLocaleString()} units · snapshot ${esc(m.snapshot_ts.replace("T", " ").slice(0, 16))} UTC` +
     (m.ts !== m.snapshot_ts ? ` · last change ${esc((m.ts || "").replace("T", " ").slice(0, 16))}` : "") +
     (m.stale ? ` · <span class="noscoop">your last login wrote no Materials line: these counts predate it</span>` : "");
+  // every material that runs out at the craftable count limits it (ties included, e.g. all three at 4)
+  const limiting = r => r.materials.filter(x => Math.floor(x.have / x.need) === r.craftable).map(x => x.name);
   document.getElementById("matSynth").innerHTML = m.synthesis.map(r => `<div class="synth" title="${r.verified ? "recipe checked against a real synthesis in your journals" : "published in-game recipe"}">
       <span class="n${r.craftable ? "" : " zero"}">×${r.craftable}</span><b>${esc(r.name)}</b>${r.boost ? `<div class="unk boostline">${esc(r.boost)} range</div>` : ""}
-      <div class="mats">${r.materials.map(x => `<span class="${x.have < x.need ? "short" : r.limit === x.name && r.craftable < 10 ? "limit" : ""}">${esc(x.name)} ${x.have}/${x.need}</span>`).join(" · ")}</div></div>`).join("");
+      <div class="mats">${r.materials.map(x => `<span class="${x.have < x.need ? "short" : r.craftable < 10 && limiting(r).includes(x.name) ? "limit" : ""}">${esc(x.name)} ${x.have}/${x.need}</span>`).join(" · ")}</div></div>`).join("");
   // where to find the FSD-injection materials: the nearest landable bodies you have scanned that carry them
-  const src = m.sources || {}, limits = new Set(m.synthesis.filter(r => /^FSD/.test(r.name)).map(r => r.limit));
+  // only a recipe you are short of (under 10, the grid's threshold) has a limiting material worth fetching
+  const src = m.sources || {}, limits = new Set(m.synthesis.filter(r => /^FSD/.test(r.name) && r.craftable < 10).flatMap(limiting));
   const have = Object.fromEntries(m.rows.map(r => [r.id, r]));
   document.getElementById("matSources").innerHTML = Object.keys(src).length ? `<h3 class="subhead">Where to find FSD-injection materials <span class="unk">· scanned landable bodies within 300 ly, nearest first</span></h3>` +
     `<table class="srcTable"><tbody>` + Object.entries(src).map(([mat, list]) => { const h = have[mat] || {};
@@ -1424,15 +2098,21 @@ function renderMat() {
 }
 
 // ---- Log: every journal event ----
-const L = {rows: [], next: null, newest: null, key: null, loading: false, open: new Set(), journal: null, fresh: new Set()};
+// gen: bumped by every fresh load, so an answer to an older request (a tail or "more" still on its way when the
+// filters changed) is dropped and cannot release the lock or prepend rows from the old cursor
+const L = {rows: [], next: null, newest: null, key: null, loading: false, open: new Set(), journal: null, fresh: new Set(), gen: 0};
+const LOG_MAX_ROWS = 1000;   // tailing keeps the newest this many; "more" continues below the last one kept
+// what the tail keys on: freshness.read moves with every journal line consumed (the journal time is to the second)
+const logMark = () => data && data.freshness ? data.freshness.read ?? data.freshness.journal : null;
 const lDays = document.getElementById("lDays"), lNoise = document.getElementById("lNoise"), lFilter = document.getElementById("lFilter");
 const lCatBoxes = [...document.querySelectorAll("#lCats input")];
 const lSaved = store.get("log", {});
-if (lSaved.days) lDays.value = lSaved.days;
+if (lSaved.days && (typeof lSaved.days === "string" || typeof lSaved.days === "number")) lDays.value = lSaved.days;
 lNoise.checked = !!lSaved.noise;
 // a category added since the filters were saved starts ticked
-const lKnown = lSaved.known || ["travel", "exploration", "bio", "ship", "carrier", "other"];   // saves from before "known"
-if (lSaved.cats) lCatBoxes.forEach(b => b.checked = lSaved.cats.includes(b.value) || !lKnown.includes(b.value));
+// (a hand-edited import or server copy may hold anything there: a list that is not a list reads as unset)
+const lKnown = Array.isArray(lSaved.known) ? lSaved.known : ["travel", "exploration", "bio", "ship", "carrier", "other"];   // saves from before "known"
+if (Array.isArray(lSaved.cats)) lCatBoxes.forEach(b => b.checked = lSaved.cats.includes(b.value) || !lKnown.includes(b.value));
 const CAT_GLYPH = {travel: "🚀", exploration: "🔭", phenomena: "🌀", bio: "🧬", ship: "🛠", carrier: "🚢", other: "•", noise: "·"};
 function logQuery() {
   const cats = lCatBoxes.filter(b => b.checked).map(b => b.value);
@@ -1446,50 +2126,61 @@ function saveLog() {
 async function loadLog(force = false) {
   const key = logQuery();
   if (key === L.key && !force) return;
-  L.key = key; L.loading = true;
+  const gen = ++L.gen, mark = logMark();   // the mark as of the request: lines read after it are tailed next
+  L.key = key; L.loading = true; L.newest = null;   // no tail from the old filter's cursor meanwhile
   document.getElementById("lStatus").textContent = "loading…";
   try {
     const r = await apiJson(`api/log?${key}`);
-    if (key !== L.key) return;
-    Object.assign(L, {rows: r.rows, next: r.next, newest: r.newest, error: null, journal: data && data.freshness && data.freshness.journal});
-  } catch (err) { L.error = err.message; }
+    if (gen !== L.gen) return;
+    if (r.error) throw new Error(r.error);
+    Object.assign(L, {rows: r.rows || [], next: r.next, newest: r.newest, error: null, journal: mark});
+  } catch (err) { if (gen !== L.gen) return; L.error = "log failed: " + err.message; L.key = null; }   // rows kept; the next render tries again
   L.loading = false;
   renderLog();
 }
 async function moreLog() {
-  if (!L.next || L.loading) return;
-  const key = L.key; L.loading = true;
+  // after a failed reload there are no filters to page with (L.key null): the next render reloads first
+  if (!L.next || L.loading || L.key === null) return;
+  const key = L.key, gen = L.gen; L.loading = true;
   try {
     const r = await apiJson(`api/log?${key}&before=${encodeURIComponent(L.next)}`);
-    if (key === L.key) { L.rows = L.rows.concat(r.rows); L.next = r.next; }
-  } catch (err) { L.error = err.message; }
+    if (gen !== L.gen) return;   // the filters changed meanwhile: that load owns the lock now
+    if (r.error) throw new Error(r.error);
+    L.rows = L.rows.concat(r.rows || []); L.next = r.next; L.error = null;
+  } catch (err) { if (gen !== L.gen) return; L.error = "loading more failed: " + err.message; }   // L.next kept: "more" tries again
   L.loading = false;
   renderLog();
 }
 async function tailLog() {   // new journal lines since the newest row: prepend them
-  const j = data && data.freshness && data.freshness.journal;
+  const j = logMark();
   if (!L.newest || L.loading || j === L.journal) return;
-  const key = L.key; L.journal = j; L.loading = true;
+  const key = L.key, gen = L.gen; L.journal = j; L.loading = true;
   try {
     const r = await apiJson(`api/log?${key}&after=${encodeURIComponent(L.newest)}`);
+    if (gen !== L.gen) return;   // a fresh load started meanwhile: its answer replaces everything
     L.loading = false;
-    if (key !== L.key) return;
+    if (r.error) { L.journal = null; return; }   // asked again at the next change
     if (r.reset) return loadLog(true);
     L.newest = r.newest || L.newest;
-    if (r.rows.length) {
+    // the tail answered: a "loading more failed" from earlier is old news (L.next is kept, so "more" still works)
+    const hadError = !!L.error; L.error = null;
+    if (hadError && !(r.rows && r.rows.length)) renderLog();
+    if (r.rows && r.rows.length) {
       const before = document.documentElement.scrollHeight, y = window.scrollY;
       r.rows.forEach(x => L.fresh.add(x.id));
       L.rows = r.rows.concat(L.rows);
+      // a long session with the Log open: keep the newest rows (each holds its raw event), "more" fetches the rest
+      if (L.rows.length > LOG_MAX_ROWS) { L.rows.length = LOG_MAX_ROWS; L.next = L.rows[LOG_MAX_ROWS - 1].id; }
       renderLog();
       if (y > 0) window.scrollBy(0, document.documentElement.scrollHeight - before);  // keep your place unless at the top
       setTimeout(() => { r.rows.forEach(x => L.fresh.delete(x.id)); }, 2500);
     }
-  } catch { L.loading = false; }
+  } catch { if (gen === L.gen) { L.loading = false; L.journal = null; } }
 }
 function openBodyIn(id, name) {
   id = String(id);
   view = "here"; store.set("view", view);
-  pinnedSystem = data.position && String(data.position.id64) === id ? null : id;
+  pinnedSystem = posId() === id ? null : id;
   hidePop();
   selectedBody = name; selectedSystem = id; bodyData = null;
   const panel = document.getElementById("bodyPanel");
@@ -1513,7 +2204,7 @@ function renderLog() {
     if (L.open.has(r.id)) h += `<tr class="raw"><td colspan="5"><pre>${esc(JSON.stringify(r.raw, null, 2))}</pre></td></tr>`;
   }
   document.getElementById("logRows").innerHTML = h || `<tr><td colspan="5" class="unk">${L.loading ? "" : "No events match."}</td></tr>`;
-  document.getElementById("lMore").hidden = !L.next;
+  document.getElementById("lMore").hidden = !L.next || L.key === null;
 }
 lCatBoxes.forEach(b => b.onchange = () => { saveLog(); loadLog(); });
 lNoise.onchange = () => { saveLog(); loadLog(); };
@@ -1539,6 +2230,23 @@ bDays.onchange = () => { store.set("bDays", bDays.value); bioKey = null; loadBio
 bState.onchange = () => { store.set("bState", bState.value); renderBio(); };
 bFilter.oninput = () => renderBio();
 function showInHere(id) { view = "here"; store.set("view", view); pinSystem(id); }
+// ---- Find a system by name (Search's top row): the server resolves it, Here shows it ----
+const foundSys = {};   // id -> the last /api/find answer: the pinned Here heading's distance for a system not nearby
+document.getElementById("findForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = document.getElementById("findName").value.trim(), st = document.getElementById("findStatus");
+  if (!name) return;
+  st.textContent = `looking up ${name}…`;
+  let d;
+  try { d = await apiJson(`api/find?name=${encodeURIComponent(name)}`); } catch (err) { d = {error: err.message}; }
+  if (d.error) { st.textContent = d.error; return; }
+  foundSys[d.id] = d;
+  const v = d.visited;
+  st.textContent = [d.name, d.distance != null ? `${d.distance.toLocaleString("en-US", {maximumFractionDigits: 2})} ly` : null,
+    v ? `visited ${v.count}× (last ${day(v.last_ts)})` : "never visited", d.bookmarked && "bookmarked", d.next_stop && "the next stop",
+    d.source === "edsm" && "found on EDSM"].filter(Boolean).join(" · ");
+  showInHere(d.id);
+});
 async function loadBio() {
   const key = `${bDays.value}|${data && data.scan_version}`;
   if (key === bioKey) return;
@@ -1597,7 +2305,9 @@ const hDays = document.getElementById("hDays");
 hDays.value = store.get("hDays", "30");
 hDays.onchange = () => { store.set("hDays", hDays.value); histKey = null; loadHistory(); };
 async function loadHistory() {
-  const key = `${hDays.value}|${data && data.scan_version}`;
+  // not scan_version: the ledger is a full pass on the server, so only a jump, a sale or a death (or opening
+  // the tab) fetches it again, not every scan while the tab is open
+  const key = `${hDays.value}|${data && data.history_version}`;
   if (key === histKey) return;
   histKey = key;
   document.getElementById("hStatus").textContent = "loading…";
@@ -1605,8 +2315,23 @@ async function loadHistory() {
   if (histData && histData.error) histKey = null;   // retried at the next render
   renderHistory();
 }
+// the Last session card: the session your latest quit ended, from the quit until you load into the game again
+function sessionLine(st) {
+  const n = (k, one, many) => st[k] ? `${st[k].toLocaleString("en-US")} ${st[k] === 1 ? one : many}` : null;
+  return [`${(st.jumps || 0).toLocaleString("en-US")} jump${st.jumps === 1 ? "" : "s"}`, st.ly ? `${Math.round(st.ly).toLocaleString("en-US")} ly` : null,
+    n("firsts", "new system", "new systems"), n("bodies_first", "new body", "new bodies"), n("mapped", "mapped", "mapped"), n("footfalls", "footfall", "footfalls"),
+    n("samples", "sample", "samples"), n("codex_new", "codex entry", "codex entries")].filter(Boolean).join(" · ");
+}
+function renderLastSession() {
+  const ls = data && data.last_session, el = document.getElementById("lastSession");
+  if (!el) return;
+  el.innerHTML = !ls ? "" : `<b>Last session</b> <span class="unk">${esc(ls.start.replace("T", " ").slice(0, 16))} → ${esc(ls.end.slice(11, 16))} UTC</span> · ${esc(sessionLine(ls))}` +
+    (ls.max_sol ? ` <span class="unk">· ${ls.max_sol.toLocaleString("en-US")} ly from Sol at most</span>` : "");
+  el.hidden = !ls;
+}
 const openSessions = new Set();
 function renderHistory() {
+  renderLastSession();
   const h = histData, st = document.getElementById("hStatus");
   if (!h || h.error) { st.textContent = h ? h.error : ""; return; }
   const tot = k => h.sessions.reduce((n, s) => n + s[k], 0);
@@ -1632,15 +2357,25 @@ function renderHistory() {
         <td class="num" title="systems visited">${(e.Systems_Visited || 0).toLocaleString()}</td><td class="num hide-sm"></td><td class="num" title="planets mapped (surface scans)">${(e.Planets_Scanned_To_Level_3 || 0).toLocaleString()}</td>
         <td class="num hide-sm">${(e.First_Footfalls || 0).toLocaleString()}</td><td class="num" title="organic species encountered">${(o.Organic_Species_Encountered || 0).toLocaleString()}</td><td class="num hide-sm"></td></tr>`); }
   const fmtD = t => t ? t.slice(0, 10) : "start";
-  document.getElementById("tripRows").innerHTML = (L.trips || []).map(t => {
+  const lossHtml = ls => ls.map(l => `<span class="lost" title="${l.ship ? `${l.bodies} bodies (${l.firsts} first discoveries) died with the ship` : "you died, the ship survived"}` +
+    `${l.bio_runs ? `; ${l.bio_runs} completed sample run${l.bio_runs === 1 ? "" : "s"} lost` : ""}">✗ ${esc(l.ts.slice(0, 10))} −${credits((l.value || 0) + (l.bio_value || 0))}` +
+    `${l.bio_value ? ` (${l.value ? `${credits(l.value)} carto, ` : ""}${credits(l.bio_value)} bio)` : ""}</span>`).join(" ");
+  // the trip still under way: a trip row only exists once a sale ends it, so losses since the last sale (every
+  // loss, if you have never sold) would show nowhere
+  const cur = (L.losses || []).filter(l => !(ss && ss.since) || l.ts > ss.since);
+  const curRow = !cur.length ? "" : `<tr class="curtrip" title="since your last sale: the trip ends at your next sale"><td>${ss && ss.since ? fmtD(ss.since) : "start"} → now</td>` +
+    `<td class="num">${ss && ss.days != null ? ss.days : ""}</td><td class="num">${ss ? (ss.jumps || 0).toLocaleString() : ""}</td>` +
+    `<td class="num hide-sm">${ss ? Math.round(ss.ly || 0).toLocaleString() : ""}</td><td class="num">${ss ? ss.firsts ?? "" : ""}</td>` +
+    `<td class="num unk">not sold</td><td class="num hide-sm"></td><td class="num hide-sm"></td><td class="num hide-sm"></td><td class="num hide-sm"></td><td>${lossHtml(cur)}</td></tr>`;
+  document.getElementById("tripRows").innerHTML = curRow + (L.trips || []).map(t => {
     const est = t.estimate ? ` <span class="unk">${t.estimate ? (t.paid_carto >= t.estimate ? "+" : "") + Math.round(100 * (t.paid_carto - t.estimate) / t.estimate) + "%" : ""}</span>` : "";
-    const losses = t.losses.map(l => `<span class="lost" title="${l.bodies} bodies (${l.firsts} first discoveries) died with the ship">✗ ${esc(l.ts.slice(0, 10))} −${credits(l.value)}</span>`).join(" ");
+    const losses = lossHtml(t.losses);
     return `<tr><td>${fmtD(t.start)} → ${fmtD(t.end)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
       <td class="num hide-sm">${Math.round(t.ly).toLocaleString()}</td><td class="num">${t.firsts}</td>
       <td class="num" title="${credits(t.paid_carto || 0)} cartographics + ${credits(t.paid_bio || 0)} exobiology">${credits(t.paid)}</td>
       <td class="num hide-sm">${t.estimate ? credits(t.estimate) + est : ""}</td><td class="num hide-sm">${t.per_hour ? credits(t.per_hour) : ""}</td>
       <td class="num hide-sm">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm">${t.first_rate ?? ""}</td><td>${losses}</td></tr>`;
-  }).join("") || `<tr><td colspan="11" class="unk">No sales on record yet.</td></tr>`;
+  }).join("") + ((L.trips || []).length ? "" : `<tr><td colspan="11" class="unk">No sales on record yet.</td></tr>`);
   document.getElementById("topRows").innerHTML = (L.top_finds || []).map(f => `<tr><td><span class="name" data-name="${esc(f.body)}" title="click to copy">${esc(f.body)}</span></td>
       <td>${esc(f.type || "")}${f.first_discovered ? " 🏁" : ""}${f.mapped ? " 🗺" : ""}</td><td class="num">${credits(f.value)}</td>
       <td class="${f.state === "lost" ? "lost" : f.state === "sold" ? "sold" : "unsold"}">${f.state === "unsold" ? "aboard" : f.state}</td><td class="hide-sm">${esc((f.ts || "").slice(0, 10))}</td></tr>`).join("");
@@ -1687,6 +2422,8 @@ async function loadMap() {
     if (M.key !== key) return;  // settings changed while we waited
     if (d.error) throw new Error(d.error);
     M.data = d;
+    // a failed Spansh lookup (sphere or boost stars) is not cached by the server: ask again in a while
+    if (d.partial) setTimeout(() => { if (M.key === key) { M.key = null; if (view === "map") { loadMap(); drawMap(); } } }, 30000);
     const nearestN = d.boost && d.boost.points.find(b => b.boost === "N");
     mEl("mStatus").innerHTML = d.error ? esc(d.error) :
       `${d.points.length.toLocaleString()} systems within ${d.radius} ly` + (d.note ? ` · ${esc(d.note)}` : "") +
@@ -1719,6 +2456,19 @@ function drawMap() {
   const cs = getComputedStyle(document.documentElement), col = v => cs.getPropertyValue(v).trim();
   const C = {line: col("--line"), muted: col("--muted"), text: col("--text"), accent: col("--accent"),
              info: col("--info"), good: col("--good"), bg: col("--bg"), gold: "#f2c94c"};
+  const byColour = mSettings.color === "star";
+  // Legend first: its height is part of the sizing below (written after it, the first draw was sized wrong).
+  const dot = (color, text, ring) => `<span><i class="${ring ? "ring" : ""}" style="background:${color};border-color:${color}"></i>${text}</span>`;
+  const legend = byColour
+    ? [...new Set(M.data.points.map(pt => starGroup(pt.star)).concat((M.data.path || []).map(j => starGroup(j.star_class))))]
+        .filter(Boolean).sort().map(k => dot(STAR_COLOURS[k] || C.muted, STAR_NAMES[k] || k)).join("") +
+      dot(C.muted, "class unknown", true)
+    : [dot(C.accent, "you are here"), dot(C.gold, "you discovered it"), dot(C.info, "visited"),
+       dot(C.muted, "known, has bodies"), dot(C.muted, "no scan data", true),
+       dot(C.text, "your route plots only", true), `<span style="color:${C.accent}">— your path</span>`,
+       `<span style="color:${C.accent}">◌ previous / target</span>`, `<span style="color:${C.gold}">★ bookmark</span>`]
+       .concat(M.data.boost ? [`<span style="color:#5ce1e6">▵ neutron · □ white dwarf · ┄ boosted range</span>`] : []).join("");
+  if (M.legend !== legend) { M.legend = legend; mEl("mLegend").innerHTML = legend; }   // not on every drag frame
   const dpr = window.devicePixelRatio || 1;
   const w = mEl("mapWrap").clientWidth;
   // fill the window down to the legend and hint beneath it (measured, since the legend's length varies)
@@ -1791,9 +2541,9 @@ function drawMap() {
   const hs = d.here_star, mult = hs === "N" ? 4 : /^D/.test(hs || "") ? 1.5 : 0;
   if (jr && mult) ringAt(jr * mult, "#5ce1e6", [2, 6]);
 
-  const bms = bmMap(), prevId = data.previous && String(data.previous.id64),
-        targetId = data.target && String(data.target.id64), hereId = String(c.id64);
-  const byColour = mSettings.color === "star";
+  // exact string ids (id), as the points carry: an id64 over 2^53 is rounded as a JavaScript number
+  const sid = x => x && (x.id ?? String(x.id64));
+  const bms = bmMap(), prevId = sid(data.previous), targetId = sid(data.target), hereId = sid(c);
   const pts = d.points.map(pt => ({pt, ...proj(...rel(pt))})).filter(q => q.ok);
   // Busy regions fade the background systems so your own stand out.
   const density = Math.min(1, 150 / Math.max(1, pts.length));
@@ -1885,18 +2635,6 @@ function drawMap() {
     g.fillStyle = C.bg; g.globalAlpha = .75; g.fillRect(x, y, tw, 15); g.globalAlpha = 1;
     g.fillStyle = C.text; g.fillText(text, x + 3, y + 11);
   }
-
-  // Legend.
-  const dot = (color, text, ring) => `<span><i class="${ring ? "ring" : ""}" style="background:${color};border-color:${color}"></i>${text}</span>`;
-  mEl("mLegend").innerHTML = byColour
-    ? [...new Set(d.points.map(pt => starGroup(pt.star)).concat((d.path || []).map(j => starGroup(j.star_class))))]
-        .filter(Boolean).sort().map(k => dot(STAR_COLOURS[k] || C.muted, STAR_NAMES[k] || k)).join("") +
-      dot(C.muted, "class unknown", true)
-    : [dot(C.accent, "you are here"), dot(C.gold, "you discovered it"), dot(C.info, "visited"),
-       dot(C.muted, "known, has bodies"), dot(C.muted, "no scan data", true),
-       dot(C.text, "your route plots only", true), `<span style="color:${C.accent}">— your path</span>`,
-       `<span style="color:${C.accent}">◌ previous / target</span>`, `<span style="color:${C.gold}">★ bookmark</span>`]
-       .concat(d.boost ? [`<span style="color:#5ce1e6">▵ neutron · □ white dwarf · ┄ boosted range</span>`] : []).join("");
 }
 
 function mapHit(e) {
@@ -1908,7 +2646,7 @@ function mapHit(e) {
 function mapPopHtml(pt) {
   const c = M.data.center, dd = Math.hypot(pt.x - c.x, pt.y - c.y, pt.z - c.z);
   const boost = pt.boost ? (pt.boost === "N" ? "neutron star: jet-cone boost ×4" : "white dwarf: jet-cone boost ×1.5") : "";
-  const what = String(c.id64) === pt.id ? "you are here" : pt.first ? "you discovered it" : pt.visited ? "visited"
+  const what = (c.id ?? String(c.id64)) === pt.id ? "you are here" : pt.first ? "you discovered it" : pt.visited ? "visited"
     : pt.kind === "route" ? "only in your route plots" : pt.scanned ? "known, has scanned bodies"
     : pt.kind === undefined ? (pt.carrier ? `your carrier ${esc(pt.carrier)} is here` : boost) : "no scan data";
   const what2 = what + (pt.carrier && !what.includes("carrier") ? ` · your carrier ${esc(pt.carrier)} is here` : "") + (boost && what !== boost ? " · " + boost : "");
@@ -1998,11 +2736,25 @@ document.getElementById("sClear").onclick = () => {
 loadForm(store.get("search", null));
 
 let search = null, searchPolling = false;
+// The seq the server gave the last search started here: an older result (a GET sent before that POST) is not it.
+let searchWant = 0;
+// set by a refused search POST: a poll loop still running for the previous search must not paint its progress
+// (or its results) over the "search failed" line. Cleared by the next accepted search.
+let searchRefused = false;
 const sLabels = {stars: "Star", planets: "Planet", rings: "Ring", hotspots: "Hotspot", bio: "Bio"};
 // ---- Search results: body pop-ups and a body panel beside the results ----
 const sysDetail = {};   // id64 -> system detail (or a pending promise), for the pop-ups
+const sysRetryAt = {};  // id64 -> when an error, partial or empty answer may be asked for again
+function sysCached(id) {   // what is known now; an incomplete answer is dropped once it is due a retry
+  if (sysRetryAt[id] && Date.now() >= sysRetryAt[id] && !(sysDetail[id] instanceof Promise)) { delete sysDetail[id]; delete sysRetryAt[id]; }
+  return sysDetail[id];
+}
 function systemFor(id) {
-  if (!sysDetail[id]) sysDetail[id] = apiJson(`api/system/${id}`).then(d => (sysDetail[id] = d)).catch(err => (sysDetail[id] = {error: err.message}));
+  if (!sysCached(id)) sysDetail[id] = apiJson(`api/system/${id}`).catch(err => ({error: err.message})).then(d => {
+    // a Spansh timeout, bodies still arriving or none known yet: shown now, asked again on a later hover
+    if (!d || d.error || d.partial || !(d.bodies || []).length) sysRetryAt[id] = Date.now() + 15000; else delete sysRetryAt[id];
+    return (sysDetail[id] = d);
+  });
   return sysDetail[id];
 }
 const sBody = {sys: null, name: null, data: null};
@@ -2054,22 +2806,48 @@ function renderSearch(bms) {
 async function pollSearch() {
   if (searchPolling) return;
   searchPolling = true;
+  // A failed poll (server restarting, a dropped connection) is retried with a growing pause; after a few
+  // the search is shown as stopped instead of 'searching…' forever.
+  let fails = 0, stale = 0;
   try {
-    do {
-      const r = await fetch("api/search");
-      search = await r.json();
-      render();
-      if (search.running) await new Promise(res => setTimeout(res, 800));
-    } while (search.running);
-  } catch {} finally { searchPolling = false; }
+    for (;;) {
+      try {
+        const r = await fetch("api/search");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const got = await r.json(); fails = 0;
+        if (searchRefused) return;
+        if (got && (got.seq || 0) < searchWant) {
+          // the previous search, from a poll sent before the new one started: keep waiting, never show it as new.
+          // Only ever one or two of these; many means the server restarted and forgot the search.
+          if (++stale >= 8) { search = {running: false, status: "lost track of the search (the server restarted?)", results: []}; render(); return; }
+          await new Promise(res => setTimeout(res, 800));
+          continue;
+        }
+        search = got; stale = 0;   // a resubmit's one stale answer each must not add up across a long search
+        render();
+        if (!search || !search.running) return;
+        await new Promise(res => setTimeout(res, 800));
+      } catch (err) {
+        if (!search || !search.running) return;   // nothing in progress (e.g. the first poll after a reload)
+        if (++fails >= 5) { search = Object.assign({}, search, {running: false, status: "lost track of the search: " + err.message}); render(); return; }
+        await new Promise(res => setTimeout(res, 1000 * 2 ** fails));
+      }
+    }
+  } finally { searchPolling = false; }
 }
 sForm.addEventListener("submit", async e => {
   e.preventDefault(); saveForm();
   search = {running: true, status: "searching…", results: []}; render();
+  for (const id of Object.keys(sysDetail)) if (!(sysDetail[id] instanceof Promise)) delete sysDetail[id];   // bodies may have been scanned since
+  let r;
   try {
-    await fetch("api/search", {method: "POST", headers: {"Content-Type": "application/json"},
-                               body: JSON.stringify(formParams())});
-  } catch (err) { search = {status: "search failed: " + err.message, results: []}; render(); return; }
+    r = await apiJson("api/search", {method: "POST", headers: {"Content-Type": "application/json"},
+                                     body: JSON.stringify(formParams())});
+  } catch (err) { r = {error: err.message}; }
+  // A refused search (403 through a proxy, 400, 500) must say so, not fall back to showing the previous results.
+  if (!r || r.error) { searchRefused = true; search = {running: false, status: "search failed: " + ((r && r.error) || "no answer"), results: []}; render(); return; }
+  searchRefused = false;
+  searchWant = r.seq || 0;
   pollSearch();
 });
 pollSearch();  // show the last search's results after a reload
@@ -2088,26 +2866,33 @@ function toast(msg) {
   const t = document.getElementById("toast"); t.textContent = msg;
   t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1400);
 }
-function copyText(text) {
+function copyText(text, what = text) {   // `what`: the toast's name for it (a long text is not repeated)
   const fallback = () => {
     try {
       const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
       document.body.appendChild(ta); ta.select();
       const ok = document.execCommand("copy"); ta.remove();
-      toast(ok ? "copied " + text : "copy failed — select the name and copy it by hand");
+      toast(ok ? "copied " + what : "copy failed — select the name and copy it by hand");
     } catch { toast("copy failed — select the name and copy it by hand"); }
   };
   if (navigator.clipboard && navigator.clipboard.writeText)
-    navigator.clipboard.writeText(text).then(() => toast("copied " + text), fallback);
+    navigator.clipboard.writeText(text).then(() => toast("copied " + what), fallback);
   else fallback();  // http:// from another machine is not a secure context
 }
 document.addEventListener("click", e => {
+  if (e.target.closest("[data-lossclose]")) { e.preventDefault(); lossCard = null; return renderStrip(); }
+  if (e.target.closest("[data-lossfirsts]")) {   // the systems to rescan: My firsts with the lost ones shown
+    e.preventDefault(); fShowLost.checked = true; store.set("fShowLost", true);
+    return document.querySelector('[data-view="firsts"]').click();
+  }
   const cell = e.target.closest("#rows td.bodies[data-id]");
   if (cell) return cell.dataset.id === pinnedSystem ? unpinSystem() : pinSystem(cell.dataset.id);  // same system again closes it
   const bm = e.target.closest("[data-bm]");
   if (bm) return openBookmark(bm.dataset.bm, bm.dataset.name);
-  const td = e.target.closest("td.name, #here .copy"); if (!td) return;
-  copyText(td.dataset.name);
+  // every "click to copy" name outside the views that handle their own (.name spans in Log, Bio, History,
+  // Ledger and Materials); an element without data-name copies nothing (it used to copy "undefined")
+  const el = e.target.closest("td.name[data-name], .copy[data-name], #topRows .name[data-name]"); if (!el) return;
+  copyText(el.dataset.name);
 });
 
 const pop = document.getElementById("pop");
@@ -2150,7 +2935,7 @@ function popHtml(s) {
   h += curiosityList(s.curiosity_list, true);
   if (s.bio_potential) h += `<div class="sec"><div class="lbl">🧬 Exobiology</div><div>up to ${credits(s.bio_potential)} cr across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"} <span class="unk">(spawn-rule estimate; the Here view shows which genera)</span></div></div>`;
   const d = s.detail;
-  if (!d) return h + `<div class="sec unk">Loading ring, belt and signal details…</div>`;
+  if (!d) return h + `<div class="sec unk">${s.no_dump ? "Spansh has no ring, belt or signal details for this system." : "Loading ring, belt and signal details…"}</div>`;
   h += list("Ringed planets", d.ringed_types) + ringList(d) + hotspotList(d) + list("Asteroid belts", d.belts);
   const flags = [
     d.ringed_stars && `${d.ringed_stars} ringed star${d.ringed_stars > 1 ? "s" : ""}`,
@@ -2177,7 +2962,7 @@ function showPop(td, x, y) {
     return;
   }
   if (td.dataset.sbodypop !== undefined) {   // a body in a search result: its system may still be loading
-    const key = "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop, sd = sysDetail[td.dataset.sys];
+    const key = "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop, sd = sysCached(td.dataset.sys);
     popId = key;
     if (!sd || sd instanceof Promise) {
       pop.innerHTML = `<div class="unk">loading ${esc(td.dataset.sbodypop)}…</div>`; pop.style.display = "block"; placePop(x, y);
@@ -2186,13 +2971,13 @@ function showPop(td, x, y) {
     }
     const b = sd.bodies && sd.bodies.find(q => q.name === td.dataset.sbodypop);
     if (!b) { pop.innerHTML = `<div class="unk">${esc(sd.error || "no details known for this body")}</div>`; pop.style.display = "block"; placePop(x, y); return; }
-    pop.innerHTML = bodyPopHtml(b).replace("click for everything known", "click for the details panel"); pop.style.display = "block"; placePop(x, y);
+    pop.innerHTML = bodyPopHtml(b, sd.region).replace("click for everything known", "click for the details panel"); pop.style.display = "block"; placePop(x, y);
     return;
   }
   if (td.dataset.bodypop !== undefined) {
     const b = hereData && hereData.bodies && hereData.bodies.find(x => x.name === td.dataset.bodypop);
     if (!b) return hidePop();
-    popId = "body" + td.dataset.bodypop; pop.innerHTML = bodyPopHtml(b); pop.style.display = "block"; placePop(x, y);
+    popId = "body" + td.dataset.bodypop; pop.innerHTML = bodyPopHtml(b, hereData.region); pop.style.display = "block"; placePop(x, y);
     return;
   }
   if (td.dataset.bm !== undefined) {
@@ -2204,7 +2989,7 @@ function showPop(td, x, y) {
     pop.style.display = "block"; placePop(x, y);
     return;
   }
-  const s = data && data.systems.find(s => String(s.id64) === td.dataset.id);
+  const s = data && data.systems.find(s => s.id === td.dataset.id);
   if (!s) return hidePop();
   popId = td.dataset.id;
   pop.innerHTML = popHtml(s); pop.style.display = "block"; placePop(x, y);
@@ -2297,6 +3082,9 @@ function drawSoundBtn() {
   const blocked = soundOn && actx && actx.state !== "running";
   soundBtn.textContent = soundOn ? "🔊" : "🔇";
   soundBtn.title = !soundOn ? "sounds off — click to turn on" : blocked ? "sounds on, but the browser needs one click on the page to allow audio" : "sounds on — click to turn off";
+  // a silent second window should not look broken
+  if (!speakerHere()) soundBtn.title += speakMode() === "never" ? " (this browser never plays alert sounds: see the alerts dialog)" : " (another window is speaking)";
+  soundBtn.style.opacity = speakerHere() ? "" : .45;
   soundBtn.classList.toggle("on", !!soundOn);
   soundBtn.classList.toggle("blocked", !!blocked);
 }
@@ -2308,7 +3096,7 @@ if (soundOn === null) soundOn = true;  // provisional until the payload's defaul
 if (soundOn) audio();
 drawSoundBtn();
 
-let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierTs = null, lastCodexTs = null, lastDockTs = null;
+let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierMoved = null, lastCodexTs = null, lastDockTs = null;
 let lastMomentSeq = 0, lastSaleTs = null, lastPosId, lastLowFlag = false, hullLatch = 0, saleBanner = null;
 const hullBand = h => !h || h.pct == null ? 0 : h.pct < 25 ? 2 : h.pct < 50 ? 1 : 0;
 // "nearest KNOWN scoopable": out in the black most systems are unreported and most stars are scoopable,
@@ -2327,16 +3115,18 @@ function onData() {
   if (brEl) brEl.textContent = br
     ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
     : "Spawn rules missing (bio_rules.json) and could not be downloaded: bodies get no species guesses. Run python3 ed_bio.py --update-rules once online.";
-  if (data.run_id !== runId) {  // first payload, or the server was restarted: no sounds for old state
+  // first payload, the server was restarted, or this window slept (see poll): no sounds for old state
+  if (data.run_id !== runId || woke) {
+    woke = false;
     runId = data.run_id; lastSeq = data.target ? data.target.seq : 0;
     const df = data.defaults || {};
     showBioMin();
-    showHl(); showMaxBonus();
+    showHl(); showMaxBonus(); fillThresholds(); showHighG();
     if (store.get("sound", null) === null && df.sounds != null) { soundOn = !!df.sounds; drawSoundBtn(); }
     lastArrival = data.arrival ? data.arrival.seq : 0;
-    lastUnsoldLevel = unsoldLevel(data.unsold); lastCarrierTs = data.carrier && data.carrier.ts;
+    lastUnsoldLevel = unsoldLevel(data.unsold); lastCarrierMoved = data.carrier && data.carrier.moved_ts;
     lastCodexTs = (data.codex_recent || [])[0] && data.codex_recent[0].ts;
-    lastDockTs = data.docked && data.docked.ts;
+    lastDockTs = data.docked ? data.docked.ts : data.docked_ts ?? null;   // docked_ts: a dock Status.json hides for now
     lastMomentSeq = Math.max(0, ...(data.moments || []).map(m => m.seq));
     lastSaleTs = data.last_sale && data.last_sale.ts;
     lastPosId = data.position && data.position.id64; lastLowFlag = !!(data.fuel && data.fuel.low_flag);
@@ -2344,17 +3134,17 @@ function onData() {
     clearAnnounced = data.sampling && data.sampling.clear ? `${data.sampling.species}|${data.sampling.samples}` : null;
     return;
   }
-  const dk = data.docked, dl = unsoldLevel(data.unsold);
-  if (dk && dk.ts !== lastDockTs) {   // just docked: the moment to sell, if it is worth it
-    if (lastDockTs !== undefined && (dk.has_uc || dk.has_vista) && dl && dl !== "ok")
-      alertOut("sell", `Docked at ${dk.station} — ${credits(data.unsold.total)} cr to sell`, dk.has_uc ? "Universal Cartographics is here." : "Vista Genomics is here.",
-               {say: () => line("docked_sell", {value: credits(data.unsold.total), station: dk.station}, `Docked. ${credits(data.unsold.total)} credits to sell here.`)});
+  // Just docked: the moment to sell, if what this station buys is worth it. Each Docked event has its own ts,
+  // so walking about the station (or a Status.json that briefly reads 'not docked') never re-announces it.
+  const dk = data.docked, canSell = sellableHere(dk, data.unsold);
+  // the dock alert below says the haul: a login greeting on this same payload leaves the amount to it
+  const dockSays = !!(dk && dk.ts !== lastDockTs && lastDockTs !== undefined && canSell && canSell.level !== "ok");
+  if (dk && dk.ts !== lastDockTs) {
+    if (lastDockTs !== undefined && canSell && canSell.level !== "ok")
+      alertOut("sell", `Docked at ${dk.station} — ${credits(canSell.value)} cr to sell`, dk.has_uc && dk.has_vista ? "Universal Cartographics and Vista Genomics are here."
+               : dk.has_uc ? "Universal Cartographics is here." : "Vista Genomics is here.",
+               {say: () => line("docked_sell", {value: credits(canSell.value), station: dk.station}, `Docked. ${credits(canSell.value)} credits to sell here.`)});
     lastDockTs = dk.ts;
-  } else if (!dk) {
-    if (lastDockTs && dl === "urgent")   // undocked with a red-level haul still aboard
-      alertOut("sell", `Undocked with ${credits(data.unsold.total)} cr still aboard`, "Nothing was sold.",
-               {sound: "alert", say: () => line("undocked_unsold", {value: credits(data.unsold.total)})});
-    lastDockTs = null;
   }
   const sale = data.last_sale;
   if (sale && sale.ts !== lastSaleTs) {   // what did I bank, and is half of it still aboard?
@@ -2372,105 +3162,219 @@ function onData() {
   if (pos && pos.id64 !== lastPosId) {
     const hs = data.here_star;
     if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && f0.pct < 30 && hs && !/^[OBAFGKM](_|$)/.test(hs))
-      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`)});
+      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {tag: "fuel_star", say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`)});
     lastPosId = pos.id64;
+    // back in a system: what you were warned about leaving its bodies last time is unfinished news again
+    const here = posId();
+    for (const k of [...leftWarned.keys()]) if (k.startsWith(here + "|")) leftWarned.delete(k);
   }
-  const low = !!(f0 && f0.low_flag);
-  if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {say: () => line("fuel_low", {pct: f0 && f0.pct}, "Fuel low.")});
-  lastLowFlag = low;
+  // the LowFuel flag is only about the ship while you sit in it: on foot or in the SRV it reads clear, and
+  // boarding again would re-announce it, so those payloads keep the last reading
+  if (!(f0 && f0.live && f0.in_ship === false)) {
+    const low = !!(f0 && f0.low_flag);
+    if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {tag: "fuel_low", say: () => line("fuel_low", {pct: f0 && f0.pct}, "Fuel low.")});
+    lastLowFlag = low;
+  }
   // moments: valuable finds (priced by the server, judged against your highlight levels), heat, interdiction
   for (const m of (data.moments || []).filter(m => m.seq > lastMomentSeq)) {
-    if (m.kind === "scan") {
-      const special = (m.notable || m.terraformable) && m.first_discovered;
-      if (special || (m.base_value != null && m.base_value >= hlLevel("body"))) {
-        const what = [m.subtype, m.terraformable && "terraformable", m.first_discovered && "undiscovered"].filter(Boolean).join(", ");
-        alertOut("find", `${m.body}: ${what}`, m.base_value ? `${credits(m.base_value)} cr scanned and mapped` : "", {say: () => line("find_body", {what, body: m.body, value: m.base_value ? credits(m.base_value) : ""}, `${what}, ${m.body}.`)});
-        toast(`✦ ${m.body}: ${what}`);
-      }
-    } else if (m.kind === "bio" && m.bio_value != null && m.bio_value >= hlLevel("bio")) {
-      alertOut("find", `Bio on ${m.body}: up to ${credits(m.bio_value)} cr`, `${m.signals} signal${m.signals === 1 ? "" : "s"}`,
-               {say: () => line("find_bio", {body: m.body, value: credits(m.bio_value)}, `Biology on ${m.body}, worth up to ${credits(m.bio_value)} credits.`)});
-      toast(`🧬 ${m.body}: up to ${credits(m.bio_value)} cr`);
-    } else if (m.kind === "heat") alertOut("hull", "Heat damage", "", {say: () => line("heat", {}, "Heat damage.")});
-    else if (m.kind === "interdicted") alertOut("hull", `Interdicted${m.by ? " by " + m.by : ""}`, m.submitted ? "you submitted" : "",
-                                                {say: () => line("interdicted", {by: m.by || "someone"}, "Interdicted.")});
-    else if (m.kind === "game_start") alertOut("game", `Game loaded${m.cmdr ? ": CMDR " + m.cmdr : ""}`, m.ship ? `flying ${m.ship}` : "",
-                                               {say: () => line("game_start", {cmdr: m.cmdr, ship: m.ship}, "Welcome back, Commander.")});
-    else if (m.kind === "signals") {   // the FSS found signals on a body: counts only, per the two ticks
-      const b = saySignals("bio") && m.bio, g = saySignals("geo") && m.geo;
-      const n = (c, what) => `${c} ${what} Signal${c === 1 ? "" : "s"}`;
-      const text = b && g ? `${m.bio} Biological and ${m.geo} Geological Signals found on body ${m.body}.`
-        : b ? `${n(m.bio, "Biological")} on body ${m.body}.` : g ? `${n(m.geo, "Geological")} on body ${m.body}.` : "";
-      if (text && speechOn) speak(text);
-    }
-    else if (m.kind === "honk") {
-      const n = m.bodies, count = m.all_found ? "all bodies found" : n != null ? `${n} bod${n === 1 ? "y" : "ies"}` : "";
-      alertOut("honk", m.ok ? `Honked ${m.system}${count ? " · " + count : ""}` : `Auto honk failed in ${m.system}`, m.why || "",
-               {say: !m.ok ? "Honk failed. Is the discovery scanner on primary fire?"
-                     : !honkAnnounce() ? "System honked."
-                     : m.all_found ? "System scan complete, and all bodies were found."
-                     : n != null ? `System Scan Completed, ${n} Bod${n === 1 ? "y" : "ies"} discovered.` : "System scan completed."});
-    }
-    else if (m.kind === "fsd_charge") {
-      const scoop = /^[OBAFGKM](_|$)/.test(m.star_class || "");
-      alertOut("jump", `Jumping to ${m.system}`, m.star_class ? `${spokenStar(m.star_class)}${scoop ? ", scoopable" : ", not scoopable"}` : "",
-               {say: `Frame Shift Drive charging to jump to ${m.system}.${scoop ? " This star is scoopable." : ""}`});
-    }
-    else if (m.kind === "game_exit") alertOut("game", "Game closed", "", {say: () => line("game_exit", {}, "Game closed. Fly safe, Commander.")});
+    // first: a moment whose handler throws (a bad setting, an odd field) is not retried on every payload, and
+    // the moments after it still get their turn
     lastMomentSeq = Math.max(lastMomentSeq, m.seq);
+    try {
+      if (m.kind === "scan") {
+        const special = (m.notable || m.terraformable) && m.first_discovered;
+        if (special || (m.base_value != null && m.base_value >= hlLevel("body"))) {
+          const what = [m.subtype, m.terraformable && "terraformable", m.first_discovered && "undiscovered"].filter(Boolean).join(", ");
+          alertOut("find", `${m.body}: ${what}`, m.base_value ? `${credits(m.base_value)} cr scanned and mapped` : "", {say: () => line("find_body", {what, body: m.body, value: m.base_value ? credits(m.base_value) : ""}, `${what}, ${m.body}.`)});
+          toast(`✦ ${m.body}: ${what}`);
+        }
+      } else if (m.kind === "bio" && m.bio_value != null && m.bio_value >= hlLevel("bio")) {
+        alertOut("find", `Bio on ${m.body}: up to ${credits(m.bio_value)} cr`, `${m.signals} signal${m.signals === 1 ? "" : "s"}`,
+                 {say: () => line("find_bio", {body: m.body, value: credits(m.bio_value)}, `Biology on ${m.body}, worth up to ${credits(m.bio_value)} credits.`)});
+        toast(`🧬 ${m.body}: up to ${credits(m.bio_value)} cr`);
+      } else if (m.kind === "heat") alertOut("hull", "Heat damage", "", {tag: "heat", say: () => line("heat", {}, "Heat damage.")});
+      else if (m.kind === "interdicted") alertOut("hull", `Interdicted${m.by ? " by " + m.by : ""}`, m.submitted ? "you submitted" : "",
+                                                  {tag: "interdicted", say: () => line("interdicted", {by: m.by || "someone"}, "Interdicted.")});
+      else if (m.kind === "game_start") { const ship = m.ship ? shipLabel(m.ship) : "";
+        if (speechShift()) pickShift();
+        // after a break of over two hours (the server says how long) the greeting carries what is at stake
+        const wb = m.away ? welcomeText(m.away, dockSays) : "";
+        alertOut("game", `Game loaded${m.cmdr ? ": CMDR " + m.cmdr : ""}`, [ship ? `flying ${ship}` : "", wb].filter(Boolean).join(" · "),
+                 {say: () => wb ? line("welcome_back", {cmdr: m.cmdr, ship, text: wb}, `Welcome back, Commander. ${wb}`)
+                                : line("game_start", {cmdr: m.cmdr, ship}, "Welcome back, Commander.")}); }
+      else if (m.kind === "loss") {   // after the rebuy: what went down with the ship, and the nearest place to rescan
+        const text = lossText(m);
+        lossCard = {m, text, until: Date.now() + 30 * 60000};
+        alertOut("loss", m.ship ? `Ship lost with ${credits(m.value)} cr of data` : `Samples lost: ${credits(m.bio)} cr`, text,
+                 {tag: "ship_lost", say: () => m.ship ? line("ship_lost", {text}, `Rebuy complete. ${text}`) : `Your samples died with you. ${text}`});
+        renderStrip();
+      }
+      else if (m.kind === "signals") {   // the FSS found signals on a body: counts only, per the two ticks
+        const b = saySignals("bio") && m.bio, g = saySignals("geo") && m.geo;
+        const n = (c, what) => `${c} ${what} Signal${c === 1 ? "" : "s"}`;
+        const text = b && g ? `${m.bio} Biological and ${m.geo} Geological Signals found on body ${m.body}.`
+          : b ? `${n(m.bio, "Biological")} on body ${m.body}.` : g ? `${n(m.geo, "Geological")} on body ${m.body}.` : "";
+        if (text && speechOn && speakerHere()) speak(text, {kind: "signals"});
+      }
+      else if (m.kind === "honk") {
+        const n = m.bodies, count = m.all_found ? "all bodies found" : n != null ? `${n} bod${n === 1 ? "y" : "ies"}` : "";
+        // a honk that worked also gave the arrival briefing, which says the body count: one summary, not two
+        alertOut("honk", m.ok ? `Honked ${m.system}${count ? " · " + count : ""}` : `Auto honk failed in ${m.system}`, m.why || "",
+                 {quiet: !!(m.ok && m.brief && alertSpeak.brief), say: !m.ok ? (/gave up/.test(m.why || "") ? (/still in the jump/.test(m.why) ? "Honk skipped." : "Honk skipped. The map stayed open.")   // never pressed: "gave up waiting: the galaxy map is open"
+                                : /map|FSS|panel|orrery|codex|scanner is open|services/.test(m.why || "") ? "Honk failed. A map or panel was open."
+                                : "Honk failed. Is the discovery scanner on primary fire?")
+                       : !honkAnnounce() ? "System honked."
+                       : m.all_found ? "System scan complete, and all bodies were found."
+                       : n != null ? `System Scan Completed, ${n} Bod${n === 1 ? "y" : "ies"} discovered.` : "System scan completed."});
+      }
+      else if (m.kind === "fsd_charge") {
+        const scoop = /^[OBAFGKM](_|$)/.test(m.star_class || "");
+        const hz = sayHazard() ? hazardSaid(m.star_class) : "";   // a neutron star, white dwarf or black hole ahead
+        clearForJump();
+        alertOut("jump", `Jumping to ${m.system}`, m.star_class ? `${spokenStar(m.star_class)}${scoop ? ", scoopable" : ", not scoopable"}` : "",
+                 {tag: "fsd_charge", say: `Frame Shift Drive charging to jump to ${m.system}.${scoop ? " This star is scoopable." : ""}${hz ? " " + hz : ""}`});
+      }
+      else if (m.kind === "arrival_brief") {   // after the honk (or 12 s after arriving without one): one sentence
+        const text = arrivalBriefText(m);
+        if (text) alertOut("brief", `${m.system_name || "Arrived"}: ${text.split(". ")[0].replace(/\.$/, "")}`, text,
+                           {tag: "arrival_brief", say: () => line("arrival_brief", {text}, text)});
+      }
+      else if (m.kind === "fss_done" && m.leaving) {   // every body found in the FSS: go here, or move on
+        const count = m.count || m.leaving.body_count, text = worthSaying(m.leaving);
+        alertOut("fss", `All ${count ? nBodies(count) + " " : "bodies "}found`, text ? `worth it: ${text}` : "nothing worth staying for",
+                 {tag: "fss_done", say: () => text ? line("fss_done", {count, text}, `All ${count || ""} found. Worth it: ${text}.`)
+                                                   : line("fss_nothing", {count}, `All ${count || ""} found. Nothing worth staying for.`)});
+      }
+      else if (m.kind === "fss_unfinished" && m.left) {
+        alertOut("fss", `FSS closed: ${nBodies(m.left)} still hidden`, m.system_name || "",
+                 {tag: "fss_unfinished", say: () => line("fss_unfinished", {left: nBodies(m.left)}, `${nBodies(m.left)} still unresolved.`)});
+      }
+      else if (m.kind === "left_body") {   // back to supercruise with sampling unfinished
+        const text = leftBodyText(m);
+        // only a warning that reached you (spoken or notified) spares the leaving alert, and only what it named
+        if (text && alertOut("sampling", `Left ${m.body} unfinished`, text, {say: () => line("left_body", {body: m.body, text}, `Leaving ${m.body} unfinished: ${text}.`)})) {
+          // once you touched down the warning had its chance at every untouched genus (it leaves out the cheap
+          // ones on purpose): the whole body counts as covered, or a 1M Bacterium would bring the body back in the
+          // system's leaving alert with the whole body's value
+          const named = new Set(Object.keys(m.partial || {}));
+          if (m.touched) for (const u of m.untouched || []) named.add(u.genus);
+          const key = `${m.system}|${m.body}`, had = leftWarned.get(key);
+          leftWarned.set(key, {genera: new Set([...named, ...(had ? had.genera : [])]), unidentified: m.touched ? m.unidentified || 0 : had ? had.unidentified : null});
+        }
+      }
+      else if (m.kind === "bio_done" && m.species) {   // the third sample: what it paid and what is left here
+        const left = bioLeftText(m), value = m.value ? credits(m.value) : "";
+        alertOut("sampling", `${m.species} complete${value ? ` · ${value} cr` : ""}`, left ? `left on ${m.body}: ${left}` : `the last one on ${m.body}`,
+                 {sound: "upbeat", say: () => left ? line("bio_done_more", {species: m.species, value, left}, `${m.species} complete. Left here: ${left}.`)
+                                                   : line("bio_done_last", {species: m.species, value}, `${m.species} complete. That was the last one here.`)});
+      }
+      else if (m.kind === "approach") {   // orbital cruise at a body: the stakes of a high-g landing, and (if ticked) its bio
+        const hg = highGStakes(m), bt = bodyBriefText(m);
+        const brief = () => line("body_brief", {body: m.body, text: bt}, `${m.body}: ${bt}.`);
+        // with both spoken, one utterance: the bio briefing leads into the high-g warning. Otherwise each alert
+        // follows its own ticks (the approach alert off must not swallow the body briefing).
+        const merge = !!(hg && bt && alertSpeak.approach && alertSpeak.bodybrief);
+        if (bt) alertOut("bodybrief", `Approaching ${m.body}`, bt, {tag: "body_brief", say: brief, quiet: merge});
+        if (hg)
+          alertOut("approach", `${m.body}: ${hg.gravity} g with ${hg.value} cr aboard`, hg.rebuys ? `${hg.rebuys}× your rebuy · land gently` : "land gently",
+                   {tag: "high_g", say: () => [merge ? brief() : "", line("high_g", hg, `${hg.gravity} g. ${hg.value} credits aboard. Land gently.`)].filter(Boolean).join(" ")});
+      }
+      else if (m.kind === "scoop_end") {   // Status.json: the scoop has ended (a jump cutting it short says nothing)
+        if (m.full) alertOut("scoop", "Tank full", m.jumps != null ? `${m.jumps} jumps at max range` : "",
+                             {tag: "scoop", say: () => line("tank_full", {jumps: m.jumps}, "Tank full.")});
+        else if (m.pct < 90) alertOut("scoopstop", `Scooping stopped at ${m.pct}%`, "",
+                                      {tag: "scoop", say: () => line("scoop_stopped", {pct: m.pct}, `Scooping stopped at ${m.pct} percent.`)});
+      }
+      else if (m.kind === "supercharged") {
+        const mult = `${Number(m.mult) || 4} times`;
+        alertOut("supercharge", `FSD supercharged ×${Number(m.mult) || 4}`, "the next jump's range", {say: () => line("supercharged", {mult}, `Frame Shift Drive supercharged, ${mult} range.`)});
+      }
+      else if (m.kind === "undocked" && unsoldLevel(data.unsold) === "urgent") {   // the journal's Undocked, with a red-level haul aboard
+        const u = data.unsold, sold = data.last_sale && m.dock_ts && data.last_sale.ts >= m.dock_ts;
+        // "nothing was sold" only where you could have: a carrier or settlement without UC or Vista (a fuel
+        // stop) says nothing, and one with only one of them counts only what it buys
+        const could = sellableHere({has_uc: m.has_uc, has_vista: m.has_vista}, u);
+        if (!sold) { if (could && could.level === "urgent") alertOut("sell", `Undocked with ${credits(u.total)} cr still aboard`, "Nothing was sold.",
+                                                                  {sound: "alert", say: () => line("undocked_unsold", {value: credits(u.total)})}); }
+        else alertOut("sell", `Undocked with ${credits(u.total)} cr still aboard`, `Still to sell: ${leftToSell(u)}.`,   // part of it was sold here
+                      {sound: "alert", say: () => line("unsold_urgent", {value: credits(u.total)})});
+      }
+      else if (m.kind === "game_exit") {   // a session of three jumps or more gets its recap in place of the plain goodbye
+        const recap = recapText(m.session);
+        alertOut("game", "Game closed", recap, {say: () => recap ? line("session_recap", {text: recap}, `Session over: ${recap}.`)
+                                                                  : line("game_exit", {}, "Game closed. Fly safe, Commander.")});
+      }
+    } catch (e) { console.error(e); pageError = `alert ${m.kind}: ${e && e.message || e}`; }
   }
   // sample spacing: say so once when you are far enough from every earlier sample of the species
   const sm = data.sampling, smKey = sm && `${sm.species}|${sm.samples}`;
   if (sm && sm.clear && smKey !== clearAnnounced) {
     clearAnnounced = smKey;
-    alertOut("find", `Clear to sample ${sm.genus}`, `${sm.nearest} m from the nearest sample (${sm.need} m needed)`, {sound: "upbeat", say: () => line("sample_clear", {genus: sm.genus}, `Clear to sample ${sm.genus}.`)});
+    alertOut("find", `Clear to sample ${sm.genus}`, `${sm.nearest} m from the nearest sample (${sm.need} m needed)`, {sound: "upbeat", tag: "sample_clear",
+             still: () => { const s = data && data.sampling; return !!s && `${s.species}|${s.samples}` === smKey; }, say: () => line("sample_clear", {genus: sm.genus}, `Clear to sample ${sm.genus}.`)});
   }
   // hull: once below half, once below a quarter (re-armed by a repair)
   const band = hullBand(data.hull);
   if (band > hullLatch) {
-    const reps = data.materials && data.materials.repairs;
-    alertOut("hull", `Hull ${data.hull.pct}%`, reps ? `${reps} basic repairs can be synthesised` : "", {say: () => line("hull", {pct: data.hull.pct}, `Hull at ${data.hull.pct} percent.`)});
+    alertOut("hull", `Hull ${data.hull.pct}%`, "", {tag: "hull", say: () => line("hull", {pct: data.hull.pct}, `Hull at ${data.hull.pct} percent.`)});
   }
   hullLatch = band;
   const t = data.target;
   if (t && t.seq !== lastSeq) {
-    if (t.fresh && soundOn && t.sound && alertSound.discovery) play(t.sound);   // the targeting sound
+    if (t.fresh && soundOn && t.sound && alertSound.discovery && speakerHere()) play(t.sound);   // the targeting sound
     if (t.fresh && t.status === "unreported")   // the fanfare above is the sound; this adds the notification (never
                                                 // spoken: arriving in an undiscovered system is announced instead)
       alertOut("discovery", "New discovery targeted", `${t.name} is not in Spansh or EDSM`, {sound: null});
-    const l = worthLeavingFor(t.leaving);
+    // bio you were already warned about when you left its body is not said twice (the rest of that body is)
+    const pid = posId();
+    const tl = t.leaving && {...t.leaving, bio_pending: (t.leaving.bio_pending || []).map(b => unwarned(pid, b)).filter(Boolean)};
+    const l = worthLeavingFor(tl);
     if (t.fresh && l && !l.clean) {
-      const text = leavingText(t.leaving).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, "");
-      alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: () => line("leaving", {text}, `Leaving with unfinished work: ${text}`)});
+      // the notification lists everything; the voice the three most valuable, then "and N more"
+      const text = leavingText(tl).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, ""), said = leavingSaid(tl);
+      alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: () => line("leaving", {text: said}, `Leaving with unfinished work: ${said}`)});
     }
     const f = data.fuel;
     if (t.fresh && f && f.live && f.pct != null && f.pct < 30 && t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class))
       alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
-               {delay: 800, say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
+               {delay: 800, tag: "fuel_target", say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
     lastSeq = t.seq;
   }
   const a = data.arrival;
   if (a && a.seq !== lastArrival) {
+    if (speechShift()) pickShift();   // a new system, a new personality on shift (before anything here is said)
+    // the discovery streak: said once per streak, when a run reaches its threshold (a run grows by one per
+    // arrival, so "equal" happens once); the new-streak line takes the place of "undiscovered", not after it
+    const sk = a.streak || {}, cfg = streakCfg();
+    const newRun = cfg.new > 1 && a.verdict === "new" && sk.new === cfg.new;
+    const knownRun = cfg.known > 1 && sk.known === cfg.known && ["complete", "known"].includes(a.verdict);
     if (a.undiscovered && a.first_visit)   // nobody has been here before you (your own unsold find does not count twice)
-      alertOut("arrival", `${a.name}: ${a.wrong ? "actually undiscovered" : "undiscovered"}`,
+      alertOut("arrival", `${a.name}: ${a.wrong ? "actually undiscovered" : "undiscovered"}${newRun ? ` · ${sk.new} in a row` : ""}`,
                a.wrong ? "the fanfare was deserved after all" : "you are the first here",
-               {sound: a.sound || null, say: () => line("arrival_undiscovered", {system: a.name}, `${a.name} is undiscovered. You are the first here.`)});
+               {sound: a.sound || null, say: () => newRun ? line("streak_new", {count: sk.new}, `${sk.new} undiscovered systems in a row.`)
+                                                          : line("arrival_undiscovered", {system: a.name}, `${a.name} is undiscovered. You are the first here.`)});
     else if (a.wrong && !a.undiscovered)   // correct a wrong fanfare out loud
       alertOut("arrival", `${a.name}: already discovered`, "someone was here before you",
                {sound: a.sound || null, say: () => line("arrival_discovered", {system: a.name}, `${a.name}: already discovered`)});
+    else if (knownRun)
+      alertOut("arrival", `${sk.known} known systems in a row`, "maybe change heading", {sound: null,
+               say: () => line("streak_known", {count: sk.known}, `${sk.known} known systems in a row. Maybe change heading.`)});
     lastArrival = a.seq;
   }
   const u = data.unsold, ulvl = unsoldLevel(u);
+  const rank = {ok: 0, warn: 1, urgent: 2};
   if (ulvl && ulvl !== lastUnsoldLevel) {
-    if (lastUnsoldLevel && ulvl !== "ok") alertOut("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.",
+    if (lastUnsoldLevel && rank[ulvl] > rank[lastUnsoldLevel]) alertOut("unsold", `Unsold data: ${credits(u.total)} cr on board`, ulvl === "urgent" ? "Go sell." : "Worth selling soon.",
                                                    {say: () => line(ulvl === "urgent" ? "unsold_urgent" : "unsold_warn", {value: credits(u.total)})});
     lastUnsoldLevel = ulvl;
   }
+  // the carrier arrived somewhere new: moved_ts, not ts (which also changes at every login and every dock at it)
   const c = data.carrier;
-  if (c && c.ts !== lastCarrierTs) {
-    if (lastCarrierTs) { alertOut("carrier", `${c.name} is at ${c.system}`, c.distance != null ? `${c.distance} ly from you` : "",
-                                  {say: () => line("carrier_arrived", {carrier: c.name, system: c.system})}); toast(`🚢 ${c.name} arrived at ${c.system}`); }
-    lastCarrierTs = c.ts;
+  if (c && c.moved_ts !== lastCarrierMoved) {
+    if (lastCarrierMoved) { alertOut("carrier", `${c.name} ${c.assumed ? "should now be" : "is"} at ${c.system}`,
+                                     (c.distance != null ? `${c.distance} ly from you` : "") + (c.assumed ? (c.distance != null ? " · " : "") + "the booked jump (not yet confirmed)" : ""),
+                                     {say: () => line("carrier_arrived", {carrier: c.name, system: c.system})}); toast(`🚢 ${c.name} arrived at ${c.system}`); }
+    lastCarrierMoved = c.moved_ts;
   }
   const k = (data.codex_recent || [])[0];
   if (k && k.ts !== lastCodexTs) {
@@ -2478,6 +3382,24 @@ function onData() {
     lastCodexTs = k.ts;
   }
 }
+// ---- the spoken-line transcript, drawn only while its section of the alerts dialog is open ----
+const fateGroup = f => !f ? "wait" : /^said/.test(f) ? "said" : /^(cut|timed)/.test(f) ? "cut"
+  : /^(dropped|replaced|refused|not said|nothing)/.test(f) ? "dropped" : "silent";
+const hms = t => new Date(t).toTimeString().slice(0, 8);
+const speechLogFacts = e => [e.kind + (e.tag ? "/" + e.tag : ""), e.style, e.voice, e.engine,
+  e.waited != null ? `waited ${(e.waited / 1000).toFixed(1)} s` : "", e.took != null && /^said/.test(e.fate || "") ? `${(e.took / 1000).toFixed(1)} s long` : ""].filter(Boolean);
+function drawSpeechLog() {
+  const box = document.getElementById("speechLogBox"), dlg = document.getElementById("alertDialog");
+  if (!box || !box.open || !dlg || !dlg.open) return;
+  document.getElementById("speechLog").innerHTML = speechLog.length ? [...speechLog].reverse().map(e =>
+    `<div class="slog ${fateGroup(e.fate)}"><span class="unk">${hms(e.t)}</span> <b>${esc(e.fate || "waiting")}</b> <span class="unk">· ${esc(speechLogFacts(e).join(" · "))}</span><br>“${esc(e.words)}”</div>`).join("")
+    : `<div class="unk">Nothing yet in this window since it opened.</div>`;
+}
+let speechLogTimer = null;
+function drawSpeechLogSoon() { if (!speechLogTimer) speechLogTimer = setTimeout(() => { speechLogTimer = null; drawSpeechLog(); }, 200); }
+const speechLogText = () => [...speechLog].reverse().map(e => `${hms(e.t)}  ${e.fate || "waiting"}  [${speechLogFacts(e).join(", ")}]  ${e.words}`).join("\n");
+document.getElementById("speechLogBox").addEventListener("toggle", drawSpeechLog);
+document.getElementById("speechLogCopy").onclick = () => copyText(speechLogText() || "(nothing yet)", `${speechLog.length} lines`);
 // ---- alert settings ----
 const alertDialog = document.getElementById("alertDialog");
 document.getElementById("alertOpts").innerHTML = ALERTS.map(([k, label, snd]) =>
@@ -2492,33 +3414,53 @@ for (const [attr, cfg, key] of [["asound", alertSound, "alertSound"], ["aspeak",
 // spoken alerts: header toggle, voice picker, a test button
 const speechBtn = document.getElementById("speechBtn");
 function drawSpeechBtn() {
-  speechBtn.classList.toggle("on", !!speechOn); speechBtn.style.opacity = speechOn ? 1 : .45;
+  speechBtn.classList.toggle("on", !!speechOn); speechBtn.style.opacity = speechOn && speakerHere() ? 1 : .45;
   const t = data && data.tts;
   speechBtn.title = (speechOn ? "spoken alerts on" : "spoken alerts off") + " — " +
-    (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see ed_tts.py)");
+    (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see ed_tts.py)") +
+    (speakerHere() ? "" : speakMode() === "never" ? " — this browser never speaks (see the alerts dialog)" : " — another window is speaking");
 }
-speechBtn.onclick = () => { speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn(); if (speechOn) speak(line("speech_on", {}, "Spoken alerts on.")); };
+// "This screen speaks": the setting, whether this window is the one, and a way to take over
+function drawSpeaker() {
+  const sel = document.getElementById("speakMode"), locks = !!(navigator.locks && navigator.locks.request);
+  if (document.activeElement !== sel) sel.value = speakMode();
+  document.getElementById("speakerStatus").textContent = speakMode() !== "auto" ? ""
+    : !locks ? "(this browser cannot tell its windows apart, so every window speaks)"
+    : isSpeaker ? "this window is the one speaking" : "another window is speaking";
+  document.getElementById("speakerClaim").hidden = !(locks && speakMode() === "auto" && !isSpeaker);
+  if (!speakerHere()) hushSpeech();   // another window took over, or this one was set to never speak
+  drawSpeechBtn(); drawSoundBtn();
+}
+speechBtn.onclick = () => {
+  speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn();
+  if (speechOn) { lineStyle = null; const t = line("speech_on", {}, "Spoken alerts on."); speak(t, styleVoice(lineStyle)); }
+  else hushSpeech(true);   // off means quiet now, not after the queue has drained
+};
 // ▶ voice: a random alert in the chosen personalities, with made-up values (the words are shown too)
 document.getElementById("trySpeak").onclick = () => {
   audio();
   const keys = Object.keys(LINE_SAMPLES).filter(k => line(k, LINE_SAMPLES[k]));
   const key = keys[Math.floor(Math.random() * keys.length)] || "leaving";
+  lineStyle = null;
   const text = line(key, LINE_SAMPLES[key], "Leaving with unfinished work: A 2, a class two gas giant, plus 1.4M to map.");
-  document.getElementById("speechTried").textContent = `${key}: “${spokenText(text)}”`;
-  speak(text);
+  const sv = styleVoice(lineStyle);
+  document.getElementById("speechTried").textContent = `${key}: “${spokenText(text)}”${sv.voice ? ` (${sv.voice})` : ""}`;
+  speak(text, sv);
 };
 // personalities: one box per style in speech.json, plus profanity for the styles with swearing versions
 function drawSpeechStyles() {
   const box = document.getElementById("speechStyles"), on = speechStyles();
   const styles = Object.entries(speechLib.styles || {});
-  box.innerHTML = styles.map(([k, v]) => `<label><input type="checkbox" data-sstyle="${esc(k)}"${on.includes(k) ? " checked" : ""}> ${esc(typeof v === "string" ? v : (v && v.label) || k)}</label>`).join(" ");
+  box.innerHTML = styles.map(([k, v]) => `<label${v && v.voice ? ` title="this personality speaks in its own voice when it is installed (set in speech.json)"` : ""}><input type="checkbox" data-sstyle="${esc(k)}"${on.includes(k) ? " checked" : ""}> ${esc(typeof v === "string" ? v : (v && v.label) || k)}` +
+    `${v && typeof v.voice === "string" ? ` <span class="unk">(${esc(v.voice)}${data && data.tts && data.tts.voices && !data.tts.voices.includes(v.voice) ? ", not installed" : ""})</span>` : ""}</label>`).join(" ");
   box.querySelectorAll("[data-sstyle]").forEach(cb => cb.onchange = () => {
-    store.set("speechStyles", [...box.querySelectorAll("[data-sstyle]:checked")].map(x => x.dataset.sstyle)); drawSpeechStyles();
+    store.set("speechStyles", [...box.querySelectorAll("[data-sstyle]:checked")].map(x => x.dataset.sstyle)); shiftStyle = null; drawSpeechStyles();
   });
   const lines = Object.values(speechLib.lines || {});
   const swear = styles.map(([k]) => k).filter(k => lines.some(e => e && Array.isArray(e[k + "_profane"]) && e[k + "_profane"].length));
   if (document.activeElement !== namesBox) namesBox.value = speechNames().join(", ");
   document.getElementById("sayBio").checked = saySignals("bio"); document.getElementById("sayGeo").checked = saySignals("geo");
+  document.getElementById("sayHazard").checked = sayHazard();
   speedBox.value = speechSpeed(); speedOut.textContent = speechSpeed().toFixed(2) + "×";
   const pr = document.getElementById("speechProfanity");
   pr.checked = !!speechProfane(); pr.disabled = !swear.length;
@@ -2526,12 +3468,14 @@ function drawSpeechStyles() {
   if (document.activeElement !== pct) pct.value = speechProfanePct();
   pct.disabled = !swear.length || !speechProfane();
   document.getElementById("speechProfanityWho").textContent = swear.length ? `(${swear.join(", ")})` : "";
+  document.getElementById("speechDangerBusiness").checked = speechDangerBusiness();
+  document.getElementById("speechShift").checked = speechShift();
   const err = speechLib.error || (speechLib.problems || []).slice(0, 3).join("; ");
   document.getElementById("speechHint").innerHTML =
     (err ? `<span class="noscoop">${esc(err)}</span><br>` : "") +
     (!styles.length ? "No lines file, so alerts use plain wording." :
      !on.some(k => speechLib.styles[k]) ? "No personality ticked, so alerts use plain wording. " : "") +
-    (styles.length ? `A line is picked at random from every personality ticked. The lines live in ${esc((data && data.speech && data.speech.file) || "speech.json")} next to the script: edit it to change or add lines (or whole personalities) and the page picks the changes up on its own. Notifications keep the plain wording.` : "");
+    (styles.length ? `A line is picked at random from ${speechShift() ? "the personality on shift (drawn from those ticked at each arrival)" : "every personality ticked"}. The lines live in ${esc((data && data.speech && data.speech.file) || "speech.json")} next to the script: edit it to change or add lines (or whole personalities) and the page picks the changes up on its own. Notifications keep the plain wording.` : "");
 }
 document.getElementById("speechProfanity").onchange = e => { store.set("speechProfanity", e.target.checked); drawSpeechStyles(); };
 document.getElementById("speechProfanityPct").onchange = e => {
@@ -2542,15 +3486,25 @@ const namesBox = document.getElementById("speechNames");
 const speedBox = document.getElementById("speechSpeed"), speedOut = document.getElementById("speechSpeedOut");
 speedBox.oninput = () => { speedOut.textContent = Number(speedBox.value).toFixed(2) + "×"; };
 speedBox.onchange = () => { store.set("speechSpeed", Number(speedBox.value)); drawSpeechStyles(); };
-for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"]])
+for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"], ["sayHazard", "sayHazard"]])
   document.getElementById(id).onchange = e => store.set(key, e.target.checked);
 namesBox.onchange = () => { store.set("speechNames", namesBox.value.trim() ? namesBox.value : null); drawSpeechStyles(); };
 drawSpeechStyles();
+document.getElementById("speechDangerBusiness").onchange = e => store.set("speechDangerBusiness", e.target.checked);
+document.getElementById("speechShift").onchange = e => { store.set("speechShift", e.target.checked); shiftStyle = null; drawSpeechStyles(); };
+document.getElementById("speakMode").onchange = e => { store.set("speakMode", e.target.value); drawSpeaker(); };
+document.getElementById("speakerClaim").onclick = () => claimSpeaker(true);
+// another window changed the setting (localStorage is shared by the browser's windows)
+window.addEventListener("storage", e => { if (e.key === "speakMode") drawSpeaker(); });
+drawSpeaker();
+// a window opened at ?mode=now (the second screen) waits a moment, so a main window opened with it speaks
+if (view === "now") setTimeout(() => claimSpeaker(), 1000); else claimSpeaker();
 // auto honk: the server holds Primary Fire on arrival; this is its on/off and status
 const honkBox = document.getElementById("autoHonk"), honkSayBox = document.getElementById("autoHonkSay");
 // say the body count when an auto honk completes: per browser, the config's [autohonk] announce by default
 const honkAnnounce = () => !!(store.get("honkAnnounce", null) ?? (data && data.autohonk && data.autohonk.announce) ?? true);
 honkSayBox.onchange = () => store.set("honkAnnounce", honkSayBox.checked);
+let honkTest = null;   // the Test run this page started: {seq, done}
 function drawHonk() {
   const a = data && data.autohonk;
   honkBox.checked = !!(a && a.wanted); honkBox.disabled = !(a && a.available);
@@ -2559,14 +3513,26 @@ function drawHonk() {
   document.getElementById("autoHonkStatus").textContent = a ? a.status : "";
   document.getElementById("autoHonkKey").textContent = a ? (a.pressing || a.key) : "";
   document.getElementById("autoHonkTest").disabled = !(a && a.available);
+  // the test's outcome comes back in the payload: a failed press would otherwise end on "holding …"
+  const t = a && a.test;
+  if (honkTest && !honkTest.done && t && t.seq === honkTest.seq && ["done", "failed", "stopped"].includes(t.state)) {
+    honkTest.done = true;
+    document.getElementById("autoHonkTestMsg").textContent = t.state === "done" ? `held ${t.what}: did the scanner fire?`
+      : t.state === "failed" ? `test failed: ${t.error}` : "test stopped";
+  }
 }
 document.getElementById("autoHonkTest").onclick = async () => {
   const msg = document.getElementById("autoHonkTestMsg");
   try {
     const r = await fetch("api/autohonk/test", {method: "POST"}), j = await r.json();
     if (!r.ok) { msg.textContent = j.error || "could not test"; return; }
+    const mine = honkTest = {seq: j.seq, done: false};
     let n = j.in;
-    const tick = () => { msg.textContent = n > 0 ? `click into the game: pressing ${j.pressing} in ${n} s` : `holding ${j.pressing}…`; if (n-- > 0) setTimeout(tick, 1000); };
+    const tick = () => {
+      if (mine.done || mine !== honkTest) return;
+      msg.textContent = n > 0 ? `click into the game: pressing ${j.pressing} in ${n} s` : `holding ${j.pressing}…`;
+      if (n-- > 0) setTimeout(tick, 1000);
+    };
     tick();
   } catch { msg.textContent = "could not reach Outrider"; }
 };
@@ -2604,10 +3570,13 @@ alertDialog.querySelectorAll("[data-alert]").forEach(cb => {
     store.set("alerts", alertCfg); drawAlertsBtn();
   };
 });
-const thresholdEls = {};
+const thresholdEls = {}, thresholdFills = [];
+// the configured thresholds arrive with the first payload: filled then, when the dialog opens and on focus
+const fillThresholds = () => thresholdFills.forEach(f => f());
 for (const [id, key] of [["unsoldWarn", "warn"], ["unsoldUrgent", "urgent"]]) {
   const el = thresholdEls[id] = document.getElementById(id);
   const fill = () => { const [w, g] = unsoldThresholds(data && data.unsold); el.value = key === "warn" ? w : g; };
+  thresholdFills.push(fill);
   fill(); el.addEventListener("focus", fill);
   el.onchange = () => {
     const v = Number(el.value);
@@ -2616,7 +3585,7 @@ for (const [id, key] of [["unsoldWarn", "warn"], ["unsoldUrgent", "urgent"]]) {
       if (key === "warn") unsoldCfg.urgent = unsoldCfg.warn; else unsoldCfg.warn = unsoldCfg.urgent;
     }
     store.set("unsoldCfg", unsoldCfg); render();
-    for (const f of Object.values(thresholdEls)) f.dispatchEvent(new Event("focus"));
+    fillThresholds();
   };
 }
 // ---- body highlights (Here list, tree and schematic) ----
@@ -2640,12 +3609,23 @@ let maxBonusCfg = store.get("maxBonus", null);
 const maxBonus = () => maxBonusCfg ?? (data && data.defaults && data.defaults.max_include_bonus) ?? true;
 const maxOf = x => maxBonus() || x.value_max_base == null ? x.value_max : x.value_max_base;
 // ✦: the likeliest species of a genus has no codex entry of yours in this region (codex entries, and their
-// vouchers, are per region). Species level is conservative: a codex entry is per colour variant.
+// vouchers, are per region). A codex entry is per colour variant: when the server could settle the colour
+// (x.variants) it checked those; otherwise it checked the species, which never over-flags.
 const codexMark = (x, region) => x && x.codex_new
-  ? ` <span class="cxnew" title="new to your codex in ${esc(region || "this region")} (likeliest species; the colour variant may differ)">✦</span>` : "";
+  ? ` <span class="cxnew" title="new to your codex in ${esc(region || "this region")} (${(x.variants || []).length
+      ? `variant ${esc(x.variants.join(" or "))}` : "likeliest species; the colour variant may differ"})">✦</span>` : "";
+// The colour the likeliest species should show, muted after the guess ("Teal", "Lime or Green"); "" when unsure.
+const variantTxt = x => x && (x.variants || []).length
+  ? ` <span class="unk" title="expected colour variant">${esc(x.variants.map(v => v.split(" - ").pop()).join(" or "))}</span>` : "";
 let codexNewCounts = store.get("codexNewCounts", true);
 // Jump range with a jet-cone charge applied (neutron x4, white dwarf x1.5; the journal gives the exact value).
 const effRange = () => data && data.jump_range ? data.jump_range * (data.boost || 1) : null;
+// Straight-line jumps to cover d ly: the charge boosts only the first jump, the rest are at plain range.
+const jumpsFor = d => {
+  const r = data && data.jump_range; if (!r) return null;
+  const first = r * (data.boost || 1);
+  return d <= first ? 1 : 1 + Math.ceil((d - first) / r);
+};
 // Arrival stars worth a warning before you jump: exclusion zones and jet cones at the drop.
 const hazardNote = sc => !sc ? "" : /^N$/.test(sc) ? "neutron star: throttle down on arrival, mind the jet cone"
   : /^D/.test(sc) ? "white dwarf: throttle down on arrival, mind the jet cone"
@@ -2678,10 +3658,105 @@ for (const [id, el] of Object.entries(hlEls)) {
   el.onchange = () => {
     const v = Number(el.value);
     hlCfg[k] = el.value.trim() === "" || !isFinite(v) || v < 0 ? null : Math.round(v);
-    store.set("highlightCfg", hlCfg); showHl(); renderHere();
+    // the body level also drives the header's leaving strip, Now and the Left-behind table: redraw them all
+    store.set("highlightCfg", hlCfg); showHl(); renderHere(); render();
   };
 }
 showHl();
+const highGEl = document.getElementById("highG");
+const showHighG = () => { highGEl.value = store.get("highG", null) ?? ""; highGEl.placeholder = highGravity(); };
+highGEl.onfocus = showHighG;
+highGEl.onchange = () => {
+  const v = Number(highGEl.value);
+  store.set("highG", highGEl.value.trim() === "" || !isFinite(v) || v <= 0 ? null : v); showHighG(); renderHere();   // Here reds gravity at it
+};
+showHighG();
+// the discovery streak's spoken thresholds and the suggested order's "skip?" floor (blank = the default)
+const streakEls = {known: document.getElementById("streakKnown"), new: document.getElementById("streakNew")};
+const showStreak = () => { const c = store.get("streakCfg", {}) || {}, now = streakCfg();
+  for (const [k, el] of Object.entries(streakEls)) { el.value = c[k] ?? ""; el.placeholder = now[k]; } };
+for (const [k, el] of Object.entries(streakEls)) {
+  el.onfocus = showStreak;
+  el.onchange = () => {
+    const c = {...(store.get("streakCfg", {}) || {})}, v = Number(el.value);
+    // a run of one is no streak: 1 is stored as 2, the smallest that can fire (0 = off)
+    if (el.value.trim() === "" || !isFinite(v) || v < 0) delete c[k]; else { const n = Math.min(99, Math.round(v)); c[k] = n === 1 ? 2 : n; }
+    store.set("streakCfg", c); showStreak();
+  };
+}
+showStreak();
+const skipEl = document.getElementById("skipFloor");
+const showSkip = () => { skipEl.value = store.get("skipFloor", null) ?? ""; skipEl.placeholder = skipFloor(); };
+skipEl.onfocus = showSkip;
+skipEl.onchange = () => {
+  const v = Number(skipEl.value);
+  store.set("skipFloor", skipEl.value.trim() === "" || !isFinite(v) || v < 0 ? null : Math.round(v)); showSkip(); renderHere();
+};
+showSkip();
+// ---- portable settings: export to a file, import from one, or keep a copy on the server for new browsers ----
+// Only SETTINGS_KEYS travel. Import replaces this browser's copy of each of them (one missing from the file
+// goes back to its default) and reloads, since most settings are read once when the page starts.
+// What this browser actually uses: its own value of each, else the server copy's (the order store.get reads
+// them in), so saving or exporting never drops what the browser inherited.
+function settingsDoc() {
+  const settings = {}, sv = serverSettings();
+  for (const k of SETTINGS_KEYS) {
+    let v = null;
+    try { v = localStorage.getItem(k); } catch {}
+    if (v !== null) { try { settings[k] = JSON.parse(v); } catch {} }
+    else if (Object.prototype.hasOwnProperty.call(sv, k) && settingOk(k, sv[k])) settings[k] = sv[k];
+  }
+  return {version: 1, settings};
+}
+function applySettings(doc) {
+  if (!doc || doc.version !== 1 || !doc.settings || typeof doc.settings !== "object" || Array.isArray(doc.settings))
+    return {error: "not an ED Outrider settings file"};
+  // unknown keys and values of the wrong shape (a string where a list belongs) are left out, not stored
+  const skipped = Object.keys(doc.settings).filter(k => !SETTINGS_KEYS.includes(k) || !settingOk(k, doc.settings[k]));
+  const use = k => k in doc.settings && settingOk(k, doc.settings[k]);
+  for (const k of SETTINGS_KEYS) {
+    try { if (use(k)) localStorage.setItem(k, JSON.stringify(doc.settings[k])); else localStorage.removeItem(k); } catch {}
+  }
+  return {applied: SETTINGS_KEYS.filter(use).length, skipped};
+}
+function drawSettingsServer() {
+  const sd = window.SERVER_DEFAULTS, clr = document.getElementById("settingsServerClear");
+  clr.hidden = !sd;
+  document.getElementById("settingsServer").title = sd ? `the server has settings saved ${String(sd.saved || "").replace("T", " ").slice(0, 16)} UTC; saving replaces them`
+    : "save these settings on the server: a browser uses them for anything it has not set itself";
+}
+drawSettingsServer();
+document.getElementById("settingsExport").onclick = () => {
+  const blob = new Blob([JSON.stringify(settingsDoc(), null, 1)], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `outrider-settings-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+const settingsFile = document.getElementById("settingsFile");
+document.getElementById("settingsImport").onclick = () => settingsFile.click();
+settingsFile.onchange = async () => {
+  const f = settingsFile.files && settingsFile.files[0];
+  settingsFile.value = "";
+  if (!f) return;
+  let doc = null;
+  try { doc = f.size <= 256 * 1024 ? JSON.parse(await f.text()) : null; } catch {}
+  const r = applySettings(doc);
+  if (r.error) { toast(r.error); return; }
+  toast(`imported ${r.applied} settings${r.skipped.length ? ` (${r.skipped.length} unknown left out)` : ""}; reloading`);
+  setTimeout(() => location.reload(), 600);
+};
+async function saveServerSettings(body) {
+  try {
+    const r = await apiJson("api/defaults", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (r.error) { toast(`not saved: ${r.error}`); return; }
+    window.SERVER_DEFAULTS = r.saved ? Object.assign(body, {saved: r.saved}) : null;
+    toast(r.saved ? "saved on the server: new browsers start with these settings" : "the server's copy is gone");
+  } catch (e) { toast(`not saved: ${e.message}`); }
+  drawSettingsServer();
+}
+document.getElementById("settingsServer").onclick = () => saveServerSettings(settingsDoc());
+document.getElementById("settingsServerClear").onclick = () => saveServerSettings({clear: true});
 const bioMinEl = document.getElementById("bioMin");
 const showBioMin = () => { bioMinEl.value = bioMinCfg ?? ""; bioMinEl.placeholder = bioMinNow(); };
 showBioMin();
@@ -2700,12 +3775,15 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   else if (id === "maxBonus") { maxBonusCfg = null; store.set("maxBonus", null); showMaxBonus(); renderHere(); }
   else if (id === "hlBody" || id === "hlBio") { hlCfg[id === "hlBody" ? "body" : "bio"] = null; store.set("highlightCfg", hlCfg); showHl(); renderHere(); }
   else if (id === "bioMin") { bioMinCfg = null; store.set("bioMinCfg", null); showBioMin(); }
+  else if (id === "highG") { store.set("highG", null); showHighG(); renderHere(); }
+  else if (id === "streak") { store.set("streakCfg", {}); showStreak(); }
+  else if (id === "skipFloor") { store.set("skipFloor", null); showSkip(); renderHere(); }
   else if (id === "speechSpeed") { store.set("speechSpeed", null); drawSpeechStyles(); }
   else { unsoldCfg[id === "unsoldWarn" ? "warn" : "urgent"] = null; store.set("unsoldCfg", unsoldCfg); thresholdEls[id].dispatchEvent(new Event("focus")); }
   render();
 });
 function drawAlertsBtn() { document.getElementById("alertsBtn").classList.toggle("on", !!alertCfg.enabled); }
-document.getElementById("alertsBtn").onclick = () => { drawSpeechStyles(); alertDialog.showModal(); };
+document.getElementById("alertsBtn").onclick = () => { drawSpeechStyles(); fillThresholds(); alertDialog.showModal(); drawSpeechLog(); };
 drawAlertsBtn();
 
 let disconnected = null;
@@ -2716,15 +3794,36 @@ function setConnected(ok) {
     if (data) render();
   }
 }
+// A payload the page fails to draw is not a lost connection: the error shows in the Data tile, and polling
+// goes on (the next payload may draw fine). Without this one bad field froze the page for good.
+let pageError = null;
+function guarded(what, fn) {
+  try { fn(); return true; }
+  catch (e) { console.error(e); pageError = `${what}: ${e && e.message || e}`; return false; }
+}
+// A window that slept (a laptop lid, a phone screen, a frozen background tab) must not replay what it missed
+// as live alerts: hours-old klaxons, "FSD charging" for a jump long made. The server answers a long poll within
+// LONG_POLL_SECONDS (25 s), so a minute without hearing from it means this page was not running: the next
+// payload is taken as it is (like a first one), not announced.
+const SLEPT_MS = 60000;
+let lastHeard = 0, woke = false;
+// lastHeard moves only on an answer (200/204): a server or network outage is a minute without hearing from it too,
+// and the retries every 2 s meanwhile must not keep it fresh (the moments missed would replay as live speech)
+const heard = (answered) => { const now = Date.now(); if (lastHeard && now - lastHeard > SLEPT_MS) woke = true; if (answered) lastHeard = now; };
 async function poll(once = false) {
-  let ok = false;
+  let ok = false, fresh = false;
+  heard(false);   // a request sent long after the last answer: timers were frozen, or the server was unreachable
   try {
     const r = await fetch(`api/nearby?since=${runId}:${version}`);
-    if (r.status === 200) { data = await r.json(); version = data.version; setConnected(true); onData(); render(); }
-    else if (r.status === 204) setConnected(true);
-    else setConnected(false);
+    if (r.status === 200 || r.status === 204) heard(true);   // an answer long after it was asked: the page slept meanwhile
+    if (r.status === 200) { data = await r.json(); version = data.version; fresh = true; }
+    else if (r.status === 204 && woke) version = -1;   // no news, but come back with the whole payload to re-baseline on
     ok = r.status === 200 || r.status === 204;
-  } catch { setConnected(false); }
+  } catch {}
+  if (fresh) pageError = null;
+  let drawn = guarded("drawing", () => setConnected(ok));
+  if (fresh) { const alerted = guarded("alerts", onData), rendered = guarded("drawing", render); drawn = drawn && alerted && rendered; }
+  if (!drawn && data) guarded("drawing", renderStrip);   // at least the Data tile, which says what failed
   // the server holds the request until something changes, so ask again at once; back off if it failed
   if (!once) setTimeout(poll, ok ? 0 : 2000);
 }
@@ -2733,7 +3832,8 @@ poll();
 // ---- keyboard reachability ----
 // Clickable things that are not real buttons (sort headers, ☆, ⌖/🔍 links, Bodies pin cells, copyable
 // names, bodies in search results) get focus and act on Enter/Space like a click. Not shortcuts: Tab to it.
-const KEYABLE = 'th[data-sort], [data-bm], .goto, td.bodies[data-pop], td.name[data-name], .copy[data-name], [data-sbodypop], #hereRows tr[data-body], .sbody[data-body]';
+const KEYABLE = 'th[data-sort], [data-bm], .goto, td.bodies[data-pop], td.name[data-name], .copy[data-name], [data-sbodypop], #hereRows tr[data-body], .sbody[data-body], ' +
+  '[data-reset], #nsClear, span.name[data-name]';
 let keyablePending = false;
 function markKeyable() {
   keyablePending = false;
@@ -2756,5 +3856,8 @@ document.getElementById("matSources").addEventListener("click", e => {
 });
 document.addEventListener("click", async e => {
   if (!e.target.closest || !e.target.closest("#nsClear")) return;
-  await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({clear: true})});
+  let r;
+  try { r = await apiJson("api/nextstop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({clear: true})}); }
+  catch (err) { r = {error: err.message}; }
+  if (r.error) toast(`could not clear the next stop: ${r.error}`);
 });

@@ -19,7 +19,7 @@
   <div class="tiles">
     <div class="tile" id="tWhere"><div class="lbl">Where I Am Currently:</div><div class="val" id="here">loading…</div><div class="ln" id="refLn" title="distance from Sol and from Colonia (Eol Prou RS-T d3-94)"></div>
       <div class="ln" id="sub"><b id="subKnown">…</b> known within <select id="radiusSel" title="how far around you Nearby lists systems (a bigger sphere takes longer to fill in the first time)"></select> ly · <b id="subUnvisited">…</b> not visited<span id="subCut"></span></div>
-      <div class="ln" id="subJump"></div><div class="ln" id="whereLn"></div><div class="ln" id="nextStopLn"></div></div>
+      <div class="ln" id="subJump"></div><div class="ln" id="whereLn"></div><div class="ln" id="streakLn"></div><div class="ln" id="horizonLn"></div><div class="ln" id="nextStopLn"></div></div>
     <div class="tile" id="tCmdr"><div class="lbl" id="cmdrLbl">Commander</div><div id="cmdrLine"></div></div>
     <div class="tile" id="tFuel" data-fuel><div class="lbl">Fuel</div><div id="fuelLine"></div></div>
     <div class="tile" id="tCarrier"><div class="lbl">Carrier</div><div id="carrierLine"></div></div>
@@ -96,6 +96,8 @@
     the cartographic estimate for what is on board from that system; lost data can be re-earned by scanning those bodies again.</div>
   <h3 class="subhead">Left behind <span class="unk">· visited systems within
     <select id="lbRadius"><option>50</option><option selected>100</option><option>200</option></select> ly with work worth going back for</span></h3>
+  <div class="hint">Bodies the honk counted that you never found, genera the DSS found that you never sampled, bio signals on bodies you never
+    probed (priced before the DSS, so an upper bound), and planets worth mapping; by your bio threshold and highlight level.</div>
   <table id="leftTable">
     <thead><tr><th>System</th><th class="num">Dist</th><th>What is left</th><th class="num">Worth</th></tr></thead>
     <tbody id="leftRows"></tbody>
@@ -104,6 +106,7 @@
     bio threshold (its best species; plain prices). ⌖ opens the system in Here.</div>
 </section>
 <section id="histView" hidden>
+  <div id="lastSession" class="lastsession" hidden></div>
   <div class="srow">
     <label>Last <select id="hDays"><option value="7">7 days</option><option value="30" selected>30 days</option>
       <option value="90">90 days</option><option value="365">year</option><option value="3650">everything</option></select></label>
@@ -225,6 +228,12 @@
     The grid is the galactic plane through your position; stalks drop each system onto it.</div>
 </section>
 <section id="searchView" hidden>
+  <form id="findForm" class="srow">
+    <label>Find a system by name <input type="search" id="findName" maxlength="100" placeholder="e.g. Synuefe XR-H d11-102"
+      autocomplete="off" spellcheck="false"></label>
+    <button type="submit">Find</button>
+    <span class="hint" id="findStatus">opens it in Here: whether you have been there, its bodies and your firsts; ☆ there bookmarks it or makes it the next stop. Unknown here? EDSM is asked.</span>
+  </form>
   <form id="searchForm">
     <div class="srow">
       <label>Within <input type="number" id="sRadius" value="100" min="1" max="5000" step="any"> ly of
@@ -283,10 +292,20 @@
     <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
       <span class="profrow"><label><input type="checkbox" id="speechProfanity"> with profanity <span id="speechProfanityWho" class="unk"></span></label>
       <label title="how often a line comes from the swearing versions instead of the clean ones"><input type="number" id="speechProfanityPct" min="0" max="100" step="5" style="width:4.5em">% of the time</label></span></div>
+    <label class="mod"><input type="checkbox" id="speechShift"> One personality per system
+      <span class="hint">the personality (and its own voice) changes at each arrival and at game start, not at every line; with one personality ticked it changes nothing</span></label>
+    <label class="mod"><input type="checkbox" id="speechDangerBusiness"> Danger alerts always down to business
+      <span class="hint">hull, heat, interdiction, low fuel or an unscoopable star, your carrier leaving without you, the ship-loss debrief: only the business lines, never swearing</span></label>
+    <div class="mod inlineopts">This screen speaks: <select id="speakMode">
+        <option value="auto">auto: one window at a time</option><option value="always">always</option><option value="never">never</option></select>
+      <span id="speakerStatus" class="hint"></span> <button type="button" class="try" id="speakerClaim" hidden>speak from this window</button>
+      <div class="hint">With the page open in several windows (a second screen at ?mode=now), auto lets only one of them speak and play the alert sounds; every window still shows the alerts. Remembered per browser: always makes every window of it speak, never keeps this browser quiet. The ▶ try buttons always work.</div></div>
     <div class="mod inlineopts">Say signals as the FSS finds them:
       <label><input type="checkbox" id="sayBio"> biological</label>
       <label><input type="checkbox" id="sayGeo"> geological</label>
       <span class="hint">"2 Biological and 1 Geological Signals found on body A 3" (when 🗣 is on)</span></div>
+    <label class="mod"><input type="checkbox" id="sayHazard"> Say the hazard when the FSD charges for a neutron star, white dwarf or black hole
+      <span class="hint">"… Neutron star ahead: throttle down on arrival, mind the jet cone" (part of the jump line)</span></label>
     <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
       <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
       <span class="hint">1× is the voice's own pace; reset goes back to the config file's speech_speed</span></label>
@@ -324,7 +343,7 @@
       <span class="hint">straight Vista Genomics payout, no first-log bonus; sampling you have already started always counts; a body the rules cannot price always counts</span></label>
     <div class="hint" id="bioRules"></div>
     <label class="mod"><input type="checkbox" id="codexNewCounts"> A body whose likeliest species is new to your codex in this region (✦) counts as unfinished whatever its value
-      <span class="hint">codex entries earn vouchers and are per region; species level, so a new colour variant of a logged species is not flagged</span></label>
+      <span class="hint">codex entries earn vouchers and are per region and per colour variant; where the colour can be told (the surface materials, or the parent star once every star in the system is known and agrees) a new colour of a logged species is flagged too, otherwise only a new species is</span></label>
     <label class="mod">Highlight a body in Here when its scan + map data pays over
       <input type="number" id="hlBody" min="0" step="100000" style="width:9em"> cr<span class="reset" data-reset="hlBody">reset</span>
       <span class="hint">the row turns green; straight Universal Cartographics value, no first-discovery, first-mapped or efficiency bonus</span></label>
@@ -337,10 +356,36 @@
       <input type="number" id="rebuyWarn" min="0" step="1" style="width:5em">× , red at
       <input type="number" id="rebuyUrgent" min="0" step="1" style="width:5em">× your rebuy <span class="reset" data-reset="rebuy">reset</span>
       <span class="hint">blank = off; either rule can turn the header amber or red (a cheap ship carrying a fortune is the risk)</span></label>
+    <label class="mod">Approach warning: a landable body of
+      <input type="number" id="highG" min="0" step="0.1" style="width:5em"> g or more<span class="reset" data-reset="highG">reset</span>
+      <span class="hint">said when you drop into orbital cruise there with unsold data over the amber level or the rebuy multiple below ("2.6 g, 480 million aboard, 3.2 rebuys"); the approach alert above switches it off</span></label>
     <label class="mod">Unsold data on board: amber "worth selling soon" at
       <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
       <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>
       <span class="hint">compared with the header total: cartographics after any NPC crew cut plus the exobiology estimate; crossing a level also sends a notification. Blank = default.</span></label>
+    <label class="mod">Discovery streak: say so at
+      <input type="number" id="streakKnown" min="0" max="99" step="1" style="width:4.5em"> fully known systems in a row, and at
+      <input type="number" id="streakNew" min="0" max="99" step="1" style="width:4.5em"> undiscovered ones in a row<span class="reset" data-reset="streak">reset</span>
+      <span class="hint">once per streak, as part of the arrival alert ("10 known systems in a row, maybe change heading"; the new-streak line replaces "undiscovered"); a system with unreported bodies or one you visited before ends a known run; 0 = off, and the smallest streak is 2</span></label>
+    <label class="mod">Here's suggested order: mark an item "skip?" under
+      <input type="number" id="skipFloor" min="0" step="10000" style="width:8em"> cr per minute of supercruise<span class="reset" data-reset="skipFloor">reset</span>
+      <span class="hint">supercruise time from the arrival star on a rough community curve (about 40 s at 2,000 ls, 6 min at 100,000 ls); started samples and first-discovery Earth-likes, water worlds, ammonia worlds and terraformables are never marked</span></label>
+    <h4>Settings</h4>
+    <div class="opts inline">
+      <button type="button" class="try" id="settingsExport" title="download this browser's settings as a file">Export settings</button>
+      <button type="button" class="try" id="settingsImport" title="load settings from an exported file (the page reloads)">Import settings…</button>
+      <input type="file" id="settingsFile" accept=".json,application/json" hidden>
+      <button type="button" class="try" id="settingsServer" title="save these settings on the server: a browser uses them for anything it has not set itself">Use these for new browsers</button>
+      <button type="button" class="try" id="settingsServerClear" hidden>stop</button>
+    </div>
+    <div class="hint" id="settingsHint">Thresholds, alert choices, personalities, "Call me" names, speed, sorts and filters live in this browser.
+      Export them to a file (Import on another browser or after clearing the cache), or save them on the server so a new browser (a tablet running Now) starts with them.
+      The view, layouts, the search form and which screen speaks stay per device. The voice is kept by the server already.</div>
+    <details id="speechLogBox" class="speechlog"><summary>Spoken lines: the last 100 alerts in this window and what became of each</summary>
+      <div class="hint">Newest first: said, cut short, dropped (waited too long, you left the system, replaced by newer news, a cooldown) or
+        silent (speech off, not ticked, another window speaks). Only this window's, and a reload starts afresh.
+        <button type="button" class="try" id="speechLogCopy">copy</button></div>
+      <div id="speechLog"></div></details>
     <div class="btns"><span class="grow"></span><button value="close" class="primary">Done</button></div>
   </form>
 </dialog>
@@ -359,6 +404,6 @@
     </div>
   </form>
 </dialog>
-<script>window.__SEARCH_OPTIONS__ = /*SEARCH_OPTIONS*/null;</script>
+<script>window.__SEARCH_OPTIONS__ = /*SEARCH_OPTIONS*/null; window.SERVER_DEFAULTS = /*SERVER_DEFAULTS*/null;</script>
 <script src="static/page.js"></script>
 </body></html>

@@ -50,6 +50,7 @@ body.disconnected main { opacity: .5; }
 #fuelLine.urgent::before { content: "⚠ "; color: var(--bad); }
 #fuelLine { cursor: help; }
 #carrierLine .copy { cursor: copy; border-bottom: 1px dotted var(--muted); }
+.copy[data-name], #topRows .name { cursor: copy; }   /* every click-to-copy name (the global handler in page.js) */
 #leaving { margin-top: 4px; font-size: 13px; color: var(--warn); }
 #leaving b { font-weight: 600; }
 tr.scoopnext td.name::after { content: " ⛽ nearest scoopable"; color: var(--good); font-size: 11px; }
@@ -192,6 +193,9 @@ dialog .reset { color: var(--info); cursor: pointer; font-size: 11px; margin-lef
 #nearOpts { display: inline-flex; gap: 16px; }
 #searchView { margin-top: 12px; }
 .srow { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
+#findForm { margin-bottom: 10px; }
+#findName { width: 18em; max-width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 6px; font: inherit; }
 .srow input[type=number] { width: 5.5em; background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; padding: 3px 6px; font: inherit; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
@@ -540,3 +544,24 @@ body.nowmode header, body.nowmode main { display: none; }
 #alertDialog .inlineopts label, #alertDialog .sstyles label { display: inline-flex; align-items: center; gap: 4px; margin: 0 12px 0 0; }
 #alertDialog .inlineopts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; }
 #alertDialog .inlineopts > .hint { flex-basis: 100%; }
+
+/* Batch 7: backups, the discovery streak, the unreported horizon, the suggested order, the Last session card */
+.badc { color: var(--bad); font-weight: 600; }
+.streak { display: inline-flex; gap: 2px; vertical-align: middle; }
+.streak .sk { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--line); cursor: help; }
+.streak .sk.new { background: #f2c230; border-color: #f2c230; }             /* first discovery */
+.streak .sk.partial { background: var(--warn); border-color: var(--warn); opacity: .75; }   /* known, bodies unreported */
+.streak .sk.complete { background: var(--info); border-color: var(--info); }   /* fully reported */
+.streak .sk.visited { background: var(--muted); border-color: var(--muted); opacity: .6; }
+.streak .sk.known { border-color: var(--muted); }                            /* known, Spansh had nothing then */
+.streak .sk.none { border-style: dashed; }
+#horizonLn { cursor: help; } #streakLn:empty, #horizonLn:empty { display: none; }
+.skipq { font-style: italic; }
+#nowView .now-small { font-size: clamp(16px, 2.2vw, 26px); color: var(--muted); } #nowView .now-small b { color: var(--text); }
+.lastsession { margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; font-size: 13px; background: var(--panel); }
+/* the alerts dialog's spoken-line transcript: each line's fate coloured by what became of it */
+details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+#speechLog { max-height: 320px; overflow-y: auto; font-size: 12px; margin-top: 6px; }
+#speechLog .slog { padding: 3px 0; border-bottom: 1px solid var(--line, rgba(128,128,128,.2)); overflow-wrap: anywhere; }
+#speechLog .said b { color: var(--good); } #speechLog .cut b { color: var(--warn); }
+#speechLog .dropped b { color: var(--bad); } #speechLog .silent b, #speechLog .wait b { color: var(--muted); }

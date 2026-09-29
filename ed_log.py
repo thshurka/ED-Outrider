@@ -11,9 +11,10 @@ A cursor is "<file name>|<line index>": stable while the newest file is still be
 import json
 import os
 import re
+import threading
 import time
 from collections import ChainMap, OrderedDict
-from glob import glob
+from glob import glob, escape as glob_escape
 
 C = 299792458.0
 
@@ -335,7 +336,7 @@ def journal_files(dirs):
     """Every journal file in `dirs`, oldest first by UTC start time, one per file name."""
     seen, out = set(), []
     for d in dirs:
-        for p in glob(os.path.join(d, "Journal.*.log")):
+        for p in glob(os.path.join(glob_escape(d), "Journal.*.log")):
             base = os.path.basename(p)
             k = file_key(p)
             if k and base not in seen:
@@ -363,6 +364,10 @@ _BODY_EVENTS = (b'"event":"Scan"', b'"event":"FSSBodySignals"', b'"event":"SAASi
                 b'"event":"SupercruiseExit"')
 _BODIES = {}   # (SystemAddress, BodyID) -> short body name, learned from every file read so far
 _FIRST_TS = {}   # path -> timestamp of its first line (file order), read once
+# read_log runs in the server's thread pool and Log requests overlap (tail, scroll, a filter change, two
+# tabs): the cache's check-then-act, iteration and eviction must not interleave ("OrderedDict mutated
+# during iteration"). Held only around the cache, not while a file is read.
+_LOCK = threading.Lock()
 
 
 def _load(path):
@@ -371,11 +376,15 @@ def _load(path):
     except OSError:
         return {"lines": [], "bodies": {}}
     key = (path, size)
-    if key in _CACHE:
-        _CACHE.move_to_end(key)
-        return _CACHE[key]
-    with open(path, "rb") as f:
-        data = f.read(size)
+    with _LOCK:
+        if key in _CACHE:
+            _CACHE.move_to_end(key)
+            return _CACHE[key]
+    try:
+        with open(path, "rb") as f:
+            data = f.read(size)
+    except OSError:     # unreadable (permissions, a legacy folder gone): no rows from it, not a failed Log
+        return {"lines": [], "bodies": {}}
     end = data.rfind(b"\n") + 1       # the game may be mid-write on the last line
     lines = data[:end].splitlines()
     for line in lines:
@@ -397,14 +406,16 @@ def _load(path):
                 name = ev.get("BodyName") or (ev.get("Body") if isinstance(ev.get("Body"), str) else None)
                 if ev.get("BodyID") is not None and name:
                     bodies[(ev.get("SystemAddress"), ev["BodyID"])] = _short(ev, name)
-        _BODIES.update(bodies)
+        with _LOCK:
+            _BODIES.update(bodies)
     # a session that starts on the planet names the body in an older file: fall back to what we know
     entry = {"lines": lines, "bodies": ChainMap(bodies, _BODIES)}
-    for k in [k for k in _CACHE if k[0] == path]:
-        del _CACHE[k]
-    _CACHE[key] = entry
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.popitem(last=False)
+    with _LOCK:
+        for k in [k for k in _CACHE if k[0] == path]:
+            del _CACHE[k]
+        _CACHE[key] = entry
+        while len(_CACHE) > _CACHE_MAX:
+            _CACHE.popitem(last=False)
     return entry
 
 
@@ -468,8 +479,10 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
     if noise:
         want.add("noise")
     ql = q.lower().encode() if q else None
-    # The tail continues from the last line of the newest file AS SCANNED here: reading the file again
-    # afterwards could see lines the game wrote in between, and they would never be returned.
+    # The tail continues from the last line AS SCANNED here: reading the file again afterwards could see
+    # lines the game wrote in between, and they would never be returned. It is the last complete line of
+    # the newest file that has one: a just-created journal with no complete line yet must not send the
+    # tail back to an older cursor (rows returned twice) or leave it with none (never tailing).
     seen_newest = None
     rows, truncated = [], False
 
@@ -508,8 +521,7 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
             if k < ck:
                 continue
             base, entry = os.path.basename(p), _load(p)
-            if p == files[-1][1]:
-                seen_newest = _cursor_of(p, entry)
+            seen_newest = _cursor_of(p, entry) or seen_newest    # files run oldest to newest
             start = cur[1] + 1 if base == cur[0] else 0
             for i in range(start, len(entry["lines"])):
                 r = accept(entry["lines"][i], f"{base}|{i}", entry)
@@ -518,7 +530,7 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
         if len(rows) > cap:
             rows, truncated = rows[-cap:], True
         rows.reverse()
-        newest = seen_newest or _newest(files) or after
+        newest = seen_newest or after
         return {"rows": rows, "next": None, "newest": newest, "reset": truncated}
 
     chosen = window(files, days, now)
@@ -530,7 +542,7 @@ def read_log(dirs, days=7, before=None, after=None, limit=200, cats=None, q=None
         if cur and cur[0] in order and k > order[cur[0]]:
             continue
         entry = _load(p)
-        if p == files[-1][1]:
+        if not cur and seen_newest is None:     # newest first: the first file with a complete line
             seen_newest = _cursor_of(p, entry)
         lines = entry["lines"]
         top = max(0, min(cur[1], len(lines))) if cur and base == cur[0] else len(lines)
@@ -556,9 +568,9 @@ def _cursor_of(path, entry):
 
 
 def _newest(files):
-    """The cursor of the last complete line in the newest file (where a live tail continues from)."""
-    if not files:
-        return None
-    _, p = files[-1]
-    entry = _load(p)
-    return f"{os.path.basename(p)}|{len(entry['lines']) - 1}" if entry["lines"] else None
+    """The cursor of the last complete line in the newest file that has one (where a live tail continues from)."""
+    for _, p in reversed(files):
+        c = _cursor_of(p, _load(p))
+        if c:
+            return c
+    return None

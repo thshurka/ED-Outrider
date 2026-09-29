@@ -20,7 +20,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
-from glob import glob
+from glob import glob, escape as glob_escape
 
 # --------------------------------------------------------------------------
 # Default journal locations. Override or extend with --dir.
@@ -45,6 +45,7 @@ def find_journal_dirs():
     win = os.path.join(os.environ.get("USERPROFILE", home), ED_SUFFIX)
     if os.path.isdir(win):
         live.append(win)
+    seen = {os.path.realpath(win)}   # the same folder twice would be tailed twice (a symlinked save folder)
     roots = [os.path.expanduser(r) for r in ("~/.local/share/Steam", "~/.steam/steam", "~/.steam/root",
                                              "~/.var/app/com.valvesoftware.Steam/.local/share/Steam")]
     libs = []
@@ -56,12 +57,11 @@ def find_journal_dirs():
         except OSError:
             pass
         libs.append(r)
-    seen = set()
     for lib in libs:
         lib = os.path.realpath(lib.replace("\\\\", "/"))
         p = os.path.join(lib, "steamapps", "compatdata", "359320", "pfx", "drive_c", "users", "steamuser", ED_SUFFIX)
-        if os.path.isdir(p) and p not in seen:
-            seen.add(p)
+        if os.path.isdir(p) and os.path.realpath(p) not in seen:
+            seen.add(os.path.realpath(p))
             live.append(p)
     for base in ("/windows", "/mnt", "/media", "/run/media"):
         for pat in (os.path.join(base, "*", "Users", "*", ED_SUFFIX), os.path.join(base, "*", "*", "Users", "*", ED_SUFFIX)):
@@ -353,7 +353,7 @@ def journal_files(dirs):
         if not os.path.isdir(d):
             print(f"warning: not a directory, skipping: {d}", file=sys.stderr)
             continue
-        files.extend(glob(os.path.join(d, "Journal*.log")))
+        files.extend(glob(os.path.join(glob_escape(d), "Journal*.log")))
     return files
 
 
@@ -546,11 +546,14 @@ def analyse(events, args):
 
     def fate(system, t):
         """What became of data picked up in `system` at time t: sold, lost or aboard."""
-        sale = next((x for x in sales_by_system.get(system, ()) if x > t), None)
+        sale = next_sale(system, t)
         loss = next((x for x in losses if x > t), None)
         if sale and (not loss or sale < loss):
             return "sold"
         return "lost" if loss else "aboard"
+
+    def next_sale(system, t):
+        return next((x for x in sales_by_system.get(system, ()) if x > t), None)
 
     if args.since:
         explo_cut = bio_cut = hard_cut
@@ -565,6 +568,8 @@ def analyse(events, args):
     # --- Pass 2: collect what is still aboard ----------------------------------
     bodies = {}                     # (system, bodyid) -> latest scan still aboard
     paid = {}                       # (system, bodyid) -> last scan that was sold
+    sold_at = {}                    # (system, bodyid) -> when that scan was sold
+    map_sold_at = {}                # (system, bodyid) -> when its mapping was sold
     mapped = {}                     # (system, bodyid) -> efficient?  (mapping still aboard)
     system_name = {}                # SystemAddress -> name, for events that carry only the address
     organics = []                   # completed (Analyse) samples since the bio cut-off
@@ -583,6 +588,10 @@ def analyse(events, args):
                 system_name[ev.get("SystemAddress")] = ev["StarSystem"]
             if hard_cut and ts <= hard_cut:
                 continue
+            if key in sold_at and sold_at[key] < ts:
+                # Universal Cartographics already bought this body: a rescan after that sale (an
+                # arrival AutoScan, a return visit) pays nothing; only a new mapping adds value.
+                continue
             body = {k: ev.get(k) for k in SCAN_KEEP}
             f = fate(ev.get("StarSystem"), ts)
             if f == "aboard":
@@ -595,6 +604,7 @@ def analyse(events, args):
                 bodies.pop(key, None)
                 if f == "sold":
                     paid[key] = body
+                    sold_at[key] = next_sale(ev.get("StarSystem"), ts)
 
         elif name == "SAAScanComplete":
             if (ev.get("BodyName") or "").endswith(" Ring"):
@@ -602,11 +612,18 @@ def analyse(events, args):
             if hard_cut and ts <= hard_cut:
                 continue
             key = (ev.get("SystemAddress"), ev.get("BodyID"))
-            if fate(system_name.get(ev.get("SystemAddress")), ts) == "aboard":
+            if key in map_sold_at and map_sold_at[key] < ts:
+                # the mapping was already sold: Universal Cartographics pays nothing for a remap
+                continue
+            sysname = system_name.get(ev.get("SystemAddress"))
+            f = fate(sysname, ts)
+            if f == "aboard":
                 probes, target = ev.get("ProbesUsed"), ev.get("EfficiencyTarget")
                 mapped[key] = bool(probes and target and probes <= target)
             else:
                 mapped.pop(key, None)
+                if f == "sold":
+                    map_sold_at[key] = next_sale(sysname, ts)
 
         elif name == "ScanOrganic":
             if ev.get("ScanType") != "Analyse":

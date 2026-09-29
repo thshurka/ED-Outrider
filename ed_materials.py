@@ -39,12 +39,13 @@ _ENCODED = {
     2: ["archivedemissiondata", "fsdtelemetry", "shieldsoakanalysis", "encryptioncodes", "scanarchives",
         "consumerfirmware", "tg_structuraldata"],
     3: ["emissiondata", "wakesolutions", "shielddensityreports", "symmetrickeys", "scandatabanks",
-        "industrialfirmware", "ancientbiologicaldata", "ancientculturaldata", "ancienthistoricaldata",
-        "ancientlanguagedata", "ancienttechnologicaldata", "tg_shipflightdata", "tg_shipsystemsdata",
-        "unknownshipsignature"],
+        "industrialfirmware", "tg_shipflightdata", "tg_shipsystemsdata", "unknownshipsignature"],
     4: ["decodedemissiondata", "hyperspacetrajectories", "shieldpatternanalysis", "encryptionarchives",
         "encodedscandata", "securityfirmware", "unknownwakedata", "tg_interdictiondata", "tg_residuedata",
-        "guardian_moduleblueprint", "guardian_weaponblueprint"],
+        "guardian_moduleblueprint", "guardian_weaponblueprint",
+        # obelisk data: the game's Materials snapshots stop at 150, the grade 4 cap
+        "ancientbiologicaldata", "ancientculturaldata", "ancienthistoricaldata", "ancientlanguagedata",
+        "ancienttechnologicaldata"],
     5: ["compactemissionsdata", "dataminedwake", "shieldfrequencydata", "adaptiveencryptors", "classifiedscandata",
         "embeddedfirmware", "guardian_vesselblueprint"],
 }
@@ -128,8 +129,10 @@ SYNTH = {
                                "boost": "+50%", "verified": False},
     "FSD injection premium": {"materials": {"carbon": 1, "germanium": 1, "arsenic": 1, "niobium": 1, "yttrium": 1,
                                             "polonium": 1}, "boost": "+100%", "verified": False},
-    "Fuel basic": {"materials": {"phosphorus": 1, "sulphur": 1}, "verified": True},
-    "Repair basic": {"materials": {"iron": 2, "nickel": 1}, "verified": True},
+    # the SRV's refuel and repair ("Fuel Basic" / "Repair Basic" in the journal): no synthesis refuels or
+    # repairs the ship itself
+    "SRV refuel basic": {"materials": {"phosphorus": 1, "sulphur": 1}, "verified": True},
+    "SRV repair basic": {"materials": {"iron": 2, "nickel": 1}, "verified": True},
     "Limpet basic": {"materials": {"iron": 10, "nickel": 10}, "verified": True},
 }
 BOOSTS = ("basic", "standard", "premium")
