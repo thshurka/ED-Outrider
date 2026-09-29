@@ -785,6 +785,20 @@ def predict(body, system=None):
     return out
 
 
+def region_allows(name, region):
+    """Whether the rules let the species `name` (case ignored) grow in region number `region`: True when one of
+    its rulesets has no region filter or passes it, False when every one excludes the region, None when the
+    rules or the species are unknown (or the region is)."""
+    R = load_rules()
+    if not R or region is None or not name:
+        return None
+    sp = next((s for s in R["species"] if s["name"].lower() == name.lower()), None)
+    if sp is None:
+        return None
+    s = {"region": region}
+    return any("regions" not in r or _check("regions", r["regions"], None, s) is not False for r in sp["rulesets"])
+
+
 # --------------------------------------------------------------------------
 # Values and grouping
 # --------------------------------------------------------------------------

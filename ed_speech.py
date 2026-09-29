@@ -10,6 +10,11 @@ spoken to a tenth at most ("52.0M" is "52 million"). If the file is missing or b
 plain wording.
 
 The file is re-read whenever it changes, so an edit takes effect without restarting Outrider.
+
+Lines you never want to hear again go in speech_banned.json next to it ({alert: [line, ...]}, written by the 👎 in
+the page's "Spoken lines" list and the voice lab's "Cut this line"). They are left out here, so the page and the
+voice lab both get the trimmed lists; a ban never empties a list (the last line of one cannot be banned, and a
+list whose every line is banned by hand is used whole).
 """
 import json
 import os
@@ -32,6 +37,8 @@ KEYS = {
     "fuel_low": "the game's low fuel warning: {pct}",
     "fuel_star": "arrived under 30% fuel at a star you cannot scoop: {pct}, {star}",
     "fuel_target": "targeted a star you cannot scoop with under 30% fuel: {pct}, {system}",
+    "fuel_topup": "at a scoopable star, targeting onward, with the tank lowish and scoopable stars scarce locally: "
+                  "{rate} (e.g. '8 of the last 20 stars were scoopable'), {jumps} (jumps of fuel left, e.g. 'about 6 jumps')",
     "hull": "hull fell below half or a quarter: {pct}",
     "heat": "heat damage",
     "interdicted": "interdicted: {by}",
@@ -46,6 +53,8 @@ KEYS = {
                 "{text} (what is worth doing, e.g. 'B 1, Earth-like world, 3.1M to map, and biology on C 2, up to 19M')",
     "fss_nothing": "you finished the FSS, every body is found, and nothing is worth staying for: {count} (how many bodies)",
     "fss_unfinished": "you closed the FSS with bodies still unresolved: {left} (how many, e.g. '3 bodies')",
+    "jumponium": "a landable body just scanned carries the material your FSD injections are short of, when the FSS debrief "
+                 "does not say it: {body} (e.g. 'B 4'), {material} (e.g. 'polonium'), {pct} (its share, e.g. '1.3 percent')",
     "left_body": "you left a body (back to supercruise) with exobiology unfinished: {body}, "
                  "{text} (what is unfinished, e.g. 'Stratum 2 of 3, and Tussock untouched, up to 4.1M')",
     "bio_done_more": "the third sample of a species, and more remain on this body: {species}, {value}, "
@@ -60,6 +69,9 @@ KEYS = {
               "{value} (the unsold total), {rebuys} (how many rebuys that is; may be missing)",
     "arrival_brief": "a briefing on the system you just entered, after the honk: "
                      "{text} (e.g. 'Undiscovered. 14 bodies. Scoopable K star.')",
+    "region": "the first jump into a new galactic region this trip, when the arrival briefing is not spoken (it opens "
+              "with the region then): {region} (e.g. 'the Norma Arm'), {count} (e.g. '31 species you have logged elsewhere "
+              "are new to your codex here'; may be empty, so it ends the line as its own sentence)",
     "session_recap": "you quit the game after a session of at least three jumps, in place of the plain goodbye: "
                      "{text} (e.g. '142 jumps, 3,100 light-years, 12 systems nobody had seen')",
     # the discovery streak: once per streak, when a run reaches its threshold (the page's alerts dialog)
@@ -145,15 +157,75 @@ def check(doc):
     return problems
 
 
+BANNED_FILE = "speech_banned.json"   # next to the speech file (git-ignored: your own choice of lines)
+
+
+def banned_path(speech_path):
+    return os.path.join(os.path.dirname(os.path.abspath(speech_path)), BANNED_FILE)
+
+
+def read_bans(path):
+    """speech_banned.json as {alert: [line, ...]}; {} when it is missing or broken (a broken file bans nothing)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    return {k: [t for t in v if isinstance(t, str)] for k, v in doc.items() if isinstance(v, list)}
+
+
+def _is_list(style, versions):
+    """A personality's list of lines in an alert's entry (not "_comment" or "when")."""
+    return isinstance(versions, list) and not style.startswith("_") and style != "when"
+
+
+def apply_bans(lines, bans):
+    """speech.json's "lines" without the banned lines: (lines, whole), `whole` naming each "alert/list" kept whole
+    because every line in it is banned (the guard: a ban never empties a list, so an alert never goes quiet)."""
+    out, whole = {}, []
+    for key, entry in (lines or {}).items():
+        cut = set(bans.get(key) or ())
+        if not cut or not isinstance(entry, dict):
+            out[key] = entry
+            continue
+        new = {}
+        for style, versions in entry.items():
+            if _is_list(style, versions):
+                kept = [v for v in versions if v not in cut]
+                if versions and not kept:
+                    whole.append(f"{key}/{style}")
+                    kept = versions
+                new[style] = kept
+            else:
+                new[style] = versions
+        out[key] = new
+    return out, whole
+
+
 class SpeechLines:
     """speech.json, re-read when its modification time changes. A broken edit keeps the last good copy
-    in use and reports what is wrong, so a typo never silences the alerts."""
+    in use and reports what is wrong, so a typo never silences the alerts. speech_banned.json beside it is
+    re-read the same way, and its lines are left out of lines()."""
 
     def __init__(self, path):
         self.path = path
         self.doc, self.error, self.problems, self._mtime = None, None, [], None
+        self.bans_path = banned_path(path)
+        self.bans, self._bans_mtime, self._bans_gen = {}, None, 0
+
+    def _refresh_bans(self):
+        try:
+            mtime = os.stat(self.bans_path).st_mtime_ns
+        except OSError:
+            mtime = None
+        if mtime != self._bans_mtime:
+            self._bans_mtime = mtime
+            self.bans = read_bans(self.bans_path) if mtime is not None else {}
 
     def refresh(self):
+        self._refresh_bans()
         try:
             mtime = os.stat(self.path).st_mtime_ns
         except OSError:
@@ -177,7 +249,8 @@ class SpeechLines:
 
     def version(self):
         self.refresh()
-        return str(self._mtime) if self.doc else None
+        # the bans are part of it: a 👎 (or the voice lab's cut) makes every page fetch the trimmed lines
+        return f"{self._mtime}-{self._bans_mtime}-{self._bans_gen}" if self.doc else None
 
     def info(self):
         """The payload's small summary: the page fetches the lines themselves when the version changes."""
@@ -185,10 +258,68 @@ class SpeechLines:
         return {"version": self.version(), "error": self.error, "problems": self.problems[:20],
                 "file": os.path.basename(self.path)}
 
+    def banned(self):
+        """The bans that still match a line in the speech file, {alert: [line, ...]} (an edited line's old ban does
+        nothing, so it is not listed)."""
+        lines = (self.doc or {}).get("lines") or {}
+        out = {}
+        for key, cut in self.bans.items():
+            entry = lines.get(key)
+            have = {v for st, vs in entry.items() if _is_list(st, vs) for v in vs} if isinstance(entry, dict) else set()
+            hit = [t for t in cut if t in have]
+            if hit:
+                out[key] = hit
+        return out
+
     def lines(self):
         self.refresh()
-        return {"styles": (self.doc or {}).get("styles") or {}, "lines": (self.doc or {}).get("lines") or {},
+        trimmed, whole = apply_bans((self.doc or {}).get("lines") or {}, self.bans)
+        return {"styles": (self.doc or {}).get("styles") or {}, "lines": trimmed,
+                "banned": self.banned(), "banned_whole": whole,
                 "version": self.version(), "error": self.error, "problems": self.problems[:20]}
+
+    def set_ban(self, alert, template, ban=True):
+        """Ban (or unban) one line of an alert: (HTTP status, answer). Only a line that is in the speech file is
+        accepted, and a ban that would leave one of its lists empty is refused (409)."""
+        self.refresh()
+        entry = ((self.doc or {}).get("lines") or {}).get(alert)
+        if not isinstance(alert, str) or not isinstance(template, str) or not isinstance(entry, dict):
+            return 400, {"error": "no such alert in the speech file"}
+        homes = [vs for st, vs in entry.items() if _is_list(st, vs) and template in vs]
+        if not homes:
+            return 400, {"error": "that line is not in the speech file"}
+        cut = list(self.bans.get(alert) or [])
+        if ban and template not in cut:
+            for vs in homes:
+                if all(v == template or v in cut for v in vs):
+                    return 409, {"error": "that is the last line left in its list: an alert never goes quiet"}
+            cut.append(template)
+        elif not ban:
+            cut = [t for t in cut if t != template]
+        bans = dict(self.bans)
+        if cut:
+            bans[alert] = cut
+        else:
+            bans.pop(alert, None)
+        tmp = self.bans_path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(bans, f, indent=1, ensure_ascii=False)
+                f.write("\n")
+            os.replace(tmp, self.bans_path)
+        except OSError as e:
+            return 500, {"error": f"{BANNED_FILE} could not be written ({e.strerror or e})"}
+        self.bans, self._bans_gen = bans, self._bans_gen + 1
+        try:
+            self._bans_mtime = os.stat(self.bans_path).st_mtime_ns
+        except OSError:
+            pass
+        return 200, {"ok": True, "banned": sum(len(v) for v in self.banned().values())}
+
+
+def ban_line(speech_path, alert, template, ban=True):
+    """set_ban on the speech file at `speech_path` (the voice lab's "Cut this line")."""
+    return SpeechLines(speech_path).set_ban(alert, template, ban)
 
 
 # ---- filling and tidying lines outside the page (the voice lab; the page has its own copies in page.js) ----
@@ -201,7 +332,8 @@ SAMPLES = {
     "find_bio": {"body": "B 7", "value": "19.0M"}, "sample_clear": {"genus": "Stratum"},
     "codex": {"entry": "Stratum Tectonicas", "what": "new to your codex for this region"},
     "fuel_low": {"pct": 18}, "fuel_star": {"pct": 22, "star": "white dwarf"},
-    "fuel_target": {"pct": 22, "system": "Drojau LL-O b26-3"}, "hull": {"pct": 42}, "interdicted": {"by": "someone"},
+    "fuel_target": {"pct": 22, "system": "Drojau LL-O b26-3"},
+    "fuel_topup": {"rate": "8 of the last 20 stars were scoopable", "jumps": "about 6 jumps"}, "hull": {"pct": 42}, "interdicted": {"by": "someone"},
     "docked_sell": {"value": "114.1M", "station": "Jaques Station"}, "undocked_unsold": {"value": "260.4M"},
     "sold": {"sold": "12.6M cr cartographics and 4.1M cr exobiology", "still": ""},
     "unsold_warn": {"value": "52.0M"}, "unsold_urgent": {"value": "251.3M"},
@@ -209,6 +341,8 @@ SAMPLES = {
     "carrier_arrived": {"carrier": "Out Of The Blue", "system": "Smojooe AR-E b25-8"},
     "fss_done": {"count": 14, "text": "B 1, Earth-like world, 3.1M to map, and biology on C 2, up to 19.0M"},
     "fss_nothing": {"count": 14}, "fss_unfinished": {"left": "3 bodies"},
+    "jumponium": {"body": "B 4", "material": "polonium", "pct": "1.3 percent"},
+    "region": {"region": "the Norma Arm", "count": "31 species you have logged elsewhere are new to your codex here"},
     "left_body": {"body": "A 3", "text": "Stratum 2 of 3, and Tussock untouched, up to 4.1M"},
     "bio_done_more": {"species": "Stratum Tectonicas", "value": "19.2M", "left": "Bacterium and Fungoida"},
     "bio_done_last": {"species": "Stratum Tectonicas", "value": "19.2M"},

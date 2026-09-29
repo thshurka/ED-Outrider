@@ -21,21 +21,27 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
   Samples    every exobiology sample run (aboard / sold / lost, with value) and codex entry
   Bookmarks  systems you starred, with a note each
   Search     local database or Spansh: star classes (scoopable shortcut), planet types, ring types,
-             ring hotspot minerals
+             ring hotspot minerals, unfinished exobiology; and any system by name (GET /api/find)
   Map        3D canvas of the neighbourhood with your path, first discoveries, boost stars
              (neutron / white dwarf) and your carrier; fills the window; left-drag rotates,
              right-drag moves, the wheel zooms
   History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
-             all-time row; exports
+             all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
+             each death cost including exobiology), your most valuable finds; exports
   Log        every journal event with a one-line summary (ed_log.py), filtered by category, time and
              text, read straight from the journal files and updated live
   Materials  engineering materials against their caps, and how many FSD injections and other
              syntheses you can make (ed_materials.py)
   My firsts  unsold first discoveries, and visited systems nearby with work worth going back for
-  Now        big text for a second monitor (also ?mode=now)
+             (Left behind, including bio signals never probed); a daily Spansh check flags unsold
+             firsts someone else has scanned since ([spansh] watch_firsts)
+  Now        big text for a second monitor (also ?mode=now): the system, the target, fuel, what to do
+             next here, the discovery count, the unreported horizon, the data at risk, the last lines
+             spoken and a button bar; ↗ opens it in its own window, which stays on Now
 
 The header shows the current system (coordinates, visit count), the commander (credits at login plus
-sales since, ship), fuel (with jumps left, jumps since the last scoop and FSD boosts on hand), your
+sales since, ship), fuel (jumps left simulated from your ship's mass and your own jumps, the laden range, how
+scoopable your recent stars were, jumps since the last scoop and FSD boosts on hand), your
 carrier (distance, UC / Vista services), the latest codex first, unsold firsts, and the unsold
 cartographic + exobiology estimate from ed_unsold.py. Targeting a system plays a sound: fanfare if
 neither Spansh nor EDSM has heard of it, upbeat if it is not fully scanned, thud if you have been
@@ -47,12 +53,26 @@ Alerts can be spoken (🗣): with Piper (ed_tts.py) when it is installed, else t
 the personalities of speech.json (ed_speech.py: business, sarcastic, sweet, with swearing versions at
 a chosen rate), calling you by the names you choose. Besides the alerts the voice can say signal
 counts as the FSS finds them, where the frame shift drive is taking you and whether that star is
-scoopable, and greet you on loading into the game. voice_lab.py is a separate window for trying
-voices and lines. Auto honk (ed_honk.py, Linux, optional) holds Primary Fire's keyboard binding on
-arriving by hyperspace so the Discovery Scanner fires, and says how many bodies it found.
+scoopable, brief you on arrival, after the FSS, on approach and on leaving a body, welcome you back
+after a break, debrief a ship loss and recap the session on quit, and it names the galactic region you cross into. Lines you tire of can be
+banned from the Spoken lines list (speech_banned.json). Lines go through a priority queue in
+one browser window (danger first; the queue clears when the FSD charges). voice_lab.py is a separate
+window for trying voices and lines. Optionally the server plays the speech and the alert sounds itself
+(POST /api/say/play, /api/sound/play; static/sounds.json), so no click on the page is needed. Auto honk (ed_honk.py, Linux, optional) holds Primary Fire's
+keyboard binding on arriving by hyperspace so the Discovery Scanner fires, and says how many bodies
+it found. The voice can be hushed for a while (the page, or POST /api/hush: the state is the server's, so
+every window and device sees it), and a co-pilot button (ed_button.py, Linux, optional, read-only) asks the
+speaking window for a status report, the last line again, or a hush until the next jump.
+
+The database backs itself up (a dated zip, the newest kept) at start when a day old and after quitting
+the game (each copy checked with quick_check and the zip with testzip before older ones rotate out), and
+every live journal is archived once into backups/journals/; --restore puts a zip back and --list-backups
+lists them. Every request goes through a
+Host/Origin guard (request_guard), so another web site cannot read the journals or trigger actions.
 
 Body data is Spansh's merged with your own journal scans, so what you scan shows up immediately,
-even for systems Spansh has never heard of. Your own data wins where both exist.
+even for systems Spansh has never heard of. Your own data wins where both exist. Spansh bodies last reported by a pre-Odyssey client are marked
+"old data" where thin-atmosphere worlds may hold unsampled life.
 
 Each row shows how much is known about the system:
 
@@ -88,6 +108,7 @@ import collections
 import json
 import math
 import os
+import random
 import re
 import sqlite3
 import sys
@@ -109,6 +130,7 @@ import ed_materials  # engineering materials and synthesis recipes (no dependenc
 import ed_tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
 import ed_speech     # the words for spoken alerts, per personality (speech.json)
 import ed_honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
+import ed_button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 try:  # one-line summaries of every journal event, for the Log view
     import ed_log
 except ImportError:
@@ -165,6 +187,21 @@ RUN_ID = int(time.time())  # identifies this server process to the page
 MAP_MAX_RADIUS = 250
 MAP_MAX_PAGES = 6
 
+# The firsts watch: a background check of your unsold first discoveries on Spansh, most valuable first, to see
+# whether someone else has scanned them since. Politely: one dump request every 10 to 30 s at most, each system at
+# most once a day while its firsts are under a month old and once a week after that or once someone else has been
+# seen (that never clears), at most FIRSTS_WATCH_DAY_CAP checks a day, and none in the first minutes after a start
+# (the arrival's own fetches go first).
+WATCH_FIRSTS = True
+FIRSTS_WATCH_GAP = (10.0, 30.0)   # s between two checks (a random pick in this range)
+FIRSTS_WATCH_EVERY = 86400        # s: a system is checked again after this
+FIRSTS_WATCH_SLOW = 7 * 86400     # s: ... or after this, once seen by others or once its firsts are FIRSTS_WATCH_YOUNG old
+FIRSTS_WATCH_YOUNG = 30 * 86400   # s after your first scan there
+FIRSTS_WATCH_DAY_CAP = 150        # checks in any 24 h, however many unsold firsts there are
+FIRSTS_WATCH_START = 120          # s after the server starts before the first check
+FIRSTS_WATCH_BACKOFF = 600        # s to wait after a failed request (Spansh down, a timeout)
+FIRSTS_OWN_GRACE = 120            # s: a body Spansh updated this soon after your own scan or map of it is your own upload
+
 # Unsold data: recompute at most this often while the journal is growing (a full pass is ~1 s).
 UNSOLD_MIN_SECONDS = 15
 # Header colour thresholds for "how much are you risking by not selling" (credits).
@@ -200,7 +237,7 @@ BROWSER_SETTINGS = ("alerts", "alertSound", "alertSpeak", "speech", "speechStyle
                     "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
                     "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
                     "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-                    "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays")
+                    "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps")
 BROWSER_DEFAULTS_MAX = 64 * 1024   # bytes
 BROWSER_DEFAULTS_FILE = "browser_defaults.json"   # next to the database
 # Spoken alerts' wording: the lines file, and the personalities a browser starts with (see ed_speech.py).
@@ -225,6 +262,7 @@ GUI_FOCUS = {1: "the internal panel is open", 2: "the external panel is open", 3
 FLAG_FSD_JUMP = 1 << 30   # Status.json Flags: in the hyperspace tunnel
 FLAG_SCOOPING = 1 << 11   # Status.json Flags: fuel scooping
 FLAG_FSD_CHARGING = 1 << 17
+FLAG_HUD_ANALYSIS = 1 << 27   # Status.json Flags: HUD in analysis mode (clear: combat mode, Primary Fire fires weapons)
 SCOOP_MIN_RUN = 5.0       # s: a scoop shorter than this (skimming the edge of the zone) is not worth a word
 SCOOP_SETTLE = 2.5        # s: the flag must stay off this long before the scoop counts as over (it flickers)
 SCOOP_JUMP_GRACE = 10     # s: a scoop that ends this soon after a hyperspace StartJump was left on purpose
@@ -278,25 +316,66 @@ class ScoopWatch:
         return {"pct": min(100, round(100 * fuel / capacity)), "full": full}
 
 
-def honk_decision(status, now):
-    """Whether the auto honk can press now: ("press", None) or ("wait", why). Waits while the jump is still
-    running or something other than the cockpit has focus (the galaxy map straight after arriving, say),
-    since Primary Fire does nothing there. Without a live, recent Status.json it presses, as before."""
+def fire_group_letter(group):
+    """Status.json FireGroup (0, 1, ...) as the letter the game shows (A, B, ...); None when unknown."""
+    return chr(65 + group) if isinstance(group, int) and not isinstance(group, bool) and 0 <= group < 26 else None
+
+
+def status_fresh(status, now):
+    """A live Status.json written in the last 30 s."""
     st = status or {}
     try:
-        fresh = bool(st.get("live")) and st.get("ts") and now - ts_seconds(st["ts"]) < 30
+        return bool(st.get("live") and st.get("ts") and now - ts_seconds(st["ts"]) < 30)
     except (TypeError, ValueError):
-        fresh = False
-    if not fresh:
+        return False
+
+
+def honk_decision(status, now, groups=None):
+    """Whether the auto honk can press now: ("press", None) or ("wait", why). Waits while the jump is still
+    running, something other than the cockpit has focus (the galaxy map straight after arriving, say), since
+    Primary Fire does nothing there, or the HUD is in combat mode (Primary Fire would fire the weapons). With
+    this ship's learned fire groups (honk_learn: {"good": [...], "bad": [...]}) it also waits while a group
+    where honks missed before is selected; an unknown group still gets the press. Without a live, recent
+    Status.json it presses, as before."""
+    st = status or {}
+    if not status_fresh(st, now):
         return "press", None
-    if (st.get("flags") or 0) & FLAG_FSD_JUMP:
+    flags = st.get("flags")
+    if (flags or 0) & FLAG_FSD_JUMP:
         return "wait", "still in the jump"
     focus = st.get("gui_focus") or 0
     if focus:
         return "wait", GUI_FOCUS.get(focus, "a panel is open")
+    if isinstance(flags, int) and not flags & FLAG_HUD_ANALYSIS:
+        return "wait", "the HUD is in combat mode"
+    group = fire_group_letter(st.get("fire_group"))
+    if group and groups and group in (groups.get("bad") or []):
+        good = ", ".join(groups.get("good") or [])
+        return "wait", f"fire group {group} selected; honks missed there before" + (f" (worked on {good})" if good else "")
     return "press", None
+
+
+def honk_learn(record, group, ok):
+    """One ship's fire-group record ({"good": [letters], "bad": [letters]}) after an auto-honk press made with
+    fire group `group` selected: a confirmed scan puts the group in good (and clears it from bad); a miss puts
+    it in bad unless it has worked there before. The caller only passes misses that nothing else explains
+    (the cockpit had focus, the HUD was in analysis mode, no screen opened during the press)."""
+    good, bad = set((record or {}).get("good") or []), set((record or {}).get("bad") or [])
+    if group:
+        if ok:
+            good.add(group)
+            bad.discard(group)
+        elif group not in good:
+            bad.add(group)
+    return {"good": sorted(good), "bad": sorted(bad)}
 SPEAK_BIO_SIGNALS = SPEAK_GEO_SIGNALS = True   # say "2 Biological Signals on body A 3" as the FSS finds them
 SPEECH_SPEED = 1.0   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
+# the player for the page's "Play speech and sounds on this PC" tick: auto (the first found), one by name, or off
+SERVER_PLAYER = "auto"
+# The co-pilot button (see ed_button.py): tap a status report, double tap say again, hold hush until the next jump.
+COPILOT = {"enabled": False, "device": "", "button": "", "hold_ms": ed_button.HOLD_MS, "double_ms": ed_button.DOUBLE_MS}
+COPILOT_ACTIONS = ("status", "again", "hush", "replay")
+HUSH_MODES = {"10m": 600, "30m": 1800, "jump": None}   # s a timed hush lasts; "jump" lasts until you leave the system
 
 
 # --------------------------------------------------------------------------
@@ -368,6 +447,20 @@ def _config_str(v):
     raise TypeError("not a string")
 
 
+def _config_player(v):
+    """[speech] server_player: one of ed_tts.PLAYER_CHOICES."""
+    if isinstance(v, str) and v.strip().lower() in ed_tts.PLAYER_CHOICES:
+        return v.strip().lower()
+    raise ValueError("not a player: " + ", ".join(ed_tts.PLAYER_CHOICES))
+
+
+def _config_button(v):
+    """[copilot] button: an evdev name or code, as a string or a bare number (a switch is not a button)."""
+    if isinstance(v, str) or (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+        return str(v).strip()
+    raise TypeError("not a button name or number")
+
+
 def _config_radius(v):
     """A sphere radius: a number of at least 1 ly (0 or a negative one would ask Spansh for nothing)."""
     out = float(v)
@@ -389,7 +482,7 @@ def _config_section(cfg, name):
 def settings_from(cfg, args, env_journals=None, detected=((), ())):
     """Resolve every setting with the precedence flag > env > config > default/auto-detect."""
     j, sv, df, sp = (_config_section(cfg, s) for s in ("journals", "server", "defaults", "spansh"))
-    ah = _config_section(cfg, "autohonk")
+    ah, spk, cp = _config_section(cfg, "autohonk"), _config_section(cfg, "speech"), _config_section(cfg, "copilot")
     j = dict(j, live=_config_folders(j.get("live"), "live"), legacy=_config_folders(j.get("legacy"), "legacy"))
     num = lambda sec, table, key, conv, default: _config_value(sec, key, table.get(key), conv, default)
     flag = lambda sec, table, key, default: _config_value(sec, key, table.get(key), _config_bool, default)
@@ -461,6 +554,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "speech_names": ", ".join(str(x) for x in df["speech_names"]) if isinstance(df.get("speech_names"), list)
                         else str(df.get("speech_names", SPEECH_NAMES)),
         "speech_file": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("speech_file") or SPEECH_FILE))),
+        "server_player": num("speech", spk, "server_player", _config_player, SERVER_PLAYER),
         "backup_dir": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("backup_dir") or BACKUP_DIR))),
         "backup_keep": max(1, num("server", sv, "backup_keep", int, BACKUP_KEEP)),
         "backup_every_days": max(0.0, num("server", sv, "backup_every_days", float, BACKUP_EVERY_DAYS)),
@@ -469,12 +563,19 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "concurrency": max(1, num("spansh", sp, "concurrency", int, SPANSH_CONCURRENCY)),
         "map_max_radius": max(5.0, num("spansh", sp, "map_max_radius", float, MAP_MAX_RADIUS)),
         "map_max_pages": max(1, num("spansh", sp, "map_max_pages", int, MAP_MAX_PAGES)),
+        "watch_firsts": flag("spansh", sp, "watch_firsts", WATCH_FIRSTS),
         "autohonk": {"enabled": flag("autohonk", ah, "enabled", AUTOHONK["enabled"]),
                      "key": str(ah.get("key") or AUTOHONK["key"]),
                      "delay": max(0.0, num("autohonk", ah, "delay", float, AUTOHONK["delay"])),
                      "hold": min(20.0, max(0.5, num("autohonk", ah, "hold", float, AUTOHONK["hold"]))),
                      "skip_honked": flag("autohonk", ah, "skip_honked", AUTOHONK["skip_honked"]),
                      "announce": flag("autohonk", ah, "announce", AUTOHONK["announce"])},
+        "copilot": {"enabled": flag("copilot", cp, "enabled", COPILOT["enabled"]),
+                    "device": num("copilot", cp, "device", _config_str, COPILOT["device"]),
+                    # a name (BTN_TRIGGER_HAPPY5) or the number --listen prints, bare or quoted
+                    "button": str(num("copilot", cp, "button", _config_button, COPILOT["button"])),
+                    "hold_ms": min(3000, max(200, num("copilot", cp, "hold_ms", int, COPILOT["hold_ms"]))),
+                    "double_ms": min(1000, max(100, num("copilot", cp, "double_ms", int, COPILOT["double_ms"])))},
     }
 
 
@@ -525,6 +626,10 @@ speech_names = {q(st["speech_names"])}   # what the voice calls you, comma separ
 concurrency = {st["concurrency"]}          # body-detail fetches in flight after an arrival
 map_max_radius = {st["map_max_radius"]:g}    # ly: the largest 3D map the page may ask for
 map_max_pages = {st["map_max_pages"]}        # pages of 500 systems fetched for the map
+watch_firsts = {"true" if st["watch_firsts"] else "false"}   # check your unsold first discoveries on Spansh in the background (one request every 10-30 s; each system daily for a month, then weekly; at most 150 a day) for someone else's scans
+
+[speech]   # for the page's "Play speech and sounds on this PC" tick (per browser, off until ticked)
+server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay, aplay, ffplay found), one of those, or off (Linux)
 
 [autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see ed_honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
@@ -535,6 +640,15 @@ delay = {st["autohonk"]["delay"]:g}   # seconds after arriving before the press 
 hold = {st["autohonk"]["hold"]:g}    # seconds to hold the trigger (the scanner fires once charged)
 skip_honked = {"true" if st["autohonk"]["skip_honked"] else "false"}   # leave systems you have already honked alone
 announce = {"true" if st["autohonk"]["announce"] else "false"}   # say "System scan completed, 12 bodies discovered" (or all found) afterwards
+
+[copilot]   # one HOTAS or keyboard button for the voice (Linux, read-only; see ed_button.py): tap a status report, double tap the last line again, hold hush until the next jump
+# Unbind the button in Elite's controls. On an X-56 avoid the latching toggles and the mode wheel (they read as held).
+# Joysticks are readable through uaccess; a keyboard or mouse needs the input group.
+enabled = {"true" if st["copilot"]["enabled"] else "false"}
+device = {q(st["copilot"]["device"])}   # a part of the device's name, or a /dev/input/by-id/... path (python3 ed_button.py --listen lists them)
+button = {q(st["copilot"]["button"])}   # the button's evdev name (e.g. BTN_TRIGGER_HAPPY5) or code number, as --listen prints it
+hold_ms = {st["copilot"]["hold_ms"]}   # ms held (or more) that make a hold
+double_ms = {st["copilot"]["double_ms"]}   # ms between a tap's release and the next press that make a double tap
 """
 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")
@@ -544,6 +658,7 @@ SCAN_EVENTS = ("Scan", "FSSDiscoveryScan", "FSSAllBodiesFound", "SAASignalsFound
 # Your fleet carrier, and fuel: where it is, what it carries, how much is in the tank.
 SHIP_EVENTS = ("FuelScoop", "RefuelAll", "RefuelPartial", "CarrierStats", "CarrierJump", "CarrierJumpRequest",
                "CarrierJumpCancelled", "CarrierLocation", "Docked", "Undocked",
+               "Cargo",   # the hold's tonnage: the ship's mass, for the fuel model
                # hull and danger: live alerts only (hull % is kept; the rest are moments, not state)
                "HullDamage", "RepairAll", "Repair", "RepairDrone", "HeatDamage", "Interdicted",
                "JetConeBoost",   # a neutron / white dwarf charge: the next jump's range is multiplied
@@ -575,12 +690,21 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 27: sale pages keyed by journal position (same-second 'Sell all' pages were dropped before); logins.
 # 28: return visits get the 'visited' streak verdict on the jump itself.
 # 30: body records keep pressure_raw (the bio rules compare finer than the rounded pressure).
-PARSER_VERSION = 30
+# 31: Vista Genomics sales keep the x5 sale check (x5_check: the runs predicted x5 against those paid it).
+PARSER_VERSION = 31
 
 SCOOPABLE = set("OBAFGKM")
 ON_FOOT_DOCKED = (1 << 3) | (1 << 13) | (1 << 14)   # Status.json Flags2: on foot in a station, hangar, social space
 HEAT_QUIET = 30            # s: at most one heat alert in this long
 FUEL_HISTORY = 20          # recent jumps used to estimate fuel per jump
+# The fuel model (fuel_model): a jump of d ly burns MaxFuelPerJump × (d / range at this mass)^p, where p is the game's
+# power constant for the drive's size (standard and SCO drives alike), and a Guardian booster adds its light years.
+FSD_POWER = {2: 2.00, 3: 2.15, 4: 2.30, 5: 2.45, 6: 2.60, 7: 2.75}
+GUARDIAN_BOOST = {1: 4.0, 2: 6.0, 3: 7.75, 4: 9.25, 5: 10.5}
+FUEL_FIT_MIN = 3           # own jumps (with the fuel left and the cargo known) before MaxFuelPerJump is fitted
+FUEL_FIT_POWER_MIN = 5     # ... and before p is fitted, for a drive size the table does not have (the size 8)
+SCOOP_RATE_OF = 20         # arrivals the scoopable share is taken over
+SCOOP_RATE_MIN = 8         # fewer known arrival stars than this: no share (carrier jumps and journal gaps have none)
 # Planet classes worth a detour (plus anything terraformable).
 NOTABLE_PLANETS = {"Earth-like world": "ELW", "Water world": "WW", "Ammonia world": "AW"}
 BIO = "$SAA_SignalType_Biological;"
@@ -667,10 +791,11 @@ CREATE TABLE IF NOT EXISTS sample_points (
     PRIMARY KEY (system, body_id, species, n));
 -- Every sale, with what it actually paid (the trip ledger). One row per sale event: 'Sell all' writes one
 -- MultiSellExplorationData per page, often in the same second, so source (journal file name:byte offset of
--- the line) tells the pages apart while a line handled twice still hits the same key.
+-- the line) tells the pages apart while a line handled twice still hits the same key. x5_check (bio sales): JSON
+-- {sold, predicted, matched, paid, unknown, used}, the runs aboard predicted x5 against the entries paid the bonus (sale_check).
 CREATE TABLE IF NOT EXISTS sale_events (
     ts TEXT, kind TEXT, base INTEGER, bonus INTEGER, total INTEGER, systems INTEGER, species INTEGER, source TEXT,
-    PRIMARY KEY (ts, kind, source));
+    x5_check TEXT, PRIMARY KEY (ts, kind, source));
 -- Outrider's estimate just before a sale (recorded live, none for sales before the tool saw them). Live only,
 -- so a journal re-read keeps it (not in RESET_JOURNAL_DATA); the ledger joins it to sale_events by (ts, kind).
 CREATE TABLE IF NOT EXISTS sale_estimates (ts TEXT, kind TEXT, estimate INTEGER, PRIMARY KEY (ts, kind));
@@ -678,6 +803,14 @@ CREATE TABLE IF NOT EXISTS sale_estimates (ts TEXT, kind TEXT, estimate INTEGER,
 -- reached_ts is set when you drop out of supercruise at one.
 CREATE TABLE IF NOT EXISTS phenomena (
     system INTEGER, kind TEXT, ts TEXT, reached_ts TEXT, PRIMARY KEY (system, kind));
+-- The firsts watch: what Spansh showed of a system holding your unsold first discoveries when last checked (see
+-- firsts_reported). reported_ts is the earliest report by someone else of a body you discovered (the first sighting);
+-- bodies how many of yours Spansh has from others, spansh_bodies of body_count the bodies it has in all. Live only
+-- (Spansh's answers then cannot be rebuilt from journals), so a journal re-read keeps it (not in RESET_JOURNAL_DATA);
+-- the backup zip carries it with the rest of the database.
+CREATE TABLE IF NOT EXISTS firsts_watch (
+    id64 INTEGER PRIMARY KEY, checked_ts REAL, reported_ts TEXT, bodies INTEGER, spansh_bodies INTEGER,
+    body_count INTEGER, first_ts TEXT);
 -- Bookmarks made on the page (the game's own bookmarks never reach the journal).
 CREATE TABLE IF NOT EXISTS bookmarks (
     id64 INTEGER PRIMARY KEY, name TEXT, x REAL, y REAL, z REAL, note TEXT, created_ts TEXT);
@@ -692,7 +825,7 @@ DELETE FROM own_systems; DELETE FROM own_bodies; DELETE FROM own_signals; DELETE
 DELETE FROM own_firsts; DELETE FROM own_mapped; DELETE FROM own_footfall; DELETE FROM sales; DELETE FROM deaths;
 DELETE FROM own_genera; DELETE FROM own_organic; DELETE FROM codex; DELETE FROM bio_sales;
 DELETE FROM own_barycentres; DELETE FROM phenomena; DELETE FROM sale_events; DELETE FROM logins;
-DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials', 'last_session');
+DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials', 'last_session', 'cargo');
 DELETE FROM meta WHERE key LIKE 'legacy:%' OR key IN ('pos', 'prev', 'jump_range', 'state_ts');
 """
 
@@ -773,7 +906,8 @@ def migrate_sale_events(db):
         ALTER TABLE sale_events RENAME TO sale_events_old;
         {keep}
         {create}
-        INSERT OR IGNORE INTO sale_events SELECT ts, kind, base, bonus, total, systems, species, '' FROM sale_events_old;
+        INSERT OR IGNORE INTO sale_events (ts, kind, base, bonus, total, systems, species, source)
+            SELECT ts, kind, base, bonus, total, systems, species, '' FROM sale_events_old;
         DROP TABLE sale_events_old;
         COMMIT;""")
 
@@ -1138,6 +1272,9 @@ def record_from_dump(system, b):
         "radius_km": b.get("radius") or (b["solarRadius"] * SOLAR_RADIUS_KM if b.get("solarRadius") else None),
         "sma_ls": b["semiMajorAxis"] * AU_LS if b.get("semiMajorAxis") else None,
         "ed": ed_from_dump(b),   # priced with the same formula as your own scans (see carto_values)
+        # when the body was last reported, and whether Spansh has a signals block for it at all: a pre-Odyssey
+        # client reported no bio signals and marked thin-atmosphere worlds not landable (see stale_bio_body)
+        "updated": b.get("updateTime"), "signals_known": "signals" in b,
     }
 
 
@@ -1295,6 +1432,9 @@ class Journals:
         self.last_start_jump = None  # ts of the latest hyperspace StartJump (a scoop cut short by a jump is not news)
         self.last_shutdown = None  # ts of the latest Shutdown read (the quit backup)
         self.line_source = ""      # "file:offset" of the journal line being handled (read_file sets it)
+        self.regions_said = set()  # galactic regions announced (or left) this game session: see note_region
+        self.region_entered = None  # the latest region crossing {id64, ts, region, spoken, count}
+        self.jumponium = None      # this system's best jumponium body so far {system, body, material, pct, said}
         self.reload()
 
     def moment(self, kind, ts, **kw):
@@ -1351,11 +1491,13 @@ class Journals:
         """What handling lines changes in memory only. A failed tick restores it along with the database
         rollback and reload(), or the retry would announce its moments twice."""
         return (self.moment_seq, list(self.moments), self.last_heat,
-                set(self.body_touched), set(self.approached), self.brief_key)
+                set(self.body_touched), set(self.approached), self.brief_key,
+                set(self.regions_said), self.region_entered, self.jumponium)
 
     def restore(self, cp):
-        self.moment_seq, moments, self.last_heat, touched, approached, self.brief_key = cp
-        self.body_touched, self.approached = set(touched), set(approached)
+        (self.moment_seq, moments, self.last_heat, touched, approached, self.brief_key,
+         regions, self.region_entered, self.jumponium) = cp
+        self.body_touched, self.approached, self.regions_said = set(touched), set(approached), set(regions)
         self.moments = collections.deque(moments, maxlen=self.moments.maxlen)
 
     def reload(self):
@@ -1380,7 +1522,8 @@ class Journals:
         self.pos = meta_get(db, "pos")
         self.prev = meta_get(db, "prev")  # the system you were in before this one
         self.ship = meta_get(db, "ship")            # {name, type, fuel_main, fuel_reserve, max_range, ts}
-        self.fuel_hist = meta_get(db, "fuel_hist", [])   # recent [jump ly, fuel t] pairs
+        self.fuel_hist = meta_get(db, "fuel_hist", [])   # recent [jump ly, fuel t, fuel left t, cargo t] (older: pairs)
+        self.cargo = meta_get(db, "cargo")               # {count, ts}: tonnes in the ship's hold, from Cargo
         self.last_scoop = meta_get(db, "last_scoop")     # ts of the last FuelScoop
         self.carrier = meta_get(db, "carrier")      # your fleet carrier, see handle_ship
         self.last_event_ts = meta_get(db, "last_event_ts")  # newest journal line handled (freshness)
@@ -1492,18 +1635,36 @@ class Journals:
                 self.jump_range = {"ly": ev["MaxJumpRange"], "ts": ts}
                 meta_set(self.db, "jump_range", self.jump_range)
                 cap = ev.get("FuelCapacity") or {}
-                fsd = next((m.get("Item", "") for m in ev.get("Modules") or [] if m.get("Slot") == "FrameShiftDrive"), "")
+                mods = ev.get("Modules") or []
+                fsd_mod = next((m for m in mods if m.get("Slot") == "FrameShiftDrive"), {})
+                fsd = fsd_mod.get("Item", "")
                 size = re.search(r"size(\d)", fsd)
+                # an engineered drive may say its MaxFuelPerJump; otherwise the fuel model fits it from your jumps
+                max_fuel = next((x.get("Value") for x in (fsd_mod.get("Engineering") or {}).get("Modifiers") or []
+                                 if x.get("Label") == "MaxFuelPerJump"), None)
+                # a Guardian FSD booster adds a flat number of light years to every jump
+                booster = next((re.search(r"size(\d)", m.get("Item", "").lower()) for m in mods
+                                if "guardianfsdbooster" in m.get("Item", "").lower()), None)
+                fit_key = [fsd, ev.get("UnladenMass") or 0, ev["MaxJumpRange"], bool(booster)]
                 if self.ship and self.ship.get("ship_id") not in (None, ev.get("ShipID")):
                     # a different ship burns differently; its jumps count from the swap (None would count every
                     # FSD jump ever made as 'since the last scoop')
                     self.fuel_hist, self.last_scoop = [], ts
                     meta_set(self.db, "fuel_hist", []); meta_set(self.db, "last_scoop", ts)
                     self.fresh("fuel_hist", ts); self.fresh("last_scoop", ts)   # older samples are the old ship's
+                elif self.ship and refitted(self.ship.get("fit_key"), fit_key):
+                    # the same ship refitted (another drive, booster or mass): its older jumps would skew the fit
+                    self.fuel_hist = []
+                    meta_set(self.db, "fuel_hist", [])
+                    self.fresh("fuel_hist", ts)
                 self.ship = {"name": ev.get("ShipName") or ev.get("Ship"), "type": ev.get("Ship"),
                              "ship_id": ev.get("ShipID"),
                              "fuel_main": cap.get("Main"), "fuel_reserve": cap.get("Reserve"),
                              "max_range": ev["MaxJumpRange"], "fsd_size": int(size.group(1)) if size else None,
+                             # the fuel model's inputs (see fuel_model): the mass without fuel or cargo, the drive
+                             "unladen": ev.get("UnladenMass"), "fsd": fsd, "max_fuel": max_fuel,
+                             "booster_ly": GUARDIAN_BOOST.get(int(booster.group(1)), 0) if booster else 0,
+                             "fit_key": fit_key,
                              "rebuy": ev.get("Rebuy"), "hull_value": ev.get("HullValue"), "modules_value": ev.get("ModulesValue"),
                              "ts": ts}
                 meta_set(self.db, "ship", self.ship)
@@ -1549,6 +1710,7 @@ class Journals:
             if name == "StartJump" and ev.get("SystemAddress"):
                 self.jump_class = {ev["SystemAddress"]: ev.get("StarClass")}
             if name == "StartJump" and ev.get("JumpType") == "Hyperspace":   # the FSD is charging (not supercruise)
+                self.flush_jumponium(ts)   # leaving with a jumponium body the FSS debrief never got to say
                 self.moment("fsd_charge", ts, system=ev.get("StarSystem") or "", star_class=ev.get("StarClass") or "")
                 self.last_start_jump = ts
             if name == "FSDTarget" and ev.get("SystemAddress") and self.fresh("target", ts, (self.target or {}).get("ts")):
@@ -1565,14 +1727,15 @@ class Journals:
                 self.db.execute("DELETE FROM own_organic WHERE done_ts IS NULL AND (ts IS NULL OR ts <= ?)", (ts,))
                 self.bio_sales_changed = True
             elif name == "SellOrganicData":
+                check = sale_check(self.db, ts, ev.get("BioData") or [], self.line_source)   # before this sale is stored
                 self.db.execute("INSERT OR IGNORE INTO bio_sales VALUES (?, ?)", (ts, len(ev.get("BioData") or [])))
                 self.bio_sales_changed = True
                 paid = sum((b.get("Value") or 0) + (b.get("Bonus") or 0) for b in ev.get("BioData") or [])
                 self.add_earnings(ts, paid)
-                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'bio', ?, ?, ?, 0, ?, ?)",
+                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'bio', ?, ?, ?, 0, ?, ?, ?)",
                                 (ts, sum(b.get("Value") or 0 for b in ev.get("BioData") or []),
                                  sum(b.get("Bonus") or 0 for b in ev.get("BioData") or []), paid, len(ev.get("BioData") or []),
-                                 self.line_source))
+                                 self.line_source, check and json.dumps(check)))
                 self.new_sales.append((ts, "bio"))
                 self.note_sale(ts, bio=paid, species=len(ev.get("BioData") or []))
             elif name == "Resurrect":
@@ -1593,7 +1756,7 @@ class Journals:
             elif name == "MultiSellExplorationData":
                 self.add_earnings(ts, ev.get("TotalEarnings") or 0)
                 # one row per page (source): 'Sell all' writes several pages in the same second
-                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'carto', ?, ?, ?, ?, 0, ?)",
+                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'carto', ?, ?, ?, ?, 0, ?, NULL)",
                                 (ts, ev.get("BaseValue"), ev.get("Bonus"), ev.get("TotalEarnings"), len(ev.get("Discovered") or []),
                                  self.line_source))
                 self.new_sales.append((ts, "carto"))
@@ -1603,7 +1766,7 @@ class Journals:
                                     (d.get("SystemName"), ts, d.get("NumBodies")))
             else:  # the pre-3.3 sale event: just a list of system names
                 self.add_earnings(ts, ev.get("TotalEarnings") or 0)
-                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'carto', ?, ?, ?, ?, 0, ?)",
+                self.db.execute("INSERT OR IGNORE INTO sale_events VALUES (?, 'carto', ?, ?, ?, ?, 0, ?, NULL)",
                                 (ts, ev.get("BaseValue"), ev.get("Bonus"), ev.get("TotalEarnings"), len(ev.get("Systems") or []),
                                  self.line_source))
                 self.new_sales.append((ts, "carto"))
@@ -1627,8 +1790,11 @@ class Journals:
             self.spend_boost(ts)
         if not ride and name == "FSDJump" and ev.get("FuelUsed") and ev.get("JumpDist") and not ev.get("BoostUsed") \
                 and self.fresh("fuel_hist", ts):
-            # boosted jumps (neutron cone, FSD injection) go further for the same fuel: not a pace sample
-            self.fuel_hist = (self.fuel_hist + [[ev["JumpDist"], ev["FuelUsed"]]])[-FUEL_HISTORY:]
+            # boosted jumps (neutron cone, FSD injection) go further for the same fuel: not a pace sample.
+            # [ly, fuel used, fuel left, cargo t] (the cargo from the journal's Cargo, None before any): the fuel
+            # left and the cargo give the ship's mass at the jump, which the MaxFuelPerJump fit needs
+            self.fuel_hist = (self.fuel_hist + [[ev["JumpDist"], ev["FuelUsed"], ev.get("FuelLevel"),
+                                                 (self.cargo or {}).get("count")]])[-FUEL_HISTORY:]
             meta_set(self.db, "fuel_hist", self.fuel_hist)
         if name == "CarrierJump" and self.carrier and ev.get("MarketID") == self.carrier.get("id") \
                 and self.fresh("carrier", ts, self.carrier_ts()):
@@ -1665,6 +1831,8 @@ class Journals:
         if ns and ns.get("id64") == id64 and not relog and current and ts > (ns.get("set_ts") or ""):
             meta_set(self.db, "next_stop", None)
         if current:
+            if name in ("FSDJump", "CarrierJump") and self.pos and self.pos["id64"] != id64:
+                self.note_region(self.pos, id64, x, y, z, ts)
             if self.pos and self.pos["id64"] != id64:
                 self.prev = self.pos
                 meta_set(self.db, "prev", self.prev)
@@ -1674,6 +1842,59 @@ class Journals:
             meta_set(self.db, "pos", self.pos)
         if ev.get("event") == "FSDJump" and current and not ride:
             self.jump_arrival = {"id64": id64, "name": ev.get("StarSystem"), "ts": ts}
+
+    def note_region(self, prev, id64, x, y, z, ts):
+        """A jump from `prev` into a galactic region not announced this session: the arrival briefing opens with it
+        (region_entered, read by State.arrival_facts) and a "region" moment speaks it when the briefing does not.
+        Both regions join regions_said, so hopping back and forth along a border says nothing more. Nothing
+        outside the region map, or when the previous position has no coordinates."""
+        if not ed_bio or prev.get("x") is None or x is None:
+            return
+        old, new = ed_bio.region_name(prev["x"], prev["y"], prev["z"]), ed_bio.region_name(x, y, z)
+        if not new or new == old:
+            return
+        said, self.regions_said = new in self.regions_said, self.regions_said | {r for r in (old, new) if r}
+        if said:
+            return
+        count = region_codex_count(self.db, new, ed_bio.region_number(x, y, z))
+        self.region_entered = {"id64": id64, "ts": ts, "region": new, "spoken": region_spoken(new), "count": count}
+        self.moment("region", ts, system=id64, region=new, spoken=region_spoken(new), count=count)
+
+    def note_jumponium(self, system, ev, ts):
+        """A new landable body carrying a material your FSD injections are short of (ed_materials.jumponium_short),
+        if it beats this system's best so far (a scarcer material, or a richer share of the same). Said with the
+        FSS debrief (take_jumponium), or alone once the FSS is already done here, or when you leave or close the
+        FSS unfinished (flush_jumponium). Nothing while the material counts are stale."""
+        m = self.materials or {}
+        if not m.get("snapshot_ts") or materials_stale(m, self.commander):
+            return
+        short = ed_materials.jumponium_short(m.get("counts") or {})
+        pick = ed_materials.jumponium_pick(ev.get("Materials"), short)
+        if not pick:
+            return
+        j = self.jumponium
+        if j and j["system"] == system and (short.get(j["material"], 1e9), -j["pct"]) <= (short[pick["material"]], -pick["pct"]):
+            return   # a body as good or better was already found here
+        self.jumponium = dict(pick, system=system, body_id=ev["BodyID"], said=False,
+                              body=short_name(ev.get("StarSystem") or (self.pos or {}).get("name"), ev.get("BodyName") or ""),
+                              name=ed_materials.display_name(m, pick["material"]))
+        la = self.last_all_found
+        if la and la["id64"] == system:   # the FSS debrief has been and gone: say it alone
+            self.flush_jumponium(ts)
+
+    def take_jumponium(self, system):
+        """This system's jumponium body for the FSS debrief ({body, material, name, pct}), marked said; else None."""
+        j = self.jumponium
+        if not j or j["system"] != system or j["said"]:
+            return None
+        self.jumponium = dict(j, said=True)
+        return {k: j[k] for k in ("body", "material", "name", "pct")}
+
+    def flush_jumponium(self, ts, system=None):
+        """A jumponium body not yet said (the FSS never completed): its own moment now."""
+        j = self.jumponium
+        if j and not j["said"] and (system is None or j["system"] == system):
+            self.moment("jumponium", ts, system=j["system"], jumponium=self.take_jumponium(j["system"]))
 
     def handle_body(self, name, ev, ts):
         """ApproachBody (orbital cruise begins: the approach briefing, once per body per session), LeaveBody
@@ -1757,6 +1978,7 @@ class Journals:
             c.update(name=ev.get("Name") or c.get("name"), fid=ev.get("FID") or c.get("fid"))
         else:  # LoadGame: the credit balance at login is the baseline; sales since are added to it
             self.approached.clear()   # a new session: each body gets its approach briefing again
+            self.regions_said = set()   # ... and each region crossing its line
             ship = ev.get("ShipName") or ev.get("Ship_Localised") or ev.get("Ship") or ""
             if not_a_ship(ev.get("Ship")):   # logged in on foot, in the SRV or a shuttle: your ship is still yours
                 ship = (self.ship or {}).get("name") or ""
@@ -1835,6 +2057,12 @@ class Journals:
         if name == "Interdicted":
             self.moment("interdicted", ts, by=ev.get("Interdictor_Localised") or ev.get("Interdictor") or "",
                         submitted=bool(ev.get("Submitted")), player=bool(ev.get("IsPlayer")))
+            return
+        if name == "Cargo":   # the hold's total (the SRV's hold is its own): the ship's mass, for the fuel model
+            if ev.get("Vessel", "Ship") == "Ship" and isinstance(ev.get("Count"), (int, float)) \
+                    and self.fresh("cargo", ts, (self.cargo or {}).get("ts")):
+                self.cargo = {"count": ev["Count"], "ts": ts}
+                meta_set(self.db, "cargo", self.cargo)
             return
         if name in ("FuelScoop", "RefuelAll", "RefuelPartial"):
             if self.fresh("last_scoop", ts, self.last_scoop):
@@ -1915,6 +2143,19 @@ class Journals:
             samples, done = (row["samples"], row["done_ts"]) if row else (0, None)
             if kind == "Log":            # first sample of a run (a new run if this species was already done)
                 samples, done = 1, None
+                # a run at 2 of 3 elsewhere that this Log discards: a card (never spoken), only when read live, so a
+                # re-read or catch-up does not bring back old losses
+                if live_event(ts):
+                    lost = self.db.execute(
+                        "SELECT system, body_id, species_name, genus_name FROM own_organic WHERE done_ts IS NULL AND samples = 2"
+                        " AND NOT (system=? AND body_id=? AND species=?) AND (ts IS NULL OR ts <= ?)",
+                        (system, body, species, ts)).fetchone()
+                    if lost:
+                        b = self.db.execute("SELECT b.name, v.name AS sys FROM own_bodies b LEFT JOIN visits v ON v.id64 = b.system"
+                                            " WHERE b.system=? AND b.body_id=?", (lost["system"], lost["body_id"])).fetchone()
+                        self.moment("bio_dropped", ts, system=lost["system"], body_id=lost["body_id"],
+                                    body=short_name(b["sys"], b["name"]) if b else "", elsewhere=lost["system"] != system,
+                                    species=lost["species_name"] or "", genus=lost["genus_name"] or "")
                 # only one sample run exists at a time: starting this one abandons any other (begun before it:
                 # a journal read out of order must not abandon the run you are on)
                 self.db.execute("DELETE FROM own_organic WHERE done_ts IS NULL AND NOT (system=? AND body_id=? AND species=?)"
@@ -1969,6 +2210,8 @@ class Journals:
                 undisc = ts if ev.get("WasDiscovered") is False else None
                 if record["type"] == "Planet" and not known:
                     self.moment("scan", ts, system=system, body_id=ev["BodyID"])
+                    if ev.get("Landable") and ev.get("Materials"):
+                        self.note_jumponium(system, ev, ts)
                 self.db.execute(
                     """INSERT INTO own_firsts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(system, body_id) DO UPDATE SET
@@ -2009,7 +2252,8 @@ class Journals:
             h = self.last_honk
             by_honk = bool(h and h["id64"] == system and ((h.get("progress") or 0) >= 0.999
                                                         or 0 <= ts_seconds(ts) - ts_seconds(h["ts"]) <= 5))
-            self.moment("fss_done", ts, system=system, count=ev.get("Count"), by_honk=by_honk)
+            self.moment("fss_done", ts, system=system, count=ev.get("Count"), by_honk=by_honk,
+                        jumponium=self.take_jumponium(system))
             self.last_all_found = {"id64": system, "ts": ts}
             self.db.execute(
                 """INSERT INTO own_systems (id64, name, body_count, all_found) VALUES (?, ?, ?, 1)
@@ -2069,7 +2313,9 @@ class Journals:
                                 # where you are on a body (the on-body strip, sample spacing) and the target
                                 "body": st.get("BodyName"), "lat": st.get("Latitude"), "lon": st.get("Longitude"),
                                 "alt": st.get("Altitude"), "planet_radius": st.get("PlanetRadius"),
-                                "destination": st.get("Destination"), "gui_focus": st.get("GuiFocus"), "live": True}
+                                "cargo": st.get("Cargo"),   # tonnes aboard (the fuel model's mass)
+                                "destination": st.get("Destination"), "gui_focus": st.get("GuiFocus"),
+                                "fire_group": st.get("FireGroup"), "live": True}
         elif self.status_json:  # game closed or at the menu: keep the last reading, mark it stale
             self.status_json = dict(self.status_json, live=False)
         else:
@@ -2107,6 +2353,34 @@ class Journals:
                                 (hop["SystemAddress"], hop["StarClass"]))
 
 
+def materials_stale(materials, commander):
+    """A login whose Materials line was never seen: the counts predate it."""
+    login, snap = (commander or {}).get("login_ts"), (materials or {}).get("snapshot_ts")
+    return bool(login and snap and ts_seconds(login) - ts_seconds(snap) > 120)
+
+
+def region_spoken(name):
+    """A region's name as said in a sentence: "the Norma Arm", "the Veils", but "Ryker's Hope", "Izanami"."""
+    if not name:
+        return name
+    if name.startswith("The "):
+        return "the " + name[4:]
+    if "'" in name or " " not in name or name == "Mare Somnia":
+        return name
+    return "the " + name
+
+
+def region_codex_count(db, region, number):
+    """Species logged in your codex in other regions, not yet in this one, that the bio rules let grow here (a
+    species the rules do not know is left out): what a crossing into `region` could add. 0 when none or unknown."""
+    if not ed_bio or not region:
+        return 0
+    logged = {(r[0] or "").strip().lower().split(" - ")[0].strip()
+              for r in db.execute("SELECT DISTINCT name FROM codex WHERE region IS NOT NULL AND region != ?", (region,))}
+    here = codex_species(db, region)[1]
+    return sum(1 for sp in logged - here if sp and ed_bio.region_allows(sp, number))
+
+
 def codex_species(db, region):
     """Your codex entries in `region` as (full names, species), both lower-cased. Codex bio entries are per
     colour variant ("bacterium aurasus - teal"); the species set ("bacterium aurasus") counts a species as known
@@ -2132,6 +2406,54 @@ def with_logged_variants(groups, logged):
     from the first sample) in place of the predicted candidates. `logged`: {genus: variant name}."""
     return [dict(g, variants=[logged[g["genus"]]], variant=logged[g["genus"]]) if logged.get(g["genus"]) else g
             for g in groups]
+
+
+SALE_SESSION_S = 300   # s: Vista Genomics sales this close together are one visit (you sold in several goes)
+
+
+def sale_check(db, ts, bio_data, source=""):
+    """A Vista Genomics sale at ts against the prediction: the completed runs aboard just before it (done since the
+    last sale before this visit and since the last death), each predicted x5 where your first scan of its body said
+    nobody had set foot there (own_firsts), matched to the sale's BioData by species counts alone (a BioData entry
+    names no body). An earlier sale of the same visit (sales under SALE_SESSION_S apart) has taken its runs out of the
+    pool already: the x5 ones first, as its own check counted them ("used"). {sold, predicted (runs predicted x5, at
+    most the entries sold of the species), matched (of those, paid the bonus), paid (entries paid the bonus), unknown
+    (runs sold whose footfall is not known), used}, or None for an empty sale. Journal state only: a re-read
+    rebuilds it."""
+    if not bio_data:
+        return None
+    visit, start, t = [], "", ts
+    for r in db.execute("SELECT ts, x5_check FROM sale_events WHERE kind = 'bio' AND ts <= ? AND source != ? ORDER BY ts DESC",
+                        (ts, source)):
+        if ts_seconds(t) - ts_seconds(r["ts"]) > SALE_SESSION_S:
+            start = r["ts"]
+            break
+        visit.append(json.loads(r["x5_check"]) if r["x5_check"] else {})
+        t = r["ts"]
+    start = max(start, db.execute("SELECT coalesce(max(ts), '') FROM deaths WHERE ts < ?", (ts,)).fetchone()[0])
+    sold, paid, x5, unknown = (collections.Counter() for _ in range(4))
+    for b in bio_data:
+        sp = (b.get("Species") or "").lower()
+        sold[sp] += 1
+        if b.get("Bonus"):
+            paid[sp] += 1
+    for r in db.execute("SELECT o.species, f.was_footfalled FROM own_organic o LEFT JOIN own_firsts f "
+                        "ON f.system = o.system AND f.body_id = o.body_id "
+                        "WHERE o.done_ts IS NOT NULL AND o.done_ts > ? AND o.done_ts <= ?", (start, ts)):
+        sp = (r["species"] or "").lower()
+        if r["was_footfalled"] == 0:
+            x5[sp] += 1
+        elif r["was_footfalled"] is None:
+            unknown[sp] += 1
+    for c in visit:   # what this visit's earlier sales took
+        for sp, (a, u) in (c.get("used") or {}).items():
+            x5[sp] -= a
+            unknown[sp] -= u
+    predicted = {sp: max(0, min(x5[sp], n)) for sp, n in sold.items()}
+    unk = {sp: max(0, min(unknown[sp], n - predicted[sp])) for sp, n in sold.items()}
+    return {"sold": sum(sold.values()), "predicted": sum(predicted.values()),
+            "matched": sum(min(predicted[sp], paid[sp]) for sp in sold), "paid": sum(paid.values()),
+            "unknown": sum(unk.values()), "used": {sp: [predicted[sp], unk[sp]] for sp in sold}}
 
 
 def organic_state(db, done_ts):
@@ -2215,6 +2537,65 @@ def own_firsts(db, id64, system):
     return out
 
 
+def spansh_seconds(t):
+    """A Spansh time ('2026-09-28T03:15:00Z', or with a space and '+00') -> seconds since the epoch; None if unreadable."""
+    try:
+        return ts_seconds(str(t).replace(" ", "T"))
+    except (TypeError, ValueError):
+        return None
+
+
+def firsts_watch_gap(row, now):
+    """Seconds before a checked firsts_watch row is due again: FIRSTS_WATCH_SLOW once someone else has been seen there
+    (a sighting never clears, so a daily look only moves the body count) or once your first scan there is
+    FIRSTS_WATCH_YOUNG old; FIRSTS_WATCH_EVERY before that."""
+    first = ts_seconds(row["first_ts"]) if row["first_ts"] else None
+    if row["reported_ts"] or (first is not None and now - first >= FIRSTS_WATCH_YOUNG):
+        return FIRSTS_WATCH_SLOW
+    return FIRSTS_WATCH_EVERY
+
+
+def firsts_reported(records, mine, body_count=None, system_times=()):
+    """Whether someone else has reported bodies you were first to discover: `records` are a system's Spansh body
+    records (record_from_dump: short name, type, updated), `mine` {short name: [your journal timestamps for that body:
+    scans, map]} for the bodies you discovered, `system_times` your other journal times there (every arrival: a jump
+    in updates the arrival star; footfall, samples, codex). A body counts when Spansh last had it updated later than
+    all your own times for it and not at one of your system times (each plus FIRSTS_OWN_GRACE, so your own upload
+    through EDDN, stamped with your event's time, does not count; one dated before your scan was in the arrival
+    snapshot, which a first discovery never has anyway). ->
+    None when no body of yours counts, else {reported_ts (the earliest such update: the first sighting), bodies (yours
+    that count), spansh_bodies (every star and planet Spansh has), body_count (the system's, when known)}."""
+    seen = []
+    visits = [ts_seconds(t) for t in system_times if t]
+    for r in records:
+        times = mine.get(r.get("name"))
+        if not times or r.get("type") not in ("Star", "Planet"):
+            continue
+        up = spansh_seconds(r.get("updated")) if r.get("updated") else None
+        own = [ts_seconds(t) for t in times if t]
+        if up is None or not own or up <= max(own) + FIRSTS_OWN_GRACE \
+                or any(v - FIRSTS_OWN_GRACE <= up <= v + FIRSTS_OWN_GRACE for v in visits):
+            continue
+        seen.append(up)
+    if not seen:
+        return None
+    return {"reported_ts": iso_ts(min(seen)), "bodies": len(seen),
+            "spansh_bodies": sum(1 for r in records if r.get("type") in ("Star", "Planet") and not r.get("placeholder")),
+            "body_count": body_count}
+
+
+def firsts_seen(row):
+    """A firsts_watch row as My firsts shows it: {reported_ts, days (after your first scan), bodies, spansh_bodies,
+    body_count}, or None when nobody else is known to have scanned there."""
+    if not row or not row.get("reported_ts"):
+        return None
+    days = None
+    if row.get("first_ts"):
+        days = max(0, round((ts_seconds(row["reported_ts"]) - ts_seconds(row["first_ts"])) / 86400))
+    return {"reported_ts": row["reported_ts"], "days": days, "bodies": row.get("bodies"),
+            "spansh_bodies": row.get("spansh_bodies"), "body_count": row.get("body_count")}
+
+
 # --------------------------------------------------------------------------
 # Summaries: what the page shows for a system, computed from merged records
 # --------------------------------------------------------------------------
@@ -2260,6 +2641,81 @@ def class_scoopable(star_class):
 
 def natural(s):
     return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", s)]
+
+
+# ---- the fuel model: laden range, fuel per hop, jumps left ----
+
+def refitted(old, new):
+    """True when a Loadout's [drive, unladen t, max range ly, booster] differs from the last one's by more than the
+    game's float jitter (the same ship logs 323.150024 t and 323.149994 t)."""
+    return bool(old) and (old[0] != new[0] or old[3] != new[3] or abs(old[1] - new[1]) > 0.5 or abs(old[2] - new[2]) > 0.05)
+
+
+def fsd_range(model, mass):
+    """The longest jump at `mass` t. The Loadout's MaxJumpRange is the range at the unladen mass plus one max jump's
+    fuel; range goes as 1/mass, the booster's flat light years apart. max_fuel unknown counts as 0 (a small error)."""
+    b = model["boost"]
+    return (model["r0"] - b) * (model["unladen"] + (model.get("max_fuel") or 0)) / mass + b
+
+
+def hop_fuel(model, d, mass):
+    """Fuel for a d ly jump at `mass` t, or None past the range (or without MaxFuelPerJump and p)."""
+    if not model.get("max_fuel") or not model.get("power"):
+        return None
+    r = fsd_range(model, mass)
+    return model["max_fuel"] * (d / r) ** model["power"] if 0 <= d <= r + 1e-6 else None
+
+
+def _fit_estimates(model, samples, power):
+    """One MaxFuelPerJump estimate per [ly, fuel used, fuel left, cargo] sample, at power p. The range depends a
+    little on the answer (the Loadout's range includes one max jump's fuel), so each is solved by iteration."""
+    out = []
+    for d, used, left, cargo in samples:
+        mass, mf = model["unladen"] + left + used + cargo, 0.0
+        for _ in range(12):
+            mf = used * (fsd_range(dict(model, max_fuel=mf), mass) / d) ** power
+        out.append(mf)
+    return out
+
+
+def fuel_model(ship, samples):
+    """The fuel model for a ship's Loadout ({unladen, r0, boost, power, max_fuel, fitted}), or None without the mass.
+    p comes from the drive's size; MaxFuelPerJump from the drive's engineering when it says, else the median of
+    your own jumps' estimates. Either can stay None (range still works, per-hop fuel does not)."""
+    ship = ship or {}
+    if not ship.get("unladen") or not ship.get("max_range"):
+        return None
+    model = {"unladen": ship["unladen"], "r0": ship["max_range"], "boost": ship.get("booster_ly") or 0,
+             "power": FSD_POWER.get(ship.get("fsd_size")), "max_fuel": ship.get("max_fuel"), "fitted": False}
+    good = [s[:4] for s in samples or [] if len(s) >= 4 and s[2] is not None and s[3] is not None and s[0] > 0 and s[1] > 0]
+    if model["power"] is None and len(good) >= FUEL_FIT_POWER_MIN:
+        # a size the table lacks: the p whose estimates agree best (the right one gives nearly the same figure
+        # for a 3 ly hop and a 60 ly one; a wrong one drifts with the distance)
+        def spread(p):
+            e = sorted(_fit_estimates(model, good, p))
+            return (e[-1] - e[0]) / e[len(e) // 2]
+        model["power"] = min(sorted(set(FSD_POWER.values()) | {2.9}), key=spread)
+    if not model["max_fuel"] and model["power"] and len(good) >= FUEL_FIT_MIN:
+        e = sorted(_fit_estimates(model, good, model["power"]))
+        model["max_fuel"], model["fitted"] = round(e[len(e) // 2], 3), True
+    return model
+
+
+def jumps_left(model, fuel, cargo, d=None, cap=1000):
+    """(jumps, ly) the fuel takes you, jump after jump, the ship lightening as it burns: at max range (d None) or
+    hops of d ly. None without MaxFuelPerJump and p. Past `cap` jumps the rest is counted at the last hop's cost."""
+    if not model or not model.get("max_fuel") or not model.get("power") or fuel is None or cargo is None:
+        return None
+    n, ly = 0, 0.0
+    while n < cap:
+        mass = model["unladen"] + fuel + cargo
+        hop = fsd_range(model, mass) if d is None else min(d, fsd_range(model, mass))
+        need = hop_fuel(model, hop, mass)
+        if need is None or need <= 0 or need > fuel + 1e-9:
+            return n, round(ly, 1)
+        fuel, n, ly = fuel - need, n + 1, ly + hop
+    more = int(fuel / need)
+    return n + more, round(ly + more * hop, 1)
 
 
 def tally(items):
@@ -2445,6 +2901,55 @@ def bio_options(r, star=None, ctx=None, known=()):
                         "species": [ed_bio.short_species(x["name"], g["genus"]) for x in g["species"]]} for g in groups]}
 
 
+# Odyssey's legacy/live split (29 Nov 2022): body data reported before it came from pre-Odyssey clients, which marked
+# thin-atmosphere worlds not landable and reported no biological signals.
+LEGACY_CUTOFF = "2022-11-29"
+
+
+def stale_bio_groups(r, star=None, ctx=None):
+    """The genus groups the exobiology rules allow on a Spansh body whose record is too old to say: a planet with a
+    thin atmosphere, marked not landable, with no signals block, last reported before LEGACY_CUTOFF. [] for any
+    other body, and for one where the rules allow nothing (an atmosphere or gravity no Odyssey life takes). Your own
+    scan replaces the Spansh record (it has no `updated`), so a body you have scanned is never one of these."""
+    if not stale_bio_candidate(r):
+        return []
+    return ed_bio.by_genus(ed_bio.predict(_bio_body(r, star, ctx), ctx))
+
+
+def stale_bio_candidate(r):
+    """stale_bio_groups' checks short of the rules: cheap, so a caller can skip building the bio context."""
+    if not ed_bio or r.get("type") != "Planet" or r.get("landable") or r.get("signals_known") is not False:
+        return False
+    updated = r.get("updated")
+    if not isinstance(updated, str) or not updated[:10] or updated[:10] >= LEGACY_CUTOFF:
+        return False
+    return str(r.get("atmosphere") or "").lower().startswith("thin")
+
+
+def stale_bio_body(r, star=None, ctx=None):
+    """Whether a Spansh body may hold life its pre-Odyssey record could not report (see stale_bio_groups)."""
+    return bool(stale_bio_groups(r, star, ctx))
+
+
+def stale_bio_summary(records, star=None, ctx=None):
+    """{bodies, genera_top, up_to, reported} for the bodies stale_bio_groups flags, or None when none are. up_to
+    prices one genus per body, the median of those the rules allow (not the most valuable), so the figure is not
+    absurd; it is kept apart from bio_potential and the value columns. reported: the latest of their Spansh dates."""
+    n, up_to, genera, last = 0, 0, collections.Counter(), ""
+    for r in records:
+        groups = stale_bio_groups(r, star, ctx)
+        if not groups:
+            continue
+        n += 1
+        vals = sorted(g.get("value") or 0 for g in groups)
+        up_to += vals[len(vals) // 2]
+        genera.update(g["genus"] for g in groups)
+        last = max(last, r["updated"][:10])
+    if not n:
+        return None
+    return {"bodies": n, "genera_top": [g for g, _ in genera.most_common(3)], "up_to": up_to, "reported": last}
+
+
 def summarise(records, body_count, star=None, ctx=None, genera=None):
     """`genera`: {body name: [genus]} your own DSS found; they win over Spansh's list (as in system_value)."""
     genera = genera or {}
@@ -2481,6 +2986,7 @@ def summarise(records, body_count, star=None, ctx=None, genera=None):
                 n += 1
     if n:
         s["bio_potential"], s["bio_bodies_guessed"] = pot, n
+    s["stale_bio"] = stale_bio_summary(records, star, ctx)   # old Spansh data: a mark only, never in the values
     if not full:
         return s  # rings, belts and signals arrive with the Spansh dump
     ringed = [r for r in planets if r.get("rings")]
@@ -2516,7 +3022,7 @@ def summarise(records, body_count, star=None, ctx=None, genera=None):
 FIND_NAME_MAX = 100   # /api/find: the longest system name taken (real ones are far shorter)
 
 # Bump when the cached record layout changes so cached systems get re-fetched.
-CACHE_VERSION = 14   # 14: pressure_raw
+CACHE_VERSION = 15   # 14: pressure_raw; 15: updated, signals_known (stale_bio_body)
 
 
 def cached_base(db, id64):
@@ -2836,18 +3342,49 @@ def archive_journals(dirs, dest):
     return copied, time.strftime("%Y-%m-%d", time.gmtime(newest)) if newest else None, failed
 
 
+def backup_zips(folder, db_path):
+    """db_path's dated zips in `folder` (see backup_name; for the default database also the older
+    outrider-YYYYMMDD-HHMMSS.zip names), oldest first. Raises OSError when the folder cannot be listed."""
+    stem = os.path.splitext(os.path.basename(db_path))[0]
+    mine = re.compile(re.escape(f"outrider-{stem}-") + r"\d{8}-\d{6}Z\.zip")
+    legacy = os.path.basename(db_path) == os.path.basename(DB_PATH)
+    return sorted((f for f in os.listdir(folder)
+                   if (mine.fullmatch(f) or (legacy and LEGACY_BACKUP_NAME.fullmatch(f)))
+                   and os.path.isfile(os.path.join(folder, f))),
+                  key=lambda f: (not LEGACY_BACKUP_NAME.fullmatch(f), f))   # the old local-time names first
+
+
+def check_zip(path):
+    """None when every member of the zip reads back with its CRC, else what is wrong with it."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            bad = z.testzip()
+    except (zipfile.BadZipFile, OSError) as e:
+        return str(e) or type(e).__name__
+    return f"{bad} is damaged" if bad is not None else None
+
+
+def check_database(path):
+    """None when SQLite's quick_check passes on the database file at `path` (opened read-only), else its first
+    complaint."""
+    try:
+        con = sqlite3.connect(f"file:{urllib.parse.quote(os.path.abspath(path))}?mode=ro", uri=True)
+        try:
+            res = con.execute("PRAGMA quick_check").fetchone()[0]
+        finally:
+            con.close()
+    except sqlite3.DatabaseError as e:
+        return str(e)
+    return None if res == "ok" else res
+
+
 def rotate_backups(folder, keep, db_path, current=None):
     """Delete db_path's dated zips (see backup_name) in `folder` beyond the newest `keep`, never `current` (the
     one just written). Nothing else is touched: not another database's zips, not the journal archive, not a
     zip you renamed, not any other file. Returns how many remain."""
-    stem = os.path.splitext(os.path.basename(db_path))[0]
-    mine = re.compile(re.escape(f"outrider-{stem}-") + r"\d{8}-\d{6}Z\.zip")
-    legacy = os.path.basename(db_path) == os.path.basename(DB_PATH)
     current = current and os.path.basename(current)
-    zips = sorted((f for f in os.listdir(folder)
-                   if (mine.fullmatch(f) or (legacy and LEGACY_BACKUP_NAME.fullmatch(f)))
-                   and os.path.isfile(os.path.join(folder, f))),
-                  key=lambda f: (not LEGACY_BACKUP_NAME.fullmatch(f), f))   # the old local-time names first
+    zips = backup_zips(folder, db_path)
     keep = max(1, int(keep))
     old = [f for f in zips if f != current]
     drop = old[:max(0, len(zips) - keep)]
@@ -2884,8 +3421,21 @@ class State:
         self.target_task = None
         self.searcher = None       # set once the Searcher exists
         self.speaker = None        # ed_tts.Speaker, set at start (None in tests)
+        self.player = None         # ed_tts.LinePlayer: the tick that plays speech and sounds here (None in tests)
+        self.sounds = ed_tts.SoundBank()   # static/sounds.json rendered to WAV for it
         self.speech = None         # ed_speech.SpeechLines, set at start (None in tests)
         self.honker = None         # ed_honk.Honker, set at start (None in tests)
+        self.button = None         # ed_button.ButtonWatch when [copilot] enabled (None otherwise and in tests)
+        # the voice's hush ({mode, until, sys}): here, not per browser, so the co-pilot button, a tablet and the
+        # window that is speaking all see the same one. In memory only: a restart ends it
+        self.hush = None
+        self.firsts_watch_on = False   # [spansh] watch_firsts, set at start (off in tests)
+        self.firsts_watch_seq = 0      # bumps with each check (firsts_cached keys on it)
+        self._firsts_cache = None
+        # the co-pilot channel ({seq, action, words}): the button and the Now bar ask the speaking window for a
+        # status report, the last line again or a replay. Kept out of Journals.moments, whose checkpoint and
+        # rollback during a journal re-read could replay or drop it
+        self.copilot = {"seq": 0, "action": None, "words": None}
         self.autohonk = dict(AUTOHONK)
         self._honk_arrival = None  # the arrival the auto honk last looked at
         self.honk_confirm = 10.0   # s to wait for the journal's discovery scan after the press
@@ -2958,8 +3508,12 @@ class State:
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
             "tts": self.speaker.info() if self.speaker else None,
+            "player": self.player.info() if self.player else None,
             "speech": self.speech.info() if self.speech else None,
             "autohonk": self.autohonk_info(),
+            "hush": self.hush_info(),
+            "firsts_watch": self.firsts_watch_info(),
+            "copilot": dict(self.copilot, button=self.button.status if self.button else None),
             "region": self.region_info(),
             "boost": (self.journals.boost or {}).get("value"),
             "on_body": self.on_body(),
@@ -2981,8 +3535,11 @@ class State:
             "previous": with_id(self.journals.prev),
             "commander": self.commander_summary(),
             "materials": self.materials_summary(), "jump_range": jr["ly"] if jr else None,
+            # the range with the fuel and cargo aboard now (the fuel model), None without the Loadout's mass
+            "jump_range_now": self.range_now(),
             "systems": list(self.systems.values()),
-            "target": dict(with_id(self.target), leaving=self.leaving_summary(pos["id64"])) if self.target and pos else with_id(self.target),
+            "target": dict(with_id(self.target), leaving=self.leaving_summary(pos["id64"]), hop=self.target_hop(self.target))
+                      if self.target and pos else with_id(self.target),
             "arrival": self.arrival,
             "scan_version": self.scan_version, "history_version": self.history_version,
             # read: moves with every journal line consumed (the Log tails on it; journal is to the second)
@@ -3012,6 +3569,40 @@ class State:
             "unsold": self.unsold,
         }
 
+    # ---- the voice's hush and the co-pilot channel ----
+
+    def set_hush(self, mode):
+        """Hush the voice ("10m", "30m", "jump": until the position changes) or end it ("off"). Danger lines and
+        the lines you ask for still speak; the page does the silencing."""
+        pos = self.journals.pos
+        if mode == "off":
+            self.hush = None
+        elif HUSH_MODES.get(mode):
+            self.hush = {"mode": mode, "until": time.time() + HUSH_MODES[mode], "sys": None}
+        else:
+            self.hush = {"mode": "jump", "until": None, "sys": pos["id64"] if pos else None}
+        self.bump()
+
+    def hush_info(self):
+        """The hush for the payload, or None once it has run out or you have jumped. `left` (s) lets a browser with
+        its clock off count down right; `sys` is the id64 as a string, like position.id."""
+        h, pos = self.hush, self.journals.pos
+        if h and ((h["until"] is not None and time.time() >= h["until"])
+                  or (h["mode"] == "jump" and pos and pos["id64"] != h["sys"])):
+            self.hush = h = None
+        if not h:
+            return None
+        return {"mode": h["mode"], "until": h["until"], "left": round(h["until"] - time.time(), 1) if h["until"] else None,
+                "sys": str(h["sys"]) if h["sys"] is not None else None}
+
+    def copilot_action(self, action, words=None):
+        """A co-pilot request for the speaking window. "hush" is done here: a hold starts a hush until the next jump,
+        and another hold (while any hush runs) ends it."""
+        if action == "hush":
+            self.set_hush("off" if self.hush_info() else "jump")
+        self.copilot = {"seq": self.copilot["seq"] + 1, "action": action, "words": words}
+        self.bump()
+
     # ---- commander, materials, fuel, carrier, current system ----
 
     def make_backup(self):
@@ -3022,9 +3613,11 @@ class State:
         so nothing is ever deleted for a backup that did not work; once the zip is good, a journal that could
         not be archived is reported (warning: the backup itself worked) but the rotation still runs, so a lasting
         failure cannot pile up zips. Legacy folders stay out of the archive: they are a copy of something already
-        and never change. The zip also holds the speech file and the config file in use when they exist (see
+        and never change. The zip also holds the speech file and the config file in use when they exist, and the lines you banned (see
         State.speech_path); one of those that cannot be read is a warning too. Runs on a worker thread; returns
-        {path, size, kept, journals_to, copied, files} (+ warning), files being the names inside the zip."""
+        {path, size, kept, journals_to, copied, files, verified} (+ warning), files being the names inside the
+        zip. The database copy must pass SQLite's quick_check and the zip testzip() before the zip replaces
+        anything or the rotation runs; a copy or zip that fails raises (and the bad zip is deleted)."""
         import zipfile
         os.makedirs(BACKUP_DIR, exist_ok=True)
         name = backup_name(self.db_path)
@@ -3037,6 +3630,10 @@ class State:
             dst = sqlite3.connect(tmp_db)
             try:
                 copy_database(src, dst)
+                # the copy must read back before it goes in the zip: a bad backup never rotates a good one out
+                problem = dst.execute("PRAGMA quick_check").fetchone()[0]
+                if problem != "ok":
+                    raise RuntimeError(f"the database copy failed its check: {problem}")
             finally:
                 dst.close(); src.close()
             with zipfile.ZipFile(path + ".part", "w", zipfile.ZIP_DEFLATED) as z:
@@ -3049,7 +3646,9 @@ class State:
                 # your lines and your settings: extras, so one that cannot be read is a warning, never a failed
                 # backup (the database is what the zip is for)
                 extra_failed = []
-                for src_path, arc in ((self.speech_path, "speech.json"), (self.config_path, "ed_outrider.toml")):
+                banned = ed_speech.banned_path(self.speech_path) if self.speech_path else None
+                for src_path, arc in ((self.speech_path, "speech.json"), (banned, ed_speech.BANNED_FILE),
+                                      (self.config_path, "ed_outrider.toml")):
                     if not src_path or not os.path.exists(src_path):
                         continue
                     try:
@@ -3057,6 +3656,10 @@ class State:
                         files.append(arc)
                     except OSError as e:
                         extra_failed.append(f"{arc} not backed up ({e.strerror or e})")
+            # every member read back with its CRC before the zip counts (the finally deletes a bad one)
+            bad = check_zip(path + ".part")
+            if bad:
+                raise RuntimeError(f"the zip failed its check: {bad}")
             os.replace(path + ".part", path)
         finally:
             # never leave the database copy or a half-written zip behind (a full disk would only get fuller)
@@ -3084,7 +3687,8 @@ class State:
                 kept = rotate_backups(BACKUP_DIR, 10 ** 9, self.db_path)   # deletes nothing: just the count
             except OSError:
                 kept = None
-        out = {"path": path, "size": size, "kept": kept, "journals_to": journals_to, "copied": copied, "files": files}
+        out = {"path": path, "size": size, "kept": kept, "journals_to": journals_to, "copied": copied, "files": files,
+               "verified": True}   # the database copy passed quick_check and the zip testzip()
         # not an error: the database zip was written and counts as the latest backup (the Data tile goes amber)
         return dict(out, warning=warning) if warning else out
 
@@ -3159,20 +3763,25 @@ class State:
 
     def sampling_summary(self):
         """While you are on a body with a sample run in progress: how far you are from the samples you have
-        taken, against the genus's colony distance. None otherwise (or when positions are unknown)."""
+        taken, against the genus's colony distance. None otherwise (or when positions are unknown).
+        On a body while the run in progress is on another body (in this system or any other): {"elsewhere":
+        {species, genus, samples, body, system, value}}, since the first Log of a new species here discards it
+        (the page shows it at 2 of 3, or when the run is worth your bio threshold)."""
         st, pos = self.journals.status_json or {}, self.journals.pos
         ob = self.on_body()
-        if not ob or st.get("lat") is None or not st.get("planet_radius") or not ed_bio:
+        if not ob or not ed_bio:
             return None
         run = self.db.execute("SELECT system, body_id, species, genus_name, species_name, samples FROM own_organic "
-                              "WHERE system=? AND done_ts IS NULL ORDER BY ts DESC LIMIT 1", (pos["id64"],)).fetchone()
+                              "WHERE done_ts IS NULL ORDER BY ts DESC LIMIT 1").fetchone()
         if not run:
             return None
         # The run must be on the body you are on: an abandoned run elsewhere in the system would give a
         # distance across two planets (and a false "clear to sample"). A body you never scanned cannot be
-        # told apart by name, so the run is kept then.
+        # told apart by name, so a run in this system is kept then.
         here = self.db.execute("SELECT body_id FROM own_bodies WHERE system=? AND name=?", (pos["id64"], ob["full"])).fetchone()
-        if here and here["body_id"] != run["body_id"]:
+        if run["system"] != pos["id64"] or (here and here["body_id"] != run["body_id"]):
+            return {"elsewhere": self.run_elsewhere(run)}
+        if st.get("lat") is None or not st.get("planet_radius"):
             return None
         pts = [dict(r) for r in self.db.execute("SELECT genus, lat, lon, n FROM sample_points WHERE system=? AND body_id=? AND species=?",
                                                 (run["system"], run["body_id"], run["species"]))]
@@ -3183,6 +3792,19 @@ class State:
             nearest = min(ed_bio.surface_distance(st["lat"], st["lon"], p["lat"], p["lon"], st["planet_radius"]) for p in pts)
             out.update(nearest=round(nearest), to_go=max(0, round(need - nearest)), clear=nearest >= need)
         return out
+
+    def run_elsewhere(self, run):
+        """A sample run in progress on another body, for the on-body strip: what it is, where, and what it pays
+        (with the x5 first footfall)."""
+        body = self.db.execute("SELECT name FROM own_bodies WHERE system=? AND body_id=?", (run["system"], run["body_id"])).fetchone()
+        where = self.locate(run["system"])
+        sysname = where[0] if where else None
+        f = self.db.execute("SELECT was_footfalled FROM own_firsts WHERE system=? AND body_id=?", (run["system"], run["body_id"])).fetchone()
+        v = ed_bio.species_value(run["species_name"])
+        return {"species": run["species_name"], "genus": run["genus_name"], "samples": run["samples"],
+                "body": short_name(sysname, body["name"]) if body and sysname else body["name"] if body else None,
+                "system": sysname if run["system"] != self.journals.pos["id64"] else None,
+                "value": v * (5 if f and f["was_footfalled"] == 0 else 1) if v else None}
 
     def on_body(self):
         """The body you are landed on, driving on or walking on (Status.json), else None."""
@@ -3282,7 +3904,8 @@ class State:
         the moments on every poll, and leaving_summary and the bio rules are not cheap."""
         kind, sid = m["kind"], m.get("system")
         if kind == "fss_done" and m.get("by_honk") and self.brief_said_all_found(sid, m["seq"]):
-            return None   # the arrival briefing already said 'all found'
+            # the arrival briefing already said 'all found' (a jumponium body it carried is said alone)
+            return {"kind": "jumponium", "system": str(sid)} if m.get("jumponium") else None
         key = (self.scan_version, sid in self.bases, (self.systems.get(sid) or {}).get("status"))
         hit = self._moment_extra.get(m["seq"])
         if hit and (hit[0] == key or kind in ("game_exit", "loss")):   # these two are worked out once
@@ -3446,7 +4069,16 @@ class State:
                 "body_count": (sysrow["body_count"] if sysrow else None) or mr["body_count"],
                 "honked": bool(sysrow), "all_found": bool(sysrow and sysrow["all_found"]), "star_class": mr["star"],
                 "base_known": mr["base_known"],
-                "worth": special[:3] + [w for w in worth[:3] if w not in special[:3]], "bio": bio}
+                "worth": special[:3] + [w for w in worth[:3] if w not in special[:3]], "bio": bio,
+                "region": self.region_crossed(id64)}
+
+    def region_crossed(self, id64):
+        """The region this arrival crossed into ({region, spoken, count}), when it was the first crossing into it
+        this session and you are still on that arrival; else None."""
+        re_, pos = self.journals.region_entered, self.journals.pos
+        if not re_ or re_["id64"] != id64 or not pos or pos["id64"] != id64 or pos.get("ts") != re_["ts"]:
+            return None
+        return {"region": re_["region"], "spoken": re_["spoken"], "count": re_["count"]}
 
     def visit_count(self, id64):
         row = self.db.execute("SELECT count FROM visits WHERE id64=?", (id64,)).fetchone()
@@ -3468,11 +4100,88 @@ class State:
         m = self.journals.materials
         if not m or not m.get("snapshot_ts"):
             return None
-        login = (self.journals.commander or {}).get("login_ts")
         return {"ts": m.get("ts"), "snapshot_ts": m["snapshot_ts"], "version": self.materials_version,
                 "boosts": ed_materials.boosts(m["counts"]), "count": sum(m["counts"].values()),
-                # a login whose Materials line was never seen: the counts predate it
-                "stale": bool(login and ts_seconds(login) - ts_seconds(m["snapshot_ts"]) > 120)}
+                "stale": materials_stale(m, self.journals.commander)}
+
+    def fuel_now(self):
+        """(model, fuel t, cargo t) for the fuel model right now, or None: no Loadout mass, no reading, or no cargo
+        figure (Status.json's, else the journal's Cargo). The cargo counts, since a hold of 700 t cuts the range."""
+        j = self.journals
+        st = j.status_json or {}
+        model = fuel_model(j.ship, j.fuel_hist)
+        cargo = st.get("cargo") if st.get("cargo") is not None else (j.cargo or {}).get("count")
+        if not model or st.get("fuel_main") is None or cargo is None:
+            return None
+        return model, st["fuel_main"], cargo
+
+    def range_now(self):
+        now = self.fuel_now()
+        return round(fsd_range(now[0], now[0]["unladen"] + now[1] + now[2]), 2) if now else None
+
+    def scoop_rate(self):
+        """{scoopable, of, dry_run} over your last SCOOP_RATE_OF hyperspace arrivals with a known star (dry_run: the
+        unscoopable ones in a row up to now), or None with fewer than SCOOP_RATE_MIN of them."""
+        rows = [r["star_class"] for r in self.db.execute(
+            "SELECT star_class FROM jumps WHERE kind='FSDJump' AND star_class IS NOT NULL ORDER BY ts DESC LIMIT ?",
+            (SCOOP_RATE_OF,))]
+        if len(rows) < SCOOP_RATE_MIN:
+            return None
+        dry = next((k for k, c in enumerate(rows) if class_scoopable(c)), len(rows))
+        return {"scoopable": sum(class_scoopable(c) for c in rows), "of": len(rows), "dry_run": dry}
+
+    def here_scoop(self):
+        """Where the arrival star cannot be scooped: the nearest other scoopable star here ({name, subtype, dist_ls},
+        name None when none is known) and whether the system's star list is complete (every body found, or Spansh
+        has them all), so "none here" can be said. None where the arrival star scoops or is unknown."""
+        pos, hs = self.journals.pos, self.here_star()
+        if not pos or not hs or class_scoopable(hs):
+            return None
+        id64 = pos["id64"]
+        key = (id64, self.scan_version, id64 in self.bases, (self.systems.get(id64) or {}).get("status"))
+        if getattr(self, "_here_scoop", (None,))[0] == key:
+            return self._here_scoop[1]
+        mr = self.merged_records(id64)
+        out = None
+        if mr:
+            stars = sorted((r for r in mr["records"] if r.get("type") == "Star" and r.get("scoopable") and not r.get("main")
+                            and r.get("dist_ls") is not None), key=lambda r: r["dist_ls"])
+            own = self.db.execute("SELECT all_found FROM own_systems WHERE id64=?", (id64,)).fetchone()
+            spansh = (self.bases.get(id64) or (None, cached_base(self.db, id64)[1]))[1] or {}
+            complete = bool(own and own["all_found"]) or (spansh.get("body_count") is not None
+                                                          and spansh["body_count"] <= len(mr["records"]))
+            best = stars[0] if stars else {}
+            out = {"name": best.get("name"), "subtype": best.get("subtype"),
+                   "dist_ls": round(best["dist_ls"]) if best else None, "complete": complete}
+        self._here_scoop = (key, out)
+        return out
+
+    def target_hop(self, t):
+        """The targeted jump's cost: {ly, fuel, left (max-range jumps after it)} when its position is known, fuel and
+        left None without the fuel model; reach False past the range (a jet-cone charge counts)."""
+        pos = self.journals.pos
+        if not t or not pos or pos.get("x") is None:
+            return None
+        row = self.systems.get(t["id64"])
+        if row and row.get("distance") is not None:
+            d = row["distance"]
+        else:
+            where = self.locate(t["id64"])
+            if not where or where[1] is None:
+                return None
+            d = dist(pos, {"x": where[1], "y": where[2], "z": where[3]})
+        out = {"ly": round(d, 2), "fuel": None, "left": None, "reach": None}
+        now = self.fuel_now()
+        if now:
+            model, fuel, cargo = now
+            mass = model["unladen"] + fuel + cargo
+            eff = d / ((self.journals.boost or {}).get("value") or 1)   # a charge multiplies this jump's range
+            out["reach"] = eff <= fsd_range(model, mass) + 0.01
+            need = hop_fuel(model, eff, mass)
+            if need is not None:
+                after = jumps_left(model, fuel - need, cargo) if need <= fuel else None
+                out.update(fuel=round(need, 2), left=after[0] if after else 0)
+        return out
 
     def fuel_summary(self):
         j = self.journals
@@ -3483,20 +4192,37 @@ class State:
         # Fuel per jump at your recent pace, and per max-range jump (fuel use ~ dist^2.x, so a
         # max jump costs far more than a short hop): both are shown.
         hist = j.fuel_hist[-FUEL_HISTORY:]
-        per_jump = sum(f for _, f in hist) / len(hist) if hist else None
+        per_jump = sum(h[1] for h in hist) / len(hist) if hist else None
         max_range = (j.jump_range or {}).get("ly")
         per_max = None
         if hist and max_range:
             # scale the biggest recent jump up to max range with the game's ~2.5 exponent
-            d, f = max(hist, key=lambda h: h[0])
+            d, f = max(hist, key=lambda h: h[0])[:2]
             per_max = f * (max_range / d) ** 2.5 if d else None
+        jumps_recent = int(st["fuel_main"] / per_jump) if per_jump else None
+        jumps_max = int(st["fuel_main"] / per_max) if per_max else None
+        # the fuel model, where the Loadout gives the mass: the range with this fuel and cargo aboard, and jumps left
+        # simulated jump by jump (at max range, and at your pace: hops as long, in fuel terms, as your recent ones)
+        now, model_out = self.fuel_now(), None
+        if now:
+            model, fuel, cargo = now
+            at_max = jumps_left(model, fuel, cargo)
+            model_out = {"range_now": self.range_now(), "max_fuel": model["max_fuel"], "fitted": model["fitted"],
+                         "power": model["power"], "cargo": cargo, "ly_max": at_max[1] if at_max else None}
+            if at_max:
+                jumps_max = at_max[0]
+                dists = [h[0] for h in hist if h[0] > 0]
+                if dists:
+                    p = model["power"]
+                    pace = (sum(x ** p for x in dists) / len(dists)) ** (1 / p)
+                    jumps_recent = jumps_left(model, fuel, cargo, d=pace)[0]
         since_scoop = self.db.execute("SELECT count(*) FROM jumps WHERE kind='FSDJump' AND ts > ?",
                                       (j.last_scoop or "",)).fetchone()[0]
         return {"main": st["fuel_main"], "reservoir": st.get("fuel_reservoir"), "capacity": cap,
                 "pct": round(100 * st["fuel_main"] / cap) if cap else None,
-                "jumps_recent": int(st["fuel_main"] / per_jump) if per_jump else None,
-                "jumps_max": int(st["fuel_main"] / per_max) if per_max else None,
+                "jumps_recent": jumps_recent, "jumps_max": jumps_max, "model": model_out,
                 "since_scoop": since_scoop, "last_scoop": j.last_scoop, "ts": st.get("ts"),
+                "scoop_rate": self.scoop_rate(), "here_scoop": self.here_scoop(),
                 "live": bool(st.get("live")),
                 "low_flag": bool((st.get("flags") or 0) & (1 << 19)),   # Status.json LowFuel: the game's own warning
                 # in the ship's seat (Flags InMainShip): on foot or in the SRV the LowFuel bit says nothing
@@ -3610,12 +4336,25 @@ class State:
         signals = {(r["system"], r["name"]): r["bio"]
                    for r in q("SELECT system, name, bio FROM own_signals WHERE system IN ({marks}) AND bio > 0")}
         stars = {r["id64"]: r["star_class"] for r in q("SELECT id64, star_class FROM jumps WHERE id64 IN ({marks}) ORDER BY ts")}
+        # Spansh's cached records of the bodies you never scanned: a pre-Odyssey one may hide life (stale_bio_groups)
+        spansh = {r["id64"]: r["summary"] for r in q("SELECT id64, summary FROM spansh_systems WHERE id64 IN ({marks})")}
         out = []
         for id64, c in cands.items():
             bs = bodies.get(id64, {})
             h = honk.get(id64)
             recs = {bid: json.loads(r["record"]) for bid, r in bs.items()}
             ctx = None
+            old_data = None
+            if id64 in spansh:
+                base = json.loads(spansh[id64])
+                mine = {short_name(c["name"], r["name"]) for r in recs.values()}
+                stale = [r for r in base.get("records") or [] if base.get("v") == CACHE_VERSION
+                         and r.get("name") not in mine and stale_bio_candidate(r)]
+                if stale:
+                    ctx = bio_context(c["name"], base.get("records") or [], c["x"], c["y"], c["z"], stars.get(id64),
+                                      base.get("body_count") or (h and h["body_count"]))
+                    old_data = stale_bio_summary(stale, stars.get(id64), ctx)
+                    ctx = None   # the bio below builds its own, from your scans
             unfound = (h["body_count"] - len(bs)) if h and h["body_count"] and not h["all_found"] else 0
             bio, maps = [], []
             for (sid, bid), gs in genera.items():
@@ -3653,17 +4392,20 @@ class State:
                 inc = ed_unsold.body_value(plain, True, False, True) - ed_unsold.body_value(plain, False, False, True)
                 maps.append({"body": short_name(c["name"], r["name"]), "subtype": rec.get("subtype"),
                              "terraformable": bool(rec.get("terraformable")), "increment": inc})
-            if unfound or bio or maps:
+            if unfound or bio or maps or old_data:
                 maps.sort(key=lambda m: -m["increment"])
                 out.append({"id": str(id64), "name": c["name"], "distance": round(dist(pos, c), 1),
-                            "unfound": unfound, "bio": bio, "maps": maps[:6], "maps_total": len(maps)})
+                            "unfound": unfound, "bio": bio, "maps": maps[:6], "maps_total": len(maps),
+                            "old_data": old_data})
         out.sort(key=lambda r: r["distance"])
         self._left, self._left_key = {"radius": radius, "systems": out}, key
         return self._left
 
     def firsts_list(self):
-        """Every visited system holding first-discovery data, with its sale state and value."""
+        """Every visited system holding first-discovery data, with its sale state and value (and, for unsold ones,
+        `seen`: what the firsts watch found of someone else's scans there, or None)."""
         pos = self.journals.pos
+        watch = self.firsts_watch_rows()
         out = []
         for r in self.db.execute(
                 "SELECT DISTINCT f.system AS id64, v.name, v.x, v.y, v.z FROM own_firsts f "
@@ -3674,9 +4416,124 @@ class State:
             out.append({"id": str(r["id64"]), "name": r["name"], "state": f["sale"], "system": f["system"],
                         "system_state": f["system_state"], "bodies_by": f["bodies_by"], "mapped_by": f["mapped_by"],
                         "distance": round(dist(pos, r), 2) if pos else None,
-                        "value": self.system_values.get(r["name"])})
+                        "value": self.system_values.get(r["name"]),
+                        "seen": firsts_seen(watch.get(r["id64"])) if f["sale"] == "unsold" else None})
         out.sort(key=lambda x: (-(x["value"] or 0), x["distance"] or 0))
         return out
+
+    # ---- the firsts watch: has someone else scanned your unsold first discoveries since? ----
+
+    def firsts_watch_rows(self):
+        return {r["id64"]: dict(r) for r in self.db.execute("SELECT * FROM firsts_watch")}
+
+    def firsts_cached(self):
+        """firsts_list(), kept until the unsold estimate (recomputed after every scan, sale or loss that changes it)
+        or the watch's table changes: the watch and the payload ask often, and each list is ~0.1 s on a big database."""
+        key = ((self.unsold or {}).get("computed"), self.unsold_at, self.firsts_watch_seq)
+        if self._firsts_cache is None or self._firsts_cache[0] != key:
+            self._firsts_cache = (key, self.firsts_list())
+        return self._firsts_cache[1]
+
+    def firsts_watch_info(self):
+        """For the Unsold tile: {on, seen, checked, of}, systems with unsold firsts someone else has scanned since
+        (seen), checked at least once (checked), in all (of). None with the watch off and nothing ever found."""
+        unsold = [x for x in self.firsts_cached() if x["state"] == "unsold"]
+        seen = sum(1 for x in unsold if x["seen"])
+        if not self.firsts_watch_on and not seen:
+            return None
+        rows = self.firsts_watch_rows() if unsold else {}
+        checked = sum(1 for x in unsold if int(x["id"]) in rows)
+        return {"on": self.firsts_watch_on, "seen": seen, "checked": checked, "of": len(unsold)}
+
+    def firsts_watch_due(self, now):
+        """(id64, name) of the next system to check: the most valuable one with unsold firsts not checked within
+        firsts_watch_gap; None when none is due, or FIRSTS_WATCH_DAY_CAP checks were made in the last 24 h."""
+        rows = self.firsts_watch_rows()
+        if sum(1 for r in rows.values() if r["checked_ts"] and now - r["checked_ts"] < 86400) >= FIRSTS_WATCH_DAY_CAP:
+            return None
+        for x in self.firsts_cached():   # most valuable first
+            r = rows.get(int(x["id"]))
+            if x["state"] == "unsold" and (r is None or r["checked_ts"] is None or now - r["checked_ts"] >= firsts_watch_gap(r, now)):
+                return int(x["id"]), x["name"]
+        return None
+
+    def firsts_mine(self, id64, name):
+        """({short name: [your journal times for it]}, your first scan there, [your other times there]) for the bodies
+        you discovered in a system: every scan, the map, the signals and the rings' maps, since any of them sent
+        through EDDN updates the body on Spansh at that time; and the system-wide ones (arrivals, footfall, samples,
+        codex entries: a jump in updates the arrival star, which need not be the body you scanned first; and every
+        login, whose Location names the body you are at without a system in the table)."""
+        mine, first = {}, None
+        for r in self.db.execute(
+                """SELECT f.name, f.first_ts, f.undisc_ts, b.ts AS scan_ts, m.ts AS map_ts, s.ts AS sig_ts FROM own_firsts f
+                   LEFT JOIN own_bodies b ON b.system = f.system AND b.body_id = f.body_id
+                   LEFT JOIN own_mapped m ON m.system = f.system AND m.body_id = f.body_id
+                   LEFT JOIN own_signals s ON s.system = f.system AND s.name = f.name
+                   WHERE f.system = ? AND f.was_discovered = 0""", (id64,)):
+            mine[short_name(name, r["name"])] = [t for t in (r["first_ts"], r["undisc_ts"], r["scan_ts"], r["map_ts"], r["sig_ts"]) if t]
+            if r["first_ts"] and (first is None or r["first_ts"] < first):
+                first = r["first_ts"]
+        for r in self.db.execute("SELECT name, ts FROM own_ring_signals WHERE system=?", (id64,)):
+            body = split_ring_name(name, r["name"])[0]
+            if body in mine and r["ts"]:
+                mine[body].append(r["ts"])
+        times = [r[0] for r in self.db.execute(
+            "SELECT ts FROM jumps WHERE id64 = ? UNION SELECT ts FROM own_footfall WHERE system = ? "
+            "UNION SELECT ts FROM own_organic WHERE system = ? UNION SELECT ts FROM codex WHERE system = ? "
+            "UNION SELECT ts FROM logins", (id64, id64, id64, id64)) if r[0]]
+        return mine, first, times
+
+    async def firsts_watch_step(self, now=None):
+        """Check the next system due (firsts_watch_due) against Spansh and record it in firsts_watch: at most one
+        dump request, none when the cached record was fetched within FIRSTS_WATCH_EVERY. Returns what
+        firsts_reported found (None: nothing, or nothing was due)."""
+        now = time.time() if now is None else now
+        due = self.firsts_watch_due(now)
+        if not due:
+            return None
+        id64, name = due
+        mine, first, times = self.firsts_mine(id64, name)
+        updated_at, base = self.spansh.cached(id64)
+        age = self.spansh.fetched_age(id64) if base else None
+        if base and age is not None and age < FIRSTS_WATCH_EVERY and (
+                base.get("no_dump") or any(r.get("full") for r in base.get("records") or [])):
+            records, count = base.get("records") or [], base.get("body_count")   # fresh enough: no request
+        elif base:   # cached for Nearby: refresh it the usual way, so Nearby gets the new bodies too
+            base = await self.spansh.full_records(id64, updated_at, base)
+            records, count = base.get("records") or [], base.get("body_count")
+        else:        # never cached: the dump alone (a system Spansh does not know is not stored as one it does)
+            system = ((await self.spansh.lookup(id64, interactive=False)) or {}).get("system") or {}
+            records = [record_from_dump(name, b) for b in system.get("bodies") or [] if b.get("type") in ("Star", "Planet")]
+            count = system.get("bodyCount")
+        own = self.db.execute("SELECT body_count FROM own_systems WHERE id64=?", (id64,)).fetchone()
+        got = firsts_reported(records, mine, (own["body_count"] if own else None) or count, times)
+        old = self.db.execute("SELECT * FROM firsts_watch WHERE id64=?", (id64,)).fetchone()
+        old_seen = old["reported_ts"] if old else None
+        if got:   # the first sighting stays the first
+            row = (min(t for t in (old_seen, got["reported_ts"]) if t), got["bodies"], got["spansh_bodies"], got["body_count"])
+        elif old_seen:   # seen before, and a report does not go away
+            row = (old_seen, old["bodies"], old["spansh_bodies"], old["body_count"])
+        else:
+            row = (None, 0, sum(1 for r in records if r.get("type") in ("Star", "Planet")), (own["body_count"] if own else None) or count)
+        self.db.execute("INSERT OR REPLACE INTO firsts_watch VALUES (?, ?, ?, ?, ?, ?, ?)", (id64, now) + row + (first,))
+        self.db.commit()
+        self.firsts_watch_seq += 1
+        if row[0] != old_seen:
+            self.bump()   # the Unsold tile's count
+        return got
+
+    async def watch_firsts(self):
+        """The firsts watch's loop (only with [spansh] watch_firsts on): one check every FIRSTS_WATCH_GAP."""
+        await asyncio.sleep(FIRSTS_WATCH_START)
+        while True:
+            try:
+                await self.firsts_watch_step()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 -- Spansh down, a timeout, a bad answer: try again later
+                print(f"firsts watch: {type(e).__name__}: {e}", file=sys.stderr)
+                await asyncio.sleep(FIRSTS_WATCH_BACKOFF)
+            await asyncio.sleep(random.uniform(*FIRSTS_WATCH_GAP))
 
     def here_star(self):
         pos = self.journals.pos
@@ -3863,6 +4720,8 @@ class State:
                 "temperature": r.get("temperature"), "volcanism": r.get("volcanism"), "pressure": r.get("pressure"),
                 "ring_details": ring_stats(r.get("rings")),
                 "landable": r.get("landable"), "terraformable": r.get("terraformable"),
+                # a pre-Odyssey Spansh record: "not landable" may be wrong and bio unreported (your scan replaces it)
+                "stale_bio": stale_bio_body(r, star, ctx), "updated": r.get("updated"),
                 "notable": NOTABLE_PLANETS.get(r["subtype"]), "scoopable": r.get("scoopable"),
                 "rings": len(r.get("rings") or []), "hotspots": sum(1 for x in r.get("rings") or [] if x.get("hotspots")),
                 "belts": r.get("belts") or [],   # belt types: the schematic marks a body with belts
@@ -4172,7 +5031,13 @@ class State:
         trips, start = [], ""
         for x in carto_sales:
             end = x["ts"]
-            paid_bio = sum(y["total"] or 0 for y in sales if y["kind"] == "bio" and start < y["ts"] <= end)
+            bio_in = [y for y in sales if y["kind"] == "bio" and start < y["ts"] <= end]
+            paid_bio = sum(y["total"] or 0 for y in bio_in)
+            # the bio estimate against what those sales paid (only the sales with an estimate), and the x5 check
+            est_bio = [y for y in bio_in if y["estimate"] is not None]
+            checks = [json.loads(y["x5_check"]) for y in bio_in if y.get("x5_check")]
+            x5 = {k: sum(c.get(k) or 0 for c in checks) for k in ("sold", "predicted", "matched", "paid", "unknown")} \
+                if checks else None
             # flying time: each session clipped to the trip, so one that spans the sale counts on both sides
             lo, hi = ts_seconds(start) if start else float("-inf"), ts_seconds(end)
             hours = sum(overlap(a, b, lo, hi) for a, b in spans) / 3600
@@ -4181,6 +5046,8 @@ class State:
             trips.append(dict(st, **self.range_counts(start, end), start=start or None, end=end,
                               days=round((ts_seconds(end) - ts_seconds(start)) / 86400, 1) if start else None,
                               paid_carto=x["total"], paid_bio=paid_bio, paid=paid, estimate=x["estimate"],
+                              estimate_bio=sum(y["estimate"] for y in est_bio) if est_bio else None,
+                              paid_bio_estimated=sum(y["total"] or 0 for y in est_bio) if est_bio else None, x5=x5,
                               hours=round(hours, 1),
                               per_hour=round(paid / hours) if hours >= 0.5 else None,
                               per_jump=round(paid / st["jumps"]) if st["jumps"] else None,
@@ -4432,12 +5299,15 @@ class State:
             rows = [dict(r) for r in self.db.execute("SELECT * FROM jumps ORDER BY ts")]
             return ["ts", "id64", "name", "x", "y", "z", "star_class", "kind"], rows
         if what == "trips":
-            rows = [dict({k: v for k, v in t.items() if k != "losses"}, losses=len(t["losses"]),
+            rows = [dict({k: v for k, v in t.items() if k not in ("losses", "x5")}, losses=len(t["losses"]),
                          lost_value=sum(l["value"] + l["bio_value"] for l in t["losses"]),
-                         lost_bio=sum(l["bio_value"] for l in t["losses"])) for t in self.ledger()["trips"]]
+                         lost_bio=sum(l["bio_value"] for l in t["losses"]),
+                         **{f"x5_{k}": (t.get("x5") or {}).get(k) for k in ("sold", "predicted", "matched")})
+                    for t in self.ledger()["trips"]]
             return ["start", "end", "days", "jumps", "ly", "systems", "firsts", "bodies_first", "mapped", "footfalls",
-                    "samples", "codex_new", "paid_carto", "paid_bio", "paid", "estimate", "hours", "per_hour", "per_jump",
-                    "per_ly", "first_rate", "losses", "lost_value", "lost_bio"], rows
+                    "samples", "codex_new", "paid_carto", "paid_bio", "paid", "estimate", "estimate_bio", "hours", "per_hour",
+                    "per_jump", "per_ly", "first_rate", "losses", "lost_value", "lost_bio", "x5_sold", "x5_predicted",
+                    "x5_matched"], rows
         if what == "route":   # every jump with what it found: for write-ups and maps
             rows, prev = [], None
             firsts = {r[0]: r[1] for r in self.db.execute(
@@ -5087,6 +5957,7 @@ class State:
         if l and l["honked"] and not l["all_found"] and (l["unscanned"] or 0) > 0:
             self._fss_warned = c[:2]
             self.journals.moment("fss_unfinished", iso_ts(now), system=c[0], left=l["unscanned"])
+            self.journals.flush_jumponium(iso_ts(now), c[0])
             self.bump()
 
     # ---- auto honk ----
@@ -5095,7 +5966,35 @@ class State:
         return {"available": bool(h and h.available), "enabled": bool(self.autohonk["enabled"] and h and h.ready),
                 "wanted": bool(self.autohonk["enabled"]), "status": h.status if h else "not started",
                 "key": self.autohonk["key"], "hold": self.autohonk["hold"], "announce": bool(self.autohonk.get("announce", True)),
-                "pressing": (h.combo()[1] if h and h.available else None), "test": self.honk_test}
+                "pressing": (h.combo()[1] if h and h.available else None), "test": self.honk_test,
+                "groups": self.honk_groups()}
+
+    # the fire groups auto honk has worked and missed in, per ship (meta honk_groups: {ShipID: {good, bad}}),
+    # learned from its own presses only (a manual or FSS honk does not say which trigger or group it used)
+    def honk_groups(self, ship_id=None):
+        """The current (or given) ship's record, or None."""
+        sid = (self.journals.ship or {}).get("ship_id") if ship_id is None else ship_id
+        return (meta_get(self.db, "honk_groups") or {}).get(str(sid)) if sid is not None else None
+
+    def note_honk_group(self, ship_id, group, ok):
+        if ship_id is None or not group:
+            return
+        groups = meta_get(self.db, "honk_groups") or {}
+        rec = honk_learn(groups.get(str(ship_id)), group, ok)
+        if rec == groups.get(str(ship_id)):
+            return
+        groups[str(ship_id)] = rec
+        meta_set(self.db, "honk_groups", groups)
+        self.db.commit()   # now, like the toggle: a failing watcher tick must not roll it back
+
+    def forget_honk_groups(self):
+        """The auto honk section's "forget": clear the current ship's record."""
+        sid = (self.journals.ship or {}).get("ship_id")
+        groups = meta_get(self.db, "honk_groups") or {}
+        if sid is not None and groups.pop(str(sid), None) is not None:
+            meta_set(self.db, "honk_groups", groups or None)
+            self.db.commit()
+        self.bump()
 
     def set_autohonk(self, enabled):
         """Switch auto honk on or off (the page's toggle; remembered over restarts)."""
@@ -5189,7 +6088,7 @@ class State:
                     self.honker.status = ready_status
                     self.bump()
                 return
-            action, why = honk_decision(self.journals.status_json, time.time())
+            action, why = honk_decision(self.journals.status_json, time.time(), self.honk_groups())
             if action == "press":
                 break
             if time.time() > deadline:
@@ -5202,6 +6101,9 @@ class State:
                 self.honker.status = f"waiting: {why}"
                 self.bump()
             await asyncio.sleep(0.25)
+        # what was selected at the press (a fresh reading only), for the miss message and the fire-group record
+        press_st, ship_id = dict(self.journals.status_json or {}), (self.journals.ship or {}).get("ship_id")
+        group = fire_group_letter(press_st.get("fire_group")) if status_fresh(press_st, time.time()) else None
         try:
             pressed = await asyncio.get_running_loop().run_in_executor(None, self.honker.press)
             if pressed is None or switched_off():   # switched off during the hold: cut short, nothing to report
@@ -5230,11 +6132,19 @@ class State:
             end = time.time() + min(1.5, self.honk_confirm)
             while not (all_found := found()) and time.time() < end:
                 await asyncio.sleep(0.1)
+        ok = honked()
+        # a miss only counts against the group when nothing else explains it: the cockpit had focus and the HUD
+        # was in analysis mode at the press (honk_decision saw to both), and no screen opened during it
+        if ok or (not focus_seen and isinstance(press_st.get("flags"), int) and press_st["flags"] & FLAG_HUD_ANALYSIS
+                  and not press_st.get("gui_focus")):
+            self.note_honk_group(ship_id, group, ok)
+        with_group = f" with fire group {group} selected" if group else ""
         # brief: the discovery scan also gave the arrival briefing (the page then leaves this one unspoken)
-        self.journals.moment("honk", a["ts"], ok=honked(), system=a["name"], brief=honked(),
-                             bodies=info.get("bodies") if honked() else None, all_found=all_found,
-                             why="" if honked() else f"no discovery scan followed: {focus_seen}" if focus_seen
-                             else "no discovery scan followed: is the D-Scanner on primary fire?")
+        self.journals.moment("honk", a["ts"], ok=ok, system=a["name"], brief=ok,
+                             bodies=info.get("bodies") if ok else None, all_found=all_found,
+                             why="" if ok else f"no discovery scan followed{with_group}: {focus_seen}" if focus_seen
+                             else f"no discovery scan followed{with_group}: is the D-Scanner on primary fire"
+                             + (" there?" if group else "?"))
         self.bump()
 
     def apply_own_changes(self):
@@ -5568,7 +6478,7 @@ class State:
                     if gist(self.journals.status_json) != gist(before):
                         self.bump()
                     sm = self.sampling_summary()
-                    skey = sm and (sm["clear"], (sm["to_go"] or 0) // 10, sm["samples"])
+                    skey = sm and (sm.get("clear"), (sm.get("to_go") or 0) // 10, sm.get("samples"), bool(sm.get("elsewhere")))
                     if skey != self._sampling_key:   # walking away from a sample: keep the countdown moving
                         self._sampling_key = skey
                         self.bump()
@@ -5623,7 +6533,7 @@ def compute_unsold():
                                      "bodies", "systems", "first_discoveries", "mapped", "last_sold", "cutoff")},
         "system_values": system_values,
         "bio": {k: bio[k] for k in ("estimated_value", "base_value", "max_value", "samples",
-                                    "bonus_rate", "bonus_rate_source", "unknown_species",
+                                    "x5_runs", "x1_runs", "unknown_runs", "bonus_rate", "bonus_rate_source", "unknown_species",
                                     "last_sold", "cutoff")},
         "species": [{"species": r["species"], "count": r["count"], "value": r["value"]}
                     for r in bio["rows"][:8]],
@@ -6009,6 +6919,16 @@ class Searcher:
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
+def sounds_json():
+    """static/sounds.json for inlining into the page (the alert sounds, which the server can also play), or
+    "null" when it cannot be read: the page then plays no sounds."""
+    try:
+        return json.dumps(ed_tts.load_sounds()).replace("<", "\\u003c")
+    except (OSError, ValueError) as e:
+        print(f"sounds: {e}", file=sys.stderr)
+        return "null"
+
+
 def load_page():
     """page.html with its script and stylesheet links stamped by modification time, so a browser fetches
     the new copy as soon as either file changes instead of running a cached one."""
@@ -6154,7 +7074,8 @@ def make_app(state, hosts=None):
         # ("<" escaped: a value holding "</script>" cannot end the script element)
         saved = read_browser_defaults(browser_defaults_path(state.db_path)) if state.db_path else None
         return web.Response(text=load_page().replace("/*SEARCH_OPTIONS*/null", options)
-                            .replace("/*SERVER_DEFAULTS*/null", json.dumps(saved).replace("<", "\\u003c")),
+                            .replace("/*SERVER_DEFAULTS*/null", json.dumps(saved).replace("<", "\\u003c"))
+                            .replace("/*SOUNDS*/null", sounds_json()),
                             content_type="text/html")
 
     async def defaults_get(_):
@@ -6300,7 +7221,7 @@ def make_app(state, hosts=None):
                 "fuel_pct": f.get("pct"), "fuel_jumps": f.get("jumps_max"), "jump_range": p["jump_range"], "boost": p["boost"],
                 "target": t and {"name": t.get("name"), "status": t.get("status"), "star_class": t.get("star_class")},
                 "unsold": u.get("total"), "on_body": ob and ob["body"],
-                "sampling": sm and {k: sm.get(k) for k in ("genus", "samples", "to_go", "clear")},
+                "sampling": sm and "elsewhere" not in sm and {k: sm.get(k) for k in ("genus", "samples", "to_go", "clear")} or None,
                 "carrier": c and {"name": c.get("name"), "system": c.get("system"), "distance": c.get("distance")},
                 "commander": (p["commander"] or {}).get("name")}
 
@@ -6341,38 +7262,157 @@ def make_app(state, hosts=None):
         body, status = state.start_backup()
         return web.json_response(body, status=status)
 
+    async def synth(sp, text, speed, voice):
+        """A line as WAV from Piper, or None (the page then uses browser speech for it). `speed` and `voice` as
+        the page sent them: a personality's own voice only if installed, so a name from the page never downloads."""
+        try:
+            speed = float(speed or SPEECH_SPEED)
+        except (TypeError, ValueError):
+            speed = SPEECH_SPEED
+        voice = str(voice) if voice else None
+        if voice and voice not in sp.installed():
+            voice = None
+        if voice and state.speech:   # room for every personality voice, so none is reloaded before each line
+            sp.size_extra(ed_speech.style_voices(state.speech.lines()["styles"]))
+        try:
+            return await asyncio.get_running_loop().run_in_executor(None, sp.say, text, speed, voice)
+        except Exception as e:  # noqa: BLE001 -- a line Piper cannot speak: the page uses browser speech for it
+            print(f"spoken alerts: could not speak {text[:60]!r}: {type(e).__name__}: {e}", file=sys.stderr)
+            return None
+
     async def say_view(request):
         """A spoken alert as WAV (Piper). 503 while no voice is ready: the page then uses browser speech."""
         text = ed_tts.clip_text(request.query.get("text"))   # a long line is cut at a boundary, not mid-word
         sp = state.speaker
         if not sp or not sp.ready or not text.strip():
             return web.json_response({"error": "no Piper voice ready" if text.strip() else "no text"}, status=503)
-        try:
-            speed = float(request.query.get("speed") or SPEECH_SPEED)
-        except ValueError:
-            speed = SPEECH_SPEED
-        # a personality's own voice (speech.json styles), only if installed: a name from the page never downloads
-        voice = request.query.get("voice") or None
-        if voice and voice not in sp.installed():
-            voice = None
-        if voice and state.speech:   # room for every personality voice, so none is reloaded before each line
-            sp.size_extra(ed_speech.style_voices(state.speech.lines()["styles"]))
-        try:
-            audio = await asyncio.get_running_loop().run_in_executor(None, sp.say, text, speed, voice)
-        except Exception as e:  # noqa: BLE001 -- a line Piper cannot speak: the page uses browser speech for it
-            print(f"spoken alerts: could not speak {text[:60]!r}: {type(e).__name__}: {e}", file=sys.stderr)
-            audio = None
+        audio = await synth(sp, text, request.query.get("speed"), request.query.get("voice"))
         if not audio:
             return web.json_response({"error": "no Piper voice ready"}, status=503)
         return web.Response(body=audio, content_type="audio/wav", headers={"Cache-Control": "no-store"})
 
+    def no_player():
+        """The 503 for "Play speech and sounds on this PC" when this machine has no player to use, or None."""
+        pl = state.player
+        if pl and pl.player:
+            return None
+        why = ("[speech] server_player is off" if pl and pl.choice == "off" else
+               f"{pl.choice} is not installed" if pl and pl.choice != "auto" else
+               "no audio player found (pw-play, paplay, aplay or ffplay)")
+        return web.json_response({"error": why}, status=503)
+
+    async def json_object(request):
+        """The request's JSON body as a dict, or None."""
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
+    # "Play speech and sounds on this PC": the page still picks and queues the lines, and this machine's player
+    # (ed_tts.LinePlayer) says them, so no click on the page is needed. POSTs, so request_guard refuses another
+    # site's request (the same Origin and Sec-Fetch-Site check GET /api/say gets).
+    async def say_play_view(request):
+        """{text, voice, speed, id}: speak a line here, answering only once it has played to the end or been
+        stopped, so the page's queue (priority, expiry, danger cutting a find short) works unchanged. 409 while
+        another line plays (two browsers never talk over each other), 503 with no Piper voice or no player: the
+        page then says the line itself."""
+        body = await json_object(request)
+        if body is None:
+            return web.json_response({"error": "expected a JSON object"}, status=400)
+        refused = no_player()
+        if refused:
+            return refused
+        text, sp = ed_tts.clip_text(str(body.get("text") or "")), state.speaker
+        if not text.strip():
+            return web.json_response({"error": "no text"}, status=400)
+        if not sp or not sp.ready:
+            return web.json_response({"error": "no Piper voice ready"}, status=503)
+        line = state.player.claim(str(body["id"])[:64] if body.get("id") else None)
+        if line is None:
+            return web.json_response({"error": "another line is playing"}, status=409)
+        try:
+            audio = await synth(sp, text, body.get("speed"), body.get("voice"))
+            if not audio:
+                return web.json_response({"error": "no Piper voice ready"}, status=503)
+            result = await state.player.play_line(line, audio)
+        finally:
+            state.player.release(line)
+        if result == "failed":
+            return web.json_response({"error": f"{state.player.name} could not play it"}, status=503)
+        return web.json_response({"ok": True, "stopped": result == "stopped"})
+
+    async def say_stop_view(request):
+        """{id}: cut that line short (without an id, whatever is playing). A stop that arrives before its line
+        is remembered, so the line is not then played."""
+        body = await json_object(request) if request.can_read_body else {}
+        line_id = str(body["id"])[:64] if body and body.get("id") else None
+        return web.json_response({"ok": True, "stopped": state.player.stop(line_id) if state.player else False})
+
+    async def sound_play_view(request):
+        """{name}: start one of sounds.json's sounds here and answer at once (a sound may overlap a line, as in
+        the browser). 503 with no player: the page plays it itself."""
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("name"), str):
+            return web.json_response({"error": "expected {name}"}, status=400)
+        refused = no_player()
+        if refused:
+            return refused
+        try:
+            wav = await asyncio.get_running_loop().run_in_executor(None, state.sounds.wav, body["name"])
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            return web.json_response({"error": f"sounds: {e}"}, status=503)
+        if wav is None:
+            return web.json_response({"error": "no such sound"}, status=404)
+        state.player.play_sound(wav)
+        return web.json_response({"ok": True})
+
     async def speech_view(_):
-        """The spoken alerts' lines (speech.json): the page asks again when the payload's version changes."""
+        """The spoken alerts' lines (speech.json, less the banned ones): the page asks again when the payload's
+        version changes."""
         return web.json_response(state.speech.lines() if state.speech else {"styles": {}, "lines": {}, "version": None})
+
+    async def speech_ban_view(request):
+        """{alert, template}: /api/speech/ban leaves that line out from now on (in speech_banned.json next to the
+        speech file), /api/speech/unban brings it back. Only a line that is in the speech file is accepted, and the
+        last line of a list cannot be banned. Behind request_guard like every POST."""
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("alert"), str) or not isinstance(body.get("template"), str):
+            return web.json_response({"error": "expected {alert, template}"}, status=400)
+        if not state.speech:
+            return web.json_response({"error": "no speech file"}, status=503)
+        status, out = state.speech.set_ban(body["alert"], body["template"], request.path.endswith("/ban"))
+        if status == 200:
+            state.bump()   # the new version sends every page for the trimmed lines
+        return web.json_response(out, status=status)
+
+    async def hush_view(request):
+        """{mode: "10m" | "30m" | "jump" | "off"}: hush the voice (danger lines still speak) or end the hush."""
+        body = await json_object(request)
+        if body is None or body.get("mode") not in (*HUSH_MODES, "off"):
+            return web.json_response({"error": "expected {mode: 10m, 30m, jump or off}"}, status=400)
+        state.set_hush(body["mode"])
+        return web.json_response({"ok": True, "hush": state.hush_info()})
+
+    async def copilot_view(request):
+        """{action: "status" | "again" | "hush" | "replay", words?}: the speaking window does it (the button and a
+        tablet's Now bar post here, so a tap anywhere speaks through the window that is speaking)."""
+        body = await json_object(request)
+        if body is None or body.get("action") not in COPILOT_ACTIONS:
+            return web.json_response({"error": "expected {action: " + ", ".join(COPILOT_ACTIONS) + "}"}, status=400)
+        words = body.get("words")
+        if body["action"] == "replay" and not (isinstance(words, str) and words.strip()):
+            return web.json_response({"error": "replay needs the words"}, status=400)
+        state.copilot_action(body["action"], ed_tts.clip_text(words) if body["action"] == "replay" else None)
+        return web.json_response({"ok": True, "seq": state.copilot["seq"]})
 
     async def autohonk_test_view(_):
         body, status = state.start_honk_test()
         return web.json_response(body, status=status)
+
+    async def autohonk_forget_view(_):
+        state.forget_honk_groups()   # the current ship's learned fire groups
+        return web.json_response(state.autohonk_info())
 
     async def autohonk_view(request):
         try:
@@ -6457,7 +7497,14 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/materials", materials_view)
     app.router.add_post("/api/radius", radius_view)
     app.router.add_get("/api/say", say_view)
+    app.router.add_post("/api/say/play", say_play_view)
+    app.router.add_post("/api/say/stop", say_stop_view)
+    app.router.add_post("/api/sound/play", sound_play_view)
     app.router.add_get("/api/speech", speech_view)
+    app.router.add_post("/api/speech/ban", speech_ban_view)
+    app.router.add_post("/api/speech/unban", speech_ban_view)
+    app.router.add_post("/api/hush", hush_view)
+    app.router.add_post("/api/copilot", copilot_view)
     app.router.add_post("/api/backup", backup_view)
     app.router.add_get("/api/defaults", defaults_get)
     app.router.add_post("/api/defaults", defaults_post)
@@ -6467,6 +7514,7 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/voice", voice_view)
     app.router.add_post("/api/autohonk", autohonk_view)
     app.router.add_post("/api/autohonk/test", autohonk_test_view)
+    app.router.add_post("/api/autohonk/forget", autohonk_forget_view)
     app.router.add_get("/api/firsts", firsts_view)
     app.router.add_get("/api/left", left_view)
     app.router.add_get("/api/body", body_view)
@@ -6508,6 +7556,93 @@ def port_free(host, port):
         return True
     except OSError:
         return False
+
+
+def list_backups(folder, db_path):
+    """--list-backups: one line per zip of db_path's (see backup_zips), oldest first."""
+    try:
+        zips = backup_zips(folder, db_path)
+    except OSError as e:
+        return [f"no backups: {folder}: {e.strerror or e}"]
+    if not zips:
+        return [f"no backups of {os.path.basename(db_path)} in {folder}"]
+    out = []
+    for f in zips:
+        st = os.stat(os.path.join(folder, f))
+        out.append(f"{f}  {st.st_size / 1e6:8.1f} MB  {time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}")
+    return out
+
+
+def restore_backup(zip_path, db_path, host, port, now=None):
+    """--restore: put the database (and browser_defaults.json, when the zip holds it) from a backup zip back in
+    place. Refuses while host:port is bound (a running Outrider holds the database open); checks the zip
+    (testzip) and the database in it (quick_check, extracted to a temp file next to the target) before
+    touching anything; the current database moves aside to <db>.pre-restore-<stamp> (with its -journal, when
+    one is left over), and browser_defaults.json the same way. Returns the lines to print; raises
+    RuntimeError with the reason when it will not restore."""
+    import shutil
+    import zipfile
+    if not port_free(host, port):
+        raise RuntimeError(f"port {port} is in use: stop ED Outrider first (a running one holds the database open)")
+    bad = check_zip(zip_path)
+    if bad:
+        raise RuntimeError(f"{zip_path} failed its check: {bad}")
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+    defaults = browser_defaults_path(db_path)
+    n = 1
+    while any(os.path.exists(f"{p}.pre-restore-{stamp}") for p in (db_path, defaults)):   # never replace one
+        n += 1
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}"
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+        dbs = [n for n in names if n.endswith(".sqlite") and "/" not in n]
+        member = os.path.basename(db_path) if os.path.basename(db_path) in dbs else dbs[0] if len(dbs) == 1 else None
+        if not member:
+            raise RuntimeError(f"{zip_path} holds no single database ({', '.join(names) or 'empty'})")
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        tmp = f"{db_path}.restore-{stamp}.part"
+        try:
+            with z.open(member) as src, open(tmp, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            problem = check_database(tmp)
+            if problem:
+                raise RuntimeError(f"the database in {zip_path} failed its check: {problem}")
+            doc = None
+            if BROWSER_DEFAULTS_FILE in names:
+                doc = z.read(BROWSER_DEFAULTS_FILE)
+                try:
+                    json.loads(doc)
+                except ValueError:
+                    raise RuntimeError(f"{BROWSER_DEFAULTS_FILE} in {zip_path} is not JSON") from None
+            lines = []
+            if os.path.exists(db_path):
+                aside = f"{db_path}.pre-restore-{stamp}"
+                os.replace(db_path, aside)
+                # a leftover rollback journal belongs to the old file: it goes with it (SQLite finds it by name)
+                for ext in ("-journal", "-wal", "-shm"):
+                    if os.path.exists(db_path + ext):
+                        os.replace(db_path + ext, aside + ext)
+                lines.append(f"the old database is kept as {aside}")
+            os.replace(tmp, db_path)
+        finally:
+            try:
+                os.remove(tmp)
+            except FileNotFoundError:
+                pass
+    lines.insert(0, f"restored {db_path} from {zip_path} ({member})")
+    if doc is not None:
+        if os.path.exists(defaults):
+            os.replace(defaults, f"{defaults}.pre-restore-{stamp}")
+            lines.append(f"restored {defaults} (the old one is kept as {defaults}.pre-restore-{stamp})")
+        else:
+            lines.append(f"restored {defaults}")
+        with open(defaults + ".part", "wb") as f:
+            f.write(doc)
+        os.replace(defaults + ".part", defaults)
+    rest = [n for n in names if n not in (member, BROWSER_DEFAULTS_FILE)]
+    if rest:
+        lines.append(f"also in the zip, not restored: {', '.join(rest)} (unzip one by hand if you want it back)")
+    return lines
 
 
 async def run(args, st):
@@ -6591,6 +7726,11 @@ async def run(args, st):
     print("spoken alerts: " + ("Piper found, preparing a voice" if state.speaker.available else
                                "Piper not installed, the page uses browser speech (see ed_tts.py)"))
     state.speaker.start()
+    state.player = ed_tts.LinePlayer(st["server_player"])
+    print("playing on this PC (the page's tick): " + (state.player.name or (
+        "off ([speech] server_player)" if state.player.choice == "off" else
+        f"{st['server_player']} not found" if state.player.choice != "auto" else
+        "no player found (pw-play, paplay, aplay or ffplay)")))
     state.autohonk = dict(st["autohonk"])
     saved = meta_get(db, "autohonk_enabled")   # the page's toggle beats the config file once used
     if saved is not None:
@@ -6600,6 +7740,14 @@ async def run(args, st):
         state.honker.open()
     print("auto honk: " + (state.honker.status if state.autohonk["enabled"] else "off")
           + (" (the D-Scanner must be on primary fire)" if state.honker.ready else ""))
+    button_task = None
+    if st["copilot"]["enabled"]:   # read-only: never grabs the device, never presses anything
+        cp = st["copilot"]
+        state.button = ed_button.ButtonWatch(cp["device"], cp["button"], lambda g: state.copilot_action(g),
+                                             cp["hold_ms"], cp["double_ms"])
+        button_task = asyncio.create_task(state.button.run())
+    print("co-pilot button: " + (f"{st['copilot']['button'] or '?'} on {st['copilot']['device'] or '?'}"
+                                 if st["copilot"]["enabled"] else "off ([copilot] enabled)"))
     state.speech = ed_speech.SpeechLines(st["speech_file"])
     sp = state.speech.info()
     print(f"spoken alerts: wording from {sp['file']}" if sp["version"] else f"spoken alerts: {sp['error']}")
@@ -6607,6 +7755,10 @@ async def run(args, st):
         print(f"  {sp['file']}: {msg}", file=sys.stderr)
     rules_task = asyncio.create_task(check_bio_rules(state)) if ed_bio else None
     watcher = asyncio.create_task(state.watch())
+    state.firsts_watch_on = st["watch_firsts"]
+    firsts_task = asyncio.create_task(state.watch_firsts()) if st["watch_firsts"] else None
+    print("firsts watch: " + ("on (your unsold firsts on Spansh: one request every 10-30 s, each system once a day)"
+                              if st["watch_firsts"] else "off ([spansh] watch_firsts)"))
 
     hosts = allowed_hosts(args.host, args.port, st["allowed_hosts"])
     runner = web.AppRunner(make_app(state, hosts))
@@ -6634,13 +7786,16 @@ async def run(args, st):
         await asyncio.Event().wait()
     finally:
         tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task, state.seller_task,
-                             state.carrier_task, state.searcher.task, state.honk_test_task, state.backup_wait_task) if t]
+                             state.carrier_task, state.searcher.task, state.honk_test_task, state.backup_wait_task, button_task,
+                             firsts_task) if t]
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         db.commit()      # first: an impatient second Ctrl-C must not lose what the page changed
         await finish_backup(state)
         state.bump()     # answer the pages' pending long polls now, or cleanup waits them out (up to 25 s)
+        if state.player:
+            await state.player.close()   # a line playing here ends now, and its request with it
         await runner.cleanup()
         await spansh.close()
         db.commit()
@@ -6686,6 +7841,12 @@ def main(argv=None):
     p.add_argument("--rescan", action="store_true",
                    help="Forget which journals were read and rebuild visits from scratch, "
                         "including the legacy directories. Spansh cache is kept.")
+    p.add_argument("--restore", nargs="?", const="", metavar="ZIP",
+                   help="Put the database (and browser_defaults.json) back from a backup zip, the newest in "
+                        "backup_dir if none is given, and exit. Refuses while Outrider is running; the current "
+                        "database is kept as <db>.pre-restore-<stamp>.")
+    p.add_argument("--list-backups", action="store_true",
+                   help="List this database's backup zips in backup_dir (name, size, time) and exit.")
     args = p.parse_args(argv)
     detected = (ed_unsold.LIVE_DIRS, ed_unsold.LEGACY_DIRS) if ed_unsold else ([], [])
     st = settings_from(load_config(args.config), args, os.environ.get("ED_JOURNALS"), detected)
@@ -6697,6 +7858,28 @@ def main(argv=None):
             with open(args.config, "w", encoding="utf-8") as f:
                 f.write(config_text(st))
             print(f"wrote {args.config}")
+        return
+    if args.list_backups:
+        print("\n".join(list_backups(st["backup_dir"], st["db"])))
+        return
+    if args.restore is not None:
+        zip_path = os.path.expanduser(args.restore)
+        if not zip_path:
+            try:
+                zips = backup_zips(st["backup_dir"], st["db"])
+            except OSError:
+                zips = []
+            if not zips:
+                print(f"no backups of {os.path.basename(st['db'])} in {st['backup_dir']}", file=sys.stderr)
+                raise SystemExit(1)
+            zip_path = os.path.join(st["backup_dir"], zips[-1])
+        elif not os.path.exists(zip_path) and os.path.exists(os.path.join(st["backup_dir"], zip_path)):
+            zip_path = os.path.join(st["backup_dir"], zip_path)   # a bare name from --list-backups
+        try:
+            print("\n".join(restore_backup(zip_path, st["db"], st["host"], st["port"])))
+        except (RuntimeError, OSError) as e:
+            print(f"not restored: {e}", file=sys.stderr)
+            raise SystemExit(1)
         return
     try:
         asyncio.run(run(args, st))

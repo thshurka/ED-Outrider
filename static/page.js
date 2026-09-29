@@ -7,7 +7,7 @@ const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechSt
   "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
   "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
   "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays"];
+  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps"];
 const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
   return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
 // The shape a shared setting must have to be used: a hand-edited import or server copy with, say, a string for
@@ -82,9 +82,17 @@ function notable(s) {
   return ["ELW", "WW", "AW", "T"].filter(k => n[k]).map(k =>
     `<span class="nb ${k}" title="${names[k]}${n[k] > 1 ? "s" : ""}">${k}${n[k] > 1 ? "×" + n[k] : ""}</span>`).join("") +
     (s.bio_potential ? `<span class="nb bio" title="exobiology: up to this much across ${s.bio_bodies_guessed} bod${s.bio_bodies_guessed === 1 ? "y" : "ies"}, from spawn rules">🧬≤${credits(s.bio_potential)}</span>` : "") +
-    phenomenaTag(s.phenomena) +
+    phenomenaTag(s.phenomena) + oldDataTag(s.stale_bio) +
     (s.curiosities ? `<span class="nb cur" title="${(s.curiosity_list || []).map(c => esc(`${c.body}: ${c.tag} (${c.why})`)).join("&#10;")}">🔭${s.curiosities > 1 ? "×" + s.curiosities : ""}</span>` : "");
 }
+// pre-Odyssey Spansh data (stale_bio {bodies, genera_top, up_to, reported}): thin-atmosphere worlds marked not
+// landable and bio never reported. A mark only: no value counts it, and nothing is spoken.
+function oldDataTitle(o) {
+  return `Last reported ${esc((o.reported || "").slice(0, 4))} by a pre-Odyssey client: thin-atmosphere worlds were marked not landable and bio was not reported. May hold unsampled life; footfall unknown.` +
+    ((o.genera_top || []).length ? `&#10;The rules allow: ${o.genera_top.map(esc).join(", ")}` : "") +
+    (o.up_to ? `&#10;One genus per body at the median: about ${credits(o.up_to)} cr` : "");
+}
+const oldDataTag = o => o && o.bodies ? `<span class="nb old" title="${oldDataTitle(o)}">old data: ${o.bodies} bod${o.bodies === 1 ? "y" : "ies"}</span>` : "";
 // 🌀 notable stellar phenomena your FSS found in a system (life clouds, rings); dimmed once you have been to it
 function phenomenaTag(list) {
   if (!list || !list.length) return "";
@@ -197,13 +205,13 @@ function backupHtml(bk) {
   const cls = error ? "badc" : warning || late ? "warnc" : "unk";
   const title = (error ? `last backup failed${bk.error_ts ? ` (${bk.error_ts.replace("T", " ").slice(0, 16)} UTC)` : ""}: ${error}\n` : "") +
     (warning && !error ? `the last backup worked, but: ${warning}\n` : "") +
-    (bk.path ? `latest: ${bk.path}` : "no backup made yet") +
+    (bk.path ? `latest: ${bk.path}${bk.verified ? " (read back: the database passed quick_check, the zip testzip)" : ""}` : "no backup made yet") +
     // what that zip holds (the database, and your browser defaults, lines and settings when they exist)
-    (bk.path && Array.isArray(bk.files) && bk.files.length ? `\nholds: ${bk.files.join(", ")}` : "") + (bk.journals_dir ? `\njournals archived in ${bk.journals_dir} (restore: --legacy that folder)` : "") +
+    (bk.path && Array.isArray(bk.files) && bk.files.length ? `\nholds: ${bk.files.join(", ")}` : "") + (bk.journals_dir ? `\njournals archived in ${bk.journals_dir} (restore: --legacy that folder)` : "") + (bk.path ? "\nrestore the database: stop Outrider, then ed_outrider.py --restore" : "") +
     (every > 0 ? `\nautomatic: at start when the last is over ${every} day${every === 1 ? "" : "s"} old, and when the game quits` : "\nautomatic backups are off (backup_every_days = 0)");
   // the warning's detail (which file, why) is in the title: the line keeps "1 journal not archived (…)"
   const warnShort = warning && !error ? warning.replace(/\s*\(.*$/s, "") + (/\(/.test(warning) ? " (…)" : "") : "";
-  const bits = [bk.ts ? `backed up ${ago}` : "no backup yet", bk.ts && bk.kept && !warnShort ? `${bk.kept} kept` : "",
+  const bits = [bk.ts ? `backed up ${ago}` : "no backup yet", bk.ts && bk.verified && !error ? "verified" : "", bk.ts && bk.kept && !warnShort ? `${bk.kept} kept` : "",
                 bk.journals_to && !warnShort ? `journals to ${bk.journals_to}` : "", warnShort].filter(Boolean);
   return `<span class="${cls}" title="${esc(title)}">${esc(bits.join(" · "))}${error ? " · last one failed" : ""}</span> <button type="button" id="backupBtn" class="mini">back up now</button>`;
 }
@@ -268,10 +276,19 @@ function renderStrip() {
   else if (!f.live) el.innerHTML = val(`<span class="unk">${f.main != null ? f.main.toFixed(1) + " t (last reading)" : "no reading"}</span>`) + ln("game not running") + boostLine();
   else {
     tf.className = "tile " + (f.pct == null ? "" : f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");   // null < 15 is true
+    const md = f.model, sr = f.scoop_rate, j = fuelJumps(f), hsc = fuelLow(f) ? hereScoopText(f) : "";
+    const srWarn = sr && j != null && j < 2 * expectedGap(sr);   // amber: fewer jumps aboard than two usual gaps
     el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) + hullLine() +
-      ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
-      ln(f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "") + boostLine();
-    tf.title = "From Status.json. Jump estimates use fuel burned on your recent jumps; a max-range jump costs several times a short hop.";
+      ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (md && md.ly_max ? ` (${Math.round(md.ly_max).toLocaleString("en-US")} ly)` : "") +
+         (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
+      ln([f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "",
+          sr ? `<span class="${srWarn ? "warnc" : ""}" title="arrival stars of your last ${sr.of} jumps with a known star${srWarn ? `: fewer jumps of fuel aboard than two of your usual gaps between scoopable stars (1 in ${expectedGap(sr).toFixed(1)})` : ""}">scoopable: ${sr.scoopable} of last ${sr.of}${sr.dry_run ? ` · ${sr.dry_run} dry in a row` : ""}</span>` : ""].filter(Boolean).join(" · ")) +
+      (hsc ? ln(hsc) : "") + boostLine();
+    tf.title = "From Status.json. " + (md && md.max_fuel
+      ? `Jumps are simulated one by one, the ship lightening as it burns: ${md.range_now != null ? `${md.range_now.toFixed(1)} ly range laden now, ` : ""}` +
+        `${md.max_fuel} t per max jump (${md.fitted ? "fitted from your own jumps" : "the drive's engineering"}); "your pace" is hops like your recent ones.`
+      : "Jump estimates use fuel burned on your recent jumps; a max-range jump costs several times a short hop." +
+        (md ? " The laden range is known; per-jump fuel needs three jumps in this ship first." : ""));
   }
   renderCarrier();
   // data tile: journal freshness, link health, server state
@@ -435,8 +452,16 @@ async function loadOnBody() {
   renderOnBody();
 }
 // sample spacing: how far to walk before the next sample of this species counts as a new colony
+// a run in progress on another body: the first Log of a new species here discards it. Only at 2 of 3, or a run worth
+// your bio threshold, so a 1 of 3 you dropped on purpose does not nag.
+function elsewhereText(e) {
+  if (!e || !e.species || !(e.samples === 2 || (e.value || 0) >= bioMinNow())) return "";
+  return `In progress elsewhere: ${e.species} ${e.samples}/3 on ${e.body || "another body"}${e.system ? ` (${e.system})` : ""}. A new species discards it.`;
+}
 function samplingHtml() {
-  const sm = data.sampling; if (!sm || !sm.samples || sm.samples >= 3) return "";
+  const sm = data.sampling;
+  if (sm && sm.elsewhere) { const t = elsewhereText(sm.elsewhere); return t ? `<div class="spacing elsewhere">${esc(t)}</div>` : ""; }
+  if (!sm || !sm.samples || sm.samples >= 3) return "";
   const head = `<b>${esc(sm.genus || "")}</b> <span class="unk">${esc((sm.species || "").split(" ").slice(1).join(" "))}</span> · sample ${sm.samples}/3`;
   // no colony distance for this genus (one ed_bio does not know): the positions may well be recorded
   if (sm.need == null && sm.points > 0) return `<div class="spacing unk">${head} · spacing unknown for this genus</div>`;
@@ -451,7 +476,7 @@ function renderOnBody() {
   const el = document.getElementById("onbody"), ob = data && data.on_body;
   if (!ob) { el.innerHTML = ""; return; }
   const b = obData && !obData.error && obData.bodies.find(x => x.name === ob.body);
-  if (!b) { el.innerHTML = `On <b>${esc(ob.body)}</b> (${ob.how})`; return; }
+  if (!b) { el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> (${ob.how})`; return; }
   const bits = [], f = bioFactor(b);
   for (const g of bioGenera(b)) {
     const o = b.organics.find(o => o.genus === g), x = (b.bio_guess || []).find(q => q.genus === g);
@@ -481,7 +506,8 @@ function renderRoute() {
 }
 // ---- Now mode: five big lines for a second monitor, readable from the chair ----
 function renderNow() {
-  const el = document.getElementById("nowView"), p = data.position, f = data.fuel, t = data.target, a = data.arrival;
+  drawNowBar();
+  const el = document.getElementById("nowBody"), p = data.position, f = data.fuel, t = data.target, a = data.arrival;
   if (!p) { el.innerHTML = `<div class="now-sys">waiting for your first jump…</div>`; return; }
   const lines = [`<div class="now-sys">${esc(p.name)}</div>`];
   // the arrival verdict, for twenty seconds after a jump
@@ -498,7 +524,10 @@ function renderNow() {
   if (f && f.live && f.pct != null)
     lines.push(`<div class="now-line ${f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : ""}">⛽ <b>${f.pct}%</b>` +
       (f.jumps_max != null ? ` · ${f.jumps_max} jumps` : "") + (f.since_scoop != null ? ` · ${f.since_scoop} since scoop` : "") +
-      (data.boost ? ` · <span class="boosted">boosted ×${data.boost}</span>` : "") + `</div>`);
+      (data.boost ? ` · <span class="boosted">boosted ×${data.boost}</span>` : "") +
+      (fuelLow(f) && hereScoopText(f) ? `<div class="now-small">${hereScoopText(f)}</div>` : "") + `</div>`);
+  const risk = nowRiskLine();
+  if (risk) lines.push(`<div class="now-line now-risk ${risk.cls}">${risk.html}</div>`);
   // landed: what is left on this body (and the sample spacing); otherwise what is left in the system
   if (data.on_body) lines.push(`<div class="now-line now-body">${document.getElementById("onbody").innerHTML}</div>`);
   else {
@@ -527,8 +556,78 @@ function renderNow() {
   if (ls) lines.push(`<div class="now-line now-small">Last session: ${esc(sessionLine(ls))}</div>`);
   if (lastAlert && Date.now() - lastAlert.at < 15000)
     lines.push(`<div class="now-card alert">${esc(lastAlert.title)}${lastAlert.body ? ` <span class="unk">${esc(lastAlert.body)}</span>` : ""}</div>`);
+  if (captions.length) lines.push(`<div class="now-caps">${captions.slice().reverse().map(c =>
+    `<div class="now-cap" data-words="${esc(c.words)}" title="say it again (through the window that is speaking)">▶ ${esc(c.words)} <span class="unk">${agoText(c.at)}</span></div>`).join("")}</div>`);
+  if (nowHintUntil && Date.now() < nowHintUntil)
+    lines.push(`<div class="now-line now-small now-hint">screen may sleep: set the tablet's screen timeout, or open over localhost/HTTPS</div>`);
   el.innerHTML = lines.join("");
 }
+// Now's at-risk line, under fuel: what the data aboard stands to lose, shown only once it matters (your amber level
+// or rebuy multiple). Docked where it sells, what selling here pays; on a high-g approach, that approach's stakes
+// (kept from the approach call-out until liftoff or leaving the body). null when there is nothing to say.
+let nowStakes = null;   // {sys, body_id, hg, landed}: the last approach's highGStakes
+function nowRiskLine() {
+  const u = data.unsold, lvl = unsoldLevel(u);
+  if (nowStakes) { const s = nowStakes.hg;
+    return {cls: lvl === "urgent" ? "urgent" : "warn", html: `⚠ <b>${esc(s.gravity)} g</b> · ${esc(s.value)} aboard${s.rebuys ? ` · ${esc(s.rebuys)} rebuys` : ""}`}; }
+  if (lvl !== "warn" && lvl !== "urgent") return null;
+  const sh = sellableHere(data.docked, u);
+  if (sh && sh.value > 0) return {cls: sh.level === "ok" ? "" : sh.level, html: `💰 sell here: <b>${credits(sh.value)}</b>`};
+  const rebuy = data.ship && data.ship.rebuy, ss = data.since_sale, days = ss && ss.days >= 1 ? Math.round(ss.days) : 0;
+  const kinds = [(u.carto || {}).estimated_payout && `🗺 ${credits(u.carto.estimated_payout)}`, (u.bio || {}).estimated_value && `🧬 ${credits(u.bio.estimated_value)}`].filter(Boolean);
+  return {cls: lvl, html: [`<b>${kinds.length ? kinds.join(" · ") : credits(u.total)}</b> aboard`, rebuy ? `${(u.total / rebuy).toFixed(1)}× rebuy` : "",
+                           days ? `${days} d unsold` : ""].filter(Boolean).join(" · ")};
+}
+// the stakes last until the jump, leaving the body, or lifting off after landing on it
+function nowStakesTick() {
+  const s = nowStakes; if (!s) return;
+  if (posId() !== s.sys) nowStakes = null;
+  else if (data.on_body) s.landed = true;
+  else if (s.landed) nowStakes = null;
+}
+// Now's caption strip: the last three lines said, in every window (a window that is not speaking shows the plain
+// wording of what the speaking one says). A tap asks the window that is speaking to say it again.
+const captions = [];
+function addCaption(words) {
+  const w = spokenText(words || ""); if (!w) return;
+  captions.push({words: w, at: Date.now()});
+  if (captions.length > 3) captions.shift();
+  if (view === "now" && data) renderNow();
+}
+const agoText = at => { const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  return s < 10 ? "just now" : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`; };
+// the bar: 🗣 as in the header, a 30-minute hush (or its end), the status report, and ✕ back (not in a ?mode=now window)
+function drawNowBar() {
+  const sp = document.getElementById("nowSpeech"), hb = document.getElementById("nowHush");
+  sp.classList.toggle("on", !!speechOn); sp.textContent = speechOn ? "🗣 on" : "🗣 off";
+  const on = hushed(), h = hushState, left = on && h.end != null ? Math.max(0, Math.ceil((h.end - Date.now()) / 1000)) : 0;
+  hb.classList.toggle("on", on);
+  hb.textContent = !on ? "hush 30 min" : h.end == null ? "voice back (hushed till the jump)" : `voice back (${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")})`;
+  document.getElementById("nowBack").hidden = nowWindow;
+}
+async function postCopilot(body, what) {
+  try {
+    const r = await fetch("api/copilot", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error(String(r.status));
+  } catch { toast(`Could not reach Outrider to ${what}`); }
+}
+// Screen wake lock while Now shows (only over localhost or HTTPS, where the browser offers it; asked again when the
+// window comes back into view). Without it, a muted hint for the first minute of the first Now in this window.
+let nowLock = null, nowLockAsking = false, nowHintUntil = 0;
+async function nowWake() {
+  const want = view === "now" && document.visibilityState === "visible";
+  if (!want) { if (nowLock) { const l = nowLock; nowLock = null; l.release().catch(() => {}); } return; }
+  if (nowLock || nowLockAsking) return;
+  if (!(window.isSecureContext && navigator.wakeLock)) { if (!nowHintUntil) nowHintUntil = Date.now() + 60000; return; }
+  nowLockAsking = true;
+  try {
+    const l = await navigator.wakeLock.request("screen");
+    l.addEventListener("release", () => { if (nowLock === l) nowLock = null; });
+    if (view === "now") nowLock = l; else l.release().catch(() => {});
+  } catch { if (!nowHintUntil) nowHintUntil = Date.now() + 60000; }
+  finally { nowLockAsking = false; }
+}
+document.addEventListener("visibilitychange", nowWake);
 // Now's heading-to line: what the targeted body is, the supercruise time (only from the arrival star or open space:
 // the curve is star-relative) and what the suggested order makes of it
 function nowDestText(hd, l, plan, b) {
@@ -543,11 +642,35 @@ function nowDestText(hd, l, plan, b) {
   const eta = (!near || (main && near === main.name)) && near !== b.name ? scSeconds(b.dist_ls) : null;
   return `➜ <b>${esc(b.name)}</b> · ${destBits(b).map(esc).join(" · ")}${eta != null ? ` · ${scText(eta)}` : ""} · ${verdict}`;
 }
-document.getElementById("nowView").addEventListener("click", () => {
+// leaving Now: ✕ back or a double tap (not on the bar or a caption). A window opened at ?mode=now stays on Now, with
+// its URL, so a stray tap or a reload keeps it there.
+function leaveNow() {
+  if (nowWindow || view !== "now") return;
   view = viewBeforeNow || "overview"; store.set("view", view);
-  if (new URLSearchParams(location.search).get("mode") === "now") history.replaceState(null, "", location.pathname);
   render();
+}
+document.getElementById("nowBack").onclick = ev => { ev.stopPropagation(); leaveNow(); };
+document.getElementById("nowView").addEventListener("dblclick", ev => { if (!ev.target.closest("#nowBar, .now-cap")) leaveNow(); });
+document.getElementById("nowView").addEventListener("click", ev => {
+  const cap = ev.target.closest(".now-cap");
+  if (cap) { ev.stopPropagation(); postCopilot({action: "replay", words: cap.dataset.words}, "replay the line"); }
 });
+document.getElementById("nowSpeech").onclick = ev => { ev.stopPropagation(); speechBtn.onclick(); drawNowBar(); };
+document.getElementById("nowHush").onclick = async ev => {
+  ev.stopPropagation();
+  try {
+    const r = await fetch("api/hush", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode: hushed() ? "off" : "30m"})});
+    if (!r.ok) throw new Error(String(r.status));
+  } catch { toast("Could not reach Outrider to hush the voice"); }
+};
+document.getElementById("nowStatus").onclick = ev => { ev.stopPropagation(); postCopilot({action: "status"}, "ask for a status report"); };
+// ↗: Now in a window of its own, named so a second press finds the one already open
+let nowWin = null;
+document.getElementById("nowPop").onclick = () => {
+  if (nowWin && !nowWin.closed) { nowWin.focus(); return; }
+  nowWin = window.open(location.pathname + "?mode=now", "ed-outrider-now", "popup,width=1000,height=800");
+  if (!nowWin) toast("The browser blocked the new window");
+};
 setInterval(() => {   // arrival card and alert card expire; a failed system lookup is asked again
   if (view !== "now" || !data) return;
   if (hereData && hereData.error) loadHere();
@@ -589,21 +712,24 @@ function star(s) {
 
 let view = store.get("view", "near");
 let viewBeforeNow = view === "now" ? "overview" : view;
-if (new URLSearchParams(location.search).get("mode") === "now") view = "now";   // the only URL parameter the page reads
+// the only URL parameter the page reads: a window opened at ?mode=now (the ↗ beside Now) shows Now and nothing else
+const nowWindow = new URLSearchParams(location.search).get("mode") === "now";
+if (nowWindow) view = "now";
 // Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
 // per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
 const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has reported it (upbeat or thud if it is known)", "fanfare"],
-  ["arrival", "arriving somewhere undiscovered (first visit), and a run of new or fully known systems in a row (the streak thresholds below); the sound only corrects a targeting call that was wrong", null],
+  ["arrival", "arriving somewhere undiscovered (first visit), and a run of new or fully known systems in a row (the streak thresholds below); the first jump into a galactic region this session, when the briefing (which opens with it) is not spoken; the sound only corrects a targeting call that was wrong", null],
   ["game", "loading into the game and quitting it", null],
   ["jump", "the frame shift drive charging for a jump (and whether the star there is scoopable)", null],
   ["honk", "the auto honk's result (when it is on; unspoken while the arrival briefing is)", null],
   ["brief", "a one-sentence briefing on arriving: discovered or not, bodies, the star, the best unmapped planet and bio (after the honk, or 12 s after arriving without one)", null],
   ["fss", "the FSS finished (what is worth mapping, or nothing worth staying for), or closed with bodies still hidden", null],
-  ["leaving", "leaving a system with work worth coming back for", "alert"], ["fuel", "fuel low where you cannot scoop", "alert"],
+  ["leaving", "leaving a system with work worth coming back for", "alert"], ["fuel", "fuel low where you cannot scoop, or a top-up worth taking before scoopable stars run scarce", "alert"],
   ["scoop", "fuel scooping filled the tank", null],
   ["scoopstop", "fuel scooping stopped early (not above 90%, nor when you jump)", null],
   ["supercharge", "the frame shift drive supercharged in a neutron star or white dwarf cone", null],
   ["find", "a valuable body just scanned (over your highlight levels)", "find"],
+  ["jumponium", "a landable body just scanned has a material your FSD injections are short of (premium or standard at 2 or fewer): said with the FSS debrief, or alone when the FSS never completes", "find"],
   ["sampling", "leaving a body with exobiology unfinished (untouched genera only if you landed there); a species completed", "alert"],
   ["approach", "approaching a landable body at or over your high-gravity level with unsold data over the amber level or rebuy multiple", "alert"],
   ["bodybrief", "approaching a body with biological signals: what they could be (the FSS already said so, so off by default)", null],
@@ -615,16 +741,23 @@ const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
   // a notification on every jump (or scoop, or FSS) would be noise: these are spoken by default, not notified
   {jump: false, honk: false, brief: false, fss: false, scoop: false, scoopstop: false, supercharge: false,
-   sampling: false, approach: false, bodybrief: false},
+   sampling: false, approach: false, bodybrief: false, jumponium: false},
   store.get("alerts", {}));
-const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), store.get("alertSound", {}));
+// off until you tick them (the whole row): the jumponium call-out
+const OFF_KINDS = {jumponium: false};
+const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), OFF_KINDS, store.get("alertSound", {}));
 // not spoken until you tick them: they repeat what the game (or another alert) already told you
-const QUIET_KINDS = {scoopstop: false, supercharge: false, bodybrief: false};
+const QUIET_KINDS = {scoopstop: false, supercharge: false, bodybrief: false, ...OFF_KINDS};
 const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), QUIET_KINDS, store.get("alertSpeak", {}));
 let speechOn = store.get("speech", false);
 function notify(kind, title, body) {
   if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return false;
-  try { new Notification(title, {body, tag: "ed-" + kind}); return true; } catch { return false; }
+  try {
+    const n = new Notification(title, {body, tag: "ed-" + kind});
+    // the jumponium call-out opens the Materials tab at its "where to find" list
+    if (kind === "jumponium") n.onclick = () => { try { window.focus(); } catch {} openMatSources(); };
+    return true;
+  } catch { return false; }
 }
 // ---- one speaker: with the page open in several windows (the second screen at ?mode=now, a forgotten tab),
 // only one of them speaks and plays the alert sounds; every window still shows the cards and notifications.
@@ -650,6 +783,24 @@ function claimSpeaker(steal = false) {
 }
 const speakMode = () => { const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
 const speakerHere = () => speakMode() === "always" || (speakMode() === "auto" && isSpeaker);
+// "Play speech and sounds on this PC" (per browser, off by default): the speaking window still picks and queues
+// the lines, but the PC running Outrider plays them and the alert sounds through its own player, so no click on
+// the page is needed. Whatever the server cannot play (no Piper voice, no player, another line playing, no
+// connection), this browser plays itself.
+const serverPlay = () => store.get("speakOnServer", false) === true;
+// ---- hush: the voice quiet for 10 or 30 minutes, or until the next jump (the ▾ beside 🗣, or the co-pilot button's
+// hold). The state is the server's (POST api/hush, back in the payload), so the button, a tablet and every window see
+// the same one, and the window that is speaking does the silencing. Danger lines (priority 0) and lines you ask for
+// still speak; the alert sounds other than danger's are skipped too. Cards and notifications stay as they are.
+let hushState = null, hushKey = null, hushTimer = null;
+// the payload's hush, with `end` on this browser's clock (from the seconds left: a tablet's clock may be off)
+function takeHush(h) { hushState = h && typeof h === "object" ? Object.assign({}, h, {end: h.left != null ? Date.now() + h.left * 1000 : null}) : null; }
+function hushed() {
+  const h = hushState; if (!h) return false;
+  if (h.mode === "jump") return !(h.sys != null && data && data.position && posId() !== h.sys);   // cleared by the jump itself
+  return h.end != null && Date.now() < h.end;
+}
+const HUSH_SAID = {"10m": "Quiet for 10 minutes.", "30m": "Quiet for 30 minutes.", jump: "Quiet until the next jump."};
 // One path for every alert: its sound (if sounds are on and the kind's sound is ticked), a desktop
 // notification (if enabled), and speech (if 🗣 is on and the kind is ticked). `say` defaults to the title;
 // it may be a function (a personality line from speech.json), called only when the alert is spoken.
@@ -661,9 +812,10 @@ let lastAlert = null;
 // session can answer "why did it not say X". In memory only: a reload starts it afresh.
 const SPEECH_LOG_MAX = 100;
 const speechLog = [];
+let speechLogSeq = 0;   // each entry's id (the 👎 finds its entry by it)
 let speechPlaying = null;   // the entry of the line being said now: whatever cuts it short marks it
 function logSpeech(e) {
-  const entry = Object.assign({t: Date.now(), kind: "manual", tag: null, style: null, voice: null, words: "", fate: null}, e);
+  const entry = Object.assign({id: ++speechLogSeq, t: Date.now(), kind: "manual", tag: null, style: null, voice: null, words: "", fate: null}, e);
   speechLog.push(entry);
   if (speechLog.length > SPEECH_LOG_MAX) speechLog.shift();
   drawSpeechLogSoon();
@@ -681,19 +833,28 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
   lastAlert = {kind, title, body, at: Date.now()};
   const entry = logSpeech({kind, tag, words: title});
   const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
-  const loud = speakerHere();
-  const plays = !!(loud && snd && soundOn && alertSound[kind]);   // no sound, no wait before the words
+  const loud = speakerHere(), hush = hushed() && speechPrio(kind, tag) !== 0;   // hushed: danger still speaks
+  const plays = !!(loud && snd && soundOn && alertSound[kind] && !hush);   // no sound, no wait before the words
   if (plays) setTimeout(() => play(snd), delay);
   const notified = notify(kind, title, body);
-  if (loud && speechOn && alertSpeak[kind] && !UNSPOKEN.has(kind) && !quiet) {
-    lineStyle = null;
+  if (loud && speechOn && alertSpeak[kind] && !UNSPOKEN.has(kind) && !quiet && !hush) {
+    lineStyle = lineKey = lineTemplate = null;
     const words = (typeof say === "function" ? say() : say) || title;
-    entry.style = lineStyle;
+    // the line's alert and its speech.json wording, for the 👎 in Spoken lines
+    entry.style = lineStyle; entry.key = lineKey; entry.template = lineTemplate;
     speak(words, {delay: plays ? delay + (SOUND_LEAD[snd] ?? 900) : delay, kind, tag, still, log: entry, ...styleVoice(lineStyle)});
+    addCaption(words);
     return true;
   }
+  // another window speaks it: Now's captions get its plain wording (a personality line picked here would not be
+  // the one said there)
+  if (!loud && alertSpeak[kind] && !UNSPOKEN.has(kind) && !quiet && !hush) {
+    linePlain = true;
+    try { addCaption((typeof say === "function" ? say() : say) || title); } catch { addCaption(title); } finally { linePlain = false; }
+  }
   setFate(entry, !loud ? "silent: another window speaks" : !speechOn ? "silent: speech off" : UNSPOKEN.has(kind) ? "not spoken (the arrival is)"
-    : quiet ? "merged into another line (quiet)" : "silent: not ticked to speak");
+    : quiet ? (typeof quiet === "string" ? quiet : "merged into another line (quiet)")
+    : hush && alertSpeak[kind] ? "silent: hushed" : "silent: not ticked to speak");
   return notified;
 }
 // ---- the speech queue: the most urgent line first, stale ones dropped ----
@@ -705,9 +866,9 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 // interdiction are said at most once in 30 s, so a flapping condition cannot keep repeating.
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
-const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "approach", "bodybrief"]);
+const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "approach", "bodybrief", "jumponium"]);
 const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" ? 1
-  : ["find", "signals", "codex", "bodybrief", "supercharge"].includes(kind) ? 3 : 2;
+  : ["find", "signals", "codex", "bodybrief", "supercharge", "jumponium"].includes(kind) ? 3 : 2;
 // the queue without what went stale by `now` with the ship at `pos`
 const speechExpire = (items, now, pos) => items.filter(it => now - it.notBefore <= SPEECH_MAX_AGE
   && (it.sys == null || it.sys === pos) && (!it.still || it.still()));
@@ -771,6 +932,14 @@ function clearForJump() {
   if (speechNow && speechNow.prio !== 0 && speechNow.kind !== "manual") { setFate(speechPlaying, "cut short: the FSD charged"); speechNow.stop(); }
 }
 const hushReason = () => !speechOn ? "speech off" : "another window speaks";
+let lastSaid = null;   // the last line actually said (the words, not the queue item): the co-pilot's "say again"
+// a hush began: what is queued or playing below danger goes (lines asked for in this window stay)
+function cutForHush() {
+  const before = speechItems;
+  speechItems = speechItems.filter(it => it.prio === 0 || it.kind === "manual");
+  dropFates(before, speechItems, "dropped: hushed");
+  if (speechNow && speechNow.prio !== 0 && speechNow.kind !== "manual") { setFate(speechPlaying, "cut short: hushed"); speechNow.stop(); }
+}
 // Speech turned off, or this window no longer the one speaking: the alerts queued (and the one playing) go
 // quiet at once; `all` also drops lines asked for here (the ▶ try button). The worker checks it too.
 function hushSpeech(all = false) {
@@ -788,6 +957,11 @@ async function speechWorker() {
         const before = speechItems;
         speechItems = speechItems.filter(it => it.kind === "manual");
         dropFates(before, speechItems, `dropped: ${hushReason()}`);
+      }
+      if (hushed()) {   // only danger, and what you asked for
+        const before = speechItems;
+        speechItems = speechItems.filter(it => it.prio === 0 || it.kind === "manual");
+        dropFates(before, speechItems, "dropped: hushed");
       }
       // speechExpire stays pure (the smoke test calls it): what it took out is told apart here
       const before = speechItems, now = Date.now(), pos = data && data.position && data.position.id64;
@@ -809,6 +983,7 @@ async function speechWorker() {
       if (e) {
         e.took = Date.now() - t0; e.engine = item.engine || null;
         setFate(e, item.unsaid ? `not said: ${item.unsaid}` : item.timedOut ? "timed out (the browser voice hung)" : "said");
+        if (e.fate === "said") lastSaid = {words: item.words, voice: item.voice, pace: item.pace};   // "say again"
       }
     }
   } finally { speechBusy = false; }
@@ -817,9 +992,23 @@ async function speechWorker() {
 async function sayNow(item) {
   const cur = speechNow = {prio: item.prio, kind: item.kind, stopped: false, halt: null, stop() { this.stopped = true; if (this.halt) this.halt(); }};
   try {
+    const onPc = serverPlay();
+    if (onPc) {   // said on the PC: the answer comes once the line has played (or was stopped)
+      const id = Math.random().toString(36).slice(2);
+      cur.halt = () => { fetch("api/say/stop", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id})}).catch(() => {}); };
+      try {
+        const speed = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
+        const r = await fetch("api/say/play", {method: "POST", headers: {"Content-Type": "application/json"},
+                                               body: JSON.stringify({text: item.words, voice: item.voice || null, speed, id})});
+        if (r.ok) { item.engine = "Piper on the PC"; return; }
+      } catch {}
+      cur.halt = null;
+      if (cur.stopped) return;
+    }
     const tts = data && data.tts;
     const ctx = tts && tts.engine === "piper" ? await runningAudio() : null;
-    if (tts && tts.engine === "piper" && !ctx && !piperBlockedSaid) {
+    // with the PC playing, the browser's click-to-allow-audio is not the user's problem: no toast for a fallback
+    if (tts && tts.engine === "piper" && !ctx && !piperBlockedSaid && !onPc) {
       piperBlockedSaid = true; toast("Click the page to allow Piper audio (the browser's voice speaks until then)");
     }
     if (ctx) {
@@ -838,7 +1027,8 @@ async function sayNow(item) {
     }
     if (cur.stopped) return;
     if (typeof speechSynthesis === "undefined") { item.unsaid = "no voice in this browser"; return; }
-    item.engine = tts && tts.engine === "piper" ? (ctx ? "browser voice (Piper failed)" : "browser voice (Piper audio blocked)") : "browser voice";
+    item.engine = (tts && tts.engine === "piper" ? (ctx ? "browser voice (Piper failed)" : "browser voice (Piper audio blocked)") : "browser voice")
+      + (onPc ? " (the PC could not play it)" : "");
     await new Promise(res => {
       let done = false; const finish = () => { if (!done) { done = true; res(); } };
       const rate = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
@@ -878,7 +1068,7 @@ const saySignals = k => !!(store.get(k === "bio" ? "sayBio" : "sayGeo", null)
 const recentLines = {};
 async function loadSpeechLib() {
   // a failed load forgets the version it wanted, so the next payload tries again
-  try { const r = await fetch("api/speech"); if (r.ok) { speechLib = await r.json(); drawSpeechStyles(); return; } } catch {}
+  try { const r = await fetch("api/speech"); if (r.ok) { speechLib = await r.json(); drawSpeechStyles(); drawSpeechLogSoon(); return; } } catch {}
   speechLibWanted = null;
 }
 // a line's {placeholders}; {name}, {cmdr}, {ship} and {here} are always there when known
@@ -896,7 +1086,7 @@ const allFilled = (text, all) => [...text.matchAll(/\{(\w+)\}/g)].every(m => all
 // Danger lines: a joke at 20% hull costs clarity, so with "Danger alerts always down to business" ticked (the
 // default) these come only from the business lists and never swear, whatever personalities are ticked.
 // (ship_lost too: a debrief after a rebuy is no time for a joke; it also jumps the queue like the others)
-const DANGER = new Set(["hull", "heat", "interdicted", "fuel_low", "fuel_star", "fuel_target", "carrier_departs", "ship_lost"]);
+const DANGER = new Set(["hull", "heat", "interdicted", "fuel_low", "fuel_star", "fuel_target", "fuel_topup", "carrier_departs", "ship_lost"]);
 const speechDangerBusiness = () => !!(store.get("speechDangerBusiness", null) ?? (data && data.defaults && data.defaults.speech_danger_business) ?? true);
 // "One personality per system": the personality is drawn at game start and at each arrival and says every line
 // until the next one, so a character (and its own voice) holds through a system. In memory only: a reload draws
@@ -911,7 +1101,9 @@ function pickShift() {
 }
 // A random version of alert `key` from every personality ticked (and their swearing versions when
 // profanity is on), not one of the last few heard; `plain` when the file has nothing for it.
+let linePlain = false;   // set while a window that is not speaking words a caption: the plain line, no personality
 function line(key, vars = {}, plain = "") {
+  if (linePlain) return plain;
   const entry = speechLib.lines && speechLib.lines[key];
   const listOf = name => !entry || typeof entry !== "object" || !Array.isArray(entry[name]) ? []
     : entry[name].filter(x => typeof x === "string" && x.trim());
@@ -935,13 +1127,14 @@ function line(key, vars = {}, plain = "") {
   const [style, pick] = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
   recent.push(pick);
   while (recent.length > Math.min(4, Math.floor(pool.length / 2))) recent.shift();
-  lineStyle = style;
+  lineStyle = style; lineKey = key; lineTemplate = pick;
   return fillLine(pick, all);
 }
 // The personality of the line line() picked last, and the voice it asks for: a style in speech.json may be
 // {label, voice, speed}, a Piper voice of its own (only if installed; it wins over the dialog's voice) and a
 // pace multiplying yours. The browser's own speech ignores the voice.
 let lineStyle = null;
+let lineKey = null, lineTemplate = null;   // and its alert and speech.json wording (the 👎 bans that wording)
 function styleVoice(style) {
   const st = style && speechLib.styles && speechLib.styles[style];
   return st && typeof st === "object" ? {voice: typeof st.voice === "string" ? st.voice : null,
@@ -963,13 +1156,13 @@ const LINE_SAMPLES = {
   find_bio: {body: "B 7", value: "19.0M"}, sample_clear: {genus: "Stratum"},
   codex: {entry: "Stratum Tectonicas", what: "new to your codex for this region"},
   fuel_low: {pct: 18}, fuel_star: {pct: 22, star: "white dwarf"}, fuel_target: {pct: 22, system: "Drojau LL-O b26-3"},
-  hull: {pct: 42}, interdicted: {by: "someone"},
+  fuel_topup: {rate: "8 of the last 20 stars were scoopable", jumps: "about 6 jumps"}, hull: {pct: 42}, interdicted: {by: "someone"},
   docked_sell: {value: "114.1M", station: "Jaques Station"}, undocked_unsold: {value: "260.4M"},
   sold: {sold: "12.6M cr cartographics and 4.1M cr exobiology", still: ""},
   unsold_warn: {value: "52.0M"}, unsold_urgent: {value: "251.3M"},
   carrier_departs: {minutes: 4, carrier: "Out Of The Blue"}, carrier_arrived: {carrier: "Out Of The Blue", system: "Smojooe AR-E b25-8"},
   fss_done: {count: 14, text: "B 1, Earth-like world, 3.1M to map, and biology on C 2, up to 19.0M"},
-  fss_nothing: {count: 14}, fss_unfinished: {left: "3 bodies"},
+  fss_nothing: {count: 14}, fss_unfinished: {left: "3 bodies"}, jumponium: {body: "B 4", material: "polonium", pct: "1.3 percent"},
   left_body: {body: "A 3", text: "Stratum 2 of 3, and Tussock untouched, up to 4.1M"},
   bio_done_more: {species: "Stratum Tectonicas", value: "19.2M", left: "Bacterium and Fungoida"},
   bio_done_last: {species: "Stratum Tectonicas", value: "19.2M"},
@@ -977,6 +1170,7 @@ const LINE_SAMPLES = {
   body_brief: {body: "B 7", text: "3 biological signals, one of Stratum, Bacterium or Fungoida, 1.0M to 19.0M"},
   high_g: {gravity: "2.6", value: "480.2M", rebuys: "3.2"},
   arrival_brief: {text: "Undiscovered. 14 bodies. Scoopable K star."},
+  region: {region: "the Norma Arm", count: "31 species you have logged elsewhere are new to your codex here"},
   session_recap: {text: "142 jumps, 3,100 light-years, 12 systems nobody had seen, 9 species sampled"},
   streak_known: {count: 10}, streak_new: {count: 5},
   welcome_back: {text: "Away 3 days. 412.0M aboard, unsold for 5 days. Fuel 64 percent. Docked at Jaques Station."},
@@ -1080,7 +1274,8 @@ function highGStakes(m) {
 function arrivalBriefText(m) {
   const verdict = m.undiscovered && !(m.visits > 1) ? "Undiscovered." : m.visits > 1 ? "Visited before." : m.status === "explored" ? "Fully scanned."
     : m.in_spansh ? "Known." : m.undiscovered === false ? "Known, not in Spansh." : "";
-  const bits = [verdict];
+  // the first crossing into a galactic region this session opens the briefing ("Entering the Norma Arm.")
+  const bits = [m.region && m.region.spoken ? `Entering ${m.region.spoken}.` : "", verdict];
   if (m.body_count) bits.push(m.all_found ? `All ${nBodies(m.body_count)} found.` : `${nBodies(m.body_count)}.`);
   // how many of them Spansh has no record of (a count: the tags are still yours to scan, whatever Spansh says)
   const unrep = m.in_spansh && m.body_count && m.base_known != null ? m.body_count - m.base_known : 0;
@@ -1093,6 +1288,59 @@ function arrivalBriefText(m) {
   if (m.bio && m.bio.value >= bioMinNow()) bits.push(`Biology on ${m.bio.body}, up to ${credits(m.bio.value)}.`);
   if (!w && !(m.bio && m.bio.value >= bioMinNow()) && m.status === "explored") bits.push("Nothing here for you.");
   return bits.filter(Boolean).join(" ");
+}
+// "Routine systems: sound only": a system with nothing worth a sentence. Not your first visit to an undiscovered
+// one; every body already found (your honk, or Spansh has them all); a scoopable star with no jet cone or exclusion
+// zone; nothing notable, terraformable or over your body level left to map; no bio at or over your exobiology
+// level. Fuel plays no part: its alerts are their own, and jump the queue.
+const routineQuiet = () => !!store.get("routineQuiet", false);
+// the region crossing's {count}: species logged elsewhere that the rules let grow here and your codex lacks here
+const regionCountText = n => n ? `${n} species you have logged elsewhere could be new to your codex here.` : "";
+// a region crossing waiting for the arrival briefing to say it ({sys, at, m}); said alone if none has in 30 s
+let pendingRegion = null, regionFlash = null;
+function sayRegion(m) {
+  const count = regionCountText(m.count);
+  alertOut("arrival", `Entering ${m.region}`, count, {tag: "region",
+           say: () => line("region", {region: m.spoken || m.region, count}, `Entering ${m.spoken || m.region}.${count ? " " + count : ""}`)});
+}
+// "B 4 has polonium, 1.3 percent": a jumponium body, in the FSS debrief or alone
+const jumponiumSaid = j => `${j.body} has ${(j.name || j.material || "").toLowerCase()}, ${j.pct} percent.`;
+const jumponiumOn = () => !!(alertSpeak.jumponium || (alertCfg.enabled && alertCfg.jumponium) || alertSound.jumponium);
+function sayJumponium(j) {
+  const material = (j.name || j.material || "").toLowerCase(), pct = `${j.pct} percent`;
+  if (jumponiumOn()) toast(`⛽ ${j.body}: ${material} ${j.pct}%`);
+  alertOut("jumponium", `${j.body}: ${material} ${j.pct}%`, "short for FSD injections · Materials → where to find",
+           {say: () => line("jumponium", {body: j.body, material, pct}, jumponiumSaid(j))});
+}
+let briefFacts = null;   // the last arrival briefing's facts ({sys, m}): the FSS debrief of that system asks isRoutine too
+function isRoutine(m) {
+  if (!m || m.region || (m.undiscovered && !(m.visits > 1)) || (m.undiscovered == null && !m.in_spansh && !(m.visits > 1))) return false;
+  const covered = m.all_found || (m.body_count > 0 && m.base_known != null && m.base_known >= m.body_count);
+  if (!covered || !/^[OBAFGKM](_|$)/.test(m.star_class || "") || hazardNote(m.star_class)) return false;
+  if ((m.worth || []).some(x => x.notable || x.terraformable || (x.value != null && x.value >= hlLevel("body")))) return false;
+  return !(m.bio && m.bio.value >= bioMinNow());
+}
+// supercruise time in words: "about 40 seconds", "about 6 minutes"
+const spokenTime = sec => sec < 90 ? `about ${Math.max(10, Math.round(sec / 5) * 5)} seconds` : `about ${Math.round(sec / 60)} minutes`;
+// The co-pilot's status report (a tap of the button; the Now bar reuses it): fuel and jumps, the next suggested stop,
+// what is aboard against your rebuy, the nearest known unvisited system. Unknown or zero parts are left out, four
+// clauses at most. On a body with a sample run under way, the sampling instead.
+function statusReportText() {
+  const sm = data && data.sampling;
+  if (data && data.on_body && sm && sm.species)
+    return `${sm.species}, sample ${sm.samples} of 3` + (sm.clear ? ", clear to take the next." : sm.to_go ? `, ${sm.to_go} metres still to go.` : ".");
+  const parts = [], f = data && data.fuel;
+  if (f && f.pct != null) { const j = f.jumps_max ?? f.jumps_recent;
+    parts.push(`Fuel ${f.pct} percent${j ? `, ${j} jump${j === 1 ? "" : "s"}` : ""}`); }
+  const hd = hereData && !hereData.error && hereData.id64 === posId() ? hereData : null;
+  const plan = hd && hd.leaving ? planItems(hd.leaving) : [];
+  if (plan.length) { const it = plan[0];
+    parts.push(`Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}${it.value ? `, ${credits(it.value)}` : ""}${it.sec != null ? `, ${spokenTime(it.sec)}` : ""}`); }
+  const u = data && data.unsold, rebuy = data && data.ship && data.ship.rebuy;
+  if (u && !u.error && u.total > 0) parts.push(`${credits(u.total)} aboard${rebuy ? `, ${(u.total / rebuy).toFixed(1)} rebuys` : ""}`);
+  const hz = data ? horizon() : null;
+  if (hz && hz.system) parts.push(`Nearest unvisited: ${hz.system.name}, ${Math.round(hz.system.distance * 10) / 10} light-years`);
+  return parts.length ? parts.slice(0, 4).join(". ") + "." : "Nothing to report yet.";
 }
 // the session recap at quit: "" under three jumps (a quick relog is not a session); zero counts are left out
 function recapText(st) {
@@ -1216,8 +1464,14 @@ function renderUnsold() {
     `<div class="ln">🗺 <b>${credits(u.carto.estimated_payout ?? u.carto.estimated_value)}</b> · 🧬 <b>${credits(u.bio.estimated_value)}</b></div>` +
     (ss ? `<div class="ln" title="since your last sale to Universal Cartographics (${esc(ss.ts.slice(0, 10))})"><b>${ss.days}</b> d · <b>${Math.round(ss.ly).toLocaleString()}</b> ly since you last sold</div>` : "") +
     sellersLine();
-  fl.innerHTML = !f || !(f.systems || f.planets || f.mapped) ? "no unsold firsts" :
-    `🏁 <b>${f.systems}</b> system${f.systems === 1 ? "" : "s"} · <b>${f.planets}</b> planet${f.planets === 1 ? "" : "s"} · <b>${f.mapped}</b> mapped unsold`;
+  fl.innerHTML = (!f || !(f.systems || f.planets || f.mapped) ? "no unsold firsts" :
+    `🏁 <b>${f.systems}</b> system${f.systems === 1 ? "" : "s"} · <b>${f.planets}</b> planet${f.planets === 1 ? "" : "s"} · <b>${f.mapped}</b> mapped unsold`) +
+    firstsSeenLine(data.firsts_watch);
+}
+// the firsts watch ({on, seen, checked, of}): systems with unsold firsts that someone else has scanned since you
+function firstsSeenLine(w) {
+  if (!w || !w.seen) return "";
+  return ` · <span class="seen" title="Someone else has scanned ${w.seen === 1 ? "one system" : w.seen + " systems"} holding your unsold first discoveries since you were there (their scans reached Spansh). Sell to keep your name on what you found first. See My firsts.${w.on ? ` Checked ${w.checked} of ${w.of}; each is looked at once a day.` : " (the firsts watch is off: this is from before)"}">👁 <b>${w.seen}</b> scanned by someone else</span>`;
 }
 // The nearest places to sell (Spansh station search): the nearest trustworthy one of each kind.
 const sellerTxt = x => !x ? "" : `${esc(x.name)}${x.yours ? " (your carrier)" : x.carrier ? " (carrier)" : ""} · ${esc(x.system)} · ${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` +
@@ -1228,6 +1482,14 @@ function sellersLine() {
   const uc = s.uc.fresh || s.uc.nearest, vi = s.vista.fresh || s.vista.nearest;
   const d = x => x ? `${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` : "?";
   return `<div class="ln" title="nearest Universal Cartographics: ${uc ? sellerTxt(uc).replace(/<[^>]+>/g, "") : "none known"}\nnearest Vista Genomics: ${vi ? sellerTxt(vi).replace(/<[^>]+>/g, "") : "none known"}">sell: UC <b>${d(uc)}</b> · Vista <b>${d(vi)}</b>${uc && uc.yours ? " <span class=\"unk\">(your carrier)</span>" : ""}</div>`;
+}
+// how the exobiology aboard is priced: x5 per run where nobody had set foot on the body when you scanned it, and
+// the runs whose body's scan is not in your journals at the share of your past sales that earned the x5
+function bioRunsText(b) {
+  const n = b.samples || 0, x5 = b.x5_runs ?? null, unk = b.unknown_runs || 0;
+  if (x5 == null) return "";
+  return `x5 on ${x5} of ${n} run${n === 1 ? "" : "s"} (no footfall when you scanned)` +
+    (unk ? ` · ${unk} unknown, priced at your ${Math.round((b.bonus_rate || 0) * 100)}% sale history` : "");
 }
 function unsoldHtml(u) {
   if (!u || u.error) return "";
@@ -1250,8 +1512,7 @@ function unsoldHtml(u) {
     `</ul></div>` +
     `<div class="sec"><div class="lbl">🧬 Exobiology · ${from(b)}</div><ul>` +
     `<li><span>${b.samples} sample${b.samples === 1 ? "" : "s"}</span><b>${cr(b.estimated_value)}</b></li>` +
-    (b.samples ? `<li><span class="bn">range ${cr(b.base_value)} – ${cr(b.max_value)}; first-log bonus assumed on ` +
-                 `${Math.round(b.bonus_rate * 100)}%</span></li>` : "") +
+    (b.samples ? `<li><span class="bn">${[bioRunsText(b), `range ${cr(b.base_value)} – ${cr(b.max_value)}`].filter(Boolean).join(" · ")}</span></li>` : "") +
     u.species.map(r => `<li><span class="bn">${esc(r.species)} ×${r.count}</span><b>${cr(r.value)}</b></li>`).join("") +
     (b.unknown_species.length ? `<li><span class="bn">not priced: ${b.unknown_species.map(esc).join(", ")}</span></li>` : "") +
     `</ul></div>` +
@@ -1275,7 +1536,8 @@ function render() {
   // distances to the two hubs: Sol, and Colonia (Eol Prou RS-T d3-94)
   const lyTo = (x, y, z) => p && Math.hypot(p.x - x, p.y - y, p.z - z).toLocaleString("en-US", {maximumFractionDigits: 0});
   const rg = data.region;
-  document.getElementById("refLn").innerHTML = p ? (rg && rg.name ? `<span title="galactic region (codex entries are per region)${rg.nebula ? "; inside a nebula zone" : ""}">${esc(rg.name)}${rg.nebula ? " · nebula" : ""}</span> · ` : "") +
+  const flash = rg && regionFlash && regionFlash.name === rg.name && Date.now() < regionFlash.until;
+  document.getElementById("refLn").innerHTML = p ? (rg && rg.name ? `<span${flash ? ` class="regionnew"` : ""} title="galactic region (codex entries are per region)${rg.nebula ? "; inside a nebula zone" : ""}${flash ? "; just entered" : ""}">${esc(rg.name)}${rg.nebula ? " · nebula" : ""}</span> · ` : "") +
     `Sol <b>${lyTo(0, 0, 0)}</b> ly · Colonia <b>${lyTo(-9530.5, -910.28125, 19808.125)}</b> ly` : "";
   const fkHere = focusKey("here");
   document.getElementById("here").innerHTML = !p ? "waiting for your first jump…" :
@@ -1319,6 +1581,7 @@ function render() {
   document.body.classList.toggle("nowmode", view === "now");
   document.getElementById("nowView").hidden = view !== "now";
   if (view === "now") renderNow();
+  nowWake();
   if (view === "map") { loadMap(); drawMap(); }
   refreshPop();
   const jr = effRange();
@@ -1347,6 +1610,7 @@ function render() {
   }
   if (document.activeElement !== rs && !rs.dataset.pending) rs.value = String(data.radius);
   document.getElementById("subJump").innerHTML = (jr ? `<span title="Loadout MaxJumpRange: the best case with a near-empty tank">max jump ${(data.jump_range || jr).toFixed(1)} ly</span>` +
+    (data.jump_range_now ? ` <span title="the range with the fuel and cargo aboard now (jumps counted here use it)">· ${data.jump_range_now.toFixed(1)} laden</span>` : "") +
     (data.boost ? ` <b class="boosted" title="jet-cone charge: your next jump reaches this far">boosted ×${data.boost} → ${jr.toFixed(0)} ly</b>` : "") : "") +
     (prev && p ? `${jr ? " · " : ""}came from ${esc(prev.name)} (${Math.hypot(prev.x - p.x, prev.y - p.y, prev.z - p.z).toFixed(1)} ly)` : "");
   document.body.classList.toggle("disconnected", !!disconnected);
@@ -1364,7 +1628,11 @@ function render() {
                                            : ` <span class="noscoop" title="not scoopable">✕</span>`) : "";
     const src = t.source === "edsm" ? " (known to EDSM only)" : "";
     const hz = hazardNote(t.star_class);
-    tEl.innerHTML = `Target: <b>${esc(t.name)}</b>${row ? ` · ${row.distance.toFixed(2)} ly` : ""}${sc}` +
+    // the jump's cost from the fuel model: "38.2 ly · 2.9 t · leaves 3 max jumps"
+    const hop = t.hop, cost = !hop ? "" : hop.fuel != null
+      ? ` · <span title="fuel this jump burns, and the max-range jumps the tank holds after it">${fuelT(hop.fuel)} t · leaves ${hop.left} max jump${hop.left === 1 ? "" : "s"}</span>`
+      : hop.reach === false ? ` · <span class="noscoop" title="further than one jump with the fuel and cargo aboard">out of range</span>` : "";
+    tEl.innerHTML = `Target: <b>${esc(t.name)}</b>${hop ? ` · ${hop.ly.toFixed(1)} ly` : row ? ` · ${row.distance.toFixed(2)} ly` : ""}${cost}${sc}` +
       ` · <span class="t-${t.status.replace(" ", "")}">${label}${src}</span>` + (hz ? ` · <span class="hazard">⚠ ${hz}</span>` : "");
   }
   renderLeaving(t && t.leaving);
@@ -1621,7 +1889,7 @@ function renderHere() {
       <td>${esc(b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}</td>
       <td class="num">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
       <td class="num${b.gravity >= highGravity() ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
-      <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}</td>
+      <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}${b.stale_bio ? ` <span class="unk old" title="${esc(staleBodyTitle(b))}">landable? (old data)</span>` : ""}</td>
       <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}</td>
       <td>${b.rings ? `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}` : ""}</td>
       <td>${firsts}</td>
@@ -1795,6 +2063,8 @@ document.getElementById("hereSchematic").addEventListener("click", e => {
   b.dataset.body === selectedBody ? closeBody() : openBody(b.dataset.body);
 });
 
+// a Spansh body last reported by a pre-Odyssey client (your own scan replaces it)
+const staleBodyTitle = b => `Last reported ${(b.updated || "").slice(0, 4)} by a pre-Odyssey client: thin-atmosphere worlds were marked not landable and bio was not reported. May hold unsampled life; footfall unknown. Your own scan replaces this.`;
 // ---- body hover summary ----
 const fmtK = n => n == null ? "?" : Math.round(n).toLocaleString();
 // region: the region of the system the body is in (a search result may be elsewhere than Here)
@@ -1806,7 +2076,7 @@ function bodyPopHtml(b, region) {
     b.temperature != null && `${fmtK(b.temperature)} K`,
     !isStar && b.atmosphere && b.atmosphere !== "None" && esc(b.atmosphere) + (b.pressure != null ? ` (${b.pressure < 0.01 ? b.pressure.toFixed(4) : b.pressure.toFixed(2)} atm)` : ""),
     !isStar && b.volcanism && esc(b.volcanism.replace(/ volcanism$/, "")),
-    !isStar && (b.landable ? "landable" : "not landable"), b.terraformable && "terraformable",
+    !isStar && (b.landable ? "landable" : b.stale_bio ? `<span class="old" title="${esc(staleBodyTitle(b))}">landable? (old data)</span>` : "not landable"), b.terraformable && "terraformable",
     isStar && (b.scoopable ? "scoopable" : "not scoopable"),
   ].filter(Boolean);
   let h = `<h3>${esc(b.name)} <span class="src">${esc(b.subtype || "")}</span></h3><div>${phys.join(" · ")}</div>`;
@@ -1974,7 +2244,7 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
 // ---- My firsts ----
 let firstsKey = null, firstsData = null;
 async function loadFirsts() {
-  const key = `${data && data.scan_version}|${data && data.unsold && data.unsold.computed}`;
+  const key = `${data && data.scan_version}|${data && data.unsold && data.unsold.computed}|${data && data.firsts_watch && data.firsts_watch.seen}`;
   if (key === firstsKey) return;
   firstsKey = key;
   document.getElementById("fStatus").textContent = "loading…";
@@ -1999,9 +2269,17 @@ function renderFirsts() {
       <td class="num dist">${x.distance == null ? "?" : x.distance.toLocaleString("en-US", {maximumFractionDigits: 1})}</td>
       <td>${x.system ? `<span class="${x.system_state}">🏁 ${x.system_state}</span>` : ""}</td>
       <td class="by">${by(x.bodies_by)}</td><td class="by">${by(x.mapped_by)}</td>
+      <td class="seen">${seenCell(x.seen)}</td>
       <td class="num">${x.value ? credits(x.value) : ""}</td></tr>`).join("") ||
-    `<tr><td colspan="7" class="unk">${lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
+    `<tr><td colspan="8" class="unk">${lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
       : "Nothing unsold or lost: every first you have found is banked."}</td></tr>`;
+}
+// someone else has scanned this since you (the firsts watch): "8 d after you · Spansh has 7 of 12 bodies"
+function seenCell(v) {
+  if (!v) return "";
+  const when = v.days == null ? "" : v.days < 1 ? "the same day" : `${v.days} d after you`;
+  const has = v.spansh_bodies != null ? `Spansh has ${v.spansh_bodies}${v.body_count ? ` of ${v.body_count}` : ""} bodies` : "";
+  return `<span title="Someone else has scanned this: ${v.bodies} bod${v.bodies === 1 ? "y" : "ies"} you discovered reached Spansh from another commander, first on ${esc((v.reported_ts || "").slice(0, 10))}. Your first discovery counts once you sell, if nobody has sold before you.">👁 ${[when, has].filter(Boolean).join(" · ")}</span>`;
 }
 // ---- Left behind: unfinished work in systems you have visited nearby ----
 let leftKey = null, leftData = null;
@@ -2026,8 +2304,10 @@ function renderLeft() {
       maps.length ? "map " + maps.map(m => `<b>${esc(m.body)}</b> <span class="unk">${esc(m.subtype)}${m.terraformable ? " T" : ""} +${credits(m.increment)}</span>`).join(", ") : "",
       // genera null: FSS signals nobody DSS'd, priced as the leaving alert prices them (an upper bound)
       bio.length ? "bio " + bio.map(b => `<b>${esc(b.body)}</b> <span class="unk">${b.genera === null ? `${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd`
-        : b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : ""].filter(Boolean);
-    return {r, bits, worth, keep: maps.length || bio.length || r.unfound};
+        : b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : "",
+      // bodies you never scanned whose Spansh record is pre-Odyssey: a mark, not counted in Worth
+      r.old_data ? `<span class="unk old" title="${oldDataTitle(r.old_data)}">old data: ${r.old_data.bodies} bod${r.old_data.bodies === 1 ? "y" : "ies"}</span>` : ""].filter(Boolean);
+    return {r, bits, worth, keep: maps.length || bio.length || r.unfound || r.old_data};
   }).filter(x => x.keep && x.bits.length);
   el.innerHTML = rows.map(({r, bits, worth}) => `<tr><td><span class="name" data-name="${esc(r.name)}" title="click to copy">${esc(r.name)}</span><span class="goto" data-goto="${esc(r.id)}" title="open in Here">⌖</span></td>
       <td class="num">${r.distance.toFixed(1)}</td><td class="left-what">${bits.join(" · ")}</td><td class="num">${worth ? credits(worth) : ""}</td></tr>`).join("")
@@ -2058,6 +2338,12 @@ async function loadMat() {
   if (matData && matData.error) matKey = null;   // retried at the next render
   renderMat();
 }
+// the Materials tab, scrolled to "Where to find FSD-injection materials" once it has drawn
+let matScroll = false;
+function openMatSources() {
+  matScroll = true;
+  const b = document.querySelector('[data-view="mat"]'); if (b) b.click();
+}
 function renderMat() {
   const m = matData, st = document.getElementById("matStatus");
   if (!m || m.error) { st.textContent = m ? m.error : ""; return; }
@@ -2081,6 +2367,7 @@ function renderMat() {
         `<td class="num">${h.count ?? 0}${h.cap ? " / " + h.cap : ""}</td><td>` +
         (list.map(x => `<span class="name" data-name="${esc(x.system)}" title="click to copy the system">${esc(x.body)}</span> <span class="unk">${x.pct}% · ${x.distance} ly</span>`).join(" · ") || `<span class="unk">none scanned nearby</span>`) + `</td></tr>`; }).join("") +
     `</tbody></table>` : "";
+  if (matScroll && Object.keys(src).length) { matScroll = false; document.getElementById("matSources").scrollIntoView({block: "start"}); }
   const f = mFilter.value.trim().toLowerCase();
   const rows = m.rows.filter(r => (!mHeld.checked || r.count) && (!f || r.name.toLowerCase().includes(f)));
   const cats = ["Raw", "Manufactured", "Encoded", "Other"];
@@ -2329,6 +2616,23 @@ function renderLastSession() {
     (ls.max_sol ? ` <span class="unk">· ${ls.max_sol.toLocaleString("en-US")} ly from Sol at most</span>` : "");
   el.hidden = !ls;
 }
+// a trip's exobiology against the prediction: "47 sold, 44 with x5 as predicted, 3 without" (the runs aboard that
+// were predicted x5, matched to what Vista Genomics paid by species), and the bio estimate against what it paid
+function tripBioText(t) {
+  const c = t.x5, parts = [];
+  if (c && c.sold) {
+    const without = (c.predicted || 0) - (c.matched || 0), extra = (c.paid || 0) - (c.matched || 0);
+    // journals from before the game wrote WasFootfalled: nothing was predicted
+    if ((c.unknown || 0) >= c.sold) parts.push(`${c.sold} sold, ${c.paid || 0} with x5 (footfall not in your journals)`);
+    else parts.push(`${c.sold} sold, ${c.matched} with x5 as predicted` + (without ? `, ${without} without` : "") +
+                    (c.unknown ? `, ${c.unknown} unknown` : extra > 0 ? `, ${extra} x5 not predicted` : ""));
+  }
+  if (t.estimate_bio && t.paid_bio_estimated != null) {
+    const pct = Math.round(100 * (t.paid_bio_estimated - t.estimate_bio) / t.estimate_bio);
+    parts.push(`estimate ${credits(t.estimate_bio)}, paid ${credits(t.paid_bio_estimated)} (${pct >= 0 ? "+" : ""}${pct}%)`);
+  }
+  return parts.join(" · ");
+}
 const openSessions = new Set();
 function renderHistory() {
   renderLastSession();
@@ -2370,11 +2674,13 @@ function renderHistory() {
   document.getElementById("tripRows").innerHTML = curRow + (L.trips || []).map(t => {
     const est = t.estimate ? ` <span class="unk">${t.estimate ? (t.paid_carto >= t.estimate ? "+" : "") + Math.round(100 * (t.paid_carto - t.estimate) / t.estimate) + "%" : ""}</span>` : "";
     const losses = lossHtml(t.losses);
-    return `<tr><td>${fmtD(t.start)} → ${fmtD(t.end)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
+    const note = tripBioText(t);
+    return `<tr${note ? ` class="hasnote"` : ""}><td>${fmtD(t.start)} → ${fmtD(t.end)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
       <td class="num hide-sm">${Math.round(t.ly).toLocaleString()}</td><td class="num">${t.firsts}</td>
       <td class="num" title="${credits(t.paid_carto || 0)} cartographics + ${credits(t.paid_bio || 0)} exobiology">${credits(t.paid)}</td>
       <td class="num hide-sm">${t.estimate ? credits(t.estimate) + est : ""}</td><td class="num hide-sm">${t.per_hour ? credits(t.per_hour) : ""}</td>
-      <td class="num hide-sm">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm">${t.first_rate ?? ""}</td><td>${losses}</td></tr>`;
+      <td class="num hide-sm">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm">${t.first_rate ?? ""}</td><td>${losses}</td></tr>` +
+      (note ? `<tr class="tripnote"><td colspan="11" class="unk">🧬 ${esc(note)}</td></tr>` : "");
   }).join("") + ((L.trips || []).length ? "" : `<tr><td colspan="11" class="unk">No sales on record yet.</td></tr>`);
   document.getElementById("topRows").innerHTML = (L.top_finds || []).map(f => `<tr><td><span class="name" data-name="${esc(f.body)}" title="click to copy">${esc(f.body)}</span></td>
       <td>${esc(f.type || "")}${f.first_discovered ? " 🏁" : ""}${f.mapped ? " 🗺" : ""}</td><td class="num">${credits(f.value)}</td>
@@ -3020,7 +3326,7 @@ document.addEventListener("touchstart", e => {
   popId === key ? hidePop() : showPop(td, t.clientX, t.clientY);
 }, {passive: true});
 
-// ---- Sounds, synthesized so there are no files to ship ----
+// ---- Sounds, synthesized from static/sounds.json so there are no audio files to ship ----
 let actx = null, soundOn = store.get("sound", null), lastSeq = null;
 const soundBtn = document.getElementById("sound");
 function audio() {
@@ -3037,49 +3343,32 @@ function tone(ctx, out, freq, start, dur, {type = "triangle", vol = .3, attack =
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g).connect(out); o.start(t0); o.stop(t0 + dur + .05);
 }
-const SOUNDS = {
-  fanfare(ctx, out) {   // brassy rising arpeggio into a held major chord
-    const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 2400; f.connect(out);
-    const b = {type: "sawtooth", vol: .16, attack: .02};
-    [[523.25, 0], [659.25, .13], [783.99, .26]].forEach(([hz, t]) => tone(ctx, f, hz, t, .16, b));
-    tone(ctx, f, 783.99, .42, .12, b);
-    [523.25, 659.25, 783.99, 1046.5].forEach(hz => tone(ctx, f, hz, .56, 1.1, {...b, vol: .11, attack: .03}));
-    tone(ctx, out, 261.63, .56, 1.1, {type: "triangle", vol: .2});
-  },
-  upbeat(ctx, out) {    // two quick rising notes
-    tone(ctx, out, 659.25, 0, .14, {vol: .28});
-    tone(ctx, out, 880, .12, .26, {vol: .28});
-  },
-  thud(ctx, out) {      // low drop with a soft knock
-    tone(ctx, out, 120, 0, .32, {type: "sine", vol: .6, attack: .005, glideTo: 40});
-    tone(ctx, out, 70, 0, .08, {type: "square", vol: .06, attack: .002});
-  },
-  alert(ctx, out) {     // two-note nag: something is unfinished here
-    [0, .22].forEach(t => { tone(ctx, out, 987.77, t, .1, {type: "square", vol: .12}); tone(ctx, out, 739.99, t + .1, .1, {type: "square", vol: .12}); });
-  },
-  chime(ctx, out) {     // soft bell: news, nothing to do right now
-    [[1318.5, 0], [1760, .09]].forEach(([hz, t]) => tone(ctx, out, hz, t, .9, {type: "sine", vol: .16, attack: .004}));
-  },
-  cash(ctx, out) {      // bright two-step "ka-ching": money
-    tone(ctx, out, 1567.98, 0, .08, {type: "triangle", vol: .22, attack: .002});
-    tone(ctx, out, 2093, .07, .5, {type: "triangle", vol: .2, attack: .002});
-    tone(ctx, out, 3135.96, .07, .35, {type: "sine", vol: .06, attack: .002});
-  },
-  find(ctx, out) {      // rising sparkle: something worth a look just turned up
-    [880, 1108.73, 1318.51, 1760].forEach((hz, i) => tone(ctx, out, hz, i * .07, .35, {type: "sine", vol: .14, attack: .005}));
-  },
-  danger(ctx, out) {    // low two-tone klaxon: the ship is in trouble
-    [0, .3].forEach(t => { tone(ctx, out, 330, t, .25, {type: "sawtooth", vol: .1}); tone(ctx, out, 247, t + .14, .14, {type: "sawtooth", vol: .1}); });
-  },
-};
-function play(name) {
+// static/sounds.json, inlined into the page by the server (which renders the same table to WAV when this browser
+// has "Play speech and sounds on this PC" ticked): per sound its tones and an optional lowpass
+const SOUND_DATA = (typeof window !== "undefined" && window.__SOUNDS__) || {};
+const SOUNDS = SOUND_DATA.sounds && typeof SOUND_DATA.sounds === "object" ? SOUND_DATA.sounds : {};
+function soundHere(ctx, out, s) {
+  let wet = out;
+  if (s.lowpass) { wet = ctx.createBiquadFilter(); wet.type = "lowpass"; wet.frequency.value = s.lowpass; wet.connect(out); }
+  for (const t of s.tones || [])
+    tone(ctx, t.dry ? out : wet, t.freq, t.start || 0, t.dur, {type: t.type, vol: t.vol, attack: t.attack, glideTo: t.glideTo});
+}
+// in this browser (WebAudio), which only plays once the page has had a click
+function playHere(name) {
   const ctx = audio(); if (!ctx || !SOUNDS[name]) return;
   if (ctx.state !== "running") { drawSoundBtn(); return; }  // would only pile up and play late
-  const out = ctx.createGain(); out.gain.value = .8; out.connect(ctx.destination);
-  SOUNDS[name](ctx, out);
+  const out = ctx.createGain(); out.gain.value = SOUND_DATA.gain ?? .8; out.connect(ctx.destination);
+  soundHere(ctx, out, SOUNDS[name]);
+}
+// on the PC when ticked (it answers at once; the sound may overlap a line, as here), else or on any failure here
+function play(name) {
+  if (!SOUNDS[name]) return;
+  if (!serverPlay()) return playHere(name);
+  fetch("api/sound/play", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})})
+    .then(r => { if (!r.ok) playHere(name); }, () => playHere(name));
 }
 function drawSoundBtn() {
-  const blocked = soundOn && actx && actx.state !== "running";
+  const blocked = soundOn && !serverPlay() && actx && actx.state !== "running";   // the PC needs no click
   soundBtn.textContent = soundOn ? "🔊" : "🔇";
   soundBtn.title = !soundOn ? "sounds off — click to turn on" : blocked ? "sounds on, but the browser needs one click on the page to allow audio" : "sounds on — click to turn off";
   // a silent second window should not look broken
@@ -3098,14 +3387,85 @@ drawSoundBtn();
 
 let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierMoved = null, lastCodexTs = null, lastDockTs = null;
 let lastMomentSeq = 0, lastSaleTs = null, lastPosId, lastLowFlag = false, hullLatch = 0, saleBanner = null;
+let lastUnderJumps = false, fuelTargetSys = null;   // the "under N jumps" latch; the system a fuel_target card came from
 const hullBand = h => !h || h.pct == null ? 0 : h.pct < 25 ? 2 : h.pct < 50 ? 1 : 0;
 // "nearest KNOWN scoopable": out in the black most systems are unreported and most stars are scoopable,
 // so the absence of a known one is not a reason to panic, and the text says so
 function scoopHint() {
-  const p = data.position, jr = effRange();
+  const p = data.position, jr = effRange(), sr = data.fuel && data.fuel.scoop_rate;
   const s = (data.systems || []).filter(x => x.id64 !== (p && p.id64) && x.main_scoopable).sort((a, b) => a.distance - b.distance)[0];
   return s ? `nearest known scoopable: ${s.name} · ${s.distance.toFixed(1)} ly${jr && s.distance > jr ? " (beyond one jump)" : ""}`
-           : "no known scoopable star nearby (most unreported stars are scoopable: check the galaxy map)";
+           : `no known scoopable star nearby (${sr ? scoopRateText(sr) : "most unreported stars are scoopable"}: check the galaxy map)`;
+}
+// Jumps of fuel left: at your pace (the fuel model's, else your recent burn), else at max range.
+const fuelJumps = f => f ? f.jumps_recent ?? f.jumps_max ?? null : null;
+// "Fuel alerts also under N jumps" (the alerts dialog; blank = off, the default): the % rules stay as they are
+const fuelJumpsCfg = () => { const v = store.get("fuelJumps", null), n = Number(v);
+  return v != null && v !== "" && isFinite(n) && n > 0 ? Math.round(n) : null; };
+const fuelUnderJumps = f => { const n = fuelJumpsCfg(), j = fuelJumps(f); return n != null && j != null && j < n; };
+const fuelLow = f => !!(f && f.live && ((f.pct != null && f.pct < 30) || f.low_flag || fuelUnderJumps(f)));
+const scoopRateText = r => `${r.scoopable} of the last ${r.of} stars ${r.scoopable === 1 ? "was" : "were"} scoopable`;
+const expectedGap = r => r.of / Math.max(r.scoopable, 1);   // jumps between scoopable stars, as they have come lately
+// Another star here to scoop at when the arrival star cannot be (the server's here_scoop): "none here" only once every
+// star is known; the travel time only where it is short enough for the rough curve to mean something.
+function hereScoopText(f, plain) {
+  const h = f && f.here_scoop; if (!h) return "";
+  if (h.name) {
+    const sec = h.dist_ls <= 2000 ? scSeconds(h.dist_ls) : null, cls = h.subtype ? ` (${h.subtype.split(" ")[0]})` : "";
+    return plain ? `Star ${h.name} can be scooped, ${h.dist_ls.toLocaleString("en-US")} light seconds out.`
+      : `⛽ scoopable here: <b>${esc(h.name)}</b>${esc(cls)} · ${h.dist_ls.toLocaleString("en-US")} ls${sec != null ? ` · ${scText(sec)}` : ""}`;
+  }
+  return plain ? "" : h.complete ? `<span class="noscoop">no scoopable star here</span>` : `<span class="unk">no other scoopable star known yet (FSS to check)</span>`;
+}
+const fuelT = x => x < 0.1 ? x.toPrecision(1) : x.toFixed(1);   // a short hop burns a few kilograms
+// the payload's hush: in the speaking window a new hush is confirmed and cuts what is queued, and its end (a cancel,
+// the jump) says "Voice back on." once; a timed one ends on this page's clock (hushTick)
+function onHush(first) {
+  const before = hushKey;
+  takeHush(data.hush);
+  hushKey = hushState ? `${hushState.mode}|${hushState.until}|${hushState.sys}` : null;
+  if (!first && hushKey !== before) {
+    if (hushState && hushed()) { cutForHush(); hushNews(HUSH_SAID[hushState.mode] || "Quiet."); }
+    else if (!hushState && before !== null) hushNews("Voice back on.");
+  }
+  drawHush();
+}
+// hush news is said in the speaking window, and only with speech on (a confirmation nobody asked to hear is noise)
+function hushNews(text) { if (speechOn && speakerHere()) speak(text, {kind: "manual"}); }
+function drawHush() {
+  const on = hushed(), h = hushState, lbl = document.getElementById("hushLbl");
+  const left = on && h.end != null ? Math.max(0, Math.ceil((h.end - Date.now()) / 1000)) : 0;
+  lbl.hidden = !on;
+  lbl.textContent = !on ? "" : h.end == null ? "hushed till the jump" : `hushed ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  lbl.title = on ? "the voice is hushed: only hull, heat, interdiction and fuel speak, and what you ask for (▾ to cancel)" : "";
+  document.getElementById("hushBtn").classList.toggle("on", on);
+  const timed = on && h.end != null;   // the 1 s refresh only while a timed hush runs
+  if (timed && !hushTimer) hushTimer = setInterval(hushTick, 1000);
+  if (!timed && hushTimer) { clearInterval(hushTimer); hushTimer = null; }
+  if (view === "now") drawNowBar();
+}
+function hushTick() {
+  if (hushState && hushState.end != null && !hushed()) { hushState = null; hushKey = null; hushNews("Voice back on."); }
+  drawHush();
+}
+// ---- the co-pilot channel: the button (ed_button.py) and a tablet's Now bar ask the window that is speaking for a
+// status report, the last line again or a replay; the first payload only takes the number, so opening a page does
+// nothing stale. "hush" is done by the server (the payload's hush then says so).
+let lastCopilotSeq = 0;
+function takeCopilot(cp, first) {
+  if (!cp || typeof cp.seq !== "number") return;
+  const fresh = !first && cp.seq > lastCopilotSeq;
+  lastCopilotSeq = cp.seq;
+  if (fresh && speakerHere()) copilotDo(cp);
+  else if (fresh && cp.action === "status") addCaption(statusReportText());   // Now's captions show what was asked for
+}
+function copilotDo(cp) {
+  if (cp.action === "status") {   // a tap while something is being said cuts it short (danger excepted)
+    if (speechNow && speechNow.prio !== 0) { setFate(speechPlaying, "cut short: a status report was asked for"); speechNow.stop(); }
+    const text = statusReportText();
+    speak(text, {kind: "manual"}); addCaption(text);
+  } else if (cp.action === "again") speak(lastSaid ? lastSaid.words : "Nothing said yet.", {kind: "manual", voice: lastSaid && lastSaid.voice, pace: lastSaid ? lastSaid.pace || 1 : 1});
+  else if (cp.action === "replay" && cp.words) speak(cp.words, {kind: "manual"});
 }
 function onData() {
   drawTts();
@@ -3116,12 +3476,16 @@ function onData() {
     ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
     : "Spawn rules missing (bio_rules.json) and could not be downloaded: bodies get no species guesses. Run python3 ed_bio.py --update-rules once online.";
   // first payload, the server was restarted, or this window slept (see poll): no sounds for old state
-  if (data.run_id !== runId || woke) {
+  const firstNews = data.run_id !== runId || woke;
+  onHush(firstNews); takeCopilot(data.copilot, firstNews); nowStakesTick();
+  const cpl = document.getElementById("copilotLine"), btn = data.copilot && data.copilot.button;
+  cpl.hidden = !btn; cpl.textContent = btn ? `Co-pilot button: ${btn}` : "";
+  if (firstNews) {
     woke = false;
     runId = data.run_id; lastSeq = data.target ? data.target.seq : 0;
     const df = data.defaults || {};
     showBioMin();
-    showHl(); showMaxBonus(); fillThresholds(); showHighG();
+    showHl(); showMaxBonus(); fillThresholds(); showHighG(); showFuelJumps();
     if (store.get("sound", null) === null && df.sounds != null) { soundOn = !!df.sounds; drawSoundBtn(); }
     lastArrival = data.arrival ? data.arrival.seq : 0;
     lastUnsoldLevel = unsoldLevel(data.unsold); lastCarrierMoved = data.carrier && data.carrier.moved_ts;
@@ -3130,6 +3494,7 @@ function onData() {
     lastMomentSeq = Math.max(0, ...(data.moments || []).map(m => m.seq));
     lastSaleTs = data.last_sale && data.last_sale.ts;
     lastPosId = data.position && data.position.id64; lastLowFlag = !!(data.fuel && data.fuel.low_flag);
+    lastUnderJumps = !!(data.fuel && data.fuel.live && fuelUnderJumps(data.fuel));
     hullLatch = hullBand(data.hull);
     clearAnnounced = data.sampling && data.sampling.clear ? `${data.sampling.species}|${data.sampling.samples}` : null;
     return;
@@ -3161,8 +3526,13 @@ function onData() {
   const pos = data.position, f0 = data.fuel;
   if (pos && pos.id64 !== lastPosId) {
     const hs = data.here_star;
-    if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && f0.pct < 30 && hs && !/^[OBAFGKM](_|$)/.test(hs))
-      alertOut("fuel", `Fuel ${f0.pct}% at a ${hs} star you cannot scoop`, scoopHint(), {tag: "fuel_star", say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`)});
+    if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && (f0.pct < 30 || fuelUnderJumps(f0)) && hs && !/^[OBAFGKM](_|$)/.test(hs)) {
+      // another star here that scoops, when one is known already (Spansh, the honk): shown, and said; its absence
+      // is shown on the tile but never said (most of the time it only means nothing is scanned yet)
+      const jn = f0.pct >= 30 ? ` (${fuelJumps(f0)} jumps)` : "", other = hereScoopText(f0, true);
+      alertOut("fuel", `Fuel ${f0.pct}%${jn} at a ${hs} star you cannot scoop`, other || scoopHint(),
+               {tag: "fuel_star", say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`) + (other ? " " + other : "")});
+    }
     lastPosId = pos.id64;
     // back in a system: what you were warned about leaving its bodies last time is unfinished news again
     const here = posId();
@@ -3173,7 +3543,13 @@ function onData() {
   if (!(f0 && f0.live && f0.in_ship === false)) {
     const low = !!(f0 && f0.low_flag);
     if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {tag: "fuel_low", say: () => line("fuel_low", {pct: f0 && f0.pct}, "Fuel low.")});
-    lastLowFlag = low;
+    // "under N jumps" (off unless set in the alerts dialog): once on crossing it, like the game's own warning
+    const under = !!(f0 && f0.live && fuelUnderJumps(f0));
+    if (under && !lastUnderJumps && !(low && !lastLowFlag)) {
+      const jn = fuelJumps(f0);
+      alertOut("fuel", `Fuel: ${jn} jump${jn === 1 ? "" : "s"} left`, scoopHint(), {tag: "fuel_low", say: () => line("fuel_low", {pct: f0.pct}, `Fuel low: ${jn} jumps left.`)});
+    }
+    lastLowFlag = low; lastUnderJumps = under;
   }
   // moments: valuable finds (priced by the server, judged against your highlight levels), heat, interdiction
   for (const m of (data.moments || []).filter(m => m.seq > lastMomentSeq)) {
@@ -3214,14 +3590,19 @@ function onData() {
         const n = (c, what) => `${c} ${what} Signal${c === 1 ? "" : "s"}`;
         const text = b && g ? `${m.bio} Biological and ${m.geo} Geological Signals found on body ${m.body}.`
           : b ? `${n(m.bio, "Biological")} on body ${m.body}.` : g ? `${n(m.geo, "Geological")} on body ${m.body}.` : "";
-        if (text && speechOn && speakerHere()) speak(text, {kind: "signals"});
+        if (text && speechOn && speakerHere() && !hushed()) speak(text, {kind: "signals"});
       }
       else if (m.kind === "honk") {
         const n = m.bodies, count = m.all_found ? "all bodies found" : n != null ? `${n} bod${n === 1 ? "y" : "ies"}` : "";
         // a honk that worked also gave the arrival briefing, which says the body count: one summary, not two
         alertOut("honk", m.ok ? `Honked ${m.system}${count ? " · " + count : ""}` : `Auto honk failed in ${m.system}`, m.why || "",
-                 {quiet: !!(m.ok && m.brief && alertSpeak.brief), say: !m.ok ? (/gave up/.test(m.why || "") ? (/still in the jump/.test(m.why) ? "Honk skipped." : "Honk skipped. The map stayed open.")   // never pressed: "gave up waiting: the galaxy map is open"
+                 {quiet: !!(m.ok && m.brief && alertSpeak.brief), say: !m.ok ? (/gave up/.test(m.why || "") ? (/still in the jump/.test(m.why) ? "Honk skipped."   // never pressed: "gave up waiting: the galaxy map is open"
+                                  : /combat mode/.test(m.why) ? "Honk skipped. The HUD stayed in combat mode."
+                                  : honkGroup(m.why) ? `Honk skipped. Fire group ${honkGroup(m.why)} stayed selected.`
+                                  : "Honk skipped. The map stayed open.")
                                 : /map|FSS|panel|orrery|codex|scanner is open|services/.test(m.why || "") ? "Honk failed. A map or panel was open."
+                                : /combat mode/.test(m.why || "") ? "Honk failed. The HUD went into combat mode."
+                                : honkGroup(m.why) ? `Honk failed. Is the discovery scanner on primary fire in fire group ${honkGroup(m.why)}?`
                                 : "Honk failed. Is the discovery scanner on primary fire?")
                        : !honkAnnounce() ? "System honked."
                        : m.all_found ? "System scan complete, and all bodies were found."
@@ -3234,22 +3615,45 @@ function onData() {
         alertOut("jump", `Jumping to ${m.system}`, m.star_class ? `${spokenStar(m.star_class)}${scoop ? ", scoopable" : ", not scoopable"}` : "",
                  {tag: "fsd_charge", say: `Frame Shift Drive charging to jump to ${m.system}.${scoop ? " This star is scoopable." : ""}${hz ? " " + hz : ""}`});
       }
+      else if (m.kind === "region") {   // the first jump into a galactic region this session
+        regionFlash = {name: m.region, until: Date.now() + 60000};
+        toast(`Entering ${m.region}`);
+        // the arrival briefing opens with it when it is spoken; otherwise (or if no briefing comes) its own line
+        if (speechOn && alertSpeak.brief && speakerHere()) pendingRegion = {sys: String(m.system), at: Date.now(), m};
+        else sayRegion(m);
+      }
+      else if (m.kind === "jumponium" && m.jumponium) sayJumponium(m.jumponium);
       else if (m.kind === "arrival_brief") {   // after the honk (or 12 s after arriving without one): one sentence
         const text = arrivalBriefText(m);
+        briefFacts = {sys: m.system, m};
+        if (pendingRegion && pendingRegion.sys === String(m.system) && m.region && text) pendingRegion = null;   // said in it
+        // "Routine systems: sound only": the soft routine sound in place of the words (only where they would be said)
+        const hum = routineQuiet() && speechOn && alertSpeak.brief && isRoutine(m);
         if (text) alertOut("brief", `${m.system_name || "Arrived"}: ${text.split(". ")[0].replace(/\.$/, "")}`, text,
-                           {tag: "arrival_brief", say: () => line("arrival_brief", {text}, text)});
+                           hum ? {sound: "routine", quiet: "sound only: a routine system"}
+                               : {tag: "arrival_brief", say: () => line("arrival_brief", {text}, text)});
       }
       else if (m.kind === "fss_done" && m.leaving) {   // every body found in the FSS: go here, or move on
         const count = m.count || m.leaving.body_count, text = worthSaying(m.leaving);
-        alertOut("fss", `All ${count ? nBodies(count) + " " : "bodies "}found`, text ? `worth it: ${text}` : "nothing worth staying for",
-                 {tag: "fss_done", say: () => text ? line("fss_done", {count, text}, `All ${count || ""} found. Worth it: ${text}.`)
-                                                   : line("fss_nothing", {count}, `All ${count || ""} found. Nothing worth staying for.`)});
+        // nothing worth staying for, in a system that is routine now every body is found: the sound, as on arrival
+        const bf = briefFacts && briefFacts.sys === m.system ? briefFacts.m : null;
+        // a jumponium body (its own row, off by default) rides on the debrief when both are spoken, else goes alone
+        const jp = m.jumponium, fold = !!(jp && alertSpeak.jumponium && alertSpeak.fss);
+        const hum = !text && !fold && routineQuiet() && speechOn && alertSpeak.fss && !!bf && isRoutine({...bf, all_found: true, worth: [], bio: null});
+        const said = alertOut("fss", `All ${count ? nBodies(count) + " " : "bodies "}found`, (text ? `worth it: ${text}` : "nothing worth staying for") + (fold ? ` · ${jumponiumSaid(jp)}` : ""),
+                 hum ? {sound: "routine", quiet: "sound only: a routine system"}
+                     : {tag: "fss_done", say: () => (text ? line("fss_done", {count, text}, `All ${count || ""} found. Worth it: ${text}.`)
+                                                          : line("fss_nothing", {count}, `All ${count || ""} found. Nothing worth staying for.`)) +
+                                                    (fold ? " " + jumponiumSaid(jp) : "")});
+        if (jp && fold && jumponiumOn()) toast(`⛽ ${jp.body}: ${(jp.name || jp.material).toLowerCase()} ${jp.pct}%`);
+        if (jp && !(fold && said)) sayJumponium(jp);
       }
       else if (m.kind === "fss_unfinished" && m.left) {
         alertOut("fss", `FSS closed: ${nBodies(m.left)} still hidden`, m.system_name || "",
                  {tag: "fss_unfinished", say: () => line("fss_unfinished", {left: nBodies(m.left)}, `${nBodies(m.left)} still unresolved.`)});
       }
       else if (m.kind === "left_body") {   // back to supercruise with sampling unfinished
+        if (nowStakes && nowStakes.body_id === m.body_id) nowStakes = null;
         const text = leftBodyText(m);
         // only a warning that reached you (spoken or notified) spares the leaving alert, and only what it named
         if (text && alertOut("sampling", `Left ${m.body} unfinished`, text, {say: () => line("left_body", {body: m.body, text}, `Leaving ${m.body} unfinished: ${text}.`)})) {
@@ -3268,8 +3672,13 @@ function onData() {
                  {sound: "upbeat", say: () => left ? line("bio_done_more", {species: m.species, value, left}, `${m.species} complete. Left here: ${left}.`)
                                                    : line("bio_done_last", {species: m.species, value}, `${m.species} complete. That was the last one here.`)});
       }
+      else if (m.kind === "bio_dropped") {   // a new species' Log discarded a run at 2 of 3 elsewhere: a card, never spoken
+        alertOut("sampling", `${m.species || m.genus || "A run"} 2/3 discarded`, `the run on ${m.body || "another body"}${m.elsewhere ? " (another system)" : ""} was dropped by the new species`,
+                 {sound: null, quiet: "a card only: never spoken"});
+      }
       else if (m.kind === "approach") {   // orbital cruise at a body: the stakes of a high-g landing, and (if ticked) its bio
         const hg = highGStakes(m), bt = bodyBriefText(m);
+        nowStakes = hg ? {sys: String(m.system), body_id: m.body_id, hg, landed: false} : null;   // Now's at-risk line
         const brief = () => line("body_brief", {body: m.body, text: bt}, `${m.body}: ${bt}.`);
         // with both spoken, one utterance: the bio briefing leads into the high-g warning. Otherwise each alert
         // follows its own ticks (the approach alert off must not swallow the body briefing).
@@ -3306,6 +3715,12 @@ function onData() {
       }
     } catch (e) { console.error(e); pageError = `alert ${m.kind}: ${e && e.message || e}`; }
   }
+  // a region crossing no briefing said within 30 s (none came, or it had nothing else to say): its own line, while
+  // still in that system
+  if (pendingRegion && Date.now() - pendingRegion.at > 30000) {
+    const pr = pendingRegion; pendingRegion = null;
+    if (posId() === pr.sys) sayRegion(pr.m);
+  }
   // sample spacing: say so once when you are far enough from every earlier sample of the species
   const sm = data.sampling, smKey = sm && `${sm.species}|${sm.samples}`;
   if (sm && sm.clear && smKey !== clearAnnounced) {
@@ -3334,10 +3749,27 @@ function onData() {
       const text = leavingText(tl).replace(/<[^>]+>/g, "").replace(/^Leaving with unfinished work: /, ""), said = leavingSaid(tl);
       alertOut("leaving", "Leaving with unfinished work", text, {delay: t.sound ? 1600 : 0, say: () => line("leaving", {text: said}, `Leaving with unfinished work: ${said}`)});
     }
-    const f = data.fuel;
-    if (t.fresh && f && f.live && f.pct != null && f.pct < 30 && t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class))
-      alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
-               {delay: 800, tag: "fuel_target", say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
+    const f = data.fuel, fsys = posId();
+    if (t.fresh && f && f.live && f.pct != null && fuelTargetSys !== fsys) {
+      // low and the target cannot be scooped; or (the top-up) at a scoopable star with fewer jumps aboard than the
+      // stretch ahead may need: the target cannot be scooped or scoopable stars have been scarce. One card, once per
+      // system (re-targeting here says nothing new)
+      const unscoop = !!t.star_class && !/^[OBAFGKM](_|$)/.test(t.star_class), sr = f.scoop_rate, j = fuelJumps(f);
+      const low = unscoop && (f.pct < 30 || fuelUnderJumps(f));
+      const need = fuelJumpsCfg() ?? Math.max(4, sr ? 2 * expectedGap(sr) : 0);
+      const topup = !!data.here_star && /^[OBAFGKM](_|$)/.test(data.here_star) && f.pct < 90 && j != null && j < need
+        && (unscoop || !!(sr && sr.scoopable / sr.of < 0.5));
+      if (low || topup) fuelTargetSys = fsys;
+      if (topup) {
+        const jt = `about ${j} jump${j === 1 ? "" : "s"}`, rt = sr ? scoopRateText(sr) : "";
+        const rate = unscoop ? `the target cannot be scooped${rt ? `, and ${rt}` : ""}` : rt;
+        alertOut("fuel", `Top up here: ${jt} of fuel left`, [unscoop && `${t.name} is a ${t.star_class} star you cannot scoop`, rt,
+                 `${f.since_scoop} jumps since the last scoop`].filter(Boolean).join(" · "),
+                 {delay: 800, tag: "fuel_target", say: () => line("fuel_topup", {rate, jumps: jt}, `Top up first: ${jt} left, and ${rate}.`)});
+      } else if (low)
+        alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
+                 {delay: 800, tag: "fuel_target", say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
+    }
     lastSeq = t.seq;
   }
   const a = data.arrival;
@@ -3391,10 +3823,55 @@ const speechLogFacts = e => [e.kind + (e.tag ? "/" + e.tag : ""), e.style, e.voi
 function drawSpeechLog() {
   const box = document.getElementById("speechLogBox"), dlg = document.getElementById("alertDialog");
   if (!box || !box.open || !dlg || !dlg.open) return;
+  drawSpeechBans();
+  // 👎 on a line picked from the lines file: never that wording again (not on plain wording, which has no versions)
+  const ban = e => !e.template || !e.key ? "" : e.banned ? ` <span class="unk">· banned</span>`
+    : ` <button type="button" class="try ban" data-ban="${e.id}" title="never say this line again (every browser, and the voice lab)">👎</button>`;
   document.getElementById("speechLog").innerHTML = speechLog.length ? [...speechLog].reverse().map(e =>
-    `<div class="slog ${fateGroup(e.fate)}"><span class="unk">${hms(e.t)}</span> <b>${esc(e.fate || "waiting")}</b> <span class="unk">· ${esc(speechLogFacts(e).join(" · "))}</span><br>“${esc(e.words)}”</div>`).join("")
+    `<div class="slog ${fateGroup(e.fate)}"><span class="unk">${hms(e.t)}</span> <b>${esc(e.fate || "waiting")}</b> <span class="unk">· ${esc(speechLogFacts(e).join(" · "))}</span>${ban(e)}<br>“${esc(e.words)}”</div>`).join("")
     : `<div class="unk">Nothing yet in this window since it opened.</div>`;
 }
+// "n lines banned · review / undo" above the list; the review lists each with an undo
+let bansOpen = false, banList = [];
+function drawSpeechBans() {
+  const el = document.getElementById("speechBans"); if (!el) return;
+  const b = speechLib.banned && typeof speechLib.banned === "object" ? speechLib.banned : {}, whole = speechLib.banned_whole || [];
+  banList = Object.entries(b).flatMap(([k, ts]) => (Array.isArray(ts) ? ts : []).map(t => [k, t]));
+  if (!banList.length && !whole.length) { el.innerHTML = ""; return; }
+  el.innerHTML = `${banList.length} line${banList.length === 1 ? "" : "s"} banned · <a href="#" data-bans="toggle">${bansOpen ? "hide" : "review / undo"}</a>` +
+    (bansOpen ? banList.map(([k, t], i) => `<div class="slog">${esc(k)}: “${esc(t)}” <button type="button" class="try" data-unban="${i}">undo</button></div>`).join("") +
+      (whole.length ? `<div class="noscoop">all lines banned in ${whole.map(esc).join(", ")}: those lists are used whole</div>` : "") : "");
+}
+// ban (or unban) a line on the server; a ban also leaves this window's copy of the lines at once, before the new
+// version arrives, so the very next pick cannot be it
+async function banLine(alert, template, ban) {
+  let j = {};
+  try {
+    const r = await fetch(`api/speech/${ban ? "ban" : "unban"}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({alert, template})});
+    j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || `could not ${ban ? "ban" : "bring back"} that line`); return false; }
+  } catch { toast("Could not reach Outrider"); return false; }
+  const e = speechLib.lines && speechLib.lines[alert], banned = Object.assign({}, speechLib.banned);
+  if (ban) {
+    if (e && typeof e === "object") for (const k of Object.keys(e)) if (Array.isArray(e[k]) && e[k].length > 1) e[k] = e[k].filter(x => x !== template);
+    banned[alert] = [...(banned[alert] || []).filter(x => x !== template), template];
+  } else banned[alert] = (banned[alert] || []).filter(x => x !== template);
+  speechLib.banned = banned;
+  for (const x of speechLog) if (x.key === alert && x.template === template) x.banned = ban;
+  toast(ban ? "Banned: that line will not be said again" : "That line is back");
+  drawSpeechLog();
+  return true;
+}
+document.getElementById("speechLog").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-ban]"); if (!b) return;
+  const e = speechLog.find(x => x.id === Number(b.dataset.ban));
+  if (e && e.key && e.template) banLine(e.key, e.template, true);
+});
+document.getElementById("speechBans").addEventListener("click", ev => {
+  if (ev.target.closest("[data-bans]")) { ev.preventDefault(); bansOpen = !bansOpen; drawSpeechBans(); return; }
+  const u = ev.target.closest("[data-unban]"), it = u && banList[Number(u.dataset.unban)];
+  if (it) banLine(it[0], it[1], false);
+});
 let speechLogTimer = null;
 function drawSpeechLogSoon() { if (!speechLogTimer) speechLogTimer = setTimeout(() => { speechLogTimer = null; drawSpeechLog(); }, 200); }
 const speechLogText = () => [...speechLog].reverse().map(e => `${hms(e.t)}  ${e.fate || "waiting"}  [${speechLogFacts(e).join(", ")}]  ${e.words}`).join("\n");
@@ -3431,6 +3908,18 @@ function drawSpeaker() {
   if (!speakerHere()) hushSpeech();   // another window took over, or this one was set to never speak
   drawSpeechBtn(); drawSoundBtn();
 }
+// the ▾ beside 🗣: hush for 10 or 30 minutes or until the next jump, or cancel (the server holds it; the payload
+// brings it back to every window)
+const hushMenu = document.getElementById("hushMenu");
+document.getElementById("hushBtn").onclick = ev => { ev.stopPropagation(); hushMenu.hidden = !hushMenu.hidden; };
+hushMenu.querySelectorAll("[data-hush]").forEach(b => b.onclick = async ev => {
+  ev.stopPropagation(); hushMenu.hidden = true;
+  try {
+    const r = await fetch("api/hush", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode: b.dataset.hush})});
+    if (!r.ok) throw new Error(String(r.status));
+  } catch { toast("Could not reach Outrider to hush the voice"); }
+});
+document.addEventListener("click", ev => { if (!hushMenu.hidden && !hushMenu.contains(ev.target)) hushMenu.hidden = true; });
 speechBtn.onclick = () => {
   speechOn = !speechOn; store.set("speech", speechOn); audio(); drawSpeechBtn();
   if (speechOn) { lineStyle = null; const t = line("speech_on", {}, "Spoken alerts on."); speak(t, styleVoice(lineStyle)); }
@@ -3441,11 +3930,12 @@ document.getElementById("trySpeak").onclick = () => {
   audio();
   const keys = Object.keys(LINE_SAMPLES).filter(k => line(k, LINE_SAMPLES[k]));
   const key = keys[Math.floor(Math.random() * keys.length)] || "leaving";
-  lineStyle = null;
+  lineStyle = lineKey = lineTemplate = null;
   const text = line(key, LINE_SAMPLES[key], "Leaving with unfinished work: A 2, a class two gas giant, plus 1.4M to map.");
   const sv = styleVoice(lineStyle);
   document.getElementById("speechTried").textContent = `${key}: “${spokenText(text)}”${sv.voice ? ` (${sv.voice})` : ""}`;
-  speak(text, sv);
+  // in Spoken lines with its wording, so a line you dislike can be banned straight from trying it
+  speak(text, {...sv, log: logSpeech({kind: "manual", style: lineStyle, key: lineKey, template: lineTemplate})});
 };
 // personalities: one box per style in speech.json, plus profanity for the styles with swearing versions
 function drawSpeechStyles() {
@@ -3461,6 +3951,7 @@ function drawSpeechStyles() {
   if (document.activeElement !== namesBox) namesBox.value = speechNames().join(", ");
   document.getElementById("sayBio").checked = saySignals("bio"); document.getElementById("sayGeo").checked = saySignals("geo");
   document.getElementById("sayHazard").checked = sayHazard();
+  document.getElementById("routineQuiet").checked = routineQuiet();
   speedBox.value = speechSpeed(); speedOut.textContent = speechSpeed().toFixed(2) + "×";
   const pr = document.getElementById("speechProfanity");
   pr.checked = !!speechProfane(); pr.disabled = !swear.length;
@@ -3486,17 +3977,20 @@ const namesBox = document.getElementById("speechNames");
 const speedBox = document.getElementById("speechSpeed"), speedOut = document.getElementById("speechSpeedOut");
 speedBox.oninput = () => { speedOut.textContent = Number(speedBox.value).toFixed(2) + "×"; };
 speedBox.onchange = () => { store.set("speechSpeed", Number(speedBox.value)); drawSpeechStyles(); };
-for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"], ["sayHazard", "sayHazard"]])
+for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"], ["sayHazard", "sayHazard"], ["routineQuiet", "routineQuiet"]])
   document.getElementById(id).onchange = e => store.set(key, e.target.checked);
 namesBox.onchange = () => { store.set("speechNames", namesBox.value.trim() ? namesBox.value : null); drawSpeechStyles(); };
 drawSpeechStyles();
 document.getElementById("speechDangerBusiness").onchange = e => store.set("speechDangerBusiness", e.target.checked);
 document.getElementById("speechShift").onchange = e => { store.set("speechShift", e.target.checked); shiftStyle = null; drawSpeechStyles(); };
 document.getElementById("speakMode").onchange = e => { store.set("speakMode", e.target.value); drawSpeaker(); };
+document.getElementById("serverPlay").onchange = e => { store.set("speakOnServer", e.target.checked); drawServerPlay(); drawSoundBtn(); };
 document.getElementById("speakerClaim").onclick = () => claimSpeaker(true);
 // another window changed the setting (localStorage is shared by the browser's windows)
-window.addEventListener("storage", e => { if (e.key === "speakMode") drawSpeaker(); });
-drawSpeaker();
+window.addEventListener("storage", e => { if (e.key === "speakMode") drawSpeaker();
+  // 🗣 in another window of this browser (a ?mode=now window's bar): the window speaking follows it
+  if (e.key === "speech") { speechOn = store.get("speech", false); drawSpeechBtn(); if (!speechOn) hushSpeech(true); if (view === "now") drawNowBar(); } if (e.key === "speakOnServer") { drawServerPlay(); drawSoundBtn(); } });
+drawSpeaker(); drawServerPlay();
 // a window opened at ?mode=now (the second screen) waits a moment, so a main window opened with it speaks
 if (view === "now") setTimeout(() => claimSpeaker(), 1000); else claimSpeaker();
 // auto honk: the server holds Primary Fire on arrival; this is its on/off and status
@@ -3505,6 +3999,8 @@ const honkBox = document.getElementById("autoHonk"), honkSayBox = document.getEl
 const honkAnnounce = () => !!(store.get("honkAnnounce", null) ?? (data && data.autohonk && data.autohonk.announce) ?? true);
 honkSayBox.onchange = () => store.set("honkAnnounce", honkSayBox.checked);
 let honkTest = null;   // the Test run this page started: {seq, done}
+// the fire group a honk's "why" names ("... with fire group C selected: ..."), for the spoken line
+const honkGroup = why => ((why || "").match(/fire group ([A-Z]) (?:selected|stayed)/) || [])[1] || "";
 function drawHonk() {
   const a = data && data.autohonk;
   honkBox.checked = !!(a && a.wanted); honkBox.disabled = !(a && a.available);
@@ -3513,6 +4009,13 @@ function drawHonk() {
   document.getElementById("autoHonkStatus").textContent = a ? a.status : "";
   document.getElementById("autoHonkKey").textContent = a ? (a.pressing || a.key) : "";
   document.getElementById("autoHonkTest").disabled = !(a && a.available);
+  // what auto honk has learned about this ship's fire groups (from its own presses), with a way to forget it
+  const g = a && a.groups, gl = document.getElementById("autoHonkGroups");
+  gl.hidden = !(g && (g.good.length || g.bad.length));
+  if (!gl.hidden) document.getElementById("autoHonkGroupsText").textContent =
+    [g.good.length ? `scanner worked on fire group${g.good.length > 1 ? "s" : ""} ${g.good.join(", ")}` : "",
+     g.bad.length ? `missed on ${g.bad.join(", ")} (auto honk waits while ${g.bad.length > 1 ? "those are" : "that is"} selected)` : ""]
+      .filter(Boolean).join("; ");
   // the test's outcome comes back in the payload: a failed press would otherwise end on "holding …"
   const t = a && a.test;
   if (honkTest && !honkTest.done && t && t.seq === honkTest.seq && ["done", "failed", "stopped"].includes(t.state)) {
@@ -3536,10 +4039,24 @@ document.getElementById("autoHonkTest").onclick = async () => {
     tick();
   } catch { msg.textContent = "could not reach Outrider"; }
 };
+document.getElementById("autoHonkForget").onclick = async e => {
+  e.preventDefault();
+  try { await apiJson("api/autohonk/forget", {method: "POST"}); }
+  catch { toast("could not forget the fire groups"); }
+};
 honkBox.onchange = async () => {
   try { await apiJson("api/autohonk", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled: honkBox.checked})}); }
   catch { toast("could not switch auto honk"); }
 };
+// "Play speech and sounds on this PC": the tick, and what the server has to play with
+function drawServerPlay() {
+  const cb = document.getElementById("serverPlay"), p = data && data.player;
+  cb.checked = serverPlay();
+  document.getElementById("serverPlayStatus").textContent = !p ? "" : p.player ? `(plays through ${p.player})`
+    : p.choice === "off" ? "(server_player is off in the config: this browser plays them)"
+    : p.choice !== "auto" ? `(${p.choice} is not installed on the PC: this browser plays them)`
+    : "(no player found on the PC: pw-play, paplay, aplay or ffplay; this browser plays them)";
+}
 function drawTts() {
   const t = data && data.tts, sel = document.getElementById("ttsVoice");
   document.getElementById("ttsEngine").textContent = t && t.engine === "piper" ? "· Piper" : "· browser speech";
@@ -3554,6 +4071,7 @@ function drawTts() {
   }
   if (t && t.voice && document.activeElement !== sel) sel.value = t.voice;
   sel.disabled = !opts.length;
+  drawServerPlay();
   drawSpeechBtn();
   drawHonk();
 }
@@ -3618,11 +4136,13 @@ const codexMark = (x, region) => x && x.codex_new
 const variantTxt = x => x && (x.variants || []).length
   ? ` <span class="unk" title="expected colour variant">${esc(x.variants.map(v => v.split(" - ").pop()).join(" or "))}</span>` : "";
 let codexNewCounts = store.get("codexNewCounts", true);
+// The range as laden now (the fuel and cargo aboard, from the fuel model), else the Loadout's best case.
+const plainRange = () => data && (data.jump_range_now || data.jump_range) || null;
 // Jump range with a jet-cone charge applied (neutron x4, white dwarf x1.5; the journal gives the exact value).
-const effRange = () => data && data.jump_range ? data.jump_range * (data.boost || 1) : null;
+const effRange = () => plainRange() ? plainRange() * (data.boost || 1) : null;
 // Straight-line jumps to cover d ly: the charge boosts only the first jump, the rest are at plain range.
 const jumpsFor = d => {
-  const r = data && data.jump_range; if (!r) return null;
+  const r = plainRange(); if (!r) return null;
   const first = r * (data.boost || 1);
   return d <= first ? 1 : 1 + Math.ceil((d - first) / r);
 };
@@ -3663,6 +4183,13 @@ for (const [id, el] of Object.entries(hlEls)) {
   };
 }
 showHl();
+const fuelJumpsEl = document.getElementById("fuelJumps");
+const showFuelJumps = () => { fuelJumpsEl.value = fuelJumpsCfg() ?? ""; fuelJumpsEl.placeholder = "off"; };
+fuelJumpsEl.onchange = () => {
+  const v = Number(fuelJumpsEl.value);
+  store.set("fuelJumps", fuelJumpsEl.value.trim() === "" || !isFinite(v) || v <= 0 ? null : Math.min(99, Math.round(v))); showFuelJumps(); if (data) render();
+};
+showFuelJumps();
 const highGEl = document.getElementById("highG");
 const showHighG = () => { highGEl.value = store.get("highG", null) ?? ""; highGEl.placeholder = highGravity(); };
 highGEl.onfocus = showHighG;
@@ -3776,6 +4303,7 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   else if (id === "hlBody" || id === "hlBio") { hlCfg[id === "hlBody" ? "body" : "bio"] = null; store.set("highlightCfg", hlCfg); showHl(); renderHere(); }
   else if (id === "bioMin") { bioMinCfg = null; store.set("bioMinCfg", null); showBioMin(); }
   else if (id === "highG") { store.set("highG", null); showHighG(); renderHere(); }
+  else if (id === "fuelJumps") { store.set("fuelJumps", null); showFuelJumps(); if (data) render(); }
   else if (id === "streak") { store.set("streakCfg", {}); showStreak(); }
   else if (id === "skipFloor") { store.set("skipFloor", null); showSkip(); renderHere(); }
   else if (id === "speechSpeed") { store.set("speechSpeed", null); drawSpeechStyles(); }

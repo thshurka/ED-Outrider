@@ -876,7 +876,7 @@ class TickSafety(unittest.TestCase):
         self.assertTrue(self.tick())
         self.assertEqual({r[0] for r in self.db.execute("SELECT id64 FROM visits")}, {1, 2})   # nothing lost
         self.assertEqual(self.j.materials["counts"].get("iron"), 3)                             # nothing doubled
-        self.assertEqual(self.j.fuel_hist, [[10.0, 1.0], [10.0, 1.0]])                          # one per jump
+        self.assertEqual(self.j.fuel_hist, [[10.0, 1.0, None, None]] * 2)                     # one per jump
         self.assertEqual(self.j.commander["earned"], 50)
 
 
@@ -1437,7 +1437,7 @@ class Speech(unittest.TestCase):
         import datetime as _dt
         now = _dt.datetime.now(_dt.timezone.utc)
         ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        live = lambda **kw: dict({"live": True, "ts": ts, "flags": 1 << 4, "gui_focus": 0}, **kw)
+        live = lambda **kw: dict({"live": True, "ts": ts, "flags": 1 << 4 | 1 << 27, "gui_focus": 0}, **kw)
         t = now.timestamp()
         d = ed_outrider.honk_decision
         self.assertEqual(d(live(), t), ("press", None))
@@ -1462,7 +1462,7 @@ class Speech(unittest.TestCase):
         self.state.honker = FakeHonker()
         self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
         self.state.honk_confirm = 0.2
-        self.j.status_json = {"live": True, "ts": now(), "flags": 1 << 4, "gui_focus": 6}   # galaxy map open
+        self.j.status_json = {"live": True, "ts": now(), "flags": 1 << 4 | 1 << 27, "gui_focus": 6}   # galaxy map open
         self.j.handle({"event": "FSDJump", "timestamp": now(), "StarSystem": "S31", "SystemAddress": 31, "StarPos": [1, 0, 0]})
 
         async def go():
@@ -2123,8 +2123,8 @@ class Batch2Values(unittest.TestCase):
                        "Species": "$Codex_Ent_Tussocks_01_Name;", "Species_Localised": "Tussock Pennata"})
         at = lambda body: setattr(self.j, "status_json", {"live": True, "ts": "2026-01-01T00:11:00Z", "fuel_main": 10, "flags": 0,
                                                           "flags2": 1, "body": body, "lat": 0.0, "lon": 0.0, "planet_radius": 1_000_000})
-        at("Sys 5")
-        self.assertIsNone(self.state.sampling_summary())
+        at("Sys 5")   # no distance across two planets: only the in-progress-elsewhere line (P5)
+        self.assertEqual(set(self.state.sampling_summary()), {"elsewhere"})
         at("Sys 4")
         self.assertEqual(self.state.sampling_summary()["genus"], "Tussock")
 
@@ -5409,6 +5409,1652 @@ class FindSystem(unittest.TestCase):
         self.edsm.assert_awaited_once_with("Nowhere Here")   # whitespace tidied; the cross-site one never asked
 
 
+class BatchAAudio(unittest.TestCase):
+    """Batch A: speech and sounds played on the server (the page's "Play speech and sounds on this PC" tick).
+    Only fake players (small Python scripts) run here: nothing ever plays on the speakers."""
+
+    def setUp(self):
+        import tempfile
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.addCleanup(self.db.close)
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        self.log = os.path.join(self.tmp, "played")
+
+        class FakeSpeaker:
+            ready = available = True
+
+            def installed(self):
+                return []
+
+            def say(self, text, speed, voice=None):
+                return b"RIFF" + text.encode()
+        self.state.speaker = FakeSpeaker()
+
+    def fake(self, seconds=0.0, rc=0, stdin=True):
+        """A LinePlayer whose player is a Python script: it appends what it was given to self.log (the WAV on
+        stdin, or the file it was handed and whether it existed), sleeps, and exits with `rc`."""
+        import ed_tts
+        code = ("import os, sys, time\n"
+                "data = sys.stdin.buffer.read() if len(sys.argv) < 2 else open(sys.argv[1], 'rb').read()\n"
+                f"open({self.log!r}, 'a').write(data.hex() + '|' + (sys.argv[1] if len(sys.argv) > 1 else '-') + '\\n')\n"
+                f"time.sleep({seconds}); sys.exit({rc})\n")
+        cmd = [sys.executable, "-c", code]
+        pl = ed_tts.LinePlayer("auto", which=lambda n: None)
+        pl.player = ("fake", cmd, cmd if stdin else None)
+        return pl
+
+    def played(self):
+        """[(the WAV bytes played, "-" for stdin or the file's path)]"""
+        try:
+            with open(self.log) as f:
+                return [(bytes.fromhex(a), b) for a, b in (x.split("|") for x in f.read().splitlines())]
+        except FileNotFoundError:
+            return []
+
+    def client(self, go):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def run():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                return await go(c)
+        return asyncio.run(run())
+
+    def test_player_choice(self):
+        import ed_tts
+        have = lambda *names: (lambda n: f"/usr/bin/{n}" if n in names else None)
+        self.assertEqual(ed_tts.find_player("auto", have("paplay", "aplay"))[0], "paplay")   # the first in order
+        self.assertEqual(ed_tts.find_player("auto", have("pw-play", "aplay"))[0], "pw-play")
+        self.assertEqual(ed_tts.find_player("aplay", have("pw-play", "aplay"))[0], "aplay")   # named: that one
+        self.assertIsNone(ed_tts.find_player("ffplay", have("pw-play")))                       # named, missing
+        self.assertIsNone(ed_tts.find_player("auto", have()))
+        self.assertIsNone(ed_tts.find_player("off", have("pw-play")))
+        self.assertIsNone(ed_tts.find_player("vlc", have("vlc", "pw-play")))
+        self.assertIsNone(ed_tts.find_player("auto", have("pw-play"))[2])   # pw-play gets a file, not stdin
+        self.assertIsNone(ed_tts.LinePlayer("off", have("pw-play")).name)
+        self.assertEqual(ed_tts.LinePlayer("nonsense", have("aplay")).choice, "auto")
+        self.assertEqual(ed_tts.LinePlayer("auto", have("aplay")).name, "aplay")
+        try:   # the voice lab uses the same detection
+            import voice_lab
+        except (ImportError, SystemExit):
+            return
+        with unittest.mock.patch.object(ed_tts.shutil, "which", have("aplay")), \
+                unittest.mock.patch.object(voice_lab.platform, "system", lambda: "Linux"):
+            self.assertEqual(voice_lab.Player().cmd, ["aplay", "-q"])
+
+    def test_config_server_player(self):
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = lambda cfg: ed_outrider.settings_from(cfg, args, None, ([], []))["server_player"]
+        self.assertEqual(st({}), "auto")
+        self.assertEqual(st({"speech": {"server_player": "PaPlay"}}), "paplay")
+        self.assertEqual(st({"speech": {"server_player": "off"}}), "off")
+        with unittest.mock.patch("sys.stderr"):
+            self.assertEqual(st({"speech": {"server_player": "vlc"}}), "auto")   # reported, default kept
+            self.assertEqual(st({"speech": {"server_player": 1}}), "auto")
+            self.assertEqual(st({"speech": "off"}), "auto")
+        full = ed_outrider.settings_from({"speech": {"server_player": "aplay"}}, args, None, ([], []))
+        self.assertEqual(tomllib.loads(ed_outrider.config_text(full))["speech"]["server_player"], "aplay")
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ed_outrider.toml.example"),
+                  encoding="utf-8") as f:
+            example = f.read()
+        self.assertIn("speech", tomllib.loads(example))   # the section, with the key shown commented out
+        self.assertRegex(example.split("[speech]", 1)[1], r'# server_player = "auto"')
+
+    def test_play_waits_and_refuses_a_second_line(self):
+        import asyncio
+        self.state.player = self.fake(seconds=0.6)
+
+        async def go(c):
+            first = asyncio.ensure_future(c.post("/api/say/play", json={"text": "one", "speed": 1.2}))
+            await asyncio.sleep(0.25)
+            second = await c.post("/api/say/play", json={"text": "two"})   # the first is still playing
+            t0 = time.monotonic()
+            r1 = await first
+            return r1.status, await r1.json(), second.status, time.monotonic() - t0
+        s1, b1, s2, _ = self.client(go)
+        self.assertEqual((s1, b1, s2), (200, {"ok": True, "stopped": False}, 409))
+        self.assertEqual(self.played(), [(b"RIFFone", "-")])   # on stdin; the refused line never played
+        self.assertFalse(self.state.player.busy)
+
+    def test_stop(self):
+        import asyncio
+        self.state.player = self.fake(seconds=10)
+
+        async def go(c):
+            t0 = time.monotonic()
+            first = asyncio.ensure_future(c.post("/api/say/play", json={"text": "long", "id": "a1"}))
+            await asyncio.sleep(0.4)
+            other = await (await c.post("/api/say/stop", json={"id": "zz"})).json()   # another page's line: not this
+            mine = await (await c.post("/api/say/stop", json={"id": "a1"})).json()
+            r = await first
+            took = time.monotonic() - t0
+            # a stop that overtakes its line: the line is then not played at all
+            await c.post("/api/say/stop", json={"id": "b2"})
+            early = await (await c.post("/api/say/play", json={"text": "late", "id": "b2"})).json()
+            return other, mine, r.status, await r.json(), took, early
+        other, mine, status, body, took, early = self.client(go)
+        self.assertEqual((other["stopped"], mine["stopped"], status, body), (False, True, 200, {"ok": True, "stopped": True}))
+        self.assertLess(took, 5)
+        self.assertEqual(early, {"ok": True, "stopped": True})
+        self.assertEqual([x[0] for x in self.played()], [b"RIFFlong"])
+
+    def test_503_and_file_players(self):
+        import ed_tts
+
+        async def go(c):
+            out = []
+            self.state.player = None                                  # tests / no LinePlayer
+            out.append((await c.post("/api/say/play", json={"text": "x"})).status)
+            self.state.player = ed_tts.LinePlayer("off")              # server_player = "off"
+            r = await c.post("/api/say/play", json={"text": "x"})
+            out.append((r.status, (await r.json())["error"]))
+            out.append((await c.post("/api/sound/play", json={"name": "chime"})).status)
+            self.state.player = self.fake()
+            self.state.speaker.ready = False                          # no Piper voice ready
+            out.append((await c.post("/api/say/play", json={"text": "x"})).status)
+            self.state.speaker.ready = True
+            self.state.player = self.fake(rc=1)                       # the player fails: the browser says it
+            out.append((await c.post("/api/say/play", json={"text": "x"})).status)
+            self.state.player = self.fake(stdin=False)                # pw-play style: a temporary file
+            out.append((await c.post("/api/say/play", json={"text": "file"})).status)
+            out.append((await c.post("/api/say/play", json=[1])).status)
+            out.append((await c.post("/api/say/play", json={"text": "  "})).status)
+            return out
+        with unittest.mock.patch("sys.stderr"):
+            got = self.client(go)
+        self.assertEqual(got, [503, (503, "[speech] server_player is off"), 503, 503, 503, 200, 400, 400])
+        data, path = self.played()[-1]
+        self.assertEqual(data, b"RIFFfile")
+        self.assertTrue(path.endswith(".wav"))
+        self.assertFalse(os.path.exists(path))   # removed once played
+
+    def test_cap(self):
+        import asyncio
+        pl = self.fake(seconds=30)
+        pl.cap = 0.5
+        line = pl.claim()
+        t0 = time.monotonic()
+        with unittest.mock.patch("sys.stderr"):
+            result = asyncio.run(pl.play_line(line, b"RIFF"))
+        self.assertEqual(result, "stopped")   # played up to the cap: not failed, or the browser says it again
+        self.assertLess(time.monotonic() - t0, 5)
+
+    def test_sound_play(self):
+        import asyncio
+        self.state.player = self.fake()
+
+        async def go(c):
+            r = await c.post("/api/sound/play", json={"name": "chime"})
+            bad = await c.post("/api/sound/play", json={"name": "nope"})
+            none = await c.post("/api/sound/play", json={})
+            cross = await c.post("/api/sound/play", json={"name": "chime"}, headers={"Sec-Fetch-Site": "cross-site"})
+            for _ in range(50):   # it answers at once and plays behind
+                if self.played():
+                    break
+                await asyncio.sleep(0.1)
+            await self.state.player.close()
+            return r.status, bad.status, none.status, cross.status
+        self.assertEqual(self.client(go), (200, 404, 400, 403))
+        self.assertEqual(len(self.played()), 1)
+        self.assertEqual(self.played()[0][0], self.state.sounds.wav("chime"))
+
+    def test_render_sound(self):
+        import io
+        import wave
+        import ed_tts
+        doc = ed_tts.load_sounds()
+        for name, spec in doc["sounds"].items():
+            wav = ed_tts.render_sound(spec, doc["gain"])
+            with wave.open(io.BytesIO(wav)) as w:
+                self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()), (1, 2, ed_tts.SOUND_RATE), name)
+                frames = w.readframes(w.getnframes())
+                length = w.getnframes() / w.getframerate()
+            end = max(t.get("start", 0) + t["dur"] for t in spec["tones"])
+            self.assertAlmostEqual(length, end + 0.05, delta=0.01, msg=name)
+            peak = max(abs(v) for v in __import__("struct").unpack(f"<{len(frames) // 2}h", frames))
+            self.assertGreater(peak, 1000, name)   # audible
+            self.assertLessEqual(peak, 32767, name)
+        # the lowpass does something, and a dry tone is left out of it
+        fan = doc["sounds"]["fanfare"]
+        self.assertNotEqual(ed_tts.render_sound(fan), ed_tts.render_sound(dict(fan, lowpass=None)))
+        bank = ed_tts.SoundBank()
+        self.assertIsNone(bank.wav("nope"))
+        self.assertIs(bank.wav("chime"), bank.wav("chime"))   # rendered once
+
+    def test_sound_names_match_the_page(self):
+        import re
+        import ed_tts
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "static", "page.js"), encoding="utf-8") as f:
+            js = f.read()
+        with open(os.path.join(root, "static", "page.html"), encoding="utf-8") as f:
+            html = f.read()
+        with open(os.path.join(root, "ed_outrider.py"), encoding="utf-8") as f:
+            py = f.read()
+        names = set(ed_tts.load_sounds()["sounds"])
+        alerts = js[js.index("const ALERTS = "):js.index("const UNSPOKEN")]
+        used = set(re.findall(r', "(\w+)"\]', alerts))                    # the alerts table's sound column
+        used |= set(re.findall(r'\bsound: "(\w+)"', js))                     # alertOut(..., {sound: "upbeat"})
+        lead = re.search(r"const SOUND_LEAD = \{([^}]*)\}", js).group(1)
+        used |= set(re.findall(r"(\w+):", lead))
+        used |= set(re.findall(r'"(thud|fanfare|upbeat)"', py))              # the target and arrival sounds
+        tries = set(re.findall(r'data-try="(\w+)"', html))                   # the ▶ buttons
+        self.assertTrue(used, "no sound names found in page.js")
+        self.assertLessEqual(used, names, used - names)
+        self.assertEqual(tries, names)   # every sound can be tried, and every button has a sound
+        self.assertNotIn("fanfare(ctx", js)   # the page's own table is gone: it builds from sounds.json
+        self.assertIn("/*SOUNDS*/null", html)
+        self.assertEqual(set(json.loads(ed_outrider.sounds_json())["sounds"]), names)
+
+
+
+class BatchBVoiceControl(unittest.TestCase):
+    """Batch B: the hush, the co-pilot channel and button (never a real input device: the device layer is a
+    stand-in), banned lines (temp files only, never a speech_banned.json in the repo)."""
+
+    def setUp(self):
+        import tempfile
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.addCleanup(self.db.close)
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+
+    def client(self, go):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def run():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                return await go(c)
+        return asyncio.run(run())
+
+    def speech_file(self, lines=None):
+        path = os.path.join(self.tmp, "speech.json")
+        doc = {"styles": {"business": "Business", "sarcastic": "Sarcastic"},
+               "lines": lines or {"hull": {"business": ["Hull {pct}.", "Hull at {pct} percent.", "Hull damage."],
+                                           "sarcastic": ["Ouch, {pct}."]},
+                                  "heat": {"business": ["Heat damage.", "Hot."]}}}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        return path
+
+    # ---- the gesture classifier: a pure function ----
+    def test_gestures(self):
+        import ed_button
+        c = lambda ev, end=None: ed_button.classify(ev, 600, 350, end)
+        self.assertEqual(c([(0, 1), (100, 0)]), ["status"])                                  # a tap
+        self.assertEqual(c([(0, 1), (100, 0)], end=400), [])                                 # still waiting for a second
+        self.assertEqual(c([(0, 1), (100, 0)], end=451), ["status"])
+        self.assertEqual(c([(0, 1), (100, 0), (300, 1), (380, 0)]), ["again"])               # press 200 ms after the release
+        self.assertEqual(c([(0, 1), (100, 0), (500, 1), (580, 0)]), ["status", "status"])    # too far apart: two taps
+        self.assertEqual(c([(0, 1), (650, 0)]), ["hush"])                                    # a hold: on the release
+        self.assertEqual(c([(0, 1), (599, 0)]), ["status"])                                  # just short of a hold
+        self.assertEqual(c([(0, 1), (200, 2), (400, 2), (700, 0)]), ["hush"])                # autorepeat ignored
+        self.assertEqual(c([(0, 1), (100, 0), (200, 1), (900, 0)]), ["hush"])                # a hold swallows the tap before
+        self.assertEqual(c([(0, 0), (50, 2)]), [])                                           # a release with no press
+        self.assertEqual(c([(0, 1), (100, 0), (300, 1), (380, 0), (500, 1), (560, 0)]), ["again", "status"])
+        g = ed_button.Gestures(600, 350)
+        self.assertEqual(g.feed(0, 1) + g.feed(50, 0), [])
+        self.assertEqual(g.due(300), [])
+        self.assertEqual(g.due(401), ["status"])
+        self.assertEqual(g.due(900), [])                                                     # said once
+
+    def fake_evdev(self, script):
+        """A stand-in for the evdev module: one device ("Saitek X-56 Throttle") whose events come from `script`
+        (a list of (seconds to wait, value) for the button, then an OSError, as an unplug gives). grab() and any
+        virtual device fail the test."""
+        import types
+        test = self
+
+        class Ev:
+            def __init__(self, value, code=300, type_=1):
+                self.type, self.code, self.value = type_, code, value
+
+        class Dev:
+            opened = []
+
+            def __init__(self, path):
+                if path == "/dev/input/event9":
+                    raise PermissionError(13, "Permission denied")
+                self.path, self.name, self.closed = path, "Saitek X-56 Throttle" if path.endswith("5") else "Keyboard", False
+                Dev.opened.append(self)
+
+            def grab(self):
+                test.fail("the button must never grab the device")
+
+            def close(self):
+                self.closed = True
+
+            async def async_read_loop(self):
+                import asyncio
+                for wait, value in script:
+                    await asyncio.sleep(wait)
+                    yield Ev(value, code=1, type_=0)   # noise: another event type
+                    yield Ev(value, code=301)          # another button
+                    yield Ev(value)
+                raise OSError(19, "No such device")
+
+        def uinput(*a, **k):
+            test.fail("the button must never create a virtual device")
+        ecodes = types.SimpleNamespace(EV_KEY=1, ecodes={"BTN_TRIGGER_HAPPY5": 300, "KEY_F13": 183},
+                                       BTN={300: "BTN_TRIGGER_HAPPY5"}, KEY={183: "KEY_F13"})
+        return types.SimpleNamespace(ecodes=ecodes, InputDevice=Dev, UInput=uinput,
+                                     list_devices=lambda: ["/dev/input/event3", "/dev/input/event5", "/dev/input/event9"]), Dev
+
+    def test_button_code_and_find_device(self):
+        import ed_button
+        ev, Dev = self.fake_evdev([])
+        self.assertEqual(ed_button.button_code(ev, "btn_trigger_happy5"), 300)
+        self.assertEqual(ed_button.button_code(ev, "183"), 183)
+        self.assertEqual(ed_button.button_code(ev, 300), 300)
+        self.assertIsNone(ed_button.button_code(ev, "BTN_NOPE"))
+        self.assertIsNone(ed_button.button_code(ev, ""))
+        dev, why = ed_button.find_device(ev, "x-56")
+        self.assertEqual((dev.path, why), ("/dev/input/event5", None))
+        self.assertTrue(all(d.closed for d in Dev.opened if d is not dev))   # the others are let go
+        dev, why = ed_button.find_device(ev, "Rhino")
+        self.assertIsNone(dev)
+        self.assertIn("1 could not be opened", why)                           # the unreadable one is counted
+        self.assertEqual(ed_button.find_device(ev, "/dev/input/event5")[0].path, "/dev/input/event5")
+        self.assertIn("Permission denied", ed_button.find_device(ev, "/dev/input/event9")[1])
+        self.assertIsNone(ed_button.find_device(ev, "")[0])
+
+    def test_button_watch(self):
+        import asyncio
+        import ed_button
+        # a tap, then a double tap, then a hold, then the device goes away
+        ev, Dev = self.fake_evdev([(0, 1), (0.02, 0), (0.25, 1), (0.02, 0), (0.03, 1), (0.02, 0),
+                                   (0.25, 1), (0.2, 0), (0.05, 2)])
+        got = []
+
+        async def go():
+            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", got.append, hold_ms=150, double_ms=100, evdev=ev)
+            seen = set()
+            with unittest.mock.patch.object(ed_button, "RETRY", 0.05):
+                t = asyncio.ensure_future(w.run())
+                for _ in range(130):   # every status it shows on the way
+                    seen.add(w.status)
+                    await asyncio.sleep(0.01)
+                t.cancel()
+                await asyncio.gather(t, return_exceptions=True)
+            return seen
+        seen = asyncio.run(go())
+        self.assertIn("listening to Saitek X-56 Throttle for BTN_TRIGGER_HAPPY5", seen)
+        self.assertEqual(got[:3], ["status", "again", "hush"])
+        self.assertTrue(set(got) <= {"status", "again", "hush"})
+        self.assertTrue(any("No such device; looking again" in x for x in seen), seen)   # the unplug, then a retry
+        self.assertTrue(all(d.closed for d in Dev.opened))        # every device it opened was closed again
+        self.assertGreater(len([d for d in Dev.opened if d.path.endswith("5")]), 1)   # and it looked again
+
+        async def bad(button):
+            w = ed_button.ButtonWatch("X-56", button, got.append, evdev=ev)
+            await w.run()   # returns at once: nothing to listen for
+            return w.status
+        self.assertIn("is not a button name or number", asyncio.run(bad("BTN_NOPE")))
+
+    def test_config(self):
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = lambda cfg: ed_outrider.settings_from(cfg, args, None, ([], []))["copilot"]
+        self.assertEqual(st({}), {"enabled": False, "device": "", "button": "", "hold_ms": 600, "double_ms": 350})
+        got = st({"copilot": {"enabled": True, "device": "X-56 Rhino Throttle", "button": 300, "hold_ms": 50, "double_ms": 5000}})
+        self.assertEqual(got, {"enabled": True, "device": "X-56 Rhino Throttle", "button": "300", "hold_ms": 200, "double_ms": 1000})
+        with unittest.mock.patch("sys.stderr"):
+            self.assertFalse(st({"copilot": {"enabled": "true"}})["enabled"])   # a quoted switch is reported, stays off
+            self.assertEqual(st({"copilot": {"button": True}})["button"], "")
+            self.assertEqual(st({"copilot": {"device": 5}})["device"], "")
+        full = ed_outrider.settings_from({"copilot": {"device": "X-56", "button": "BTN_TRIGGER_HAPPY5"}}, args, None, ([], []))
+        back = tomllib.loads(ed_outrider.config_text(full))["copilot"]
+        self.assertEqual(back, {"enabled": False, "device": "X-56", "button": "BTN_TRIGGER_HAPPY5", "hold_ms": 600, "double_ms": 350})
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "ed_outrider.toml.example"), encoding="utf-8") as f:
+            example = f.read()
+        self.assertIn("copilot", tomllib.loads(example))
+        section = example.split("[copilot]", 1)[1]
+        for key in ("enabled = false", "device", "button", "hold_ms = 600", "double_ms = 350"):
+            self.assertIn(f"# {key}", section)
+        with open(os.path.join(root, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for words in ("[copilot]", "uaccess", "`input` group", "latching", "Spoken lines", "Cut this line", "sound only"):
+            self.assertIn(words, readme)
+
+    # ---- the hush (server side) ----
+    def test_hush(self):
+        self.j.pos = {"id64": 11, "name": "A", "x": 0, "y": 0, "z": 0}
+        self.assertIsNone(self.state.hush_info())
+        v = self.state.version
+        self.state.set_hush("10m")
+        h = self.state.hush_info()
+        self.assertEqual((h["mode"], h["sys"], self.state.version), ("10m", None, v + 1))
+        self.assertAlmostEqual(h["left"], 600, delta=2)
+        with unittest.mock.patch.object(ed_outrider.time, "time", lambda: h["until"] + 1):
+            self.assertIsNone(self.state.hush_info())                      # run out
+        self.assertIsNone(self.state.hush)
+        self.state.set_hush("jump")
+        self.assertEqual(self.state.hush_info(), {"mode": "jump", "until": None, "left": None, "sys": "11"})
+        self.j.pos = dict(self.j.pos, id64=12)                              # the jump ends it
+        self.assertIsNone(self.state.hush_info())
+        self.state.set_hush("30m")
+        self.state.set_hush("off")
+        self.assertIsNone(self.state.hush_info())
+
+        async def go(c):
+            out = [(await c.post("/api/hush", json={"mode": "jump"})).status, self.state.hush_info()["sys"]]
+            for body in ({"mode": "5m"}, {}, [1]):
+                out.append((await c.post("/api/hush", json=body)).status)
+            out.append((await c.post("/api/hush", json={"mode": "off"}, headers={"Sec-Fetch-Site": "cross-site"})).status)
+            out.append(self.state.hush_info() is not None)                  # the refused request changed nothing
+            r = await c.post("/api/hush", json={"mode": "off"})
+            out.append((r.status, (await r.json())["hush"]))
+            return out
+        self.assertEqual(self.client(go), [200, "12", 400, 400, 400, 403, True, (200, None)])
+
+    # ---- the co-pilot channel ----
+    def test_copilot(self):
+        self.j.pos = {"id64": 11, "name": "A", "x": 0, "y": 0, "z": 0}
+        moments = list(self.j.moments) if hasattr(self.j, "moments") else None
+
+        async def go(c):
+            out = []
+            r = await c.post("/api/copilot", json={"action": "status"})
+            out.append((r.status, (await r.json())["seq"], self.state.copilot["action"]))
+            out.append((await c.post("/api/copilot", json={"action": "replay"})).status)          # no words
+            r = await c.post("/api/copilot", json={"action": "replay", "words": "  Tank   full. "})
+            out.append((r.status, self.state.copilot["words"]))
+            out.append((await c.post("/api/copilot", json={"action": "dance"})).status)
+            out.append((await c.post("/api/copilot", json={"action": "status"}, headers={"Origin": "http://evil.example"})).status)
+            await c.post("/api/copilot", json={"action": "hush"})                                  # a hold: hush till the jump
+            out.append(self.state.hush_info()["mode"])
+            await c.post("/api/copilot", json={"action": "hush"})                                  # another hold ends it
+            out.append(self.state.hush_info())
+            out.append(self.state.copilot["seq"])
+            return out
+        self.assertEqual(self.client(go), [(200, 1, "status"), 400, (200, "Tank full."), 400, 403, "jump", None, 4])
+        if moments is not None:
+            self.assertEqual(list(self.j.moments), moments)   # never a moment: a journal re-read cannot replay it
+        # the button's gestures go through the same channel
+        self.state.copilot_action("again")
+        self.assertEqual((self.state.copilot["seq"], self.state.copilot["action"]), (5, "again"))
+
+    # ---- banned lines ----
+    def test_ban_validation(self):
+        path = self.speech_file()
+        sl = ed_speech.SpeechLines(path)
+        v0 = sl.version()
+        self.assertEqual(sl.set_ban("fuel_low", "Hull {pct}.")[0], 400)             # not an alert in the file
+        self.assertEqual(sl.set_ban("hull", "Hull {pct} percent!")[0], 400)         # not a line in the file
+        self.assertEqual(sl.set_ban("hull", 5)[0], 400)
+        self.assertFalse(os.path.exists(ed_speech.banned_path(path)))               # nothing written for a refusal
+        status, out = sl.set_ban("hull", "Hull {pct}.")
+        self.assertEqual((status, out), (200, {"ok": True, "banned": 1}))
+        self.assertEqual(os.path.dirname(ed_speech.banned_path(path)), self.tmp)    # next to the speech file
+        got = sl.lines()
+        self.assertEqual(got["lines"]["hull"]["business"], ["Hull at {pct} percent.", "Hull damage."])
+        self.assertEqual(got["banned"], {"hull": ["Hull {pct}."]})
+        self.assertNotEqual(sl.version(), v0)                                        # pages fetch the trimmed lines
+        self.assertEqual(sl.set_ban("hull", "Hull {pct}.")[1]["banned"], 1)         # twice is once
+        # a second reader (the voice lab, another process) sees the same bans
+        self.assertEqual(ed_speech.SpeechLines(path).lines()["lines"]["hull"]["business"], ["Hull at {pct} percent.", "Hull damage."])
+        self.assertEqual(sl.set_ban("hull", "Hull {pct}.", ban=False), (200, {"ok": True, "banned": 0}))
+        self.assertEqual(len(sl.lines()["lines"]["hull"]["business"]), 3)
+        # a broken or odd file bans nothing, and never stops the lines loading
+        for text in ("{not json", "[1, 2]", '{"hull": "Hull {pct}."}'):
+            with open(ed_speech.banned_path(path), "w") as f:
+                f.write(text)
+            fresh = ed_speech.SpeechLines(path)
+            self.assertEqual(len(fresh.lines()["lines"]["hull"]["business"]), 3, text)
+            self.assertIsNone(fresh.lines()["error"])
+        self.assertEqual(ed_speech.read_bans(os.path.join(self.tmp, "missing.json")), {})
+
+    def test_ban_never_empties_a_list(self):
+        path = self.speech_file()
+        sl = ed_speech.SpeechLines(path)
+        self.assertEqual(sl.set_ban("heat", "Heat damage.")[0], 200)
+        status, out = sl.set_ban("heat", "Hot.")                                    # the last line left in the list
+        self.assertEqual(status, 409)
+        self.assertIn("last line", out["error"])
+        self.assertEqual(sl.lines()["lines"]["heat"]["business"], ["Hot."])
+        self.assertEqual(sl.set_ban("hull", "Ouch, {pct}.")[0], 409)               # a list of one
+        # a hand-edited file that bans a whole list: the list is used whole, and the review says so
+        with open(ed_speech.banned_path(path), "w") as f:
+            json.dump({"heat": ["Heat damage.", "Hot."]}, f)
+        got = ed_speech.SpeechLines(path).lines()
+        self.assertEqual(got["lines"]["heat"]["business"], ["Heat damage.", "Hot."])
+        self.assertEqual(got["banned_whole"], ["heat/business"])
+        lines, whole = ed_speech.apply_bans({"hull": {"business": ["a", "b"], "_note": "x", "when": ["a"]}}, {"hull": ["a"]})
+        self.assertEqual((lines["hull"], whole), ({"business": ["b"], "_note": "x", "when": ["a"]}, []))
+
+    def test_ban_endpoints_and_backup(self):
+        import zipfile
+        path = self.speech_file()
+        self.state.speech = ed_speech.SpeechLines(path)
+
+        async def go(c):
+            out = []
+            v = self.state.version
+            out.append((await c.post("/api/speech/ban", json={"alert": "hull", "template": "Hull damage."})).status)
+            out.append(self.state.version > v)
+            r = await c.get("/api/speech")
+            doc = await r.json()
+            out.append(("Hull damage." in doc["lines"]["hull"]["business"], doc["banned"]))
+            out.append((await c.post("/api/speech/ban", json={"alert": "hull", "template": "made up"})).status)
+            out.append((await c.post("/api/speech/ban", json={"alert": "hull"})).status)
+            out.append((await c.post("/api/speech/ban", json={"alert": "hull", "template": "Hull {pct}."},
+                                     headers={"Sec-Fetch-Site": "cross-site"})).status)
+            out.append((await c.post("/api/speech/unban", json={"alert": "hull", "template": "Hull damage."})).status)
+            out.append((await (await c.get("/api/speech")).json())["banned"])
+            await c.post("/api/speech/ban", json={"alert": "heat", "template": "Hot."})
+            return out
+        self.assertEqual(self.client(go), [200, True, (False, {"hull": ["Hull damage."]}), 400, 400, 403, 200, {}])
+        # the backup zip carries the bans beside the speech file
+        dbp = os.path.join(self.tmp, "x.sqlite")
+        sqlite3.connect(dbp).close()
+        self.state.db_path, self.state.speech_path, self.state.config_path = dbp, path, None
+        with unittest.mock.patch.object(ed_outrider, "BACKUP_DIR", os.path.join(self.tmp, "b")), \
+                unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", []):
+            out = self.state.make_backup()
+        self.assertEqual(out["files"], ["x.sqlite", "speech.json", "speech_banned.json"])
+        with zipfile.ZipFile(out["path"]) as z:
+            self.assertEqual(json.loads(z.read("speech_banned.json")), {"heat": ["Hot."]})
+
+    def test_voice_lab_sees_the_bans(self):
+        try:
+            import voice_lab
+        except (ImportError, SystemExit):
+            self.skipTest("voice_lab needs tkinter")
+        path = self.speech_file()
+        self.assertEqual(ed_speech.ban_line(path, "hull", "Hull damage.")[0], 200)
+        styles, lines = voice_lab.load_lines(path)
+        self.assertEqual(lines["hull"]["business"], ["Hull {pct}.", "Hull at {pct} percent."])
+        self.assertIn("sarcastic", styles)
+
+    def test_gitignored(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, ".gitignore"), encoding="utf-8") as f:
+            self.assertIn("speech_banned.json", f.read().split())
+
+
 def types_ns(**kw):
     import types
     return types.SimpleNamespace(**kw)
+
+
+class BatchDFuel(unittest.TestCase):
+    """Batch D: the fuel model (laden range, per-hop fuel, jumps left), the local scoopable share, the in-system
+    scoopable star and the targeted jump's cost."""
+
+    # Real [JumpDist, FuelUsed, FuelLevel, cargo t] from the author's journals (copied here, never read from a live
+    # database): a Mandalay (SCO 5A, Guardian booster size 5, UnladenMass 323.15 t, MaxJumpRange 83.487473 ly)
+    # hopping to the nearest unvisited system, and a Panther Clipper Mk II (SCO 7A, booster size 4, 1596.8 t,
+    # 44.958641 ly) on the same 12.571 ly jump empty and with 1,153 t in the hold.
+    MANDALAY = {"unladen": 323.150024, "max_range": 83.487473, "fsd_size": 5, "booster_ly": 10.5, "max_fuel": None}
+    MANDALAY_JUMPS = [[1.177, 0.000179, 31.999821, 0], [1.875, 0.000559, 30.999441, 0], [2.791, 0.001483, 31.498516, 0],
+                      [3.295, 0.002229, 31.490419, 0], [3.914, 0.003346, 28.849634, 0], [4.245, 0.004158, 31.995842, 0],
+                      [4.663, 0.005234, 31.994766, 0], [4.878, 0.005739, 28.935785, 0], [5.252, 0.006984, 31.477118, 0],
+                      [5.985, 0.00962, 31.490379, 0], [7.012, 0.014219, 31.985781, 0], [12.441, 0.057825, 31.56846, 0]]
+    PANTHER = {"unladen": 1596.800049, "max_range": 44.958641, "fsd_size": 7, "booster_ly": 9.25, "max_fuel": None}
+    PANTHER_JUMPS = [[12.571, 0.456644, 126.433357, 0], [12.571, 1.287122, 126.712875, 1153],
+                     [12.571, 0.457277, 127.542725, 0], [12.571, 1.285804, 125.146919, 1153], [12.571, 0.456283, 125.799706, 0]]
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def test_model_against_real_jumps(self):
+        m = ed_outrider.fuel_model(self.MANDALAY, self.MANDALAY_JUMPS)
+        self.assertEqual((m["power"], m["fitted"]), (2.45, True))
+        self.assertAlmostEqual(m["max_fuel"], 5.2, delta=0.01)          # an SCO 5A's MaxFuelPerJump
+        for d, used, left, cargo in self.MANDALAY_JUMPS:                 # every real burn, to within 1%
+            self.assertAlmostEqual(ed_outrider.hop_fuel(m, d, m["unladen"] + left + used + cargo) / used, 1, delta=0.01)
+        # the Panther's cargo counts: the same jump burns 2.8 times the fuel with the hold full
+        p = ed_outrider.fuel_model(self.PANTHER, self.PANTHER_JUMPS)
+        self.assertEqual(p["power"], 2.75)
+        self.assertAlmostEqual(p["max_fuel"], 13.1, delta=0.02)
+        for d, used, left, cargo in self.PANTHER_JUMPS:
+            self.assertAlmostEqual(ed_outrider.hop_fuel(p, d, p["unladen"] + left + used + cargo) / used, 1, delta=0.01)
+        # a wrong exponent would not fit: at p 2.30 the estimates drift with the distance
+        e = ed_outrider._fit_estimates(m, self.MANDALAY_JUMPS, 2.30)
+        self.assertGreater((max(e) - min(e)) / min(e), 0.3)
+        # an engineered drive that says its MaxFuelPerJump is taken as said
+        self.assertEqual(ed_outrider.fuel_model(dict(self.MANDALAY, max_fuel=6.1), self.MANDALAY_JUMPS)["max_fuel"], 6.1)
+
+    def test_power_fitted_for_a_size_the_table_lacks(self):
+        truth = dict(unladen=1600.0, r0=50.0, boost=0, power=2.6, max_fuel=8.0)
+        # jumps as that drive would burn them, 100 t in the tank before each
+        jumps = [[d, ed_outrider.hop_fuel(truth, d, 1700), 100 - ed_outrider.hop_fuel(truth, d, 1700), 0] for d in (3, 9, 17, 25, 33, 40)]
+        m = ed_outrider.fuel_model({"unladen": 1600.0, "max_range": 50.0, "fsd_size": 8, "booster_ly": 0}, jumps)
+        self.assertEqual(m["power"], 2.6)
+        self.assertAlmostEqual(m["max_fuel"], 8.0, places=2)
+        # too few jumps to tell: no exponent, so no per-hop fuel (the range still works)
+        few = ed_outrider.fuel_model({"unladen": 1600.0, "max_range": 50.0, "fsd_size": 8, "booster_ly": 0}, jumps[:3])
+        self.assertIsNone(few["power"])
+        self.assertIsNone(ed_outrider.jumps_left(few, 50, 0))
+
+    def test_range_scaling_and_jumps_left(self):
+        m = ed_outrider.fuel_model(self.MANDALAY, self.MANDALAY_JUMPS)
+        u, mf = m["unladen"], m["max_fuel"]
+        self.assertAlmostEqual(ed_outrider.fsd_range(m, u + mf), m["r0"], places=6)   # the Loadout's figure
+        full = ed_outrider.fsd_range(m, u + 32)
+        self.assertAlmostEqual(full, 77.98, delta=0.02)
+        # the booster's 10.5 ly do not shrink with mass: 700 t of cargo halves only the drive's own part
+        heavy = ed_outrider.fsd_range(m, 2 * (u + 32))
+        self.assertAlmostEqual(heavy - 10.5, (full - 10.5) / 2, places=6)
+        # at max range every jump burns MaxFuelPerJump, and each is longer than the one before (lighter)
+        n, ly = ed_outrider.jumps_left(m, 32, 0)
+        self.assertEqual(n, int(32 / mf))
+        self.assertGreater(ly, n * full)
+        # hops of 5 ly: thousands of them, counted past the cap at the last hop's cost
+        pace, _ = ed_outrider.jumps_left(m, 32, 0, d=5)
+        self.assertGreater(pace, 3000)
+        self.assertEqual(ed_outrider.jumps_left(m, 3, 0), (0, 0.0))    # under one max jump's fuel
+        self.assertIsNone(ed_outrider.jumps_left(m, 32, None))          # no cargo figure: no answer, not a wrong one
+
+    def test_journal_loadout_cargo_and_samples(self):
+        mods = [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size5_class5",
+                 "Engineering": {"Modifiers": [{"Label": "FSDOptimalMass", "Value": 2077.4}]}},
+                {"Slot": "Slot03_Size5", "Item": "Int_GuardianFSDBooster_Size5"}]
+        lo = {"event": "Loadout", "timestamp": "2026-01-01T00:00:00Z", "Ship": "mandalay", "ShipID": 32,
+              "UnladenMass": 323.150024, "MaxJumpRange": 83.487473, "FuelCapacity": {"Main": 32.0, "Reserve": 0.5}, "Modules": mods}
+        self.j.handle(lo)
+        s = self.j.ship
+        self.assertEqual((s["unladen"], s["fsd_size"], s["booster_ly"], s["max_fuel"]), (323.150024, 5, 10.5, None))
+        self.j.handle({"event": "Cargo", "timestamp": "2026-01-01T00:00:01Z", "Vessel": "SRV", "Count": 4})   # the SRV's hold
+        self.assertIsNone(self.j.cargo)
+        self.j.handle({"event": "Cargo", "timestamp": "2026-01-01T00:00:02Z", "Vessel": "Ship", "Count": 0})
+        self.assertEqual(self.j.cargo["count"], 0)
+        for k, (d, used, left, _) in enumerate(self.MANDALAY_JUMPS[:4]):
+            self.j.handle({"event": "FSDJump", "timestamp": f"2026-01-01T00:0{k + 1}:00Z", "StarSystem": f"S{k}", "SystemAddress": 100 + k,
+                           "StarPos": [k, 0, 0], "JumpDist": d, "FuelUsed": used, "FuelLevel": left})
+        self.assertEqual(self.j.fuel_hist[0], self.MANDALAY_JUMPS[0])
+        self.assertIsNotNone(ed_outrider.fuel_model(self.j.ship, self.j.fuel_hist)["max_fuel"])
+        # the same ship logged again with float jitter keeps its samples; a new drive starts them afresh
+        self.j.handle(dict(lo, timestamp="2026-01-01T01:00:00Z", UnladenMass=323.149994, MaxJumpRange=83.487465))
+        self.assertEqual(len(self.j.fuel_hist), 4)
+        mods2 = [dict(mods[0], Item="int_hyperdrive_size5_class5"), mods[1]]
+        self.j.handle(dict(lo, timestamp="2026-01-01T02:00:00Z", Modules=mods2, MaxJumpRange=70.1))
+        self.assertEqual(self.j.fuel_hist, [])
+
+    def test_fuel_summary_model_and_null_paths(self):
+        self.j.ship = dict(self.MANDALAY, fuel_main=32.0)
+        self.j.jump_range = {"ly": self.MANDALAY["max_range"], "ts": "x"}
+        self.j.fuel_hist = [list(x) for x in self.MANDALAY_JUMPS]
+        self.j.status_json = {"live": True, "fuel_main": 32.0, "flags": 1 << 24}   # no Cargo in Status.json, none from the journal
+        f = self.state.fuel_summary()
+        self.assertIsNone(f["model"])                                    # no cargo figure: the old estimate, no model
+        self.assertIsNone(self.state.payload()["jump_range_now"])
+        old_max = f["jumps_max"]
+        self.j.status_json["cargo"] = 0
+        f = self.state.fuel_summary()
+        self.assertEqual((f["jumps_max"], f["model"]["fitted"]), (6, True))
+        self.assertAlmostEqual(f["model"]["range_now"], 77.98, delta=0.02)
+        self.assertNotEqual(old_max, f["jumps_max"])                     # the dist^2.5 guess said otherwise
+        self.assertGreater(f["jumps_recent"], 1000)
+        self.assertAlmostEqual(self.state.payload()["jump_range_now"], 77.98, delta=0.02)
+        self.j.ship = {"fuel_main": 32.0, "max_range": 83.5}             # a Loadout from before UnladenMass was kept
+        self.assertIsNone(self.state.fuel_summary()["model"])
+        self.assertIsNone(self.state.range_now())
+
+    def test_scoop_rate_and_dry_run(self):
+        self.assertIsNone(self.state.scoop_rate())
+        classes = ["K", "M", "L", "F", "T", "G", "M_RedGiant", "Y", "DA", "N"]   # oldest first; the newest three are dry
+        for k, c in enumerate(classes):
+            self.db.execute("INSERT INTO jumps (ts, id64, star_class, kind) VALUES (?, ?, ?, 'FSDJump')", (f"2026-01-01T00:{k:02d}:00Z", k, c))
+        self.db.execute("INSERT INTO jumps (ts, id64, star_class, kind) VALUES ('2026-01-01T01:00:00Z', 50, NULL, 'FSDJump')")      # a journal gap
+        self.db.execute("INSERT INTO jumps (ts, id64, star_class, kind) VALUES ('2026-01-01T01:01:00Z', 51, 'K', 'CarrierJump')")   # the carrier's
+        self.assertEqual(self.state.scoop_rate(), {"scoopable": 5, "of": 10, "dry_run": 3})
+        self.db.execute("DELETE FROM jumps WHERE id64 < 3")
+        self.assertIsNone(self.state.scoop_rate())                       # 7 known: too few to say
+
+    def test_here_scoop_complete_and_incomplete(self):
+        self.j.pos = {"id64": 9, "name": "Here", "x": 0, "y": 0, "z": 0, "ts": "2026-01-01T00:00:00Z"}
+        self.state.here_star = lambda: "DA"
+        recs = [{"name": "A", "type": "Star", "main": True, "scoopable": False, "dist_ls": 0},
+                {"name": "B", "type": "Star", "main": False, "scoopable": True, "subtype": "K (Yellow-Orange) Star", "dist_ls": 1240.4},
+                {"name": "C", "type": "Star", "main": False, "scoopable": True, "subtype": "M (Red dwarf) Star", "dist_ls": 88000},
+                {"name": "A 1", "type": "Planet", "main": False, "scoopable": False, "dist_ls": 12}]
+        self.state.merged_records = lambda i: {"records": recs}
+        self.assertEqual(self.state.here_scoop(), {"name": "B", "subtype": "K (Yellow-Orange) Star", "dist_ls": 1240, "complete": False})
+        self.state.scan_version += 1                                     # every body found: now complete
+        self.db.execute("INSERT INTO own_systems VALUES (9, 'Here', 4, 1)")
+        recs[1]["scoopable"] = recs[2]["scoopable"] = False
+        self.assertEqual(self.state.here_scoop(), {"name": None, "subtype": None, "dist_ls": None, "complete": True})
+        self.state.scan_version += 1                                     # Spansh knows 6 bodies, 4 records here: not complete
+        self.db.execute("DELETE FROM own_systems")
+        self.state.bases[9] = ("spansh", {"body_count": 6})
+        self.assertFalse(self.state.here_scoop()["complete"])
+        self.state.here_star = lambda: "K"                               # the arrival star scoops: nothing to find
+        self.assertIsNone(self.state.here_scoop())
+
+    def test_target_hop(self):
+        self.j.pos = {"id64": 9, "name": "Here", "x": 0, "y": 0, "z": 0, "ts": "2026-01-01T00:00:00Z"}
+        self.db.execute("INSERT INTO route_systems VALUES (77, 'Next', 38.2, 0, 0, 'K', 'x')")
+        t = {"id64": 77, "name": "Next"}
+        self.assertEqual(self.state.target_hop(t), {"ly": 38.2, "fuel": None, "left": None, "reach": None})   # no model yet
+        self.j.ship = dict(self.MANDALAY, fuel_main=32.0)
+        self.j.fuel_hist = [list(x) for x in self.MANDALAY_JUMPS]
+        self.j.status_json = {"live": True, "fuel_main": 32.0, "cargo": 0}
+        h = self.state.target_hop(t)
+        self.assertAlmostEqual(h["fuel"], 0.91, delta=0.01)
+        self.assertEqual((h["left"], h["reach"]), (5, True))
+        self.db.execute("UPDATE route_systems SET x = 95 WHERE id64 = 77")   # past the laden range
+        self.assertEqual(self.state.target_hop(t)["reach"], False)
+        self.j.boost = {"value": 4.0, "ts": "x"}                         # a neutron charge reaches it
+        self.assertTrue(self.state.target_hop(t)["reach"])
+
+
+class BatchEExobio(unittest.TestCase):
+    """Batch E: the run in progress elsewhere (P5), per-run x5 pricing and the sale check (P8), the region crossing
+    (P10) and the jumponium call-out (P17)."""
+
+    STRATUM = "$Codex_Ent_Stratum_07_Name;"
+    TUSSOCK = "$Codex_Ent_Tussocks_01_Name;"
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    @staticmethod
+    def body_scan(ts, body_id, footfalled, addr=1, system="Sys", **kw):
+        ev = scan(ts, system, addr, body_id, f"{system} {body_id}")[2]
+        if footfalled is not None:
+            ev["WasFootfalled"] = footfalled
+        ev.update(kw)
+        return ev
+
+    @staticmethod
+    def organic(ts, body_id, kind, species, name, addr=1):
+        genus = name.split()[0]
+        return {"event": "ScanOrganic", "timestamp": ts, "SystemAddress": addr, "Body": body_id, "ScanType": kind,
+                "Genus": f"$Codex_Ent_{genus}_Genus_Name;", "Genus_Localised": genus, "Species": species, "Species_Localised": name}
+
+    # ---- P8: per-run pricing ----
+    def test_per_run_pricing(self):
+        ev = lambda e: (T(e["timestamp"]), None, e)
+        v, _ = ed_unsold.species_value(self.STRATUM)
+        sold = {"event": "SellOrganicData", "timestamp": "2026-01-01T00:00:00Z",   # 1 of 4 sold entries earned x5: 25%
+                "BioData": [{"Species": self.TUSSOCK, "Value": 10, "Bonus": 40}] + [{"Species": self.TUSSOCK, "Value": 10, "Bonus": 0}] * 3}
+        events = [ev(sold)] + [ev(self.body_scan("2026-01-02T00:00:00Z", b, f)) for b, f in ((1, False), (2, True), (3, None))] + \
+                 [ev(self.organic(f"2026-01-03T00:0{b}:00Z", b, "Analyse", self.STRATUM, "Stratum Tectonicas")) for b in (1, 2, 3)]
+        bio = ed_unsold.analyse(events, ARGS)["exobiology"]
+        self.assertEqual((bio["x5_runs"], bio["x1_runs"], bio["unknown_runs"]), (1, 1, 1))
+        self.assertEqual(bio["estimated_value"], int(v * 5 + v + v * (1 + 4 * 0.25)))
+        self.assertEqual((bio["base_value"], bio["max_value"]), (3 * v, 15 * v))   # unchanged
+        self.assertEqual({k: bio["rows"][0][k] for k in ("x5", "x1", "unknown")}, {"x5": 1, "x1": 1, "unknown": 1})
+        # a rescan after your own landing says footfalled: the first scan decides
+        events.insert(4, ev(self.body_scan("2026-01-02T01:00:00Z", 1, True)))
+        self.assertEqual(ed_unsold.analyse(events, ARGS)["exobiology"]["x5_runs"], 1)
+
+    # ---- P8: the sale check ----
+    def sale_journal(self):
+        return [self.body_scan("2026-01-01T00:00:00Z", 1, False), self.body_scan("2026-01-01T00:00:01Z", 2, False),
+                self.body_scan("2026-01-01T00:00:02Z", 3, True), self.body_scan("2026-01-01T00:00:03Z", 4, None),
+                self.organic("2026-01-01T01:00:00Z", 1, "Analyse", self.STRATUM, "Stratum Tectonicas"),
+                self.organic("2026-01-01T01:10:00Z", 2, "Analyse", self.STRATUM, "Stratum Tectonicas"),
+                self.organic("2026-01-01T01:20:00Z", 3, "Analyse", self.TUSSOCK, "Tussock Pennata"),
+                self.organic("2026-01-01T01:30:00Z", 4, "Analyse", self.TUSSOCK, "Tussock Pennata"),
+                {"event": "SellOrganicData", "timestamp": "2026-01-02T00:00:00Z", "BioData": [
+                    {"Species": self.STRATUM, "Value": 100, "Bonus": 400}, {"Species": self.STRATUM, "Value": 100, "Bonus": 0},
+                    {"Species": self.TUSSOCK, "Value": 10, "Bonus": 40}, {"Species": self.TUSSOCK, "Value": 10, "Bonus": 0}]},
+                {"event": "MultiSellExplorationData", "timestamp": "2026-01-02T00:05:00Z", "TotalEarnings": 1000,
+                 "BaseValue": 1000, "Bonus": 0, "Discovered": []}]
+
+    def test_sale_check(self):
+        for i, e in enumerate(self.sale_journal()):
+            self.j.line_source = f"j:{i}"
+            self.j.handle(e)
+        row = self.db.execute("SELECT x5_check FROM sale_events WHERE kind = 'bio'").fetchone()
+        want = {"sold": 4, "predicted": 2, "matched": 1, "paid": 2, "unknown": 1}
+        used = {self.STRATUM.lower(): [2, 0], self.TUSSOCK.lower(): [0, 1]}
+        self.assertEqual(json.loads(row[0]), dict(want, used=used))
+        # the estimate is live only; the check comes back from the journals alone after a re-read
+        self.db.execute("INSERT INTO sale_estimates VALUES ('2026-01-02T00:00:00Z', 'bio', 400)")
+        self.db.executescript(ed_outrider.RESET_JOURNAL_DATA)
+        self.j.reload()
+        for i, e in enumerate(self.sale_journal()):
+            self.j.line_source = f"j:{i}"
+            self.j.handle(e)
+        self.assertEqual(json.loads(self.db.execute("SELECT x5_check FROM sale_events WHERE kind = 'bio'").fetchone()[0]), dict(want, used=used))
+        trip = self.state.ledger()["trips"][0]
+        self.assertEqual(trip["x5"], want)
+        self.assertEqual((trip["estimate_bio"], trip["paid_bio_estimated"]), (400, 660))
+        # a death before the sale takes the runs done before it out of the prediction
+        self.assertEqual(ed_outrider.sale_check(self.db, "2026-01-02T00:00:00Z", []), None)
+        self.db.execute("INSERT INTO deaths VALUES ('2026-01-01T01:15:00Z', 'recover')")
+        self.assertEqual(ed_outrider.sale_check(self.db, "2026-01-03T00:00:00Z", [{"Species": self.STRATUM, "Bonus": 1}]),
+                         {"sold": 1, "predicted": 0, "matched": 0, "paid": 1, "unknown": 0, "used": {self.STRATUM.lower(): [0, 0]}})
+
+    def test_sale_check_over_one_visit(self):
+        # selling in three goes at one station: each later sale draws on the runs the earlier ones left
+        journal = self.sale_journal()[:8]
+        parts = [[{"Species": self.STRATUM, "Value": 100, "Bonus": 400}], [{"Species": self.STRATUM, "Value": 100, "Bonus": 400}],
+                 [{"Species": self.TUSSOCK, "Value": 10, "Bonus": 0}, {"Species": self.TUSSOCK, "Value": 10, "Bonus": 0}]]
+        for i, (t, bio) in enumerate(zip(("00:00:00", "00:00:11", "00:02:10"), parts)):
+            journal.append({"event": "SellOrganicData", "timestamp": f"2026-01-02T{t}Z", "BioData": bio})
+        for i, e in enumerate(journal):
+            self.j.line_source = f"j:{i}"
+            self.j.handle(e)
+        got = [{k: c[k] for k in ("sold", "predicted", "matched", "unknown")} for c in
+               (json.loads(r[0]) for r in self.db.execute("SELECT x5_check FROM sale_events WHERE kind = 'bio' ORDER BY ts"))]
+        self.assertEqual(got, [{"sold": 1, "predicted": 1, "matched": 1, "unknown": 0}, {"sold": 1, "predicted": 1, "matched": 1, "unknown": 0},
+                               {"sold": 2, "predicted": 0, "matched": 0, "unknown": 1}])
+
+    def test_old_sale_events_gain_the_column(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "old.sqlite")
+        try:
+            old = sqlite3.connect(path)
+            old.executescript("""CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE sale_events (ts TEXT, kind TEXT, base INTEGER, bonus INTEGER, total INTEGER, systems INTEGER,
+                                          species INTEGER, source TEXT, PRIMARY KEY (ts, kind, source));
+                CREATE TABLE sale_estimates (ts TEXT, kind TEXT, estimate INTEGER, PRIMARY KEY (ts, kind));
+                INSERT INTO meta VALUES ('parser_version', '30');
+                INSERT INTO sale_events VALUES ('2026-01-02T00:00:00Z', 'bio', 1, 0, 1, 0, 1, 'j:1');
+                INSERT INTO sale_estimates VALUES ('2026-01-02T00:00:00Z', 'bio', 2);""")
+            old.commit()
+            old.close()
+            db = ed_outrider.open_db(path)   # PARSER_VERSION 31: the sales are re-read to gain their check
+            try:
+                self.assertIn("x5_check", [r["name"] for r in db.execute("PRAGMA table_info(sale_events)")])
+                self.assertEqual(db.execute("SELECT count(*) FROM sale_events").fetchone()[0], 0)
+                self.assertEqual(db.execute("SELECT estimate FROM sale_estimates").fetchone()[0], 2)   # live only: kept
+            finally:
+                db.close()
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    # ---- P5: the run in progress elsewhere ----
+    def test_run_elsewhere_and_discard_card(self):
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1, "StarPos": [0, 0, 0]})
+        for b in (4, 5):
+            self.j.handle(self.body_scan("2026-01-01T00:01:00Z", b, False))
+        self.j.handle(self.organic("2026-01-01T00:10:00Z", 4, "Log", self.TUSSOCK, "Tussock Pennata"))
+        self.j.handle(self.organic("2026-01-01T00:12:00Z", 4, "Sample", self.TUSSOCK, "Tussock Pennata"))
+        self.j.status_json = {"live": True, "ts": "2026-01-01T00:20:00Z", "fuel_main": 10, "flags": 0, "flags2": 1,
+                              "body": "Sys 5", "lat": 0.0, "lon": 0.0, "planet_radius": 1_000_000}
+        e = self.state.sampling_summary()["elsewhere"]
+        self.assertEqual((e["species"], e["samples"], e["body"], e["system"]), ("Tussock Pennata", 2, "4", None))
+        self.assertEqual(e["value"], ed_bio.species_value("Tussock Pennata") * 5)
+        # an old Log (a re-read) discards it silently; a live one leaves a card
+        seq = self.j.moment_seq
+        now = ed_outrider.iso_ts(time.time())
+        self.j.handle(self.organic(now, 5, "Log", self.STRATUM, "Stratum Tectonicas"))
+        m = [x for x in self.j.moments if x["seq"] > seq and x["kind"] == "bio_dropped"]
+        self.assertEqual([(x["species"], x["body"], x["elsewhere"]) for x in m], [("Tussock Pennata", "4", False)])
+        self.assertIsNone(self.db.execute("SELECT 1 FROM own_organic WHERE body_id = 4").fetchone())
+        self.db.execute("INSERT INTO own_organic VALUES (1, 4, 'x', 'Bacterium', 'Bacterium Aurasus', NULL, 2, NULL, '2026-01-01T00:30:00Z')")
+        seq = self.j.moment_seq
+        self.j.handle(self.organic("2026-01-01T00:40:00Z", 5, "Log", self.TUSSOCK, "Tussock Pennata"))
+        self.assertEqual([x for x in self.j.moments if x["seq"] > seq and x["kind"] == "bio_dropped"], [])
+
+    # ---- P10: the region crossing ----
+    def jump(self, ts, id64, z):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [0, 0, z]})
+
+    def regions(self, seq=0):
+        return [(m["region"], m["spoken"], m["count"]) for m in self.j.moments if m["kind"] == "region" and m["seq"] > seq]
+
+    def test_region_crossing_once(self):
+        if not ed_bio.available():
+            self.skipTest("no bio rules")
+        for i, (name, region) in enumerate((("Stratum Tectonicas - Green", "Inner Orion Spur"), ("Aleoida Spica - Yellow", "Inner Orion Spur"),
+                                            ("Aleoida Laminiae - Teal", "Inner Orion Spur"), ("Tussock Pennata - Red", "Inner Orion Spur"),
+                                            ("Fumarole", "Inner Orion Spur"), ("Tussock Pennata - Red", "Inner Scutum-Centaurus Arm"))):
+            self.db.execute("INSERT INTO codex (ts, entry_id, name, region) VALUES (?, ?, ?, ?)", (f"2025-01-01T00:00:0{i}Z", i, name, region))
+        self.jump("2026-01-01T00:00:00Z", 1, 0)         # first position known: nothing (the startup Location)
+        self.assertEqual(self.regions(), [])
+        self.jump("2026-01-01T00:01:00Z", 2, 9000)      # into the Inner Scutum-Centaurus Arm: once
+        # Stratum (no region rule) and Aleoida Laminiae; Spica cannot grow there, Tussock is logged there, Fumarole is no species
+        self.assertEqual(self.regions(), [("Inner Scutum-Centaurus Arm", "the Inner Scutum-Centaurus Arm", 2)])
+        self.assertEqual(self.state.region_crossed(2), {"region": "Inner Scutum-Centaurus Arm", "spoken": "the Inner Scutum-Centaurus Arm", "count": 2})
+        seq = self.j.moment_seq
+        cp = self.j.checkpoint()
+        self.jump("2026-01-01T00:02:00Z", 3, 0)         # back and forth along the border: nothing more
+        self.jump("2026-01-01T00:03:00Z", 4, 9000)
+        self.assertEqual(self.regions(seq), [])
+        self.assertIsNone(self.state.region_crossed(4))   # a later arrival is not the crossing
+        self.j.restore(cp)                              # a rolled-back tick keeps the announced set
+        self.assertIn("Inner Scutum-Centaurus Arm", self.j.regions_said)
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-02T00:00:00Z", "Commander": "X"})   # a new session
+        self.jump("2026-01-02T00:01:00Z", 5, 0)
+        self.assertEqual(self.regions(seq), [("Inner Orion Spur", "the Inner Orion Spur", 0)])
+        self.assertEqual([ed_outrider.region_spoken(n) for n in ("Norma Arm", "The Veils", "Ryker's Hope", "Izanami", "Mare Somnia")],
+                         ["the Norma Arm", "the Veils", "Ryker's Hope", "Izanami", "Mare Somnia"])
+
+    # ---- P17: jumponium ----
+    def test_jumponium_limits(self):
+        short = ed_materials.jumponium_short
+        c = {"carbon": 10, "germanium": 10, "arsenic": 2, "niobium": 2, "yttrium": 2, "polonium": 10, "vanadium": 10, "cadmium": 10}
+        self.assertEqual(short(c), {"arsenic": 2, "yttrium": 2})    # the tie set, niobium (not scarce) left out
+        self.assertEqual(short(dict(c, arsenic=3, niobium=3, yttrium=3)), {})   # 3 premium boosts: not short
+        self.assertEqual(short(dict(c, cadmium=1)), {"arsenic": 2, "yttrium": 2, "cadmium": 1})   # standard at 1 too
+        pick = ed_materials.jumponium_pick
+        self.assertIsNone(pick([{"Name": "yttrium", "Percent": 0.8}, {"Name": "iron", "Percent": 20}], {"yttrium": 2}))   # under the floor
+        self.assertEqual(pick([{"Name": "arsenic", "Percent": 1.6}, {"Name": "yttrium", "Percent": 1.3}], {"arsenic": 2, "yttrium": 1}),
+                         {"material": "yttrium", "pct": 1.3})      # the scarcest held wins over a richer share
+        self.assertIsNone(pick([{"Name": "arsenic", "Percent": 1.2}], {"arsenic": 2}))   # grade 2-3 floor 1.5%
+
+    def mats_login(self, snap_ts="2026-01-01T00:00:05Z"):
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:00:00Z", "Commander": "X"})
+        self.j.handle({"event": "Materials", "timestamp": snap_ts, "Raw": [{"Name": n, "Count": c} for n, c in (
+            ("carbon", 10), ("germanium", 10), ("arsenic", 10), ("niobium", 10), ("yttrium", 10), ("polonium", 1), ("vanadium", 10), ("cadmium", 10))]})
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:01:00Z", "StarSystem": "Sys", "SystemAddress": 1, "StarPos": [0, 0, 0]})
+
+    def rich(self, ts, body_id, pct, landable=True):
+        return self.body_scan(ts, body_id, False, Landable=landable, Materials=[{"Name": "iron", "Percent": 20.0}, {"Name": "polonium", "Percent": pct}])
+
+    def test_jumponium_fss_and_alone(self):
+        self.mats_login()
+        self.j.handle(self.rich("2026-01-01T00:02:00Z", 3, 1.3))
+        self.j.handle(self.rich("2026-01-01T00:02:10Z", 4, 1.1))   # a lower share in the same system: silent
+        self.j.handle(self.rich("2026-01-01T00:02:20Z", 5, 2.0, landable=False))   # not landable
+        self.j.handle({"event": "FSSAllBodiesFound", "timestamp": "2026-01-01T00:03:00Z", "SystemName": "Sys", "SystemAddress": 1, "Count": 6})
+        fss = [m for m in self.j.moments if m["kind"] == "fss_done"]
+        self.assertEqual(fss[-1]["jumponium"], {"body": "3", "material": "polonium", "name": "Polonium", "pct": 1.3})
+        self.assertEqual([m for m in self.j.moments if m["kind"] == "jumponium"], [])
+        self.j.handle(self.rich("2026-01-01T00:04:00Z", 6, 1.8))   # richer, after the debrief: said alone
+        self.assertEqual([m["jumponium"]["body"] for m in self.j.moments if m["kind"] == "jumponium"], ["6"])
+        # no FSS finished in the next system: said when the FSD charges to leave
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:10:00Z", "StarSystem": "Two", "SystemAddress": 2, "StarPos": [0, 0, 5]})
+        self.j.handle(self.rich("2026-01-01T00:11:00Z", 1, 1.5) | {"SystemAddress": 2, "StarSystem": "Two", "BodyName": "Two 1"})
+        self.j.handle({"event": "StartJump", "timestamp": "2026-01-01T00:12:00Z", "JumpType": "Hyperspace", "StarSystem": "Three",
+                       "SystemAddress": 3, "StarClass": "K"})
+        said = [m for m in self.j.moments if m["kind"] == "jumponium"]
+        self.assertEqual((said[-1]["system"], said[-1]["jumponium"]["body"]), (2, "1"))
+
+    def test_jumponium_silent_when_counts_are_stale(self):
+        self.mats_login(snap_ts="2025-12-31T00:00:00Z")   # the login wrote no Materials line: yesterday's counts
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:00:30Z", "Commander": "X"})
+        self.j.handle(self.rich("2026-01-01T00:02:00Z", 3, 1.3))
+        self.assertIsNone(self.j.jumponium)
+
+
+class BatchFSpansh(unittest.TestCase):
+    """Batch F: the pre-Odyssey mark (P16) and the firsts watch (P20). No network: Spansh is a fake."""
+
+    # a thin-atmosphere rocky world as a 2019 client reported it: not landable, no signals block
+    OLD = {"name": "Sys A 3", "type": "Planet", "subType": "Rocky body", "isLandable": False,
+           "atmosphereType": "Thin Carbon dioxide", "surfacePressure": 0.02, "gravity": 0.12, "surfaceTemperature": 180,
+           "volcanismType": "No volcanism", "distanceToArrival": 500, "bodyId": 3, "earthMasses": 0.01,
+           "updateTime": "2019-06-01 10:00:00+00"}
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types_ns(cached=lambda i: (None, None)), 25)
+
+    def rec(self, **kw):
+        return ed_outrider.record_from_dump("Sys", dict(self.OLD, **kw))
+
+    # ---- P16 ----
+
+    def test_record_keeps_update_time_and_signals_block(self):
+        self.assertEqual(ed_outrider.CACHE_VERSION, 15)
+        r = self.rec()
+        self.assertEqual((r["updated"], r["signals_known"]), ("2019-06-01 10:00:00+00", False))
+        self.assertTrue(self.rec(signals={"signals": {}, "updateTime": "2019-06-01"})["signals_known"])
+
+    def test_stale_bio_cases(self):
+        self.assertTrue(ed_outrider.stale_bio_body(self.rec(), "K"))                             # the old one
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(signals={"signals": {}}), "K"))    # a signals block
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(updateTime="2023-01-05T10:00:00Z"), "K"))   # after the cutoff
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(updateTime="2022-11-29T00:00:00Z"), "K"))   # the day itself
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(isLandable=True), "K"))             # already landable
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(atmosphereType="Carbon dioxide"), "K"))   # not thin
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(atmosphereType=None), "K"))
+        # the rules allow nothing on a 30 K neon world, however old the record
+        self.assertFalse(ed_outrider.stale_bio_body(self.rec(atmosphereType="Thin Neon", surfaceTemperature=30, gravity=0.3), "K"))
+        # your own scan replaces the Spansh record: no updated, never flagged
+        own = dict(self.rec(), updated=None)
+        own.pop("signals_known")
+        self.assertFalse(ed_outrider.stale_bio_body(own, "K"))
+
+    def test_summary_is_a_mark_and_values_are_unchanged(self):
+        star = ed_outrider.record_from_dump("Sys", {"name": "Sys A", "type": "Star", "subType": "K (Yellow-Orange) Star",
+                                                    "mainStar": True, "solarMasses": 0.8, "bodyId": 1,
+                                                    "updateTime": "2019-06-01 10:00:00+00"})
+        old, new = [star, self.rec()], [star, self.rec(updateTime="2023-01-05T10:00:00Z")]
+        s_old, s_new = ed_outrider.summarise(old, 2, "K"), ed_outrider.summarise(new, 2, "K")
+        self.assertEqual(s_old["stale_bio"]["bodies"], 1)
+        self.assertEqual(s_old["stale_bio"]["reported"], "2019-06-01")
+        self.assertTrue(s_old["stale_bio"]["genera_top"])
+        groups = ed_outrider.stale_bio_groups(self.rec(), "K")
+        vals = sorted(g["value"] or 0 for g in groups)
+        self.assertEqual(s_old["stale_bio"]["up_to"], vals[len(vals) // 2])   # one genus, the median, not the best
+        self.assertIsNone(s_new["stale_bio"])
+        self.assertEqual((s_old["bio_potential"], s_old["est_value"]), (s_new["bio_potential"], s_new["est_value"]))
+        # system_value (Nearby's value columns) counts nothing for it
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 9,
+                       "StarPos": [0, 0, 0]})
+        self.assertEqual(self.state.system_value(9, "Sys", old, "K"), self.state.system_value(9, "Sys", new, "K"))
+
+    def test_here_and_left_behind_show_the_mark(self):
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 9,
+                       "StarPos": [0, 0, 0]})
+        base = {"v": ed_outrider.CACHE_VERSION, "name": "Sys", "x": 0, "y": 0, "z": 0, "body_count": 2,
+                "records": [self.rec(), self.rec(name="Sys A 4", bodyId=4, updateTime="2024-01-01T00:00:00Z")]}
+        self.db.execute("INSERT INTO spansh_systems (id64, updated_at, summary, fetched_ts, x, y, z) VALUES (9, 'u', ?, 0, 0, 0, 0)",
+                        (json.dumps(base),))
+        self.state.bases[9] = ("spansh", base)
+        self.state.center = {"x": 0, "y": 0, "z": 0}
+        bodies = {b["name"]: b for b in self.state.system_detail(9)["bodies"]}
+        self.assertTrue(bodies["A 3"]["stale_bio"])
+        self.assertFalse(bodies["A 4"]["stale_bio"])
+        self.assertEqual(self.state.row(9)["stale_bio"]["bodies"], 1)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T01:00:00Z", "StarSystem": "Far", "SystemAddress": 10,
+                       "StarPos": [20, 0, 0]})
+        left = {r["id"]: r for r in self.state.left_behind(100)["systems"]}
+        self.assertEqual(left["9"]["old_data"]["bodies"], 1)
+        # scanned yourself: the Spansh record is replaced, and the mark goes
+        ev = scan("2026-01-01T01:10:00Z", "Sys", 9, 3, "Sys A 3", disc=True)[2]
+        self.j.handle(dict(ev, event="Scan", StarSystem="Sys"))
+        self.db.commit()
+        self.state.scan_version += 1
+        left = {r["id"]: r for r in self.state.left_behind(100)["systems"]}
+        self.assertIsNone((left.get("9") or {}).get("old_data"))
+
+    # ---- P20 ----
+
+    # a fixture dump in Spansh's layout: your three discoveries (A, A 1 and A 2), one body you never scanned
+    def dump(self, a1_time, a2_time="2026-01-01T00:02:00Z", extra=None):
+        bodies = [{"name": "Sys A", "type": "Star", "subType": "K (Yellow-Orange) Star", "bodyId": 1,
+                   "updateTime": "2026-01-01T00:00:10Z"},
+                  {"name": "Sys A 1", "type": "Planet", "subType": "Icy body", "bodyId": 2, "updateTime": a1_time},
+                  {"name": "Sys A 2", "type": "Planet", "subType": "Icy body", "bodyId": 3, "updateTime": a2_time},
+                  {"name": "Sys A belt cluster", "type": "Barycentre", "updateTime": "2026-02-01T00:00:00Z"}]
+        return {"system": {"name": "Sys", "id64": 9, "bodyCount": 4, "date": "2026-02-01T00:00:00Z",
+                           "bodies": bodies + (extra or [])}}
+
+    def records(self, d):
+        return [ed_outrider.record_from_dump("Sys", b) for b in d["system"]["bodies"] if b["type"] in ("Star", "Planet")]
+
+    MINE = {"A": ["2026-01-01T00:00:10Z"], "A 1": ["2026-01-01T00:01:00Z", "2026-01-01T00:05:00Z"],
+            "A 2": ["2026-01-01T00:02:00Z"]}
+
+    def test_own_uploads_are_not_someone_else(self):
+        # EDDN stamps an upload with the journal's time: every update matches one of your own scans or the map
+        self.assertIsNone(ed_outrider.firsts_reported(self.records(self.dump("2026-01-01T00:05:00Z")), self.MINE, 4))
+        self.assertIsNone(ed_outrider.firsts_reported(self.records(self.dump("2026-01-01T00:06:30Z")), self.MINE, 4))   # grace
+
+    def test_someone_else_later(self):
+        d = self.dump("2026-01-09T12:00:00Z", "2026-01-08T00:00:00Z",
+                      extra=[{"name": "Sys B", "type": "Star", "subType": "M (Red dwarf) Star", "bodyId": 5,
+                              "updateTime": "2026-01-07T00:00:00Z"}])   # a body you never discovered: not counted
+        got = ed_outrider.firsts_reported(self.records(d), self.MINE, 4)
+        self.assertEqual(got, {"reported_ts": "2026-01-08T00:00:00Z", "bodies": 2, "spansh_bodies": 4, "body_count": 4})
+        # Spansh's other time format reads the same
+        d2 = self.dump("2026-01-09 12:00:00+00")
+        self.assertEqual(ed_outrider.firsts_reported(self.records(d2), self.MINE, None)["reported_ts"], "2026-01-09T12:00:00Z")
+
+    def test_snapshot_and_unknown_times_do_not_count(self):
+        # updated before your scan: in the snapshot when you arrived; no time at all: cannot tell
+        self.assertIsNone(ed_outrider.firsts_reported(self.records(self.dump("2025-12-01T00:00:00Z")), self.MINE, 4))
+        d = self.dump(None)
+        self.assertIsNone(ed_outrider.firsts_reported(self.records(d), self.MINE, 4))
+        self.assertIsNone(ed_outrider.firsts_reported([], self.MINE, 4))   # Spansh has nothing: nobody reported
+
+    def discover(self, id64, name, t0, x=0):
+        self.j.handle({"event": "FSDJump", "timestamp": t0, "StarSystem": name, "SystemAddress": id64, "StarPos": [x, 0, 0]})
+        self.j.handle(scan(t0[:-3] + "10Z", name, id64, 1, f"{name} A", star=True)[2])
+        self.j.handle(scan(t0[:-6] + "01:00Z", name, id64, 2, f"{name} A 1")[2])
+        self.j.handle(scan(t0[:-6] + "02:00Z", name, id64, 3, f"{name} A 2")[2])
+        self.db.commit()
+
+    def fake(self, dumps):
+        calls = []
+
+        class FakeSpansh(ed_outrider.Spansh):
+            async def lookup(self, id64, interactive=True):
+                calls.append((id64, interactive))
+                return dumps.get(id64)
+        return FakeSpansh(self.db), calls
+
+    def test_watch_step_most_valuable_first_once_a_day(self):
+        import asyncio
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        self.discover(8, "Cheap", "2026-01-02T00:00:00Z", x=5)
+        self.state.system_values = {"Sys": 5_000_000, "Cheap": 100}
+        cheap = self.dump("2026-01-02T00:01:00Z", "2026-01-02T00:02:00Z")
+        for b in cheap["system"]["bodies"]:
+            b["name"] = b["name"].replace("Sys", "Cheap")
+        sp, calls = self.fake({9: self.dump("2026-01-09T12:00:00Z"), 8: cheap})
+        self.state.spansh = sp
+        now = ed_outrider.ts_seconds("2026-01-10T00:00:00Z")
+        got = asyncio.run(self.state.firsts_watch_step(now))
+        self.assertEqual(calls, [(9, False)])                  # the valuable one first, on the bulk lane
+        self.assertEqual(got["reported_ts"], "2026-01-09T12:00:00Z")
+        self.assertIsNone(asyncio.run(self.state.firsts_watch_step(now + 20)))   # Cheap: your own upload
+        self.assertEqual(calls, [(9, False), (8, False)])
+        self.assertIsNone(asyncio.run(self.state.firsts_watch_step(now + 40)))   # nothing due until tomorrow
+        self.assertEqual(len(calls), 2)
+        self.assertIsNone(self.db.execute("SELECT * FROM spansh_systems").fetchone())   # never cached: not stored
+        seen = {x["name"]: x["seen"] for x in self.state.firsts_list()}
+        self.assertEqual(seen["Sys"], {"reported_ts": "2026-01-09T12:00:00Z", "days": 8, "bodies": 1,
+                                       "spansh_bodies": 3, "body_count": 4})
+        self.assertIsNone(seen["Cheap"])
+        # the watch is off here, but what it found still counts on the Unsold tile
+        self.assertEqual(self.state.firsts_watch_info(), {"on": False, "seen": 1, "checked": 2, "of": 2})
+
+    def test_watch_info_and_reports_stay(self):
+        import asyncio
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        self.state.system_values = {"Sys": 5_000_000}
+        self.state.firsts_watch_on = True
+        self.assertEqual(self.state.firsts_watch_info(), {"on": True, "seen": 0, "checked": 0, "of": 1})
+        sp, calls = self.fake({9: self.dump("2026-01-09T12:00:00Z")})
+        self.state.spansh = sp
+        now = ed_outrider.ts_seconds("2026-01-10T00:00:00Z")
+        asyncio.run(self.state.firsts_watch_step(now))
+        self.assertEqual(self.state.firsts_watch_info(), {"on": True, "seen": 1, "checked": 1, "of": 1})
+        self.assertEqual(self.state.payload()["firsts_watch"]["seen"], 1)
+        # seen by others: not due again for a week; then Spansh answers without it (a glitch): the first sighting stays
+        sp2, calls2 = self.fake({9: None})
+        self.state.spansh = sp2
+        self.assertIsNone(asyncio.run(self.state.firsts_watch_step(now + 86400)))
+        self.assertEqual(calls2, [])
+        later = now + ed_outrider.FIRSTS_WATCH_SLOW
+        asyncio.run(self.state.firsts_watch_step(later))
+        row = self.db.execute("SELECT * FROM firsts_watch WHERE id64=9").fetchone()
+        self.assertEqual((row["reported_ts"], row["checked_ts"]), ("2026-01-09T12:00:00Z", later))
+        self.state.firsts_watch_on = False
+        self.assertEqual(self.state.firsts_watch_info()["seen"], 1)   # off: what was found still shows
+
+    def test_watch_gap_slows_for_old_or_seen_firsts(self):
+        gap, day = ed_outrider.firsts_watch_gap, 86400
+        t0 = ed_outrider.ts_seconds("2026-01-01T00:00:10Z")
+        row = {"first_ts": "2026-01-01T00:00:10Z", "reported_ts": None}
+        self.assertEqual(gap(row, t0 + 10 * day), ed_outrider.FIRSTS_WATCH_EVERY)           # young: daily
+        self.assertEqual(gap(row, t0 + 31 * day), ed_outrider.FIRSTS_WATCH_SLOW)            # a month on: weekly
+        self.assertEqual(gap(dict(row, reported_ts="2026-01-02T00:00:00Z"), t0 + day), ed_outrider.FIRSTS_WATCH_SLOW)
+        self.assertEqual(gap({"first_ts": None, "reported_ts": None}, t0), ed_outrider.FIRSTS_WATCH_EVERY)
+
+    def test_watch_daily_cap(self):
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        self.state.system_values = {"Sys": 5_000_000}
+        now = ed_outrider.ts_seconds("2026-01-10T00:00:00Z")
+        self.assertEqual(self.state.firsts_watch_due(now), (9, "Sys"))
+        cap = ed_outrider.FIRSTS_WATCH_DAY_CAP
+        self.db.executemany("INSERT INTO firsts_watch VALUES (?, ?, NULL, 0, 0, 0, NULL)",
+                            [(1000 + i, now - 3600) for i in range(cap)])   # other systems checked in the last hour
+        self.assertIsNone(self.state.firsts_watch_due(now))                  # the day's checks are used up
+        self.assertEqual(self.state.firsts_watch_due(now + 86400), (9, "Sys"))   # a day on they have aged out
+
+    def test_watch_uses_a_fresh_cache_and_refreshes_a_stale_one(self):
+        import asyncio
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        sp, calls = self.fake({9: self.dump("2026-01-09T12:00:00Z")})
+        self.state.spansh = sp
+        base = {"v": ed_outrider.CACHE_VERSION, "name": "Sys", "x": 0, "y": 0, "z": 0, "body_count": 4,
+                "records": self.records(self.dump("2026-01-01T00:01:00Z"))}
+        sp.store(9, "u1", base)   # fetched just now, with your own upload only
+        got = asyncio.run(self.state.firsts_watch_step())
+        self.assertIsNone(got)
+        self.assertEqual(calls, [])                              # no request: the cache is under a day old
+        self.db.execute("UPDATE spansh_systems SET fetched_ts = ?", (time.time() - 2 * 86400,))
+        self.db.execute("UPDATE firsts_watch SET checked_ts = 0")
+        got = asyncio.run(self.state.firsts_watch_step())
+        self.assertEqual(calls, [(9, False)])
+        self.assertEqual(got["bodies"], 1)
+        self.assertEqual(sp.cached(9)[1]["records"][1]["updated"], "2026-01-09T12:00:00Z")   # Nearby's cache refreshed too
+
+    def test_watch_table_survives_a_journal_reread_and_goes_in_the_backup(self):
+        import tempfile, zipfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "w.sqlite")
+            db = ed_outrider.open_db(path)
+            db.execute("INSERT INTO firsts_watch VALUES (9, 1.5, '2026-01-09T12:00:00Z', 2, 3, 4, '2026-01-01T00:00:10Z')")
+            db.commit(); db.close()
+            db = ed_outrider.open_db(path, rescan=True)   # the journal re-read (also what a PARSER_VERSION bump does)
+            try:
+                self.assertEqual(tuple(db.execute("SELECT * FROM firsts_watch").fetchone()),
+                                 (9, 1.5, "2026-01-09T12:00:00Z", 2, 3, 4, "2026-01-01T00:00:10Z"))
+                self.assertNotIn("firsts_watch", ed_outrider.RESET_JOURNAL_DATA)
+                state = ed_outrider.State(db, ed_outrider.Journals(db), types_ns(cached=lambda i: (None, None)), 25)
+                state.db_path = path
+                out = os.path.join(d, "backups")
+                with unittest.mock.patch.object(ed_outrider, "BACKUP_DIR", out), \
+                        unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", []):
+                    res = state.make_backup()
+                with zipfile.ZipFile(res["path"]) as z:
+                    z.extract("w.sqlite", os.path.join(d, "x"))
+                copy = sqlite3.connect(os.path.join(d, "x", "w.sqlite"))
+                self.assertEqual(copy.execute("SELECT reported_ts FROM firsts_watch").fetchone()[0], "2026-01-09T12:00:00Z")
+                copy.close()
+            finally:
+                db.close()
+
+    def test_config_switch(self):
+        import tomllib
+        st = ed_outrider.settings_from({}, argparse.Namespace(journals=None, legacy=None, host=None, port=None,
+                                                               radius=None, db=None))
+        self.assertIs(st["watch_firsts"], True)
+        st = ed_outrider.settings_from({"spansh": {"watch_firsts": False}},
+                                       argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None))
+        self.assertIs(st["watch_firsts"], False)
+        self.assertIs(tomllib.loads(ed_outrider.config_text(st))["spansh"]["watch_firsts"], False)
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ed_outrider.toml.example")) as f:
+            self.assertIn("watch_firsts", f.read())
+
+    def test_your_own_later_visit_is_not_someone_else(self):
+        # found on the real journals: a jump back in two days later updated the arrival star on Spansh (EDDN)
+        d = self.dump("2026-01-01T00:01:00Z")
+        d["system"]["bodies"][0]["updateTime"] = "2026-01-03T03:09:50Z"
+        self.assertIsNone(ed_outrider.firsts_reported(self.records(d), self.MINE, 4, ["2026-01-03T03:09:50Z"]))
+        self.assertEqual(ed_outrider.firsts_reported(self.records(d), self.MINE, 4, ["2026-01-02T00:00:00Z"])["bodies"], 1)
+        # and the watch passes your arrivals in: a revisit leaves the system unflagged
+        import asyncio
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-02T00:00:00Z", "StarSystem": "Elsewhere", "SystemAddress": 7,
+                       "StarPos": [9, 0, 0]})
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-03T03:09:50Z", "StarSystem": "Sys", "SystemAddress": 9,
+                       "StarPos": [0, 0, 0]})
+        self.db.commit()
+        sp, calls = self.fake({9: d})
+        self.state.spansh = sp
+        self.assertIsNone(asyncio.run(self.state.firsts_watch_step(ed_outrider.ts_seconds("2026-01-10T00:00:00Z"))))
+        self.assertEqual(calls, [(9, False)])
+
+
+class BatchGHonkBackups(unittest.TestCase):
+    """Batch G: auto honk's combat-mode and fire-group safety (P7, unit tests only: fake honkers, no device, no
+    keys), and verified backups with --restore / --list-backups (P19, temp files only)."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    @staticmethod
+    def now_ts():
+        import datetime as _dt
+        return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def live(self, **kw):
+        return dict({"live": True, "ts": self.now_ts(), "flags": 1 << 4 | 1 << 27, "gui_focus": 0, "fire_group": 0}, **kw)
+
+    # ---- P7 ----
+    def test_read_status_keeps_the_fire_group(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "Status.json"), "w") as f:
+                json.dump({"timestamp": self.now_ts(), "Flags": 1 << 27, "Flags2": 0, "FireGroup": 2, "GuiFocus": 0,
+                           "Fuel": {"FuelMain": 8.0, "FuelReservoir": 0.5}}, f)
+            self.j.read_status(d)
+        self.assertEqual((self.j.status_json["fire_group"], ed_outrider.fire_group_letter(2)), (2, "C"))
+        self.assertIsNone(ed_outrider.fire_group_letter(None))
+        self.assertIsNone(ed_outrider.fire_group_letter(True))
+
+    def test_honk_decision_combat_mode_and_groups(self):
+        d, t = ed_outrider.honk_decision, time.time()
+        self.assertEqual(d(self.live(), t), ("press", None))
+        # combat mode: Primary Fire would fire the weapons
+        self.assertEqual(d(self.live(flags=1 << 4), t), ("wait", "the HUD is in combat mode"))
+        self.assertEqual(d(self.live(flags=1 << 4 | 1 << 30), t), ("wait", "still in the jump"))
+        self.assertEqual(d(self.live(flags=1 << 4, gui_focus=6), t), ("wait", "the galaxy map is open"))
+        self.assertEqual(d(self.live(flags=None), t), ("press", None))           # no flags at all: as before
+        groups = {"good": ["A"], "bad": ["C"]}
+        self.assertEqual(d(self.live(fire_group=2), t, groups),
+                         ("wait", "fire group C selected; honks missed there before (worked on A)"))
+        self.assertEqual(d(self.live(fire_group=2), t, {"good": [], "bad": ["C"]}),
+                         ("wait", "fire group C selected; honks missed there before"))
+        self.assertEqual(d(self.live(fire_group=1), t, groups), ("press", None))   # unknown group: still pressed
+        self.assertEqual(d(self.live(fire_group=0), t, groups), ("press", None))
+        self.assertEqual(d(self.live(fire_group=2), t), ("press", None))            # nothing learned for this ship
+        # a stale reading presses, whatever it says
+        self.assertEqual(d(self.live(fire_group=2, flags=1 << 4), t + 120, groups), ("press", None))
+        self.assertEqual(d(dict(self.live(fire_group=2), live=False), t, groups), ("press", None))
+
+    def test_honk_learn(self):
+        learn = ed_outrider.honk_learn
+        self.assertEqual(learn(None, "A", True), {"good": ["A"], "bad": []})
+        self.assertEqual(learn({"good": ["A"], "bad": []}, "C", False), {"good": ["A"], "bad": ["C"]})
+        self.assertEqual(learn({"good": ["A"], "bad": []}, "A", False), {"good": ["A"], "bad": []})   # worked there before
+        self.assertEqual(learn({"good": ["A"], "bad": ["C"]}, "C", True), {"good": ["A", "C"], "bad": []})   # a success clears it
+        self.assertEqual(learn({"good": ["A"], "bad": []}, None, False), {"good": ["A"], "bad": []})
+
+    def honk(self, id64, answers, status, ship_id=7, during=None):
+        """One auto-honk arrival with a fake honker (no device, no keys): the presses, and the honk moment."""
+        import asyncio
+        j, presses, now_ts = self.j, [], self.now_ts
+
+        class FakeHonker:
+            ready, available, status = True, True, "ready"
+
+            def press(self):
+                presses.append(id64)
+                if during:
+                    j.status_json = dict(j.status_json, **during)
+                if answers:
+                    j.last_honk = {"id64": id64, "ts": now_ts(), "bodies": 5, "progress": 0.3}
+                return True
+        self.j.ship = {"name": "Ship", "type": "dolphin", "ship_id": ship_id}
+        self.state.honker = FakeHonker()
+        self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
+        self.state.honk_confirm = 0.2
+        self.j.handle({"event": "FSDJump", "timestamp": now_ts(), "StarSystem": f"S{id64}", "SystemAddress": id64,
+                       "StarPos": [id64, 0, 0]})
+        self.j.ship = {"name": "Ship", "type": "dolphin", "ship_id": ship_id}
+        self.j.status_json = status
+
+        async def go():
+            self.state.maybe_honk()
+            await asyncio.sleep(0.6)
+        asyncio.run(go())
+        honks = [m for m in self.state.moments_summary() if m["kind"] == "honk" and m["system"] == f"S{id64}"]
+        return presses, honks[-1] if honks else None
+
+    def test_fire_groups_learned_from_auto_honk_presses(self):
+        # a confirmed press in group A: good
+        presses, m = self.honk(101, True, self.live(fire_group=0))
+        self.assertEqual((presses, m["ok"]), ([101], True))
+        self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": []})
+        # a miss in group C with the cockpit focused and analysis mode on: bad, and the message names the group
+        presses, m = self.honk(102, False, self.live(fire_group=2))
+        self.assertEqual(presses, [102])
+        self.assertEqual(m["why"], "no discovery scan followed with fire group C selected: is the D-Scanner on primary fire there?")
+        self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": ["C"]})
+        self.state.honker.combo = lambda: (["KEY_K"], "K")
+        self.assertEqual(self.state.autohonk_info()["groups"], {"good": ["A"], "bad": ["C"]})
+        # a miss explained by a screen opening during the press is not held against the group
+        presses, m = self.honk(103, False, self.live(fire_group=1), during={"gui_focus": 6})
+        self.assertEqual(m["why"], "no discovery scan followed with fire group B selected: the galaxy map is open")
+        self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": ["C"]})
+        # a miss with no fresh status names no group and learns nothing
+        stale = self.live(fire_group=1, ts="2020-01-01T00:00:00Z")
+        presses, m = self.honk(104, False, stale)
+        self.assertEqual(m["why"], "no discovery scan followed: is the D-Scanner on primary fire?")
+        self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": ["C"]})
+        # another ship has its own record: group C is not held against it
+        presses, m = self.honk(105, True, self.live(fire_group=2), ship_id=8)
+        self.assertEqual(presses, [105])
+        self.assertEqual(self.state.honk_groups(8), {"good": ["C"], "bad": []})
+        self.assertEqual(self.state.honk_groups(7), {"good": ["A"], "bad": ["C"]})
+        # back in ship 7 with C selected: it waits, and a switch to A releases the press
+        import asyncio
+        self.j.ship = {"name": "Ship", "type": "dolphin", "ship_id": 7}
+        presses = []
+
+        class FakeHonker:
+            ready, available, status = True, True, "ready"
+
+            def press(self):
+                presses.append(1)
+                return True
+        self.state.honker = FakeHonker()
+        self.j.handle({"event": "FSDJump", "timestamp": self.now_ts(), "StarSystem": "S106", "SystemAddress": 106,
+                       "StarPos": [106, 0, 0]})
+        self.j.ship = {"name": "Ship", "type": "dolphin", "ship_id": 7}
+        self.j.status_json = self.live(fire_group=2)
+
+        async def go():
+            self.state.maybe_honk()
+            await asyncio.sleep(0.5)
+            waiting = (list(presses), self.state.honker.status)
+            self.j.status_json = self.live(fire_group=0)
+            await asyncio.sleep(0.8)
+            return waiting
+        waiting = asyncio.run(go())
+        self.assertEqual(waiting, ([], "waiting: fire group C selected; honks missed there before (worked on A)"))
+        self.assertEqual(presses, [1])
+
+    def test_combat_mode_waits_then_gives_up(self):
+        import asyncio
+        presses = []
+
+        class FakeHonker:
+            ready, available, status = True, True, "ready"
+
+            def press(self):
+                presses.append(1)
+                return True
+        self.state.honker = FakeHonker()
+        self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
+        self.j.handle({"event": "FSDJump", "timestamp": self.now_ts(), "StarSystem": "S111", "SystemAddress": 111,
+                       "StarPos": [1, 0, 0]})
+        self.j.status_json = self.live(flags=1 << 4)
+
+        async def go():
+            with unittest.mock.patch.object(ed_outrider, "AUTOHONK_WAIT_MAX", 0.4):
+                self.state.maybe_honk()
+                await asyncio.sleep(0.2)
+                status = self.state.honker.status
+                await asyncio.sleep(0.6)
+                return status
+        self.assertEqual(asyncio.run(go()), "waiting: the HUD is in combat mode")
+        self.assertEqual(presses, [])
+        m = [m for m in self.state.moments_summary() if m["kind"] == "honk"][-1]
+        self.assertEqual((m["ok"], m["why"]), (False, "gave up waiting: the HUD is in combat mode"))
+        self.assertIsNone(self.state.honk_groups())   # never pressed: nothing learned
+
+    def test_forget_fire_groups(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        self.j.ship = {"name": "Ship", "type": "dolphin", "ship_id": 7}
+        self.state.note_honk_group(7, "A", True)
+        self.state.note_honk_group(7, "C", False)
+        self.state.note_honk_group(8, "B", True)
+
+        async def go():   # the test client only: no auto honk, no device (forget touches the meta record alone)
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                r = await c.post("/api/autohonk/forget")
+                return r.status, await r.json()
+        status, body = asyncio.run(go())
+        self.assertEqual((status, body["groups"]), (200, None))
+        self.assertIsNone(self.state.honk_groups(7))
+        self.assertEqual(self.state.honk_groups(8), {"good": ["B"], "bad": []})   # other ships keep theirs
+
+    def test_page_names_the_group(self):
+        with open(os.path.join(os.path.dirname(ed_outrider.__file__), "static", "page.js"), encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("Is the discovery scanner on primary fire in fire group ${honkGroup(m.why)}?", js)
+        self.assertIn("api/autohonk/forget", js)
+
+    # ---- P19 ----
+    def make_db(self, path, rows=50):
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+        con.execute("CREATE INDEX t_v ON t (v)")
+        con.executemany("INSERT INTO t (v) VALUES (?)", [(f"row {i} " + "x" * 200,) for i in range(rows)])
+        con.commit()
+        con.close()
+
+    def backup_env(self, d):
+        live, out = os.path.join(d, "live"), os.path.join(d, "backups")
+        os.makedirs(live); os.makedirs(out)
+        dbp = os.path.join(d, "x.sqlite")
+        self.make_db(dbp)
+        self.state.db_path = dbp
+        self.state.speech_path = self.state.config_path = None
+        return live, out, dbp
+
+    def test_backup_is_verified(self):
+        import tempfile, zipfile
+        with tempfile.TemporaryDirectory() as d:
+            live, out, dbp = self.backup_env(d)
+            with unittest.mock.patch.object(ed_outrider, "BACKUP_DIR", out), \
+                    unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [live]):
+                res = self.state.make_backup()
+            self.assertTrue(res["verified"])
+            self.assertIsNone(ed_outrider.check_zip(res["path"]))
+            with zipfile.ZipFile(res["path"]) as z:
+                self.assertIsNone(z.testzip())
+
+    def test_corrupt_copy_fails_and_keeps_older_zips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            live, out, dbp = self.backup_env(d)
+            older = []
+            for i in range(1, 3):
+                older.append(f"outrider-x-2020010{i}-000000Z.zip")
+                with open(os.path.join(out, older[-1]), "w") as f:
+                    f.write("old")
+            real = ed_outrider.copy_database
+
+            def corrupting(src, dst, **kw):   # the copy goes through, then its pages are overwritten
+                real(src, dst, **kw)
+                path = dst.execute("PRAGMA database_list").fetchone()[2]
+                size = os.path.getsize(path)
+                with open(path, "r+b") as f:
+                    f.seek(24)
+                    f.write(b"\x7f\x7f\x7f\x7f")   # a new change counter: the connection re-reads the pages
+                    f.seek(size // 4096 // 2 * 4096 if size > 8192 else 4096)
+                    f.write(b"\xde\xad" * 2048)
+            with unittest.mock.patch.object(ed_outrider, "BACKUP_DIR", out), \
+                    unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [live]), \
+                    unittest.mock.patch.object(ed_outrider, "BACKUP_KEEP", 1), \
+                    unittest.mock.patch.object(ed_outrider, "copy_database", corrupting):
+                with self.assertRaises(Exception) as e:
+                    self.state.make_backup()
+            self.assertRegex(str(e.exception), "check|malformed|corrupt")
+            self.assertEqual(sorted(os.listdir(out)), older)   # nothing rotated, no bad zip, no temp copy left
+
+    def test_bad_zip_is_deleted_and_nothing_rotates(self):
+        import tempfile, zipfile
+        with tempfile.TemporaryDirectory() as d:
+            live, out, dbp = self.backup_env(d)
+            with open(os.path.join(out, "outrider-x-20200101-000000Z.zip"), "w") as f:
+                f.write("old")
+            with unittest.mock.patch.object(ed_outrider, "BACKUP_DIR", out), \
+                    unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [live]), \
+                    unittest.mock.patch.object(ed_outrider, "BACKUP_KEEP", 1), \
+                    unittest.mock.patch.object(zipfile.ZipFile, "testzip", return_value="x.sqlite"):
+                with self.assertRaisesRegex(RuntimeError, "the zip failed its check: x.sqlite is damaged"):
+                    self.state.make_backup()
+            self.assertEqual(os.listdir(out), ["outrider-x-20200101-000000Z.zip"])
+
+    def make_zip(self, d, name="outrider-x-20260101-000000Z.zip", rows=10, defaults=None):
+        import zipfile
+        src = os.path.join(d, f"src-{name}.sqlite")
+        self.make_db(src, rows)
+        path = os.path.join(d, "backups", name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(src, "x.sqlite")
+            if defaults is not None:
+                z.writestr("browser_defaults.json", json.dumps(defaults))
+            z.writestr("speech.json", "{}")
+        return path
+
+    def test_restore(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "x.sqlite")
+            self.make_db(dbp, 3)
+            with open(dbp + "-journal", "w") as f:
+                f.write("left over")
+            defaults = ed_outrider.browser_defaults_path(dbp)
+            ed_outrider.write_browser_defaults(defaults, {"version": 1, "settings": {"sound": False}})
+            z = self.make_zip(d, rows=10, defaults={"version": 1, "settings": {"sound": True}})
+            lines = ed_outrider.restore_backup(z, dbp, "127.0.0.1", 0, now=0)
+            stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(0))
+            con = sqlite3.connect(dbp)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 10)
+            con.close()
+            aside = f"{dbp}.pre-restore-{stamp}"
+            self.assertFalse(os.path.exists(dbp + "-journal"))
+            self.assertTrue(os.path.exists(aside + "-journal"))   # went with the old file (before SQLite opens it)
+            con = sqlite3.connect(aside)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 3)   # the old one kept
+            con.close()
+            with open(defaults) as f:
+                self.assertEqual(json.load(f)["settings"], {"sound": True})
+            with open(f"{defaults}.pre-restore-{stamp}") as f:
+                self.assertEqual(json.load(f)["settings"], {"sound": False})
+            self.assertTrue(lines[0].startswith(f"restored {dbp} from {z}"))
+            self.assertIn("also in the zip, not restored: speech.json", lines[-1])
+            self.assertFalse([f for f in os.listdir(d) if f.endswith(".part")])
+
+    def test_restore_refuses_while_the_port_is_bound(self):
+        import socket, tempfile
+        with tempfile.TemporaryDirectory() as d, socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            port = sock.getsockname()[1]
+            dbp = os.path.join(d, "x.sqlite")
+            self.make_db(dbp, 3)
+            z = self.make_zip(d)
+            with self.assertRaisesRegex(RuntimeError, f"port {port} is in use"):
+                ed_outrider.restore_backup(z, dbp, "127.0.0.1", port)
+            self.assertEqual(sorted(os.listdir(d)), ["backups", "src-outrider-x-20260101-000000Z.zip.sqlite", "x.sqlite"])
+
+    def test_restore_refuses_a_bad_zip_or_database(self):
+        import tempfile, zipfile
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "x.sqlite")
+            self.make_db(dbp, 3)
+            os.makedirs(os.path.join(d, "backups"))
+            junk = os.path.join(d, "backups", "outrider-x-20260101-000000Z.zip")
+            with open(junk, "w") as f:
+                f.write("not a zip")
+            with self.assertRaisesRegex(RuntimeError, "failed its check"):
+                ed_outrider.restore_backup(junk, dbp, "127.0.0.1", 0)
+            with zipfile.ZipFile(junk, "w") as z:
+                z.writestr("x.sqlite", b"SQLite format 3\x00" + b"\x00" * 200)
+            with self.assertRaisesRegex(RuntimeError, "the database in .* failed its check"):
+                ed_outrider.restore_backup(junk, dbp, "127.0.0.1", 0)
+            self.assertEqual(sorted(os.listdir(d)), ["backups", "x.sqlite"])   # untouched, no temp file left
+
+    def test_list_backups_and_cli(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            z1 = self.make_zip(d, "outrider-x-20260101-000000Z.zip", rows=4)
+            self.make_zip(d, "outrider-x-20260102-000000Z.zip", rows=6)
+            self.make_zip(d, "outrider-other-20260103-000000Z.zip")
+            out = os.path.join(d, "backups")
+            lines = ed_outrider.list_backups(out, os.path.join(d, "x.sqlite"))
+            self.assertEqual([l.split()[0] for l in lines], ["outrider-x-20260101-000000Z.zip", "outrider-x-20260102-000000Z.zip"])
+            self.assertIn(" MB ", lines[0])
+            self.assertEqual(ed_outrider.list_backups(os.path.join(d, "none"), "x.sqlite")[0][:11], "no backups:")
+            cfg = os.path.join(d, "t.toml")
+            with open(cfg, "w") as f:
+                f.write(f'[server]\nbackup_dir = "{out}"\n')
+            dbp = os.path.join(d, "x.sqlite")
+            got = self.cli(["--config", cfg, "--db", dbp, "--list-backups"])
+            self.assertEqual(len(got.stdout.strip().splitlines()), 2)
+            got = self.cli(["--config", cfg, "--db", dbp, "--restore"])   # no zip named: the newest of this database's
+            self.assertEqual(got.returncode, 0, got.stderr)
+            con = sqlite3.connect(dbp)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 6)
+            con.close()
+            got = self.cli(["--config", cfg, "--db", dbp, "--restore", os.path.basename(z1)])   # a bare name, found in backup_dir
+            self.assertEqual(got.returncode, 0, got.stderr)
+            con = sqlite3.connect(dbp)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 4)
+            con.close()
+            self.assertEqual(len([f for f in os.listdir(d) if ".pre-restore-" in f]), 1)   # the first had no database to move
+            got = self.cli(["--config", cfg, "--db", dbp, "--restore", "nope.zip"])
+            self.assertEqual(got.returncode, 1)
+            self.assertIn("not restored:", got.stderr)
+
+    @staticmethod
+    def cli(args):
+        """ed_outrider.py in a subprocess on a free scratch port: these flags exit before any server starts."""
+        import socket, subprocess
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        return subprocess.run([sys.executable, ed_outrider.__file__, "--port", str(port), "--host", "127.0.0.1"] + args,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_help_and_readme_name_the_flags(self):
+        out = self.cli(["--help"]).stdout
+        self.assertIn("--restore", out)
+        self.assertIn("--list-backups", out)
+        with open(os.path.join(os.path.dirname(ed_outrider.__file__), "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        self.assertIn("--restore", readme)
+        self.assertIn("--list-backups", readme)

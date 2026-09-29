@@ -463,8 +463,8 @@ def analyse(events, args):
             explo_sales.append((ts, ev))
         elif name in SELL_ORGANIC:
             bio_sales.append((ts, ev))
-            # Calibrate the first-log bonus rate on the whole sale history,
-            # not just the last one -- a bigger sample is a better prior.
+            # Calibrate the x5 rate on the whole sale history, not just the last
+            # one -- a bigger sample is a better prior (for runs whose footfall is unknown).
             for b in ev.get("BioData", []):
                 bio_rows += 1
                 if b.get("Bonus"):
@@ -573,6 +573,7 @@ def analyse(events, args):
     mapped = {}                     # (system, bodyid) -> efficient?  (mapping still aboard)
     system_name = {}                # SystemAddress -> name, for events that carry only the address
     organics = []                   # completed (Analyse) samples since the bio cut-off
+    footfalled = {}                 # (system, bodyid) -> WasFootfalled from your first Scan of it that says
     death_in_window = None
 
     for ts, cmdr, ev in events:
@@ -581,6 +582,10 @@ def analyse(events, args):
         name = ev.get("event")
 
         if name == "Scan":
+            if "WasFootfalled" in ev:
+                # Vista Genomics pays x5 where nobody had set foot when you scanned the body (the first scan
+                # counts: a rescan after your own landing says footfalled)
+                footfalled.setdefault((ev.get("SystemAddress"), ev.get("BodyID")), bool(ev["WasFootfalled"]))
             if not (ev.get("StarType") or ev.get("PlanetClass")):
                 continue  # belt clusters and rings: no cartographic value, don't count them
             key = (ev.get("SystemAddress"), ev.get("BodyID"))
@@ -679,25 +684,9 @@ def analyse(events, args):
         })
     explo_rows.sort(key=lambda r: r["value"], reverse=True)
 
-    bio_by_species = {}
-    bio_unknown = []
-    bio_base_total = 0
-    for ev in organics:
-        value, name = species_value(ev.get("Species", ""))
-        label = ev.get("Species_Localised") or name or ev.get("Species", "?")
-        if value is None:
-            bio_unknown.append(label)
-            value = 0
-        bio_base_total += value
-        row = bio_by_species.setdefault(label, {"species": label, "count": 0,
-                                                "unit_value": value, "value": 0})
-        row["count"] += 1
-        row["value"] += value
-    bio_rows_out = sorted(bio_by_species.values(), key=lambda r: r["value"], reverse=True)
-
-    # Vista Genomics pays 5x for a species nobody has logged before. The journal
-    # cannot know that in advance, so bound it: base total .. 5x base total, with
-    # a mid estimate calibrated on how often your own past sales earned the bonus.
+    # Vista Genomics pays 5x for a sample from a body nobody had set foot on when you scanned it. Each run is
+    # priced by its body's WasFootfalled (x5 when False, x1 when True); a run whose body's Scan is not in the
+    # journals is priced at the rate your own past sales earned the bonus. Range: base total .. 5x base total.
     if args.bonus_rate is not None:
         bonus_rate = args.bonus_rate
         rate_source = "supplied with --bonus-rate"
@@ -708,7 +697,30 @@ def analyse(events, args):
     else:
         bonus_rate = 0.0
         rate_source = "no prior sale to calibrate against"
-    bio_estimate = int(bio_base_total * (1 + 4 * bonus_rate))
+
+    bio_by_species = {}
+    bio_unknown = []
+    bio_base_total = 0
+    bio_estimate = 0.0
+    factors = {5: 0, 1: 0, None: 0}   # runs priced x5 / x1 / at the sale-history rate
+    for ev in organics:
+        value, name = species_value(ev.get("Species", ""))
+        label = ev.get("Species_Localised") or name or ev.get("Species", "?")
+        if value is None:
+            bio_unknown.append(label)
+            value = 0
+        ff = footfalled.get((ev.get("SystemAddress"), ev.get("Body")))
+        factor = None if ff is None else 1 if ff else 5
+        factors[factor] += 1
+        bio_base_total += value
+        bio_estimate += value * (factor if factor else 1 + 4 * bonus_rate)
+        row = bio_by_species.setdefault(label, {"species": label, "count": 0, "unit_value": value, "value": 0,
+                                                "x5": 0, "x1": 0, "unknown": 0})
+        row["count"] += 1
+        row["value"] += value
+        row["x5" if factor == 5 else "x1" if factor == 1 else "unknown"] += 1
+    bio_rows_out = sorted(bio_by_species.values(), key=lambda r: r["value"], reverse=True)
+    bio_estimate = int(bio_estimate)
 
     return {
         "commanders_seen": sorted(commanders),
@@ -738,6 +750,9 @@ def analyse(events, args):
             "base_value": bio_base_total,
             "max_value": bio_base_total * 5,
             "estimated_value": bio_estimate,
+            "x5_runs": factors[5],
+            "x1_runs": factors[1],
+            "unknown_runs": factors[None],
             "bonus_rate": bonus_rate,
             "bonus_rate_source": rate_source,
             "unknown_species": sorted(set(bio_unknown)),
@@ -794,8 +809,10 @@ def report(result, args):
     print(f"  base value    : {cr(bio['base_value'])}")
     print(f"  ESTIMATED     : {cr(bio['estimated_value'])}"
           f"   (range {cr(bio['base_value'])} .. {cr(bio['max_value'])})")
-    print(f"  first-log rate: {bio['bonus_rate']:.0%} assumed"
-          f" -- {bio['bonus_rate_source']}")
+    print(f"  x5 runs       : {bio['x5_runs']:,} of {bio['samples']:,} (no footfall when you scanned the body)")
+    if bio["unknown_runs"]:
+        print(f"  footfall unknown: {bio['unknown_runs']:,}, priced at {bio['bonus_rate']:.0%} x5"
+              f" -- {bio['bonus_rate_source']}")
     if bio["unknown_species"]:
         print(f"  NOT PRICED    : {', '.join(bio['unknown_species'])}"
               " (species missing from the built-in table; counted as 0)")
@@ -1002,8 +1019,9 @@ def main(argv=None):
     p.add_argument("--ignore-deaths", action="store_true",
                    help="Do not treat a Died event as a reset point.")
     p.add_argument("--bonus-rate", type=float, metavar="0.0-1.0",
-                   help="Assumed fraction of organic samples that earn the 5x first-log bonus. "
-                        "Default: calibrated from your last sale.")
+                   help="Assumed fraction of organic samples that earn the 5x first-footfall bonus, "
+                        "for runs whose body's footfall is not in the journals (the rest are priced x5 or x1 "
+                        "from the body's scan). Default: calibrated from your past sales.")
     p.add_argument("--efficiency-bonus", action="store_true",
                    help="Apply the 1.25x bonus for mapping inside the probe efficiency "
                         "target. Off by default -- see --calibrate.")

@@ -57,6 +57,8 @@ tr.scoopnext td.name::after { content: " ⛽ nearest scoopable"; color: var(--go
 td.notable { font-size: 12px; }
 td.notable .nb { display: inline-block; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-right: 3px; }
 td.notable .bio { color: #c77dff; }
+td.notable .old { color: var(--muted); border-style: dashed; cursor: help; } .old { cursor: help; }
+#firstsLine .seen, td.seen span { color: var(--warn); cursor: help; }
 td.notable .ELW { color: var(--good); } td.notable .WW { color: var(--info); } td.notable .AW { color: #c77dff; } td.notable .T { color: var(--warn); }
 .badge.s-edsm { color: var(--info); margin-left: 4px; }
 #hereHead { font-size: 15px; margin: 12px 0 4px; } #hereHead b { color: var(--accent); }
@@ -268,6 +270,18 @@ button.icon { background: var(--panel); color: var(--text); border: 1px solid va
   padding: 3px 8px; cursor: pointer; font: inherit; font-size: 15px; line-height: 1; }
 button.icon.on { border-color: var(--accent); }
 button.icon.blocked { border-color: var(--warn); }
+/* the hush: ▾ beside 🗣 opens the menu; "hushed 7:42" while it runs */
+.hushwrap { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+button.icon.hushbtn { padding: 3px 4px; font-size: 11px; }
+button.icon.hushbtn.on { border-color: var(--warn); }
+.hushlbl { color: var(--warn); font-size: 12px; white-space: nowrap; }
+.hushmenu { position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 60; display: flex; flex-direction: column; gap: 4px;
+  min-width: 14em; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.hushmenu[hidden] { display: none; }
+.hushmenu b { font-size: 12px; }
+.hushmenu button { text-align: left; background: none; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 13px; }
+.hushmenu button:hover { border-color: var(--accent); }
+.hushmenu .unk { font-size: 11px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 10px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 7px; min-width: 0; }
 .tile .lbl { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
@@ -524,10 +538,20 @@ tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font
 
 /* ---- Now mode: big text for a second monitor ---- */
 body.nowmode header, body.nowmode main { display: none; }
-#nowView { padding: 3vh 4vw; cursor: pointer; min-height: 100vh; }
+#nowView { padding: 3vh 4vw; min-height: 100vh; touch-action: manipulation; }
+#nowBar { float: right; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0 0 8px 12px; max-width: 100%; }
+#nowBar button { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  font-size: clamp(14px, 1.5vw, 18px); padding: 6px 12px; min-height: 40px; cursor: pointer; }
+#nowBar button.on { border-color: var(--accent); color: var(--accent); }
+#nowView .now-caps { margin-top: 2vh; border-top: 1px solid var(--line); padding-top: 1vh; }
+#nowView .now-cap { font-size: clamp(16px, 2.2vw, 26px); line-height: 1.3; padding: .5vh 0; cursor: pointer; }
+#nowView .now-cap:hover { color: var(--accent); }
+#nowView .now-cap .unk { font-size: .75em; }
+@media (max-width: 640px) { #nowBar { float: none; justify-content: flex-start; margin: 0 0 10px; } #nowBar button { padding: 6px 9px; } }
 #nowView .now-sys { font-size: clamp(36px, 7vw, 80px); font-weight: 700; color: var(--accent); line-height: 1.1; margin-bottom: 2vh; word-break: break-word; }
 #nowView .now-line { font-size: clamp(20px, 3.4vw, 40px); margin: 1.4vh 0; line-height: 1.25; }
 #nowView .now-line.warn b { color: var(--warn); } #nowView .now-line.urgent b { color: var(--bad); }
+#nowView .now-risk.warn { color: var(--warn); } #nowView .now-risk.urgent { color: var(--bad); }
 #nowView .now-body { font-size: clamp(18px, 2.6vw, 30px); } #nowView .now-body .spacing { font-size: 1.3em; }
 #nowView .now-card { font-size: clamp(22px, 3.8vw, 44px); padding: 1.2vh 1.6vw; border-radius: 10px; margin: 1.4vh 0; border: 2px solid var(--line); }
 #nowView .now-card.yes { border-color: var(--good); color: var(--good); } #nowView .now-card.no { color: var(--muted); }
@@ -565,3 +589,8 @@ details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: poin
 #speechLog .slog { padding: 3px 0; border-bottom: 1px solid var(--line, rgba(128,128,128,.2)); overflow-wrap: anywhere; }
 #speechLog .said b { color: var(--good); } #speechLog .cut b { color: var(--warn); }
 #speechLog .dropped b { color: var(--bad); } #speechLog .silent b, #speechLog .wait b { color: var(--muted); }
+#speechLog button.ban { padding: 0 4px; font-size: 12px; }
+.spacing.elsewhere { color: var(--warn); }
+#refLn .regionnew { color: var(--good); font-weight: 600; }
+#tripRows tr.hasnote td { border-bottom: none; padding-bottom: 1px; }
+#tripRows tr.tripnote td { font-size: 12px; padding-top: 0; padding-left: 24px; white-space: normal; }

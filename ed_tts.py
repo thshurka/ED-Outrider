@@ -10,12 +10,21 @@ this script is searched when the system Python has no Piper). Voices live in pip
 the script; a configured voice that is missing is downloaded there in the background on first use
 (about 63 MB each, from the Piper voices repository on Hugging Face). Installing them beforehand
 with `python -m piper.download_voices --download-dir piper-voices <voice>` just skips that wait.
+
+"Play speech and sounds on this PC" (a tick on the page) plays the lines and the alert sounds here instead of in
+the browser, through the first of pw-play, paplay, aplay or ffplay found (Linux; [speech] server_player picks
+one or turns it off). LinePlayer does the playing and render_sound turns static/sounds.json into WAV.
 """
+import asyncio
 import glob
 import hashlib
 import io
+import json
+import math
 import os
 import re
+import shutil
+import struct
 import sys
 import tempfile
 import threading
@@ -42,6 +51,17 @@ FILE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/{path}?down
 # The longest line spoken (about a minute of speech): a cap on the synthesis work one request can ask for.
 # A longer line is cut at a sentence or clause boundary, never mid-word (see clip_text).
 SAY_MAX = 1000
+# Audio players, in the order "auto" tries them: (name, command playing a file (its path is appended), command
+# reading a WAV on stdin, or None when it needs a file). The voice lab uses the file commands.
+PLAYERS = (("pw-play", ["pw-play"], None),
+           ("paplay", ["paplay"], ["paplay"]),
+           ("aplay", ["aplay", "-q"], ["aplay", "-q", "-"]),
+           ("ffplay", ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"],
+            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "-"]))
+PLAYER_CHOICES = ("auto",) + tuple(p[0] for p in PLAYERS) + ("off",)
+PLAY_MAX = 20.0   # s: the longest a line (or a sound) may play on the server before its player is killed
+SOUNDS_FILE = os.path.join(HERE, "static", "sounds.json")
+SOUND_RATE = 22050
 
 
 def clip_text(text, limit=SAY_MAX):
@@ -364,3 +384,252 @@ class Speaker:
         with self._lock:
             self._keep(key, audio)
         return audio
+
+
+# --------------------------------------------------------------------------
+# Playing on the server: the page's "Play speech and sounds on this PC" tick (Linux only).
+# --------------------------------------------------------------------------
+
+def find_player(choice="auto", which=None):
+    """The PLAYERS entry to use: for "auto" the first one installed, for a player's name that one if it is
+    installed; None for "off", an unknown name or nothing found. `which`: shutil.which, or a stand-in (tests)."""
+    which = which or shutil.which
+    for entry in PLAYERS:
+        if choice in ("auto", entry[0]) and which(entry[0]):
+            return entry
+    return None
+
+
+class _Line:
+    """A spoken line on its way through LinePlayer: stop() may come before its player has even started."""
+    __slots__ = ("id", "stopped", "proc")
+
+    def __init__(self, line_id):
+        self.id, self.stopped, self.proc = line_id, False, None
+
+
+class LinePlayer:
+    """Plays WAV audio with a local player. One spoken line at a time (claim() refuses a second, so two browsers
+    cannot talk over each other); sounds play beside it without waiting, as they do in the browser."""
+
+    def __init__(self, choice="auto", which=None, cap=PLAY_MAX):
+        self.choice = choice if choice in PLAYER_CHOICES else "auto"
+        self.player = find_player(self.choice, which) if self.choice != "off" else None
+        self.cap = cap
+        self._line = None          # the _Line playing (or being synthesised) now
+        self._stopped = []         # ids a stop named before their line arrived (the page's stop can overtake it)
+        self._sounds = set()       # sound tasks still playing (kept, or the loop may drop them half way)
+
+    @property
+    def name(self):
+        return self.player[0] if self.player else None
+
+    @property
+    def busy(self):
+        return self._line is not None
+
+    def info(self):
+        return {"player": self.name, "choice": self.choice}
+
+    def claim(self, line_id=None):
+        """Reserve the voice for a line (before synthesis, so a second request is refused at once); None when
+        another line has it."""
+        if self._line is not None:
+            return None
+        self._line = _Line(line_id)
+        if line_id is not None and line_id in self._stopped:   # stopped before it got here
+            self._line.stopped = True
+        return self._line
+
+    def release(self, line):
+        if self._line is line:
+            self._line = None
+
+    def stop(self, line_id=None):
+        """Cut the line short: any line, or only the one with this id (a page stops only its own line)."""
+        line = self._line
+        if line is None or (line_id is not None and line.id != line_id):
+            if line_id is not None:
+                self._stopped = (self._stopped + [line_id])[-16:]
+            return False
+        line.stopped = True
+        if line.proc and line.proc.returncode is None:
+            try:
+                line.proc.terminate()
+            except ProcessLookupError:
+                pass
+        return True
+
+    async def play_line(self, line, wav):
+        """Play a claimed line to its end: "done", "stopped" or "failed" (no player, or it would not play)."""
+        if line.stopped:
+            return "stopped"
+        rc = await self._run(wav, line)
+        return "stopped" if line.stopped else "done" if rc == 0 else "failed"
+
+    def play_sound(self, wav):
+        """Start a sound and return at once (False when there is no player)."""
+        if not self.player:
+            return False
+        task = asyncio.get_running_loop().create_task(self._run(wav))
+        self._sounds.add(task)
+        task.add_done_callback(self._sounds.discard)
+        return True
+
+    async def _run(self, wav, line=None):
+        """Run the player on `wav`: on stdin where it reads one, else from a temporary file removed afterwards.
+        Killed past the cap. The exit code, or None when it could not start."""
+        if not self.player:
+            return None
+        _, file_cmd, stdin_cmd = self.player
+        path, proc = None, None
+        try:
+            if stdin_cmd:
+                cmd = stdin_cmd
+            else:
+                fd, path = tempfile.mkstemp(prefix="outrider-", suffix=".wav")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(wav)
+                cmd = file_cmd + [path]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdin=asyncio.subprocess.PIPE if stdin_cmd else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            except OSError as e:
+                print(f"spoken alerts: could not start {cmd[0]}: {e}", file=sys.stderr)
+                return None
+            if line is not None:
+                line.proc = proc
+                if line.stopped:   # stopped while the player started
+                    proc.terminate()
+
+            async def feed_and_wait():
+                if stdin_cmd:
+                    try:
+                        proc.stdin.write(wav)
+                        await proc.stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError):   # stopped, or the player gave up
+                        pass
+                    finally:
+                        proc.stdin.close()
+                return await proc.wait()
+            try:
+                return await asyncio.wait_for(feed_and_wait(), self.cap)
+            except asyncio.TimeoutError:
+                print(f"spoken alerts: {cmd[0]} still playing after {self.cap:g} s, stopped", file=sys.stderr)
+                if line is not None:   # it did play: a line cut at the cap counts as stopped, not as failed
+                    line.stopped = True   # (a failure would have the browser say the whole line again)
+                return None
+        finally:
+            if proc is not None and proc.returncode is None:   # the cap, or the request went away
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
+            if path:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    async def close(self):
+        """At shutdown: stop the line and any sound still playing."""
+        self.stop()
+        for task in list(self._sounds):
+            task.cancel()
+        await asyncio.gather(*self._sounds, return_exceptions=True)
+
+
+def load_sounds(path=SOUNDS_FILE):
+    """static/sounds.json: {"gain": g, "sounds": {name: {"tones": [...], "lowpass"?: Hz}}}."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    if not isinstance(doc, dict) or not isinstance(doc.get("sounds"), dict):
+        raise ValueError(f"{path}: no sounds")
+    return doc
+
+
+def _wave(kind, phase):
+    """One oscillator sample at `phase` (cycles), -1 to 1, shaped like WebAudio's (without its band limiting)."""
+    x = phase % 1.0
+    if kind == "sine":
+        return math.sin(2 * math.pi * x)
+    if kind == "square":
+        return 1.0 if x < 0.5 else -1.0
+    if kind == "sawtooth":   # from 0 up to 1, a drop to -1 half way, back up to 0
+        return 2 * ((x + 0.5) % 1.0) - 1
+    return 1 - 4 * abs((x + 0.25) % 1.0 - 0.5)   # triangle: from 0 up to 1, down to -1, back to 0
+
+
+def _tone_into(buf, tone, rate):
+    """Add one tone to `buf` (a list of floats), with the page's envelope: from 0.0001 up to vol over `attack`,
+    then an exponential fade to 0.0001 at `dur`; a glide is an exponential change of pitch over dur."""
+    freq, start, dur = float(tone["freq"]), float(tone.get("start", 0)), float(tone["dur"])
+    vol, attack = max(float(tone.get("vol", 0.3)), 0.0001), min(float(tone.get("attack", 0.01)), dur)
+    kind, glide = tone.get("type", "triangle"), tone.get("glideTo")
+    first, n = int(start * rate), int(dur * rate)
+    phase, floor = 0.0, 0.0001
+    for i in range(n):
+        t = i / rate
+        if t < attack:
+            g = floor * (vol / floor) ** (t / attack)
+        else:
+            g = vol * (floor / vol) ** ((t - attack) / max(dur - attack, 1e-6))
+        f = freq * (float(glide) / freq) ** (t / dur) if glide else freq
+        buf[first + i] += g * _wave(kind, phase)
+        phase += f / rate
+
+
+def render_sound(spec, gain=0.8, rate=SOUND_RATE):
+    """One sound of sounds.json as 16-bit mono WAV bytes, mixed as the page mixes it: the tones, those not marked
+    dry through a one-pole lowpass when the sound has one (the page's biquad is steeper; close enough), times
+    `gain`, clipped."""
+    tones = spec.get("tones") or []
+    length = max((float(t.get("start", 0)) + float(t["dur"]) for t in tones), default=0) + 0.05
+    size = int(length * rate) + 1
+    wet, dry = [0.0] * size, [0.0] * size
+    cut = spec.get("lowpass")
+    for t in tones:
+        _tone_into(dry if (t.get("dry") or not cut) else wet, t, rate)
+    if cut:
+        a, y = 1 - math.exp(-2 * math.pi * float(cut) / rate), 0.0
+        for i, x in enumerate(wet):
+            y += a * (x - y)
+            dry[i] += y
+    frames = struct.pack(f"<{size}h", *(int(max(-1.0, min(1.0, v * gain)) * 32767) for v in dry))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(frames)
+    return buf.getvalue()
+
+
+class SoundBank:
+    """The alert sounds rendered to WAV on first use, rendered again when sounds.json changes."""
+
+    def __init__(self, path=SOUNDS_FILE):
+        self.path = path
+        self._stamp, self._doc, self._wavs = None, None, {}
+
+    def _load(self):
+        stamp = os.path.getmtime(self.path)
+        if stamp != self._stamp:
+            self._doc, self._wavs, self._stamp = load_sounds(self.path), {}, stamp
+        return self._doc
+
+    def names(self):
+        return list(self._load()["sounds"])
+
+    def wav(self, name):
+        """WAV bytes for a sound, or None for a name sounds.json does not have (call it off the event loop:
+        rendering takes a few tens of milliseconds)."""
+        doc = self._load()
+        spec = doc["sounds"].get(name)
+        if not isinstance(spec, dict):
+            return None
+        if name not in self._wavs:
+            self._wavs[name] = render_sound(spec, float(doc.get("gain", 0.8)))
+        return self._wavs[name]

@@ -136,6 +136,11 @@ SYNTH = {
     "Limpet basic": {"materials": {"iron": 10, "nickel": 10}, "verified": True},
 }
 BOOSTS = ("basic", "standard", "premium")
+# The jumponium call-out: the scarce FSD-injection materials worth a landing, with the least share of a body's
+# surface worth one (roughly 1% for grade 4, 1.5% for the others); a boost you can still make more often than
+# JUMPONIUM_MAX times is not short of anything.
+JUMPONIUM_SCARCE = {"arsenic": 1.5, "cadmium": 1.5, "yttrium": 1.0, "polonium": 1.0}
+JUMPONIUM_MAX = 2
 
 
 def new_state():
@@ -214,6 +219,36 @@ def craftable(counts, recipe):
         if best is None or n < best:
             best, limit = n, m
     return best or 0, limit
+
+
+def jumponium_short(counts, threshold=JUMPONIUM_MAX):
+    """The scarce materials holding back FSD injections: for the standard and premium recipes you can make at most
+    `threshold` times, every material whose floor(have / need) equals that count (the tie set: craftable() names
+    only one), kept to JUMPONIUM_SCARCE and to those not near their grade's cap. {material id: count held}."""
+    out = {}
+    for b in ("standard", "premium"):
+        recipe = SYNTH[f"FSD injection {b}"]["materials"]
+        n, _ = craftable(counts, recipe)
+        if n > threshold:
+            continue
+        for m, need in recipe.items():
+            have = counts.get(m, 0)
+            if m in JUMPONIUM_SCARCE and have // need == n and have < 0.9 * CAPS[MATERIALS[m][2]]:
+                out[m] = have
+    return out
+
+
+def jumponium_pick(body_materials, short):
+    """What a body's surface offers of the `short` materials (jumponium_short): the scarcest one you hold (the
+    richest share on a tie) at or over its floor, as {material, pct}, or None. `body_materials` is a Scan's
+    Materials list ([{Name, Percent}])."""
+    best = None
+    for x in body_materials or []:
+        m, pct = (x.get("Name") or "").lower(), x.get("Percent") or 0
+        if m in short and pct >= JUMPONIUM_SCARCE[m]:
+            if best is None or (short[m], -pct) < (short[best["material"]], -best["pct"]):
+                best = {"material": m, "pct": round(pct, 1)}
+    return best
 
 
 def boosts(counts):

@@ -12,6 +12,8 @@ A small window, separate from Outrider (it does not need the server running):
 - Lines: play a random line from speech.json, from one alert and personality or any, filled in with
   made-up values and the names you want to be called, exactly as Outrider would say it (in the personality's
   own voice and pace when speech.json gives it one). Audition plays eight key alerts in a row per personality.
+  Cut this line bans the line just played (speech_banned.json, the same file the page's 👎 writes): Outrider
+  and the lab never say it again.
 - Your own text: type anything and hear it; Save WAV keeps the audio.
 
 Needs Piper (pip install piper-tts, or install.sh); tkinter comes with Python on Windows and macOS, and is
@@ -92,10 +94,9 @@ class Player:
             self.cmd = "winsound"
         elif system == "Darwin" and shutil.which("afplay"):
             self.cmd = ["afplay"]
-        else:
-            self.cmd = next((c for c in (["pw-play"], ["paplay"], ["aplay", "-q"],
-                                         ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"])
-                             if shutil.which(c[0])), None)
+        else:   # the same players, in the same order, as Outrider's "Play speech and sounds on this PC"
+            found = ed_tts.find_player()
+            self.cmd = found[1] if found else None
 
     @property
     def name(self):
@@ -221,9 +222,12 @@ def download(entry, progress):
 
 
 def load_lines(path=None):
-    with open(path or configured_speech_file(), encoding="utf-8") as f:
+    """(styles, lines) from the speech file, less the lines banned in speech_banned.json (as Outrider sees them)."""
+    path = path or configured_speech_file()
+    with open(path, encoding="utf-8") as f:
         doc = json.load(f)
-    return doc.get("styles") or {}, doc.get("lines") or {}
+    lines, _ = ed_speech.apply_bans(doc.get("lines") or {}, ed_speech.read_bans(ed_speech.banned_path(path)))
+    return doc.get("styles") or {}, lines
 
 
 class Lab:
@@ -232,6 +236,7 @@ class Lab:
         self.player, self.voices = Player(), Voices()
         self.tmp = tempfile.mkdtemp(prefix="outrider-voice-")
         self.catalogue, self.last_line, self.busy = {}, None, False
+        self.last_pick = None   # (alert, personality, line) of the random line on show: what "Cut this line" bans
         self.line_pace = None   # (text, personality speed) of the last random line: see speak()
         self.line_voice = None  # (text, personality's own voice, personality) of the last random line: see synth_args()
         self.audition_run = None   # the audition playing (a fresh object per run): Stop, Speak and the rest end it
@@ -337,6 +342,7 @@ class Lab:
         lb.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Button(lb, text="▶ Random line", command=self.random_line).pack(side="left")
         ttk.Button(lb, text="▶ Audition", command=self.audition).pack(side="left", padx=6)
+        ttk.Button(lb, text="✂ Cut this line", command=self.cut_line).pack(side="left")
         self.picked = ttk.Label(lf, text=self.lines_error or "", foreground="#c0392b" if self.lines_error else "#777")
         self.picked.grid(row=3, column=2, columnspan=2, sticky="w", pady=(6, 0))
         self.alert_changed()
@@ -503,6 +509,7 @@ class Lab:
         self.text.delete("1.0", "end")
         self.text.insert("1.0", text)
         self.picked.configure(text=f"{alert} · {self.style_label(style)}", foreground="#777")
+        self.last_pick = (alert, style, line)
         # a personality's own voice and pace in speech.json, as in Outrider (kept while this line is the text):
         # its voice wins over the lab's, its pace multiplies yours
         voice, pace = ed_speech.style_voice(self.styles, style)
@@ -521,6 +528,24 @@ class Lab:
             return
         self.show_line(*pick)
         self.speak()
+
+    def cut_line(self):
+        """Ban the random line on show, in speech_banned.json next to the speech file (the page's 👎 writes the same
+        file), and drop it from the lab's lists. The last line of a list stays, so no alert ever goes quiet."""
+        if not self.last_pick:
+            self.picked.configure(text="play a random line first, then cut it", foreground="#c0392b")
+            return
+        alert, style, line = self.last_pick
+        status, out = ed_speech.ban_line(self.speech_file, alert, line)
+        if status != 200:
+            self.picked.configure(text=f"not cut: {out.get('error')}", foreground="#c0392b")
+            return
+        self.last_pick = None
+        entry = self.lines.get(alert) or {}
+        for k, versions in entry.items():   # a ban covers the wording in every list of the alert
+            if isinstance(versions, list) and line in versions and len(versions) > 1:
+                entry[k] = [x for x in versions if x != line]
+        self.picked.configure(text=f"cut from {alert} · {self.style_label(style)} ({out['banned']} banned in all)", foreground="#777")
 
     # ---- audition: eight key alerts in a row, per personality, each in its own voice ----
     def audition(self):

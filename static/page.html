@@ -13,8 +13,9 @@
 <header>
   <div class="topbar">
     <h1>ED Outrider</h1>
-    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button></span>
-    <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button></span>
+    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
+    <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
+      <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button></span>
   </div>
   <div class="tiles">
     <div class="tile" id="tWhere"><div class="lbl">Where I Am Currently:</div><div class="val" id="here">loading…</div><div class="ln" id="refLn" title="distance from Sol and from Colonia (Eol Prou RS-T d3-94)"></div>
@@ -33,7 +34,10 @@
   <div id="arrival"></div>
   <div id="sell"></div>
 </header>
-<section id="nowView" hidden title="tap to go back"></section>
+<section id="nowView" hidden>
+  <div id="nowBar"><button type="button" id="nowSpeech" title="spoken alerts on or off (this browser, as 🗣 in the header)">🗣</button><button type="button" id="nowHush" title="hush the voice for 30 minutes (danger lines still speak), wherever it is speaking">hush 30 min</button><button type="button" id="nowStatus" title="the co-pilot's status report, said by the window that is speaking">status report</button><button type="button" id="nowBack" title="back to the page (or double-tap)">✕ back</button></div>
+  <div id="nowBody"></div>
+</section>
 <main>
 <section id="overView" hidden>
   <div class="ovbar">
@@ -89,11 +93,12 @@
     <label><input type="checkbox" id="fShowLost"> show lost</label><span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=firsts&format=csv" download>CSV</a> · <a href="api/export?what=firsts&format=json" download>JSON</a></span></div>
   <table id="firstsTable">
-    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th class="num" data-sort="value">Unsold value</th></tr></thead>
+    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th title="the firsts watch: someone else has scanned this since you (their scans reached Spansh)">Seen by others</th><th class="num" data-sort="value">Unsold value</th></tr></thead>
     <tbody id="firstsRows"></tbody>
   </table>
   <div class="hint">Every visited system that still holds first-discovery or first-mapping data you have not sold (or lost). Unsold value is
-    the cartographic estimate for what is on board from that system; lost data can be re-earned by scanning those bodies again.</div>
+    the cartographic estimate for what is on board from that system; lost data can be re-earned by scanning those bodies again.
+    Seen by others: someone else has scanned this since you (checked on Spansh once a day per system, most valuable first; <code>[spansh] watch_firsts</code> turns it off).</div>
   <h3 class="subhead">Left behind <span class="unk">· visited systems within
     <select id="lbRadius"><option>50</option><option selected>100</option><option>200</option></select> ly with work worth going back for</span></h3>
   <div class="hint">Bodies the honk counted that you never found, genera the DSS found that you never sampled, bio signals on bodies you never
@@ -300,10 +305,14 @@
         <option value="auto">auto: one window at a time</option><option value="always">always</option><option value="never">never</option></select>
       <span id="speakerStatus" class="hint"></span> <button type="button" class="try" id="speakerClaim" hidden>speak from this window</button>
       <div class="hint">With the page open in several windows (a second screen at ?mode=now), auto lets only one of them speak and play the alert sounds; every window still shows the alerts. Remembered per browser: always makes every window of it speak, never keeps this browser quiet. The ▶ try buttons always work.</div></div>
+    <label class="mod"><input type="checkbox" id="serverPlay"> Play speech and sounds on this PC <span id="serverPlayStatus" class="unk"></span>
+      <span class="hint">the PC running Outrider plays the spoken lines (Piper) and the alert sounds through its own player, so the page needs no click to allow audio; a page must still be open, since it chooses what to say. Whatever the PC cannot play, this browser plays instead. Per browser; Linux only</span></label>
     <div class="mod inlineopts">Say signals as the FSS finds them:
       <label><input type="checkbox" id="sayBio"> biological</label>
       <label><input type="checkbox" id="sayGeo"> geological</label>
       <span class="hint">"2 Biological and 1 Geological Signals found on body A 3" (when 🗣 is on)</span></div>
+    <label class="mod"><input type="checkbox" id="routineQuiet"> Routine systems: sound only
+      <span class="hint">arriving somewhere known with every body already found, a scoopable star, and nothing over your body or bio levels: a soft two-note sound instead of the arrival briefing (and of "nothing worth staying for" after the FSS); the card stays</span></label>
     <label class="mod"><input type="checkbox" id="sayHazard"> Say the hazard when the FSD charges for a neutron star, white dwarf or black hole
       <span class="hint">"… Neutron star ahead: throttle down on arrival, mind the jet cone" (part of the jump line)</span></label>
     <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
@@ -325,6 +334,9 @@
       this off before alt-tabbing away mid-jump.
       <button type="button" class="try" id="autoHonkTest" title="press Primary Fire once, 5 seconds from now">▶ test in 5 s</button>
       <span id="autoHonkTestMsg"></span></div>
+    <div class="hint" id="autoHonkGroups" hidden><span id="autoHonkGroupsText"></span>
+      <a href="#" id="autoHonkForget" title="clear what auto honk learned about this ship's fire groups">forget</a></div>
+    <div class="hint" id="copilotLine" hidden></div>
     <h4>Sounds</h4>
     <div class="opts inline">Try them:
       <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>
@@ -334,6 +346,7 @@
       <button type="button" class="try" data-try="find" title="a valuable body just scanned">▶ find</button>
       <button type="button" class="try" data-try="cash" title="docked with data to sell, a sale">▶ cash</button>
       <button type="button" class="try" data-try="chime" title="carrier, codex">▶ chime</button>
+      <button type="button" class="try" data-try="routine" title="a routine system (Routine systems: sound only)">▶ routine</button>
       <button type="button" class="try" data-try="danger" title="hull, heat, interdiction">▶ danger</button>
       <button type="button" class="try" id="trySpeak" title="spoken alerts">▶ voice</button>
     </div>
@@ -359,6 +372,9 @@
     <label class="mod">Approach warning: a landable body of
       <input type="number" id="highG" min="0" step="0.1" style="width:5em"> g or more<span class="reset" data-reset="highG">reset</span>
       <span class="hint">said when you drop into orbital cruise there with unsold data over the amber level or the rebuy multiple below ("2.6 g, 480 million aboard, 3.2 rebuys"); the approach alert above switches it off</span></label>
+    <label class="mod">Fuel alerts: also warn under
+      <input type="number" id="fuelJumps" min="0" max="99" step="1" style="width:4.5em"> jumps of fuel left<span class="reset" data-reset="fuelJumps">reset</span>
+      <span class="hint">blank = off (the default). Once when the jumps left at your pace fall under it (said like the game's low fuel warning), and the low-fuel warnings for an unscoopable arrival star or target then count it as well as under 30%; it also becomes the level for the "top up here" warning, which otherwise asks for two of your usual gaps between scoopable stars (at least 4 jumps)</span></label>
     <label class="mod">Unsold data on board: amber "worth selling soon" at
       <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
       <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>
@@ -382,9 +398,11 @@
       Export them to a file (Import on another browser or after clearing the cache), or save them on the server so a new browser (a tablet running Now) starts with them.
       The view, layouts, the search form and which screen speaks stay per device. The voice is kept by the server already.</div>
     <details id="speechLogBox" class="speechlog"><summary>Spoken lines: the last 100 alerts in this window and what became of each</summary>
-      <div class="hint">Newest first: said, cut short, dropped (waited too long, you left the system, replaced by newer news, a cooldown) or
-        silent (speech off, not ticked, another window speaks). Only this window's, and a reload starts afresh.
+      <div class="hint">Newest first: said, cut short, dropped (waited too long, you left the system, replaced by newer news, a cooldown, hushed) or
+        silent (speech off, not ticked, another window speaks, hushed). Only this window's, and a reload starts afresh.
+        👎 on a line from the lines file means never say that one again (for every browser and the voice lab; the last line of a list stays).
         <button type="button" class="try" id="speechLogCopy">copy</button></div>
+      <div id="speechBans" class="hint"></div>
       <div id="speechLog"></div></details>
     <div class="btns"><span class="grow"></span><button value="close" class="primary">Done</button></div>
   </form>
@@ -405,5 +423,6 @@
   </form>
 </dialog>
 <script>window.__SEARCH_OPTIONS__ = /*SEARCH_OPTIONS*/null; window.SERVER_DEFAULTS = /*SERVER_DEFAULTS*/null;</script>
+<script>window.__SOUNDS__ = /*SOUNDS*/null;</script>
 <script src="static/page.js"></script>
 </body></html>

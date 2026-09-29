@@ -4,6 +4,9 @@ ed_outrider.toml
 # Local database built from your journals, and caches
 ed_outrider.sqlite
 ed_outrider.sqlite-journal
+# what --restore moved aside (the database and browser_defaults.json it replaced), and its temp file
+*.pre-restore-*
+*.restore-*.part
 __pycache__/
 *.pyc
 
@@ -19,6 +22,10 @@ project/
 # Python virtual environment and downloaded Piper voices (spoken alerts)
 .venv/
 piper-voices/
+
+# Lines banned with the 👎 in the page's "Spoken lines" (or the voice lab's Cut this line): your own choice
+speech_banned.json
+speech_banned.json.tmp
 
 # Backups made from the page (database + journals)
 backups/
