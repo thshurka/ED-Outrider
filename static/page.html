@@ -92,14 +92,19 @@
 </section>
 <section id="firstsView" hidden>
   <div class="srow"><span id="fStatus"></span>
-    <label><input type="checkbox" id="fShowLost"> show lost</label><span class="grow"></span>
+    <label><input type="checkbox" id="fShowLost"> show lost</label>
+    <label title="with show lost: only the systems with lost data to rescan within this many ly of you, nearest first (empty: no limit)">within <input type="number" id="fWithin" min="1" step="any" placeholder="any" inputmode="decimal"> ly</label><span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=firsts&format=csv" download>CSV</a> · <a href="api/export?what=firsts&format=json" download>JSON</a></span></div>
   <table id="firstsTable">
-    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th>System tag</th><th>Bodies</th><th>Mapped</th><th title="the firsts watch: someone else has scanned this since you (their scans reached Spansh)">Seen by others</th><th class="num" data-sort="value">Unsold value</th></tr></thead>
+    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="f-unsold">System tag</th><th class="f-by">Bodies</th><th class="f-by">Mapped</th><th class="f-unsold" title="the firsts watch: someone else has scanned this since you (their scans reached Spansh)">Seen by others</th>
+      <th class="num f-lost" title="what the bodies still to scan pay (FSS; with the first discovery bonus)"><span class="hide-sm">Lost: </span>scan (FSS)</th><th class="num f-lost" title="what the maps still to redo add on top of the scans (DSS; with the first mapped bonus)"><span class="hide-sm">Lost: </span>map (DSS)</th><th class="num f-lost" data-sort="lost" title="scan + map: what rescanning and remapping everything still lost would get back (click to sort)">Lost <span class="hide-sm">total</span></th><th class="num" data-sort="value">Unsold <span class="hide-sm">value</span></th></tr></thead>
     <tbody id="firstsRows"></tbody>
   </table>
   <div class="hint">Every visited system that still holds first-discovery or first-mapping data you have not sold (or lost). Unsold value is
-    the cartographic estimate for what is on board from that system; lost data can be re-earned by scanning those bodies again.
+    the cartographic estimate for what is on board from that system; lost data can be re-earned by scanning those bodies again
+    (and mapping them again for a lost first map): with show lost ticked and a <i>within</i> distance, the list is that rescan checklist,
+    marked amber part-way and green once everything lost is scanned again (until you sell it). The Lost columns price what is still
+    to scan and to map again (with the bonuses you earned, no efficiency bonus; a map counts what it adds on top of the scan), so the two add up.
     Seen by others: someone else has scanned this since you (checked on Spansh once a day per system, most valuable first; <code>[spansh] watch_firsts</code> turns it off).</div>
   <h3 class="subhead">Left behind <span class="unk">· visited systems within
     <select id="lbRadius"><option>50</option><option selected>100</option><option>200</option></select> ly with work worth going back for</span></h3>

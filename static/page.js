@@ -7,7 +7,7 @@ const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechSt
   "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
   "sayMapped", "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
   "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
+  "log", "lbRadius", "fShowLost", "fWithin", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
   "surfaceCfg", "moduleWarn"];
 const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
   return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
@@ -2636,24 +2636,76 @@ async function loadFirsts() {
 function renderFirsts() {
   const f = firstsData, st = document.getElementById("fStatus"), bms = bmMap();
   if (!f || f.error) { st.textContent = f ? f.error : ""; return; }
-  // lost data stays in the database (a rescan earns it again) but is hidden unless asked for
-  const list = f.firsts.filter(x => fShowLost.checked || x.state !== "lost");
-  list.sort(sortKeys.firsts === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-          : sortKeys.firsts === "distance" ? (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)
+  // lost data stays in the database (a rescan earns it again) but is hidden unless asked for. x.sale is the
+  // headline (unsold while any of it is aboard); x.state is lost while anything is still to rescan, rescanned once
+  // every lost body and map is back (x.recover: the rescan checklist)
+  const within = fShowLost.checked ? firstsWithin() : null;
+  const checklist = x => x.state === "lost" || x.state === "rescanned";
+  let list = f.firsts.filter(x => fShowLost.checked || (x.sale || x.state) === "unsold");
+  // "within N ly": the rescan checklist near you, nearest first
+  if (within != null) list = list.filter(x => checklist(x) && x.distance != null && x.distance <= within);
+  // show lost adds the Lost value columns; Lost total sorts the most valuable trips first (with or without "within",
+  // which is otherwise nearest first); without show lost that sort falls back to the unsold value
+  const lostCols = fShowLost.checked, byLost = lostCols && sortKeys.firsts === "lost";
+  const lostOf = x => (x.recover && x.recover.lost_total) || 0, byDist = (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9);
+  document.getElementById("firstsTable").classList.toggle("lostcols", lostCols);
+  list.sort(byLost ? (a, b) => lostOf(b) - lostOf(a) || byDist(a, b)
+          : within != null || sortKeys.firsts === "distance" ? byDist
+          : sortKeys.firsts === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
           : (a, b) => (b.value || 0) - (a.value || 0));
-  const unsold = f.firsts.filter(x => x.state === "unsold"), lost = f.firsts.filter(x => x.state === "lost");
-  st.textContent = `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts${fShowLost.checked ? "" : " (hidden)"}`;
+  const unsold = f.firsts.filter(x => (x.sale || x.state) === "unsold"), lost = f.firsts.filter(x => x.state === "lost");
+  const redone = f.firsts.filter(x => x.state === "rescanned");
+  const back = redone.length ? ` · ${redone.length} rescanned` : "";
+  st.textContent = within != null
+    ? `${list.filter(x => x.state === "lost").length} lost within ${within} ly` +
+      (list.some(x => x.state === "rescanned") ? ` · ${list.filter(x => x.state === "rescanned").length} rescanned` : "") +
+      (f.firsts.length && !f.firsts.some(x => x.distance != null) ? " (your position is not known yet)" : "")
+    : `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts${fShowLost.checked ? back : " (hidden)"}`;
   const by = b => ["sold", "unsold", "lost"].filter(k => b && b[k]).map(k => `<span class="${k}">${b[k]} ${k}</span>`).join(" · ");
-  document.getElementById("firstsRows").innerHTML = list.map(x => `<tr>
+  document.getElementById("firstsRows").innerHTML = list.map(x => { const rs = rescanNote(x); return `<tr${rs ? ` class="${rs.cls}"` : ""}>
       <td class="bmcell">${bmIcon(x.id, x.name, bms)}</td>
-      <td class="name" data-name="${esc(x.name)}" title="click to copy">${esc(x.name)}</td>
+      <td class="name" data-name="${esc(x.name)}" title="click to copy">${esc(x.name)}${rs ? `<div class="rescan"${rs.pop ? ` data-rescanpop="${esc(rs.pop)}"` : ` title="${esc(rs.title)}"`}>${esc(rs.text)}</div>` : ""}${lostCols && x.seen ? `<div class="seen seen-sub">${seenCell(x.seen)}</div>` : ""}</td>
       <td class="num dist">${x.distance == null ? "?" : x.distance.toLocaleString("en-US", {maximumFractionDigits: 1})}</td>
-      <td>${x.system ? `<span class="${x.system_state}">🏁 ${x.system_state}</span>` : ""}</td>
-      <td class="by">${by(x.bodies_by)}</td><td class="by">${by(x.mapped_by)}</td>
-      <td class="seen">${seenCell(x.seen)}</td>
-      <td class="num">${x.value ? credits(x.value) : ""}</td></tr>`).join("") ||
-    `<tr><td colspan="8" class="unk">${lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
+      <td class="f-unsold">${x.system ? `<span class="${x.system_state}">🏁 ${x.system_state}</span>` : ""}</td>
+      <td class="by f-by">${by(x.bodies_by)}</td><td class="by f-by">${by(x.mapped_by)}</td>
+      <td class="seen f-unsold">${seenCell(x.seen)}</td>
+      ${lostCells(x.recover)}
+      <td class="num">${x.value ? credits(x.value) : ""}</td></tr>`; }).join("") ||
+    `<tr><td colspan="11" class="unk">${within != null ? `Nothing lost to rescan within ${within} ly.`
+      : lost.length && !fShowLost.checked ? `Nothing unsold. ${lost.length} systems with lost data are hidden — tick "show lost" to see them.`
       : "Nothing unsold or lost: every first you have found is banked."}</td></tr>`;
+}
+// the rescan checklist's progress for a system that lost data with a ship: green once every lost body and map is
+// scanned again ("rescanned"), amber part-way ("rescanned 5 of 12 · 2 maps to redo"), whose hover (tap) pop-up names
+// the bodies still to scan and the maps still to redo; nothing before a rescan
+function rescanNote(x) {
+  const r = x.recover;
+  if (!r) return null;
+  const maps = r.maps_lost - r.maps_redone, title = `Lost with a ship: ${r.lost_bodies} discover${r.lost_bodies === 1 ? "y" : "ies"}` +
+    `${r.maps_lost ? `, ${r.maps_lost} first map${r.maps_lost === 1 ? "" : "s"}` : ""}. Scanned again since: ${r.rescanned}` +
+    `${r.maps_lost ? `, remapped ${r.maps_redone}` : ""}. Sell it to bank it.`;
+  if (x.state === "rescanned") return {cls: "rs-done", text: "✓ rescanned", title};
+  if (!r.rescanned && !r.maps_redone) return null;
+  const bits = [r.lost_bodies ? (r.rescanned === r.lost_bodies ? `all ${r.lost_bodies} rescanned` : `rescanned ${r.rescanned} of ${r.lost_bodies}`) : "",
+    maps ? `${maps} map${maps === 1 ? "" : "s"} to redo` : ""].filter(Boolean);
+  // each body with what it pays (firsts_recovery: a map is what it adds on top of the scan), the heading with the total
+  const left = (lbl, items) => items && items.length ? `<div class="sec"><div class="lbl">${lbl} · <span class="tot">${credits(items.reduce((n, t) => n + (t.value || 0), 0))}</span></div>` +
+    `<ul>${items.map(t => `<li><span>${esc(t.name)}</span><b>${t.value ? credits(t.value) : "?"}</b></li>`).join("")}</ul></div>` : "";
+  const todo = left("Still to scan (FSS)", r.todo_scan) + left("Maps to redo (DSS)", r.todo_map);
+  return {cls: "rs-part", text: bits.join(" · "), title,
+    pop: todo && `<h3>${esc(x.name)} <span class="src">rescan checklist</span></h3>${todo}<div class="sec unk">${esc(title)}</div>`};
+}
+// My firsts with show lost: what is still lost there, scan (FSS) / map (DSS) / total (firsts_recovery's values);
+// blank for a system that never lost anything, a muted 0 once everything is back
+function lostCells(r) {
+  if (!r) return `<td class="num f-lost"></td>`.repeat(3);
+  const cell = (v, cls = "") => `<td class="num f-lost${v ? "" : " zero"}${cls}">${v ? credits(v) : "0"}</td>`;
+  return cell(r.lost_scan) + cell(r.lost_map) + cell(r.lost_total, " tot");
+}
+// the "within N ly" box: a positive number, or null (no limit)
+function firstsWithin() {
+  const v = parseFloat(fWithin.value);
+  return v > 0 ? v : null;
 }
 // someone else has scanned this since you (the firsts watch): "8 d after you · Spansh has 7 of 12 bodies"
 function seenCell(v) {
@@ -2700,7 +2752,11 @@ document.getElementById("leftRows").addEventListener("click", e => {
 });
 const fShowLost = document.getElementById("fShowLost");
 fShowLost.checked = store.get("fShowLost", false);
-fShowLost.onchange = () => { store.set("fShowLost", fShowLost.checked); renderFirsts(); };
+fShowLost.onchange = () => { store.set("fShowLost", fShowLost.checked); fWithin.disabled = !fShowLost.checked; renderFirsts(); };
+const fWithin = document.getElementById("fWithin");
+fWithin.value = store.get("fWithin", "") ?? "";
+fWithin.disabled = !fShowLost.checked;
+fWithin.oninput = () => { store.set("fWithin", fWithin.value); renderFirsts(); };
 
 // ---- Materials ----
 let matKey = null, matData = null;
@@ -3628,6 +3684,7 @@ document.addEventListener("click", e => {
   if (bm) return openBookmark(bm.dataset.bm, bm.dataset.name);
   // every "click to copy" name outside the views that handle their own (.name spans in Log, Bio, History,
   // Ledger and Materials); an element without data-name copies nothing (it used to copy "undefined")
+  if (e.target.closest("[data-rescanpop]")) return;   // My firsts' rescan note opens its pop-up (a tap on touch), no copy
   const el = e.target.closest("td.name[data-name], .copy[data-name], #topRows .name[data-name]"); if (!el) return;
   copyText(el.dataset.name);
 });
@@ -3698,6 +3755,11 @@ function showPop(td, x, y) {
     pop.innerHTML = td.dataset.minepop; pop.style.display = "block"; placePop(x, y);
     return;
   }
+  if (td.dataset.rescanpop !== undefined) {   // My firsts, part-way through a rescan: what is still to scan and map
+    popId = "rescan" + (td.closest("[data-name]") || {dataset: {}}).dataset.name;
+    pop.innerHTML = td.dataset.rescanpop; pop.style.display = "block"; placePop(x, y);
+    return;
+  }
   if (td.dataset.unsold !== undefined) {
     const h = data && unsoldHtml(data.unsold);
     if (!h) return hidePop();
@@ -3742,23 +3804,24 @@ let lastPointer = null;
 document.addEventListener("mousemove", e => {
   if (e.target === mapCanvas) return;  // the map draws its own hover
   lastPointer = {x: e.clientX, y: e.clientY};
-  const td = e.target.closest("[data-minepop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
+  const td = e.target.closest("[data-minepop], [data-rescanpop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, e.clientX, e.clientY) : popId !== null && hidePop();
 });
 function refreshPop() {
   // render() has just rebuilt the DOM: re-resolve whatever the pointer is over.
   if (popId === null || popId === "map" || !lastPointer) return;
   const el = document.elementFromPoint(lastPointer.x, lastPointer.y);
-  const td = el && el.closest && el.closest("[data-minepop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
+  const td = el && el.closest && el.closest("[data-minepop], [data-rescanpop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, lastPointer.x, lastPointer.y) : hidePop();
 }
 document.addEventListener("mouseleave", hidePop);
 // Touch: tap the bodies cell to toggle.
 document.addEventListener("touchstart", e => {
   if (e.target.closest("[data-bm]")) return;  // taps on a star open the bookmark dialog
-  const td = e.target.closest("[data-minepop], [data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
+  const td = e.target.closest("[data-minepop], [data-rescanpop], [data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
   const t = e.touches[0];
-  const key = td.dataset.minepop !== undefined ? "mine" + (td.closest("[data-bodypop]") || {dataset: {}}).dataset.bodypop : td.dataset.unsold !== undefined ? "unsold" : td.dataset.sbodypop !== undefined ? "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop
+  const key = td.dataset.minepop !== undefined ? "mine" + (td.closest("[data-bodypop]") || {dataset: {}}).dataset.bodypop
+    : td.dataset.rescanpop !== undefined ? "rescan" + (td.closest("[data-name]") || {dataset: {}}).dataset.name : td.dataset.unsold !== undefined ? "unsold" : td.dataset.sbodypop !== undefined ? "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop
     : td.dataset.bodypop !== undefined ? "body" + td.dataset.bodypop : td.dataset.id;
   popId === key ? hidePop() : showPop(td, t.clientX, t.clientY);
 }, {passive: true});

@@ -253,7 +253,7 @@ BROWSER_SETTINGS = ("alerts", "alertSound", "alertSpeak", "speech", "speechStyle
                     "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
                     "sayMapped", "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
                     "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-                    "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
+                    "log", "lbRadius", "fShowLost", "fWithin", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
                     "surfaceCfg", "moduleWarn")
 BROWSER_DEFAULTS_MAX = 64 * 1024   # bytes
 BROWSER_DEFAULTS_FILE = "browser_defaults.json"   # next to the database
@@ -3241,6 +3241,7 @@ def pickup_judge(db, system):
         if loss:
             return "lost", loss
         return "unsold", None
+    state.losses = losses   # own_firsts' rescan check: was the data lost between two pickups?
     return state
 
 
@@ -3251,9 +3252,11 @@ def own_firsts(db, id64, system):
     lost if you die; footfall is credited on the spot.
     """
     rows = db.execute(
-        """SELECT f.*, m.ts AS mapped_ts, m.first_ts AS map_first_ts, ff.ts AS foot_ts FROM own_firsts f
+        """SELECT f.*, m.ts AS mapped_ts, m.first_ts AS map_first_ts, ff.ts AS foot_ts, b.record AS body_record
+           FROM own_firsts f
            LEFT JOIN own_mapped m ON m.system = f.system AND m.body_id = f.body_id
            LEFT JOIN own_footfall ff ON ff.system = f.system AND ff.body_id = f.body_id
+           LEFT JOIN own_bodies b ON b.system = f.system AND b.body_id = f.body_id
            WHERE f.system = ?""", (id64,)).fetchall()
     disc = [r for r in rows if r["was_discovered"] == 0]
     mapped = [r for r in rows if r["was_mapped"] == 0 and r["mapped_ts"]]
@@ -3284,7 +3287,58 @@ def own_firsts(db, id64, system):
         out["sold_ts"] = max(t for st, t in disc_states + map_states if st == "sold")
     elif out["sale"] == "lost":
         out["lost_ts"] = max(t for st, t in disc_states + map_states if st == "lost")
+    out["recover"] = firsts_recovery(disc, disc_states, mapped, map_states, state.losses, system)
     return out
+
+
+def firsts_body_value(row, mapped):
+    """What a body on the rescan checklist pays (an own_firsts row with its own_bodies record as body_record), as
+    top_finds and lost_bodies value it: ed_unsold.body_value with the first-discovery and first-mapped bonuses you
+    earned there, without the efficiency bonus. 0 with no scan record (or no ed_unsold)."""
+    raw = row["body_record"] if "body_record" in row.keys() else None
+    rec = json.loads(raw) if raw else {}
+    if not ed_unsold or not rec.get("ed"):
+        return 0
+    body = dict(rec["ed"], first_discovered=row["was_discovered"] == 0, first_mapped=row["was_mapped"] == 0)
+    return ed_unsold.body_value(body, mapped, False, True)
+
+
+def firsts_recovery(disc, disc_states, mapped, map_states, losses, system=None):
+    """The rescan checklist for one system (own_firsts' rows and states): {lost_bodies, rescanned, maps_lost,
+    maps_redone, todo_scan, todo_map, lost_scan, lost_map, lost_total} over the discoveries and first maps that died
+    with a ship and are not banked again -- still lost, or picked up again by a later scan (a new DSS for a map:
+    own_mapped's ts after the loss) and not sold since.
+    None when nothing is. From the journals alone: the latest unsold pickup (undisc_ts, which only moves while the
+    game still calls the body undiscovered; own_mapped.ts) with a ship loss between it and your first scan (first
+    map) is data that was lost and rescanned; a sale in between would have banked it, and a rescan after that sale
+    reads as discovered, so undisc_ts never passes it. todo_scan / todo_map: [{name, value}] (short_name, in natural
+    order) for the bodies still to scan in the FSS and whose lost first map still wants a DSS; empty once done.
+    Values (firsts_body_value, with the bonuses earned): a scan is the body's unmapped value, a map what mapping adds
+    on top (mapped minus unmapped, as Left behind counts it), so a body whose scan and map are both lost shows its
+    scan under one and the rest under the other, adding up to its mapped value. lost_scan / lost_map: their sums
+    (what is still lost; 0 once everything is back), lost_total both."""
+    def tally(rows, states, first, pickup, worth):
+        lost = back = 0
+        todo = []
+        for r, (st, _) in zip(rows, states):
+            a, b = r[first], r[pickup] or r[first]
+            if st == "lost":
+                lost += 1
+                todo.append({"name": short_name(system, r["name"]) or f"body {r['body_id']}", "value": worth(r)})
+            elif st == "unsold" and a and b and any(a < t < b for t in losses):
+                lost += 1
+                back += 1
+        return lost, back, sorted(todo, key=lambda t: natural(t["name"]))
+    lost_bodies, rescanned, todo_scan = tally(disc, disc_states, "first_ts", "undisc_ts",
+                                              lambda r: firsts_body_value(r, False))
+    maps_lost, maps_redone, todo_map = tally(mapped, map_states, "map_first_ts", "mapped_ts",
+                                             lambda r: max(0, firsts_body_value(r, True) - firsts_body_value(r, False)))
+    if not (lost_bodies or maps_lost):
+        return None
+    lost_scan, lost_map = sum(t["value"] for t in todo_scan), sum(t["value"] for t in todo_map)
+    return {"lost_bodies": lost_bodies, "rescanned": rescanned, "maps_lost": maps_lost, "maps_redone": maps_redone,
+            "todo_scan": todo_scan, "todo_map": todo_map,
+            "lost_scan": lost_scan, "lost_map": lost_map, "lost_total": lost_scan + lost_map}
 
 
 def spansh_seconds(t):
@@ -3306,11 +3360,12 @@ def firsts_watch_gap(row, now):
 
 
 def firsts_watched(entry):
-    """Whether the firsts watch looks at a firsts_list entry: unsold, with at least one body you discovered. A system
+    """Whether the firsts watch looks at a firsts_list entry: unsold (its sale headline: a system rescanned after a
+    loss, or part rescanned, holds unsold data again), with at least one body you discovered. A system
     whose only unsold firsts are first-mapped bodies (someone else discovered them) is left out: firsts_mine and
     firsts_reported only look at your discoveries, so its check could never find anything and, with no first scan
     of yours to age by, would come round daily for as long as the data stays unsold."""
-    return entry["state"] == "unsold" and sum((entry.get("bodies_by") or {}).values()) > 0
+    return entry.get("sale", entry["state"]) == "unsold" and sum((entry.get("bodies_by") or {}).values()) > 0
 
 
 def firsts_reported(records, mine, body_count=None, system_times=()):
@@ -5577,7 +5632,8 @@ class State:
 
     def firsts_list(self):
         """Every visited system holding first-discovery data, with its sale state and value (and, for unsold ones,
-        `seen`: what the firsts watch found of someone else's scans there, or None)."""
+        `seen`: what the firsts watch found of someone else's scans there, or None). `recover` (firsts_recovery) is
+        the rescan checklist for data lost with a ship."""
         pos = self.journals.pos
         watch = self.firsts_watch_rows()
         out = []
@@ -5587,7 +5643,14 @@ class State:
             f = own_firsts(self.db, r["id64"], r["name"])
             if not f or f["sale"] == "sold":
                 continue
-            out.append({"id": str(r["id64"]), "name": r["name"], "state": f["sale"], "system": f["system"],
+            rec = f["recover"]
+            # state: unsold, lost (data still to rescan, whatever else is aboard) or rescanned (every lost body and
+            # map scanned again, not yet sold); sale: own_firsts' headline (unsold whenever any of it is aboard),
+            # which the firsts watch and the unsold count go by
+            done = rec and rec["rescanned"] == rec["lost_bodies"] and rec["maps_redone"] == rec["maps_lost"]
+            out.append({"id": str(r["id64"]), "name": r["name"],
+                        "state": "rescanned" if done else "lost" if rec else f["sale"], "sale": f["sale"],
+                        "recover": rec, "system": f["system"],
                         "system_state": f["system_state"], "bodies_by": f["bodies_by"], "mapped_by": f["mapped_by"],
                         "distance": round(dist(pos, r), 2) if pos else None,
                         "value": self.system_values.get(r["name"]),

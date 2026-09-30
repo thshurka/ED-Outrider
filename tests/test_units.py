@@ -9256,3 +9256,201 @@ class ReviewBatchF(unittest.TestCase):
             asyncio.run(once())
             asyncio.run(once())
         self.assertEqual((calls, self.state.unsold_login), (["2026-01-01T01:00:00Z"], ("2026-01-01T01:00:00Z", 3)))
+
+
+class RescanChecklist(unittest.TestCase):
+    """My firsts as a rescan checklist: first discoveries and first maps lost with a ship, scanned (and mapped) again
+    since, until they are sold; worked out from the journal tables alone (firsts_recovery)."""
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types_ns(cached=lambda i: (None, None)), 25)
+
+    def jump(self, ts, name, id64, x=0):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": name, "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def scans(self, ts, name, id64, bodies):
+        for b in bodies:
+            self.j.handle(scan(ts, name, id64, b, f"{name} A" if b == 1 else f"{name} A {b}", star=b == 1)[2])
+        self.db.commit()
+
+    def dss(self, ts, name, id64, body):
+        self.j.handle({"event": "SAAScanComplete", "timestamp": ts, "SystemAddress": id64, "BodyID": body,
+                       "BodyName": f"{name} A {body}", "ProbesUsed": 4, "EfficiencyTarget": 6})
+        self.db.commit()
+
+    def die(self, ts, option="rebuy"):
+        self.j.handle({"event": "Died", "timestamp": ts})
+        self.j.handle({"event": "Resurrect", "timestamp": ts, "Option": option})
+        self.db.commit()
+
+    def entry(self, name):
+        """The firsts_list entry, with recover's to-do lists as plain names (the values are tested apart, from
+        self.values and self.items)."""
+        self.state._firsts_cache = None
+        e = next((x for x in self.state.firsts_list() if x["name"] == name), None)
+        if e and e["recover"]:
+            r = e["recover"] = dict(e["recover"])
+            self.values = {k: r.pop(k) for k in ("lost_scan", "lost_map", "lost_total")}
+            self.items = {k: r[k] for k in ("todo_scan", "todo_map")}
+            r.update({k: [t["name"] for t in r[k]] for k in ("todo_scan", "todo_map")})
+        return e
+
+    def test_lost_rescanned_and_sold(self):
+        self.jump("2026-01-01T00:00:00Z", "Lossy", 5)
+        self.scans("2026-01-01T00:01:00Z", "Lossy", 5, [1, 2, 3, 4])
+        self.dss("2026-01-01T00:02:00Z", "Lossy", 5, 2)
+        self.jump("2026-01-01T00:10:00Z", "Gone", 8, x=20)
+        self.scans("2026-01-01T00:11:00Z", "Gone", 8, [1, 2])
+        e = self.entry("Lossy")
+        self.assertEqual((e["state"], e["sale"], e["recover"]), ("unsold", "unsold", None))   # nothing lost yet
+        self.die("2026-01-01T01:00:00Z")
+        e = self.entry("Lossy")
+        self.assertEqual((e["state"], e["sale"]), ("lost", "lost"))
+        self.assertEqual(e["recover"], {"lost_bodies": 4, "rescanned": 0, "maps_lost": 1, "maps_redone": 0,
+                                        "todo_scan": ["A", "A 2", "A 3", "A 4"], "todo_map": ["A 2"]})
+        # a rebuy that kept the ship (recover) loses nothing more; a system found after the loss is never on it
+        self.die("2026-01-01T01:30:00Z", option="recover")
+        self.jump("2026-01-01T02:00:00Z", "Clean", 6, x=40)
+        self.scans("2026-01-01T02:01:00Z", "Clean", 6, [1, 2])
+        # back later: two of the four scanned again -- part-way, still on the checklist, and unsold data again
+        self.jump("2026-01-02T00:00:00Z", "Lossy", 5)
+        self.scans("2026-01-02T00:01:00Z", "Lossy", 5, [1, 3])
+        e = self.entry("Lossy")
+        self.assertEqual((e["state"], e["sale"]), ("lost", "unsold"))
+        self.assertEqual(e["recover"], {"lost_bodies": 4, "rescanned": 2, "maps_lost": 1, "maps_redone": 0,
+                                        "todo_scan": ["A 2", "A 4"], "todo_map": ["A 2"]})
+        # every body scanned again (body 2's Scan too), but its lost first map needs a new DSS
+        self.scans("2026-01-02T00:02:00Z", "Lossy", 5, [2, 4])
+        e = self.entry("Lossy")
+        self.assertEqual((e["state"], e["recover"]), ("lost", {"lost_bodies": 4, "rescanned": 4, "maps_lost": 1, "maps_redone": 0,
+                                                             "todo_scan": [], "todo_map": ["A 2"]}))
+        self.dss("2026-01-02T00:03:00Z", "Lossy", 5, 2)
+        e = self.entry("Lossy")
+        self.assertEqual((e["state"], e["sale"]), ("rescanned", "unsold"))
+        self.assertEqual(e["recover"], {"lost_bodies": 4, "rescanned": 4, "maps_lost": 1, "maps_redone": 1,
+                                        "todo_scan": [], "todo_map": []})
+        self.assertEqual(e["bodies_by"], {"sold": 0, "unsold": 4, "lost": 0})
+        # a system never lost is not on the checklist; one lost and never revisited is, with nothing rescanned
+        c, g = self.entry("Clean"), self.entry("Gone")
+        self.assertEqual((c["state"], c["sale"], c["recover"]), ("unsold", "unsold", None))
+        self.assertEqual((g["state"], g["sale"], g["recover"]), ("lost", "lost", {"lost_bodies": 2, "rescanned": 0,
+                                                                                  "maps_lost": 0, "maps_redone": 0,
+                                                                                  "todo_scan": ["A", "A 2"], "todo_map": []}))
+        # the watch and the Unsold tile's count treat the rescanned system as unsold, as the clean one; not the lost one
+        self.assertTrue(ed_outrider.firsts_watched(e))
+        self.assertTrue(ed_outrider.firsts_watched(c))
+        self.assertFalse(ed_outrider.firsts_watched(g))
+        self.state.firsts_watch_on = True
+        self.state.system_values = {"Lossy": 5_000_000, "Clean": 100}
+        self.assertEqual(self.state.firsts_watch_info(), {"on": True, "seen": 0, "checked": 0, "of": 2})
+        self.assertEqual(self.state.firsts_watch_due(ed_outrider.ts_seconds("2026-01-03T00:00:00Z")), (5, "Lossy"))
+        # sold: gone from the list, as any sold system
+        self.j.handle(sale("2026-01-03T00:00:00Z", ["Lossy"])[2])
+        self.db.commit()
+        self.assertIsNone(self.entry("Lossy"))
+        self.assertEqual((self.entry("Clean")["state"], self.entry("Gone")["state"]), ("unsold", "lost"))
+
+    def test_todo_names_what_is_left_short_and_in_natural_order(self):
+        # the rescan checklist's to-do lists: short body names still to scan (FSS) and maps still to redo (DSS),
+        # naturally sorted (A 10 after A 3); empty once everything is back
+        self.jump("2026-01-01T00:00:00Z", "Todo", 9)
+        self.scans("2026-01-01T00:01:00Z", "Todo", 9, [1, 2, 3, 10, 11])
+        self.dss("2026-01-01T00:02:00Z", "Todo", 9, 10)
+        self.dss("2026-01-01T00:02:30Z", "Todo", 9, 3)
+        self.die("2026-01-01T01:00:00Z")
+        self.jump("2026-01-02T00:00:00Z", "Todo", 9)
+        self.scans("2026-01-02T00:01:00Z", "Todo", 9, [1, 3])
+        self.dss("2026-01-02T00:02:00Z", "Todo", 9, 3)
+        r = self.entry("Todo")["recover"]
+        self.assertEqual((r["rescanned"], r["maps_redone"]), (2, 1))
+        self.assertEqual((r["todo_scan"], r["todo_map"]), (["A 2", "A 10", "A 11"], ["A 10"]))
+        self.scans("2026-01-02T00:03:00Z", "Todo", 9, [2, 10, 11])
+        r = self.entry("Todo")["recover"]
+        self.assertEqual((r["todo_scan"], r["todo_map"]), ([], ["A 10"]))   # every body back, one map to redo
+        self.dss("2026-01-02T00:04:00Z", "Todo", 9, 10)
+        e = self.entry("Todo")
+        self.assertEqual((e["state"], e["recover"]["todo_scan"], e["recover"]["todo_map"]), ("rescanned", [], []))
+
+    def test_never_lost_and_partly_rescanned_stays_watched(self):
+        self.jump("2026-01-01T00:00:00Z", "Safe", 7)
+        self.scans("2026-01-01T00:01:00Z", "Safe", 7, [1, 2])
+        self.die("2026-01-01T00:30:00Z", option="recover")   # the ship survived: no loss
+        e = self.entry("Safe")
+        self.assertEqual((e["state"], e["sale"], e["recover"]), ("unsold", "unsold", None))
+        self.assertTrue(ed_outrider.firsts_watched(e))
+        # lost, then only one body scanned again: the headline is unsold, so the watch keeps looking at it
+        self.die("2026-01-01T01:00:00Z")
+        self.scans("2026-01-01T02:00:00Z", "Safe", 7, [2])
+        e = self.entry("Safe")
+        self.assertEqual((e["state"], e["sale"], e["recover"]["rescanned"], e["recover"]["lost_bodies"]), ("lost", "unsold", 1, 2))
+        self.assertTrue(ed_outrider.firsts_watched(e))
+        # a sale banks the rescanned body; the one still lost stays, with nothing rescanned
+        self.j.handle(sale("2026-01-01T03:00:00Z", ["Safe"])[2])
+        self.db.commit()
+        e = self.entry("Safe")
+        self.assertEqual((e["state"], e["sale"], e["recover"]), ("lost", "lost", {"lost_bodies": 1, "rescanned": 0,
+                                                                                  "maps_lost": 0, "maps_redone": 0, "todo_scan": ["A"],
+                                                                              "todo_map": []}))
+
+    # values: what is still lost, with the bonuses earned, as ed_unsold.body_value prices it (no efficiency bonus)
+    def worth(self, id64, body, mapped):
+        rec = json.loads(self.db.execute("SELECT record FROM own_bodies WHERE system=? AND body_id=?", (id64, body)).fetchone()[0])
+        return ed_unsold.body_value(dict(rec["ed"], first_discovered=True, first_mapped=True), mapped, False, True)
+
+    def test_values_of_what_is_still_lost(self):
+        self.jump("2026-01-01T00:00:00Z", "Worth", 11)
+        self.scans("2026-01-01T00:01:00Z", "Worth", 11, [1, 2, 3, 10])
+        self.dss("2026-01-01T00:02:00Z", "Worth", 11, 2)
+        self.dss("2026-01-01T00:02:30Z", "Worth", 11, 10)
+        star, planet, mapped = self.worth(11, 1, False), self.worth(11, 2, False), self.worth(11, 2, True)
+        inc = mapped - planet            # what the map adds on top of the scan
+        self.assertTrue(0 < planet < mapped and star > 0)
+        self.die("2026-01-01T01:00:00Z")
+        # nothing rescanned yet: the full loss (the page hides the pop-up list but shows the values in the row)
+        self.entry("Worth")
+        self.assertEqual(self.items["todo_scan"], [{"name": "A", "value": star}, {"name": "A 2", "value": planet},
+                                                   {"name": "A 3", "value": planet}, {"name": "A 10", "value": planet}])
+        self.assertEqual(self.items["todo_map"], [{"name": "A 2", "value": inc}, {"name": "A 10", "value": inc}])
+        self.assertEqual(self.values, {"lost_scan": star + 3 * planet, "lost_map": 2 * inc,
+                                       "lost_total": star + 3 * planet + 2 * inc})
+        # part-way: the star and A 2 scanned again, A 2 remapped
+        self.jump("2026-01-02T00:00:00Z", "Worth", 11)
+        self.scans("2026-01-02T00:01:00Z", "Worth", 11, [1, 2])
+        self.dss("2026-01-02T00:02:00Z", "Worth", 11, 2)
+        self.entry("Worth")
+        self.assertEqual(self.items["todo_scan"], [{"name": "A 3", "value": planet}, {"name": "A 10", "value": planet}])
+        self.assertEqual(self.items["todo_map"], [{"name": "A 10", "value": inc}])
+        self.assertEqual(self.values, {"lost_scan": 2 * planet, "lost_map": inc, "lost_total": 2 * planet + inc})
+        # every body back, only a map left
+        self.scans("2026-01-02T00:03:00Z", "Worth", 11, [3, 10])
+        self.entry("Worth")
+        self.assertEqual((self.items["todo_scan"], self.items["todo_map"]), ([], [{"name": "A 10", "value": inc}]))
+        self.assertEqual(self.values, {"lost_scan": 0, "lost_map": inc, "lost_total": inc})
+        # complete: nothing lost any more
+        self.dss("2026-01-02T00:04:00Z", "Worth", 11, 10)
+        self.assertEqual(self.entry("Worth")["state"], "rescanned")
+        self.assertEqual(self.values, {"lost_scan": 0, "lost_map": 0, "lost_total": 0})
+
+    def test_values_match_the_unsold_estimate(self):
+        # scan + map of a body both lost add up to what ed_unsold's own estimate gave those bodies while aboard
+        evs = [(T(t), None, e) for t, e in [
+            ("2026-01-01T00:00:00Z", {"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Est",
+                                      "SystemAddress": 12, "StarPos": [0, 0, 0]})]]
+        evs += [scan("2026-01-01T00:01:00Z", "Est", 12, b, "Est A" if b == 1 else f"Est A {b}", star=b == 1) for b in (1, 2, 3)]
+        dss = {"event": "SAAScanComplete", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 12, "BodyID": 2,
+               "BodyName": "Est A 2", "ProbesUsed": 9, "EfficiencyTarget": 6}
+        evs.append((T(dss["timestamp"]), None, dss))
+        aboard = [r for r in ed_unsold.analyse(evs, ARGS)["exploration"]["rows"] if r["system"] == "Est"]
+        self.assertEqual(len(aboard), 3)
+        for _t, _c, e in evs:
+            self.j.handle(e)
+        self.db.commit()
+        self.die("2026-01-01T01:00:00Z")
+        self.entry("Est")
+        self.assertEqual(self.values["lost_total"], sum(r["value"] for r in aboard))
+        self.assertEqual({t["name"]: t["value"] for t in self.items["todo_map"]},
+                         {"A 2": self.worth(12, 2, True) - self.worth(12, 2, False)})
+

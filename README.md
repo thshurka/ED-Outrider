@@ -155,7 +155,8 @@ been, and opens it in Here, where ☆ bookmarks it or makes it the next stop.
 <b>My firsts</b> — visited systems with first-discovery data you haven't sold. The <b>firsts watch</b>
 checks them on Spansh in the background (each daily for a month, then weekly; at most 150 checks a day)
 and marks any someone else has scanned since you ("👁 8 d after you"). Selling first still keeps your name, as long as nobody sold before
-you. <b>Left behind</b> lists visited systems nearby with work over your thresholds. <b>Bookmarks</b> hold
+you. Tick <b>show lost</b> and set <b>within N ly</b> for a rescan checklist of data lost with a ship, nearest first: amber
+part-way ("rescanned 5 of 12 · 2 maps to redo", hover for which are left), green once it is all scanned again, gone once sold; the Lost columns price what is still to scan and map (sort by Lost total). <b>Left behind</b> lists visited systems nearby with work over your thresholds. <b>Bookmarks</b> hold
 notes and your <b>next stop</b>.
 <br><br><img src="docs/firsts.png" alt="My firsts">
 </td>

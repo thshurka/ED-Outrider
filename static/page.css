@@ -188,6 +188,20 @@ main > #hereView.detail > #bodyPanel { position: sticky; top: calc(var(--head-h,
 #firstsView { margin-top: 12px; }
 #firstsRows td.by { white-space: normal; font-size: 12px; }
 #firstsRows .sold { color: var(--good); } #firstsRows .unsold { color: var(--warn); } #firstsRows .lost { color: var(--bad); }
+#firstsRows .rescan { font-size: 12px; font-weight: 600; white-space: normal; }
+#firstsRows tr.rs-done .rescan { color: var(--good); } #firstsRows tr.rs-part .rescan { color: var(--warn); }
+#firstsRows tr.rs-done td.name { box-shadow: inset 3px 0 var(--good); } #firstsRows tr.rs-part td.name { box-shadow: inset 3px 0 var(--warn); }
+/* show lost: the Lost value columns replace System tag and Seen by others (a sighting moves under the name) */
+#firstsTable:not(.lostcols) .f-lost, #firstsTable.lostcols .f-unsold { display: none; }
+#firstsTable.lostcols th.f-lost { white-space: normal; min-width: 5.5em; }
+#firstsRows td.f-lost.zero { color: var(--muted); }
+#firstsRows td.f-lost.tot { font-weight: 600; }
+#firstsRows .seen-sub { font-size: 12px; white-space: normal; }
+#pop .lbl .tot { text-transform: none; }
+@media (max-width: 640px) { #firstsTable.lostcols .f-by { display: none; } #firstsTable.lostcols th.f-lost { min-width: 0; }
+  #firstsTable.lostcols th { white-space: normal; letter-spacing: 0; } #firstsTable.lostcols td.num { font-size: 13px; }
+  #firstsTable.lostcols td.bmcell, #firstsTable.lostcols th:first-child { padding-right: 0; } #firstsTable.lostcols th, #firstsTable.lostcols td { padding: 6px 3px; } }
+#fWithin { width: 5em; }
 .sp.lost { color: var(--bad); }
 dialog h4 { margin: 12px 0 4px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
 dialog .reset { color: var(--info); cursor: pointer; font-size: 11px; margin-left: 6px; }

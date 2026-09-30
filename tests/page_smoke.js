@@ -1916,6 +1916,95 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodF;
     console.log(goodF ? "OK" : "FAIL", "| batch F S4/S5/S10 |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "mining search and Nearby ⛏, core modules under the level, This session on Now", errors.slice(before));
   }
+  {   // the rescan checklist: "within N ly" beside show lost, and each lost row's progress (colour and text)
+    const w = dom.window, d = w.document, before = errors.length, bad = [], got = {};
+    const savedF = w.eval("JSON.stringify(firstsData)"), savedLost = w.eval("fShowLost.checked"), savedWithin = w.eval("fWithin.value");
+    const savedSort = w.eval("sortKeys.firsts"), savedSorts = w.localStorage.getItem("sorts");
+    const by = (u, l) => ({sold: 0, unsold: u, lost: l});
+    const sys = (name, distance, state, sale, recover, u, l) => ({id: String(name.length * 7 + distance), name, state, sale, recover, system: true,
+      system_state: sale, bodies_by: by(u, l), mapped_by: by(0, 0), distance, value: sale === "unsold" ? 1000000 : null, seen: null});
+    // firsts_recovery: the to-do lists carry each body's value, the totals what is still lost
+    const rec = (o, scan, map) => {
+      const items = (names, v) => names.map((name, i) => ({name, value: Array.isArray(v) ? v[i] : v}));
+      const r = Object.assign({}, o, {todo_scan: items(o.todo_scan, scan), todo_map: items(o.todo_map, map)});
+      r.lost_scan = r.todo_scan.reduce((n, t) => n + t.value, 0); r.lost_map = r.todo_map.reduce((n, t) => n + t.value, 0);
+      r.lost_total = r.lost_scan + r.lost_map;
+      return r;
+    };
+    w.eval(`firstsData = {firsts: ${JSON.stringify([
+      sys("Far Lost", 80, "lost", "lost", rec({lost_bodies: 4, rescanned: 0, maps_lost: 0, maps_redone: 0, todo_scan: ["1", "2", "3", "4"], todo_map: []}, 3000000), 0, 4),
+      sys("Part Back", 20, "lost", "unsold", rec({lost_bodies: 12, rescanned: 5, maps_lost: 0, maps_redone: 0,
+        todo_scan: ["A 2", "A 4", "A 10", "B 1", "B 2", "B 3", "C 1"], todo_map: []}, [100000, 20000, 1500000, 3000, 4000, 5000, 6000]), 5, 7),
+      sys("All Back", 30, "rescanned", "unsold", rec({lost_bodies: 3, rescanned: 3, maps_lost: 1, maps_redone: 1, todo_scan: [], todo_map: []}), 3, 0),
+      sys("Maps Left", 10, "lost", "lost", rec({lost_bodies: 2, rescanned: 2, maps_lost: 3, maps_redone: 1, todo_scan: [], todo_map: ["ABC 1", "B 5"]}, 0, [1400000, 600000]), 2, 0),
+      sys("Near Lost", 5, "lost", "lost", rec({lost_bodies: 1, rescanned: 0, maps_lost: 0, maps_redone: 0, todo_scan: ["A"], todo_map: []}, 500), 0, 1),
+      sys("Plain Unsold", 1, "unsold", "unsold", null, 2, 0)])}, computed: "x"}`);
+    const rows = () => [...d.querySelectorAll("#firstsRows tr")].map(tr => [tr.querySelector("td.name").dataset.name, tr.className,
+      (tr.querySelector(".rescan") || {}).textContent || ""]);
+    w.eval(`fShowLost.checked = false; fShowLost.onchange()`);
+    got.hidden = [w.eval("fWithin.disabled"), rows().map(r => r[0])];
+    w.eval(`fShowLost.checked = true; fShowLost.onchange(); fWithin.value = ""; fWithin.oninput()`);
+    got.all = rows().length;
+    // the part-way rows' pop-up (hover, tap on touch) names what is left; untouched lost rows and green ones have none
+    got.pops = [...d.querySelectorAll("#firstsRows tr")].filter(tr => tr.querySelector("[data-rescanpop]")).map(tr => tr.querySelector("td.name").dataset.name).sort();
+    const popFor = name => {
+      const el = d.querySelector(`#firstsRows td.name[data-name="${name}"] [data-rescanpop]`);
+      el.dispatchEvent(new w.MouseEvent("mousemove", {bubbles: true, clientX: 10, clientY: 10}));
+      const p = d.getElementById("pop"), r = [p.style.display, [...p.querySelectorAll(".sec:not(.unk)")].map(s => s.textContent)];
+      w.eval("hidePop()");
+      return r;
+    };
+    got.popPart = popFor("Part Back");
+    got.popMaps = popFor("Maps Left");
+    // show lost: the Lost value columns (scan / map / total) instead of System tag and Seen by others; blank for a
+    // system that lost nothing, 0 once everything is back
+    const shown = el => el && w.getComputedStyle(el).display !== "none";
+    const heads = () => [...d.querySelectorAll("#firstsTable thead th")].filter(shown).map(th => th.textContent);
+    const lostRow = name => { const tr = d.querySelector(`#firstsRows td.name[data-name="${name}"]`).closest("tr");
+      return [...tr.querySelectorAll("td.f-lost")].map(td => td.textContent); };
+    got.lostHeads = heads();
+    got.lostCells = ["Far Lost", "Part Back", "All Back", "Maps Left", "Plain Unsold"].map(lostRow);
+    // Lost total sorts the most valuable first (ties nearest first)
+    const clickSort = key => d.querySelector(`#firstsTable th[data-sort="${key}"]`).click();
+    clickSort("lost");
+    got.lostSort = rows().map(r => r[0]);
+    w.eval(`fShowLost.checked = false; fShowLost.onchange()`);
+    got.plainHeads = heads();   // show lost off: the columns as before, the lost sort falls back to the unsold value
+    got.plainCells = d.querySelectorAll("#firstsRows tr")[0].querySelectorAll("td").length;
+    w.eval(`fShowLost.checked = true; fShowLost.onchange()`);
+    clickSort("distance");
+    w.eval(`fWithin.value = "50"; fWithin.oninput()`);
+    got.within = [w.eval("fWithin.disabled"), d.getElementById("fStatus").textContent, rows(), w.eval(`store.get("fWithin", null)`)];
+    clickSort("lost");   // within N ly, sorted by Lost total on request
+    got.withinLost = rows().map(r => r[0]);
+    clickSort("distance");
+    w.eval(`fWithin.value = "3"; fWithin.oninput()`);
+    got.none = d.getElementById("firstsRows").textContent.trim();
+    w.eval(`fWithin.value = ""; fWithin.oninput()`);
+    w.localStorage.removeItem("fWithin");
+    w.eval(`sortKeys.firsts = ${JSON.stringify(savedSort)}`);
+    if (savedSorts == null) w.localStorage.removeItem("sorts"); else w.localStorage.setItem("sorts", savedSorts);
+    w.eval(`firstsData = ${savedF}; fShowLost.checked = ${savedLost}; fShowLost.onchange(); fWithin.value = ${JSON.stringify(savedWithin)}; renderFirsts()`);
+    const want = {
+      hidden: [true, ["Plain Unsold", "Part Back", "All Back"]],   // show lost off: the unsold ones (part or all rescanned too), by distance
+      all: 6,
+      pops: ["Maps Left", "Part Back"],
+      popPart: ["block", ["Still to scan (FSS) · 1.6MA 2100kA 420kA 101.5MB 13kB 24kB 35kC 16k"]],
+      popMaps: ["block", ["Maps to redo (DSS) · 2.0MABC 11.4MB 5600k"]],
+      lostHeads: ["", "System", "Dist", "Bodies", "Mapped", "Lost: scan (FSS)", "Lost: map (DSS)", "Lost total", "Unsold value"],   // (phone: "scan (FSS)", "map (DSS)", "Lost")
+      lostCells: [["12.0M", "0", "12.0M"], ["1.6M", "0", "1.6M"], ["0", "0", "0"], ["0", "2.0M", "2.0M"], ["", "", ""]],
+      lostSort: ["Far Lost", "Maps Left", "Part Back", "Near Lost", "Plain Unsold", "All Back"],
+      plainHeads: ["", "System", "Dist", "System tag", "Bodies", "Mapped", "Seen by others", "Unsold value"],
+      plainCells: 11,
+      withinLost: ["Maps Left", "Part Back", "Near Lost", "All Back"],
+      within: [false, "3 lost within 50 ly · 1 rescanned", [["Near Lost", "", ""], ["Maps Left", "rs-part", "all 2 rescanned · 2 maps to redo"],
+        ["Part Back", "rs-part", "rescanned 5 of 12"], ["All Back", "rs-done", "✓ rescanned"]], "50"],
+      none: "Nothing lost to rescan within 3 ly."};
+    for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    const goodR = !bad.length && errors.length === before;
+    allOk = allOk && goodR;
+    console.log(goodR ? "OK" : "FAIL", "| rescan checklist |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "within N ly filter, nearest first, rescanned / part-way / plain lost rows, what is left in the part-way pop-up with values, Lost columns and sort", errors.slice(before));
+  }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",
     headers: Object.assign({"Content-Type": "application/json"}, origin ? {Origin: origin} : {})}).then(r => r.status);
