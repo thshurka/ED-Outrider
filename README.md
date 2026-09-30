@@ -234,7 +234,7 @@ browser starts with.
 | Suggested order | 100k/min | Supercruise credits per minute under which Here marks "skip?". |
 | Fuel alerts under N jumps | off | Warns once when jumps left at your pace fall under N; also sets the top-up level. |
 | Core modules | 80% | A core module under this shows under hull and is said in the status report. |
-| Surface map | 1,000 m / 500 m / 78 m / 3,500 m | Altitude it shows below, narrowest view, rig spacing ring (0 = none), rig leash warning. |
+| Surface map | 1,000 m / 500 m / 50 m / 3,500 m | Altitude it shows below, narrowest view, rig spacing ring (0 = none), rig leash warning. |
 
 **Export settings** and **Import settings** move them to another browser profile. **Use these for new
 browsers** keeps a copy on the server (`browser_defaults.json`, included in backups), so a tablet running

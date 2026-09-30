@@ -1539,7 +1539,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       o.rig2 = {tag: it("2").tag, hollow: it("2").hollow};
       o.rig3 = {off: it("3").off, r: Math.hypot(it("3").sx - L.c, it("3").sy - L.c), rimR: L.rimR, far: it("3").far};
       const b = L.items.find(i => i.kind === "bio" && !i.faint), sp = L.items.find(i => i.kind === "rig" && i.ringPx);
-      o.ring = {px: b.ringPx, want: 500 * L.scale, bar: L.bar.px / L.bar.m, scale: L.scale, spacing: sp.ringPx / 78};
+      o.ring = {px: b.ringPx, want: 500 * L.scale, bar: L.bar.px / L.bar.m, scale: L.scale, spacing: sp.ringPx / 50};
       const lg = document.getElementById("nowMapLegend");
       o.species = [...lg.querySelectorAll(".lg-bio")].map(e => e.textContent);
       o.slot2 = lg.querySelector('[data-rig="2"]').textContent; o.slot3 = lg.querySelector('[data-rig="3"]').className;
@@ -1575,7 +1575,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       slots: /Methanol Monohydrate Crystals 14 t/.test(got.slot2) && /probably full/.test(got.slot2) && /far/.test(got.slot3) && /empty/.test(got.slot5),
       ship: /Ship 409 m · 158°/.test(got.ship), site: /U1 Gold 11 t unmarked · L3/.test(got.site || ""), loc: /L3 242 m/.test(got.loc || ""),
       strip: /1 Water 10 t/.test(got.strip || "") && /ship 409 m 158°/.test(got.strip || "") && got.nowMapOffNow,
-      settings: got.placeholder === "78" && got.stored && got.stored.alt === 1500 && got.stored.strip === true && got.exported && got.exported.alt === 1500 &&
+      settings: got.placeholder === "50" && got.stored && got.stored.alt === 1500 && got.stored.strip === true && got.exported && got.exported.alt === 1500 &&
         got.shared && got.imported.cfg.alt === 800 && got.imported.cfg.warn === 2000 && got.imported.input === "800" && got.imported.strip === false &&
         got.reset && Object.keys(got.reset).length === 0};
     const goodM2 = Object.values(want).every(Boolean) && errors.length === before;

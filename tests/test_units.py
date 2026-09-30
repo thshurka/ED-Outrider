@@ -8318,7 +8318,7 @@ class SurfaceRigs(unittest.TestCase):
         self.assertEqual([(r["n"], r["dist"], r["tons"], r["full"]) for r in sf["rigs"]], [(1, 7, 0, False)])
         self.assertEqual([(b["species"], b["current"], b["need"], b["clear"]) for b in sf["bio"]],
                          [("Bacterium Aurasus", True, 500, True), ("Stratum Tectonicas", False, 500, False)])
-        self.assertEqual(p["defaults"]["rig_spacing"], 78)
+        self.assertEqual(p["defaults"]["rig_spacing"], 50)
         self.assertTrue(self.state.surface_summary(now=self.base + 10 + 481)["rigs"][0]["full"])   # 8 min: probably full
 
     def test_mining_sites_list(self):
@@ -8397,10 +8397,10 @@ class SurfaceRigs(unittest.TestCase):
         args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
         st = ed_outrider.settings_from({}, args, None, ([], []))
         self.assertEqual((st["surface_alt"], st["rig_spacing"], st["surface_map_min"], st["surface_map_strip"], st["rig_warn"]),
-                         (1000, 78, 500, False, 3500))
+                         (1000, 50, 500, False, 3500))
         back = tomllib.loads(ed_outrider.config_text(st))["defaults"]
         self.assertEqual((back["surface_alt"], back["rig_spacing"], back["surface_map_min"], back["surface_map_strip"], back["rig_warn"]),
-                         (1000, 78, 500, False, 3500))
+                         (1000, 50, 500, False, 3500))
         st = ed_outrider.settings_from({"defaults": {"rig_warn": 9000, "rig_spacing": -1}}, args, None, ([], []))
         self.assertEqual((st["rig_warn"], st["rig_spacing"]), (4900, 0))
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ed_outrider.toml.example")) as f:

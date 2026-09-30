@@ -415,7 +415,7 @@ HUSH_MODES = {"10m": 600, "30m": 1800, "jump": None}   # s a timed hush lasts; "
 # co-pilot button marks them (in the Rhino on a body every gesture does); collections are the journal's MiningRefined.
 SURFACE_ALT = 1000        # m: the surface map shows below this altitude...
 SURFACE_HIDE_PAD = 100    # ...and hides above SURFACE_ALT + this (nothing flickers in between)
-RIG_SPACING = 78          # m: the ring drawn round a rig (SrvSurvey's "too close to deploy"; an estimate)
+RIG_SPACING = 50          # m: the ring drawn round a rig: the game allowed two rigs ~44-51 m apart (author's test, 30 Sep) and draws a 50 m ring
 SURFACE_MAP_MIN = 500     # m across: the map never zooms in tighter than this
 SURFACE_MAP_STRIP = False  # a small copy of the map in the on-body strip too
 RIG_WARN = 3500           # m from the Rhino: the leash warning (a rig is lost at RIG_LOST_M)

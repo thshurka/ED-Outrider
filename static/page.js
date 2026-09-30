@@ -623,7 +623,7 @@ const surfaceCfg = () => {
   const c = store.get("surfaceCfg", {}) || {}, d = (data && data.defaults) || {};
   const num = (k, dk, def, lo, hi) => { const raw = c[k] ?? d[dk] ?? def, v = Number(raw);
     return raw !== null && raw !== "" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def; };
-  return {alt: num("alt", "surface_alt", 1000, 10, 100000), spacing: num("spacing", "rig_spacing", 78, 0, 1000),
+  return {alt: num("alt", "surface_alt", 1000, 10, 100000), spacing: num("spacing", "rig_spacing", 50, 0, 1000),
           min: num("min", "surface_map_min", 500, 50, 6000), warn: num("warn", "rig_warn", 3500, 100, 4900),
           strip: typeof c.strip === "boolean" ? c.strip : !!d.surface_map_strip};
 };
