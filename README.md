@@ -78,16 +78,16 @@ A `.venv` next to the script is found even when you start Outrider with plain `p
 and whether you can scoop it, notable bodies, curiosities (🔭) and a credit estimate. Sort and hide
 visited or fully scanned systems. The radius (20–50 ly) is a dropdown in the Where tile. A dashed
 <i>old data</i> mark flags a system whose Spansh records predate Odyssey: thin-atmosphere planets there may
-hold life nobody has sampled. Hover it for details; it is never added to the values or spoken.
+hold life nobody has sampled; it is never added to the values or spoken. ⛏ N counts planetary mining
+locations on ground worth a Rhino (metal-rich, high metal content, rocky with magma volcanism; not icy).
 <br><br><img src="docs/nearby.png" alt="Nearby systems">
 </td>
 <td width="50%" valign="top">
 <b>Here</b> — the current system body by body, with bio and geo signals and 🌋 for volcanism. Before the
 DSS each bio signal shows the genera it could be. Hover a body for a summary, click it for everything.
-The ⛏ column counts planetary mining locations (from your FSS, or Spansh's for bodies you have not scanned).
-Hover or tap a count for the valuable minerals seen at that ground type's mining locations in a community
-survey ("Deuterium 54% · Low Temp Diamonds 27% · Helium-3 17%"), odds rather than what the body holds.
-Under the odds, "Mined previously" lists the total of each material your SRV's refinery has collected on that body, with the latest date ("Water 10 t (Last: 30 Sep)").
+⛏ counts planetary mining locations (your FSS, or Spansh's). Hover or tap it for the minerals a community
+survey found at that kind of ground ("Deuterium 54% · Low Temp Diamonds 27%": odds, not contents), and
+<i>Mined previously</i>: what your SRV refined there ("Water 10 t (Last: 30 Sep)").
 The to-do line ticks itself off as you honk, map and sample, in a <i>suggested order</i>: nearest first, with
 supercruise time and credits per minute ("~2 min · 450k/min"), and "skip?" on anything not worth the trip.
 Bio nobody had set foot on is valued with the ×5 first-footfall bonus ("up to 95.0M 👣×5"). In a system
@@ -107,14 +107,15 @@ white dwarfs.
 all-time row, "since your last sale" and the game's career statistics. Below: every trip from sale to
 sale with what it actually paid against Outrider's estimate, a check of the exobiology ×5 against the
 prediction ("🧬 47 sold, 44 with x5 as predicted, 3 without"), credits per hour and per jump, what each
-death cost, and your 25 most valuable finds.
+death cost, and your 25 most valuable finds. The trip under way shows what you have sold to Vista Genomics
+since your last cartographic sale (a player who sells only exobiology sees every sale there).
 <br><br><img src="docs/history.png" alt="History">
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <b>Samples</b> — every exobiology sample run: species, variant, body, value, and whether it is
-<i>aboard</i>, <i>sold</i> or <i>lost</i>. Filter, sort, export. Codex entries sit underneath. Unsold runs are
+<i>aboard</i>, <i>sold</i> or <i>lost</i> (a Vista Genomics sale of some species leaves the others aboard). Filter, sort, export. Codex entries sit underneath. Unsold runs are
 priced one by one ("x5 on 42 of 47 runs"); a run whose body scan is missing from your journals is priced
 at your past sales' ×5 rate.
 <br><br><img src="docs/samples.png" alt="Samples">
@@ -129,8 +130,8 @@ search any text, click a row for the raw event.
 <td width="50%" valign="top">
 <b>Materials</b> — materials against their caps, and how many FSD injections, limpets, SRV
 refuels and repairs, and Rhino mining rig restocks you can make right now. <b>Mining sites</b> lists each
-body your SRV mined: minerals and tons, rigs and unmarked sites, mining locations (L3), the last date and
-the distance. ⌖ opens it in Here; <b>forget</b> clears its saved spots (the tons stay: they come from the journals).
+body your SRV mined: minerals and tons, saved spots, the last date and the distance. ⌖ opens it in Here;
+<b>forget</b> clears its saved spots (the tons come from the journals and stay).
 <br><br><img src="docs/materials.png" alt="Materials">
 </td>
 <td width="50%" valign="top">
@@ -144,14 +145,16 @@ keeps the schematic under the list or tree.
 <td width="50%" valign="top">
 <b>Search</b> — systems with particular stars (or just <i>scoopable</i>), planets, rings, hotspots, or
 unfinished exobiology within a radius, from what Outrider knows (<i>Local</i>) or everything reported
-(<i>Spansh</i>). The name box finds any system, says how far it is and whether you've been, and opens it in
-Here, where ☆ bookmarks it or makes it the next stop.
+(<i>Spansh</i>). <i>Planetary mining locations</i> (Local only) takes an optional mineral and keeps a body
+when the survey found it at 10% or more of that ground's locations ("A 2 · metal-rich: ⛏ 5, Platinum 46% of
+surveyed locations (~2 expected)"). The name box finds any system, says how far it is and whether you've
+been, and opens it in Here, where ☆ bookmarks it or makes it the next stop.
 <br><br><img src="docs/search.png" alt="Search">
 </td>
 <td width="50%" valign="top">
 <b>My firsts</b> — visited systems with first-discovery data you haven't sold. The <b>firsts watch</b>
-checks them on Spansh in the background (gently: each daily for a month, then weekly, at most 150 checks a day) and marks any someone else has
-scanned since you ("👁 8 d after you"). Selling first still keeps your name, as long as nobody sold before
+checks them on Spansh in the background (each daily for a month, then weekly; at most 150 checks a day)
+and marks any someone else has scanned since you ("👁 8 d after you"). Selling first still keeps your name, as long as nobody sold before
 you. <b>Left behind</b> lists visited systems nearby with work over your thresholds. <b>Bookmarks</b> hold
 notes and your <b>next stop</b>.
 <br><br><img src="docs/firsts.png" alt="My firsts">
@@ -165,6 +168,8 @@ The **Overview** at the top shows Here and Nearby together: drag the divider, sw
 what to do next, the body you have targeted, and the nearest unvisited system.
 
 - An **at-risk line** shows what is aboard against your rebuy ("🗺 380M · 🧬 412M aboard · 3.2× rebuy").
+- **This session** since your login: "2 h 14 · 74 jumps · 612 ly · 6 new systems · 11 mapped · 4 samples ·
+  ~38.0M found" (the unsold estimate's change plus what you sold). After you quit, the last session.
 - **Captions** show the last three lines said; tap one to hear it again. A corner bar has 🗣, hush 30 min,
   status report and ✕ back.
 - **↗** beside the Now button opens Now in its own window, or open `http://127.0.0.1:8025/?mode=now`,
@@ -173,12 +178,19 @@ what to do next, the body you have targeted, and the nearest unvisited system.
 - On a planet, the **surface map** appears under the lines (see below).
 
 The **header** shows the galactic region, ranks, fuel, hull damage, your carrier's jump countdown, the
-nearest places to sell, and when you were last backed up.
+nearest places to sell, and when you were last backed up. Under hull, any core module under your level
+(`module_warn`, 80%) shows: "FSD 78% · Power plant 79% (as of 20:19 · 6 boosts since)". That is as of the
+last Loadout or repair, since the journal logs nothing in between; jet-cone boosts since are counted. The
+welcome back and the co-pilot's status report say it too.
 
 The **fuel tile** counts jumps as the ship gets lighter: "≈6 jumps at max range (484 ly), 3,500 at your
-pace". Nearby shows laden range ("83.5 ly · 78.0 laden") and the targeted jump its cost ("38.2 ly · 0.9 t ·
-leaves 5 max jumps"). "scoopable: 9 of last 20" turns amber when your fuel is short for the gaps between
-scoopable stars, and at a star you can't scoop it names another in the system if one is known.
+pace". It works for any drive (sizes 2 to 8, the Caspian's Mk II included, engineered or not, with or without a
+Guardian booster) from your own Loadout and jumps; the tooltip says how many more jumps it needs to learn a new
+ship. Engineering moves the range at once. Nearby shows laden range ("83.5 ly · 78.0 laden") and the targeted
+jump's cost ("38.2 ly · 0.9 t · leaves 5 max jumps"); on a low tank the range shrinks to what the fuel pays for
+("out of range (needs 4.0 t)"). "scoopable: 9 of last 20" turns amber when your fuel is short for the gaps
+between scoopable stars (Apex and multicrew jumps don't count), and at a star you can't scoop it names one
+in the system that you can.
 
 Under the Where tile, the **discovery streak** is a dot per arrival for your last 20 (gold: first
 discovery, amber: bodies nobody had reported, blue: fully known, grey: revisited). Below it, the
@@ -196,9 +208,11 @@ notification and be spoken (🗣), chosen per alert in the **🔔 alerts** dialo
 - a valuable body the moment the FSS resolves it, and a new codex entry
 - low fuel where you cannot scoop, and a top-up worth taking before a dry stretch
 - docking where the station buys your data, and what you banked when you sold
-- a sale that left data aboard (Universal Cartographics sells 50 systems a page), said once the pages stop
+- a sale that left data aboard (Universal Cartographics sells 50 systems a page; at Vista Genomics, the species
+  you kept back), said 90 seconds after the last page
 - hull damage, heat damage, interdiction, and unsold data past a threshold
 - your carrier arriving somewhere new or leaving without you
+- a Rhino mining rig nearing the 5 km leash, and rigs still marked out when you dock the Rhino (see The surface map)
 
 Spoken but not notified unless you tick it: the arrival briefing, the FSS debrief, leaving a body with
 sampling unfinished, each species completed, tank full, a high-gravity approach with a lot aboard, and
@@ -218,6 +232,8 @@ browser starts with.
 | Discovery streak | 10 / 5 | Known or undiscovered systems in a row for a spoken line (0 turns it off). |
 | Suggested order | 100k/min | Supercruise credits per minute under which Here marks "skip?". |
 | Fuel alerts under N jumps | off | Warns once when jumps left at your pace fall under N; also sets the top-up level. |
+| Core modules | 80% | A core module under this shows under hull and is said in the status report. |
+| Surface map | 1,000 m / 500 m / 78 m / 3,500 m | Altitude it shows below, narrowest view, rig spacing ring (0 = none), rig leash warning. |
 
 **Export settings** and **Import settings** move them to another browser profile. **Use these for new
 browsers** keeps a copy on the server (`browser_defaults.json`, included in backups), so a tablet running
@@ -242,14 +258,12 @@ the game. **Back up now** in the Data tile does it on demand.
 **Restoring.** The journals alone can rebuild everything:
 `python3 ed_outrider.py --legacy backups/journals` reads them into a fresh database.
 
-To get the database itself back (bookmarks, the Spansh cache, your settings), stop Outrider and run
-`python3 ed_outrider.py --restore`. It restores from the newest zip, or from one you name
-(`--restore outrider-ed_outrider-20260930-181500Z.zip`). It refuses while Outrider is running, checks the
-zip first, and keeps the database it replaces as `ed_outrider.sqlite.pre-restore-<date-time>`, so you can
-undo it. `python3 ed_outrider.py --list-backups` lists the zips. Add `--db` for a second database.
-
-`--restore` leaves `speech.json`, `speech_banned.json` and `ed_outrider.toml` alone. Unzip those by hand if
-you need them, bearing in mind that an old `speech.json` loses any lines an update has added since.
+To get the database back (bookmarks, the Spansh cache, your settings), stop Outrider and run
+`python3 ed_outrider.py --restore` for the newest zip, or name one
+(`--restore outrider-ed_outrider-20260930-181500Z.zip`). It refuses while Outrider is running, checks the zip
+first, and keeps the database it replaces as `ed_outrider.sqlite.pre-restore-<date-time>`. `--list-backups`
+lists the zips; add `--db` for a second database. `--restore` leaves `speech.json`, `speech_banned.json` and
+`ed_outrider.toml` alone: unzip those by hand if you need them (an old `speech.json` lacks newer lines).
 
 ## 🗣 The voice
 
@@ -278,12 +292,16 @@ config file) downloads into `piper-voices/` the first time; the dialog switches 
   briefing where there is nothing to do.
 - **FSS debrief:** what is worth doing once every body is found. **Signals** as the FSS finds them.
   **"Charging to jump"** with whether the star ahead is scoopable, and any hazard.
-- **Greeting and goodbye:** what is at stake after a long break, and a session recap when you quit.
+- **Greeting and goodbye:** what is at stake after a long break (and any core module under your level), and a
+  session recap when you quit.
 - **Exobiology:** leaving a body mid-run warns; the third sample says what it paid and what is left.
 - **Approach:** "2.6 g. 480 million aboard, 3.2 rebuys. Land gently."
 - **Fuel:** low fuel where you can't scoop, and the **top-up warning** before a likely dry stretch.
 - **Jumponium** (off by default): the best landable body with a material your FSD injections are short
   of ("B 4 has polonium, 1.3 percent.").
+- **Mapped** (off by default: **Say when a planet is mapped**, or `speak_mapped`): after each DSS mapping,
+  "A 2 mapped efficiently, 3.4 million. Next: biology on C 2, up to 19 million." It says so when you went
+  over the probe target, and "Nothing else here over your levels" when the system is done.
 - **Ship-loss debrief:** what went down with the ship and the nearest lost system to go back to.
 - **System names said properly:** "Drojau LL-O b26-3" is said "Drojau L L O, b 26 3".
 
@@ -291,6 +309,8 @@ config file) downloads into `piper-voices/` the first time; the dialog switches 
 
 - **Most urgent first.** Danger jumps the queue. Lines that waited over 20 seconds, or are about a system
   you've left, are dropped. Charging the frame shift drive clears the queue.
+- **No repeats too soon.** Each alert goes through every line in your personalities before any comes round
+  again. The browser remembers what you have heard across reloads.
 - **Hush.** The **▾** beside 🗣 hushes for 10 minutes, 30 minutes or until the next jump. Danger and anything
   you ask for still speak. The hush is kept by Outrider, so a hush from a tablet or the co-pilot button
   quiets the PC too.
@@ -300,7 +320,8 @@ config file) downloads into `piper-voices/` the first time; the dialog switches 
 - **Play speech and sounds on this PC.** Ticked in the dialog, the PC running Outrider plays the voice and
   sounds itself, so there is no click to allow audio, and the voice comes from the PC even with the page on
   a tablet. A page must still be open. Linux only: uses `pw-play`, `paplay`, `aplay` or `ffplay`
-  (`[speech] server_player`).
+  (`[speech] server_player`). A line plays to its end however long it is. Closing or reloading the
+  speaking window stops its line on the PC.
 
 **Spoken lines: what was said, and banning lines**
 
@@ -308,6 +329,8 @@ Open the 🔔 alerts dialog and scroll to the very bottom. The collapsed **Spoke
 window's last 100 alerts and what became of each: said, cut short, dropped or silent, and why. **copy**
 puts it on the clipboard.
 
+- Above the list, **This session** counts each alert's lines, noisiest first ("Arrival brief 42 · FSD charge
+  40 (3 dropped)"). **🔇** beside one stops speaking that alert (its 🗣 tick), with an undo.
 - Press **👎** beside a line to never hear that wording again, in any browser or in the voice lab.
 - "3 lines banned · review / undo" above the list lets you take a ban back.
 - Bans live in `speech_banned.json` beside `speech.json`, so editing `speech.json` never loses them.
@@ -323,16 +346,20 @@ Hugging Face: double-click one to download it for Outrider too.
 On a planet, Now shows a map under its lines: on the ground, in the SRV, on foot, or flying below 1,000 m
 (it hides again 100 m higher). Hiding deletes nothing.
 
+<p align="center">
+  <img src="docs/surface.png" alt="The surface map on Now: rigs, samples, a mining location and the ship" width="900">
+</p>
+
 - **Heading-up:** the way you face is the top, you are the arrow in the middle, N on the rim is north. It
   zooms to fit everything within 3 km, never narrower than 500 m, with a scale bar.
-- **What is drawn:** your ship, the samples of unfinished bio runs with each species' colony ring (the
+- **What is drawn:** your ship (a landing-pad H), the samples of unfinished bio runs with each species' colony ring (the
   current run solid), your rigs 1–6 with a faint spacing ring, saved sites (U1… unmarked, S1… rigs picked
   up) and mining locations (L3). Anything off the map is a chevron on the rim.
 - **The legend** names each tag, nearest first. Six rig slots mirror the game's HUD: mineral (or
   "placed"), tons so far, distance and bearing. A solid rig is **probably full**: 8 minutes since it was
   placed or last collected from.
 - **The leash:** the game destroys a rig 5 km from its Rhino. Past 3.5 km it turns red and the voice warns,
-  again at 4.5 km ("Rig 3 is 3.8 kilometres away; it is lost at 5."). It has its own alerts row.
+  again at 4.5 km ("Rig 3 is 3.8 kilometres away; it is lost at 5.").
 - **Strip copy:** a tick in the dialog adds a small copy to the on-body strip, with a one-line legend.
 
 **Marking rigs.** The game logs nothing when you deploy or pick up a rig, so you tell Outrider with the
@@ -341,18 +368,21 @@ co-pilot button. In the Rhino on a planet:
 - **Tap away from your rigs:** the next rig (lowest free number, 1–6) is placed 7 m behind you, where the
   game drops it. "Rig 3 placed."
 - **Tap within 5 m of a rig:** it is picked up and its number is free again.
-- The button does nothing else in the Rhino. Anywhere else it works as usual.
+- The button does nothing else in the Rhino. Anywhere else it works as usual. Getting out on foot and back in
+  keeps it marking rigs.
+- **Forgot to tap?** The ✕ by a rig's slot in the legend marks it picked up.
+- **Rigs still out:** docking the Rhino with rigs still marked out on the body says so, and a card shows it
+  ("Rigs 2 and 5 still marked out; rig 5 is probably full."). It is Outrider's record, not the game's, so a
+  rig picked up without a tap counts until you ✕ it.
 
-**Automatic:** collections. Driving over a rig refines 1 t per journal line; the tons go to the rig under you
-(or an unmarked site if none is marked there) and are said once it stops ("Rig 3: 12 tons of Water.").
-Also automatic: your ship's landing spot, mining location markers (arriving at one you targeted from the
-ship) and rigs lost at 5 km or when you leave the body. **Not automatic:** placing and picking up rigs, and
-what a deposit holds. A rig that collected anything is kept as a saved site for your next visit and listed
-under Materials' **Mining sites**.
+**Automatic:** collections (the tons go to the rig under you, or an unmarked site, and are said once you
+stop: "Rig 3: 12 tons of Water."), your ship's landing spot, mining locations you targeted from the ship, and
+rigs lost at 5 km, on leaving the body, or with the Rhino destroyed, a death or a relog. **Not automatic:**
+placing and picking up rigs, and what a deposit holds. A rig that collected anything is kept as a saved site
+for your next visit and listed under Materials' **Mining sites**.
 
-**Settings** (🔔 alerts dialog, per browser; `[defaults]` for a new one): `surface_alt` (1,000 m),
-`surface_map_min` (500 m across), `rig_spacing` (78 m, an estimate; 0 = no ring), `rig_warn` (3,500 m; the
-spoken warning always uses the config file's) and `surface_map_strip`.
+The map's sizes and the leash distance are in the thresholds table under Alerts; the spoken leash warning
+always uses the config file's `rig_warn`.
 
 ## 🎯 Auto honk
 
@@ -361,7 +391,8 @@ holds Primary Fire, and says how it went ("System Scan Completed, 12 Bodies disc
 you tick it in the 🔔 alerts dialog.
 
 - It waits while a map or panel is open, and while the HUD is in combat mode (switch to analysis mode).
-- It learns which fire groups the scanner is in, per ship, and waits on a group where it has missed.
+- It learns which fire groups the scanner is in, per ship, and waits on a group where it has missed twice in a
+  row (one miss can be an alt-tab, which sends the key to another window).
   The dialog's **forget** clears that after you move the scanner.
 - It skips systems you've already honked, Apex shuttles and multicrew.
 
@@ -381,8 +412,10 @@ Setting it up:
 
 On Linux, one button on your HOTAS (or a spare key) talks to the voice:
 
-- **Tap:** a status report: fuel and jumps, the next stop here, what is aboard against your rebuy, and the
-  nearest unvisited system. On a body mid-run it gives the sampling instead. A tap mid-line cuts it short.
+- **Tap:** a status report: fuel and jumps (and any core module under your level), the next stop, what is
+  aboard against your rebuy, and the nearest unvisited system. With a body targeted it leads with that body
+  ("A 3: 2.4 g, thin ammonia, 3 bio signals, up to 19 million, about 2 minutes, worth it"); mid-run on a body,
+  the sampling. A tap mid-line cuts it short.
 - **Double tap:** the last line again.
 - **Hold:** hush until the next jump; hold again to end it.
 - **In the Rhino** on a planet, any press marks rigs instead (see The surface map).
@@ -432,7 +465,7 @@ effect. Switches take a bare `true` or `false`; a wrong value is reported at sta
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them |
 | `[server]` | `host`, `port`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
-| `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
+| `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC** |
@@ -485,7 +518,9 @@ network can read the page.
 
 For overlays, `GET /api/status` returns a compact JSON status and
 `GET /api/status.txt?fields=system,region,fuel,target,unsold,body,sampling` one line for an OBS text
-source. Both are read-only.
+source. Both are read-only, and they are the only parts of `/api/` another web site's page may read: every
+other request a browser labels as coming from another site is refused (curl and scripts send no such label and
+pass).
 
 </details>
 

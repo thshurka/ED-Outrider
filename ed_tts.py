@@ -59,9 +59,19 @@ PLAYERS = (("pw-play", ["pw-play"], None),
            ("ffplay", ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"],
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "-"]))
 PLAYER_CHOICES = ("auto",) + tuple(p[0] for p in PLAYERS) + ("off",)
-PLAY_MAX = 20.0   # s: the longest a line (or a sound) may play on the server before its player is killed
+PLAY_MAX = 20.0   # s: the longest a sound (or a line whose length is unknown) may play on the server before its player is killed
+PLAY_SLACK = 5.0  # s: a line may play this much past its own length (player start-up, the feed) before it is killed
 SOUNDS_FILE = os.path.join(HERE, "static", "sounds.json")
 SOUND_RATE = 22050
+
+
+def wav_seconds(wav):
+    """How long a WAV plays (frames / rate from its header), or None when it is not a WAV that says."""
+    try:
+        with wave.open(io.BytesIO(wav)) as w:
+            return w.getnframes() / w.getframerate() if w.getframerate() else None
+    except (wave.Error, EOFError, TypeError, ValueError):
+        return None
 
 
 def clip_text(text, limit=SAY_MAX):
@@ -401,11 +411,12 @@ def find_player(choice="auto", which=None):
 
 
 class _Line:
-    """A spoken line on its way through LinePlayer: stop() may come before its player has even started."""
-    __slots__ = ("id", "stopped", "proc")
+    """A spoken line on its way through LinePlayer: stop() may come before its player has even started.
+    `capped`: its player was killed at the time limit (a hung player), not stopped by the page."""
+    __slots__ = ("id", "stopped", "proc", "capped")
 
     def __init__(self, line_id):
-        self.id, self.stopped, self.proc = line_id, False, None
+        self.id, self.stopped, self.proc, self.capped = line_id, False, None, False
 
 
 class LinePlayer:
@@ -460,12 +471,19 @@ class LinePlayer:
                 pass
         return True
 
+    def line_cap(self, wav):
+        """The time limit for a line: its own length plus PLAY_SLACK, never under the cap (a WAV whose length
+        is unknown gets the cap), so a long line or a slow voice is heard to its end and only a hung player is cut."""
+        length = wav_seconds(wav)
+        return self.cap if length is None else max(self.cap, length + PLAY_SLACK)
+
     async def play_line(self, line, wav):
-        """Play a claimed line to its end: "done", "stopped" or "failed" (no player, or it would not play)."""
+        """Play a claimed line to its end: "done", "stopped", "capped" (killed at the time limit: it played, but
+        not to the end) or "failed" (no player, or it would not play)."""
         if line.stopped:
             return "stopped"
-        rc = await self._run(wav, line)
-        return "stopped" if line.stopped else "done" if rc == 0 else "failed"
+        rc = await self._run(wav, line, self.line_cap(wav))
+        return "capped" if line.capped else "stopped" if line.stopped else "done" if rc == 0 else "failed"
 
     def play_sound(self, wav):
         """Start a sound and return at once (False when there is no player)."""
@@ -476,9 +494,10 @@ class LinePlayer:
         task.add_done_callback(self._sounds.discard)
         return True
 
-    async def _run(self, wav, line=None):
+    async def _run(self, wav, line=None, cap=None):
         """Run the player on `wav`: on stdin where it reads one, else from a temporary file removed afterwards.
-        Killed past the cap. The exit code, or None when it could not start."""
+        Killed past `cap` s (default the cap). The exit code, or None when it could not start."""
+        cap = self.cap if cap is None else cap
         if not self.player:
             return None
         _, file_cmd, stdin_cmd = self.player
@@ -514,11 +533,11 @@ class LinePlayer:
                         proc.stdin.close()
                 return await proc.wait()
             try:
-                return await asyncio.wait_for(feed_and_wait(), self.cap)
+                return await asyncio.wait_for(feed_and_wait(), cap)
             except asyncio.TimeoutError:
-                print(f"spoken alerts: {cmd[0]} still playing after {self.cap:g} s, stopped", file=sys.stderr)
-                if line is not None:   # it did play: a line cut at the cap counts as stopped, not as failed
-                    line.stopped = True   # (a failure would have the browser say the whole line again)
+                print(f"spoken alerts: {cmd[0]} still playing after {cap:g} s, stopped", file=sys.stderr)
+                if line is not None:   # it did play: a line cut at the cap counts as cut, not as failed
+                    line.stopped = line.capped = True   # (a failure would have the browser say the whole line again)
                 return None
         finally:
             if proc is not None and proc.returncode is None:   # the cap, or the request went away

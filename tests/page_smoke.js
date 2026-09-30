@@ -1283,6 +1283,12 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
                 /\(484 ly\)/.test(fl.textContent)];
     got.target = /Costed · 38\.2 ly · 2\.9 t · leaves 3 max jumps/.test(d.getElementById("target").textContent);
     got.laden = /78\.0 laden/.test(d.getElementById("subJump").textContent);
+    // R14: a jump the tank can't pay for reads out of range, with what it needs; R15: the jumps still to make
+    w.eval(`data.target = Object.assign({}, data.target, {hop: {ly: 75.6, fuel: 4.02, left: 0, reach: false}}); render()`);
+    const tt = d.getElementById("target").textContent;
+    got.short = [/Costed · 75\.6 ly · out of range \(needs 4\.0 t\)/.test(tt), /leaves/.test(tt)];
+    w.eval(`data.fuel = ${fuel(20, 3, {model: {range_now: 78.0, max_fuel: null, fitted: false, power: 2.9, cargo: 0, ly_max: null, need: 2}})}; render()`);
+    got.need = /per-jump fuel needs 2 more jumps in this ship first/.test(d.getElementById("tFuel").title);
     w.eval(`data = ${savedData}; render()`);
     const want = {topup: [["Top up here: about 3 jumps of fuel left", "fuel_target"]], topupSay: ["fuel_topup", true], again: [],
       both: [["Top up here: about 3 jumps of fuel left", "fuel_target"]], bothBody: true,
@@ -1292,11 +1298,11 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       starKnown: [["fuel_star", true, "Star B can be scooped, 1,240 light seconds out."]], starUnknown: [["fuel_star", false, true]],
       underOff: [], underOn: [["Fuel: 3 jumps left", "fuel_low"]], underOnce: [],
       underArrival: [["Fuel 45% (3 jumps) at a DA star you cannot scoop", "fuel_star"]],
-      tile: [true, true, true, true], target: true, laden: true};
+      tile: [true, true, true, true], target: true, laden: true, short: [true, false], need: true};
     for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
     const goodD = !bad.length && errors.length === before;
     allOk = allOk && goodD;
-    console.log(goodD ? "OK" : "FAIL", "| batch D fuel |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(got)}` : "top-up card (one, once per system, fuel_topup), old rule kept, in-system star wording, under N jumps, tile, target cost", errors.slice(before));
+    console.log(goodD ? "OK" : "FAIL", "| batch D fuel |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(got)}` : "top-up card (one, once per system, fuel_topup), old rule kept, in-system star wording, under N jumps, tile, target cost, short of fuel, jumps still needed", errors.slice(before));
   }
   // Batch E: the x5 per-run tile line, the trip's sale check line, the run in progress elsewhere (strip line and the
   // discard card), the region crossing (folded into the briefing, or alone) and the jumponium call-out (off by default;
@@ -1576,6 +1582,81 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodM2;
     console.log(goodM2 ? "OK" : "FAIL", "| M2 surface map |", goodM2 ? "show/hide, heading-up, rings to scale, rig slots, chevron, legend, strip, settings" : JSON.stringify({want, got}), errors.slice(before));
   }
+  // Batch A (review 2026-10-01): R27 the N and the rim tags centred on every frame (a stand-in canvas whose
+  // save/restore keeps the text alignment, as a real one does), R30 two species on a body never share a colour (these
+  // two hash to the same one), S1 the rigs-out moment's alert and card, and a rig slot's ✕ marking it picked up
+  {
+    const w = dom.window, before = errors.length, bad = [];
+    const realFetch = w.fetch, posted = [];
+    w.fetch = (u, o) => String(u).startsWith("api/rigs/remove") ? (posted.push(o && o.body),
+      Promise.resolve(new Response('{"ok": true}', {headers: {"Content-Type": "application/json"}}))) : realFetch(u, o);
+    const got = JSON.parse(await w.eval(`(async () => {
+      const o = {}, v0 = view, s0 = data.surface, cf = window.confirm, seq0 = lastMomentSeq, m0 = data.moments, card0 = rigsCard;
+      const st = {textAlign: "start", textBaseline: "alphabetic"}, stack = [], log = [];
+      const ctx = new Proxy({}, {get: (t, p) => p in st ? st[p] : p === "save" ? () => stack.push({...st})
+          : p === "restore" ? () => Object.assign(st, stack.pop()) : p === "fillText" ? txt => log.push([txt, st.textAlign, st.textBaseline]) : () => {},
+        set: (t, p, v) => { if (p in st) st[p] = v; return true; }});
+      const R = 1000000, k = 180 / Math.PI / R;
+      const s = {body: "ABC 1", system: "5", body_id: 3, lat: 0, lon: 0, heading: 90, alt: 0, radius: R, show: true, down: true, alt_avg: false,
+        rhino: true, ship: null, sites: [], locations: [],
+        rigs: [{id: 7, n: 2, lat: 100 * k, lon: 0, minerals: {Water: 4}, tons: 4, full: false, dist: 100},
+               {id: 8, n: 3, lat: 0, lon: -4000 * k, minerals: {}, tons: 0, full: false, dist: 4000}],
+        bio: [{species: "Stratum Tectonicas", current: false, samples: 1, need: 500, points: [{n: 1, lat: 50 * k, lon: 0, dist: 50}]},
+              {species: "Aleoida Arcus", current: false, samples: 1, need: 150, points: [{n: 1, lat: -50 * k, lon: 0, dist: 50}]}]};
+      const L = surfaceLayout(s, surfaceCfg(), 600), canvas = {style: {}, width: 0, getContext: () => ctx};
+      drawSurface(canvas, L, false); log.length = 0; drawSurface(canvas, L, false);
+      o.frame2 = log.filter(x => x[0] === "N" || x[0] === "3");
+      o.colours = new Set(L.items.filter(i => i.kind === "bio").map(i => i.colour)).size;
+      data.surface = s; view = "now"; render();
+      const lg = document.getElementById("nowMapLegend");
+      o.swatches = new Set([...lg.querySelectorAll(".lg-bio .sw")].map(e => e.style.background)).size;
+      window.confirm = () => true;
+      lg.querySelector('[data-rigremove="7"]').click();
+      await new Promise(r => setTimeout(r, 50));
+      window.confirm = cf;
+      // S1: the moment, as the server sends it after a live DockSRV
+      data.moments = [{seq: seq0 + 1, ts: new Date().toISOString(), kind: "rigs_out", system: "5", body_id: 3, rigs: [2, 3], full: [3],
+                       text: "Rigs 2 and 3 still marked out; rig 3 is probably full."}];
+      onData();
+      o.alert = [lastAlert.kind, lastAlert.title, /surface map/.test(lastAlert.body)];
+      const se = document.getElementById("sell");
+      o.card = [se.textContent.includes("Rigs 2 and 3 still marked out"), se.textContent.includes("surface map"), !!se.querySelector("[data-rigsclose]")];
+      data.surface = Object.assign({}, s, {rigs: []}); renderStrip();   // no rig out there any more: the card goes
+      o.gone = !se.textContent.includes("still marked out");
+      data.surface = s; renderStrip(); se.querySelector("[data-rigsclose]").click();
+      o.closed = rigsCard === null;
+      o.row = ALERTS.some(a => a[0] === "rigsout") && !alertCfg.rigsout && alertSpeak.rigsout && !DANGER.has("rigs_out");
+      data.moments = m0; lastMomentSeq = seq0; rigsCard = card0; data.surface = s0; view = v0; render();
+      return JSON.stringify(o);
+    })()`));
+    w.fetch = realFetch;
+    const want = {frame2: [["3", "center", "middle"], ["N", "center", "middle"]], colours: 2, swatches: 2,
+      alert: ["rigsout", "Rigs 2 and 3 still marked out; rig 3 is probably full", true], card: [true, true, true], gone: true, closed: true, row: true};
+    for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    if (JSON.stringify(posted) !== JSON.stringify(['{"id":7}'])) bad.push("remove");
+    const goodBA = !bad.length && errors.length === before;
+    allOk = allOk && goodBA;
+    console.log(goodBA ? "OK" : "FAIL", "| batch A surface |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify({got, posted})}` : "N and tags centred every frame, distinct species colours, rigs-out alert and card, rig ✕", errors.slice(before));
+  }
+  // Batch B (review 2026-10-01) R13: Vista Genomics sales since the last cartographic sale show as the trip under
+  // way (its payout and x5 check) with no loss to draw it, and a player who sells only exobiology gets that row
+  // instead of "No sales on record yet."
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const h = histData, cur = {start: null, end: null, paid_bio: 2000000, paid: 2000000, paid_carto: null,
+        x5: {sold: 2, predicted: 2, matched: 2, paid: 2, unknown: 0}, estimate_bio: null, losses: []};
+      const rows = ledger => { histData = {sessions: [], all_time: null, ledger}; renderHistory();
+        return [...document.querySelectorAll("#tripRows tr")].map(r => [...r.cells].map(td => td.textContent.trim()).filter(Boolean).join(" | ")); };
+      const o = {bioOnly: rows({trips: [], current: cur, since_last_sale: {since: null, days: null, jumps: 3, ly: 40, firsts: 1}, losses: []}),
+                 none: rows({trips: [], current: null, since_last_sale: null, losses: []})};
+      histData = h; if (h) renderHistory();
+      return JSON.stringify(o); })()`));
+    const good = got.bioOnly.length === 2 && got.bioOnly[0] === "start → now | 3 | 40 | 1 | 2.0M" && got.bioOnly[1] === "🧬 2 sold, 2 with x5 as predicted"
+      && JSON.stringify(got.none) === JSON.stringify(["No sales on record yet."]) && errors.length === before;
+    allOk = allOk && good;
+    console.log(good ? "OK" : "FAIL", "| R13 trip under way |", good ? "bio sales since the last carto sale drawn with their x5 check" : JSON.stringify(got), errors.slice(before));
+  }
   // M3: Materials' Mining sites (one row per body, open in Here, forget after a confirm) and the rig restock recipe
   {
     const w = dom.window, before = errors.length;
@@ -1620,6 +1701,220 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const goodM3 = Object.values(want).every(Boolean) && errors.length === before;
     allOk = allOk && goodM3;
     console.log(goodM3 ? "OK" : "FAIL", "| M3 mining sites |", goodM3 ? "a row per body, forget after a confirm, rig restock row, served by /api/materials" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // Batch D (review 2026-10-01): R11 a line the PC's player cut at its time limit is logged as cut, not said; R32 a
+  // pagehide mid-line stops the PC's line with a beacon (and none once it has ended); S2 the status report leads with
+  // the targeted body (not when it is the next stop; a finished one only "nothing to do" after the fuel); S3 every
+  // line of a pool before a repeat, kept across a reload, and ▶ voice samples not counted; S8 the mapped call-out's
+  // words and its tick; S9 the session tally and its 🔇 (the grid's tick kept in step) with an undo
+  {
+    const w = dom.window, before = errors.length, got = {}, bad = [], realFetch = w.fetch;
+    const flags = w.eval("[speechOn, isSpeaker]"), savedData = w.eval("JSON.stringify(data)"), savedLib = w.eval("JSON.stringify(speechLib)");
+    const savedAs = w.eval("JSON.stringify(alertSpeak)"), savedServer = w.localStorage.getItem("speakOnServer");
+    const beacons = [];
+    Object.defineProperty(w.navigator, "sendBeacon", {configurable: true, value: (u, b) => { beacons.push([u, b]); return true; }});
+    let release = null;
+    w.fetch = (u, o) => {
+      const url = String(u);
+      if (url === "api/say/play") {
+        const text = JSON.parse(o.body).text;
+        if (text === "Held line.") return new Promise(res => { release = () => res(new Response('{"ok": true, "stopped": true}', {status: 200, headers: {"Content-Type": "application/json"}})); });
+        const body = text === "Capped line." ? {ok: true, stopped: true, capped: true} : {ok: true, stopped: false};
+        return Promise.resolve(new Response(JSON.stringify(body), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      if (url === "api/say/stop") return Promise.resolve(new Response('{"ok": true}', {status: 200, headers: {"Content-Type": "application/json"}}));
+      return realFetch(u, o);
+    };
+    w.localStorage.setItem("speakOnServer", "true");
+    w.eval("speechOn = true; isSpeaker = true; speechItems = []; speechLast = {}; speechLog.length = 0; hushState = null");
+    const fates = () => JSON.parse(w.eval("JSON.stringify(speechLog.map(e => [e.words, e.fate]))"));
+    const fateOf = words => (fates().find(f => f[0] === words) || [])[1];
+    w.eval('speak("Capped line."); speak("Whole line.")');
+    for (let i = 0; i < 30 && !(fateOf("Capped line.") && fateOf("Whole line.")); i++) await sleep(100);
+    got.capped = [fateOf("Capped line."), fateOf("Whole line.")];
+    w.eval('speak("Held line.")');
+    for (let i = 0; i < 30 && !release; i++) await sleep(50);
+    w.dispatchEvent(new w.Event("pagehide"));
+    const b0 = beacons[0];
+    got.beacon = b0 ? [b0[0], JSON.parse(await (b0[1].text ? b0[1].text() : new Promise(r => { const fr = new w.FileReader(); fr.onload = () => r(fr.result); fr.readAsText(b0[1]); }))).id === w.eval("pcLineId")] : null;
+    if (release) release();
+    for (let i = 0; i < 30 && !fateOf("Held line."); i++) await sleep(50);
+    w.dispatchEvent(new w.Event("pagehide"));
+    got.beaconAfter = beacons.length;
+    w.fetch = realFetch;
+    if (savedServer === null) w.localStorage.removeItem("speakOnServer"); else w.localStorage.setItem("speakOnServer", savedServer);
+    // S2: the status report with a body targeted
+    got.status = JSON.parse(w.eval(`(() => { const d = data, hd0 = hereData;
+      data = Object.assign({}, d, {status: "ready", radius: 25, sphere_cut: null, on_body: null, sampling: null, fuel: {pct: 64, jumps_max: 8},
+        unsold: {total: 412e6}, ship: {rebuy: 128e6}, position: Object.assign({}, d.position, {id64: 777, id: "777"}),
+        systems: [{id64: 99, name: "Drojau LL-O b26-3", distance: 6.43, visited: false, source: "spansh"}]});
+      hereData = {id64: "777", bodies: [
+        {name: "A", type: "Star", main: true, body_id: 0, dist_ls: 0, scoopable: true, genera: []},
+        {name: "A 1", type: "Planet", body_id: 1, dist_ls: 100, gravity: 0.3, atmosphere: "None", bio: 0, genera: [], subtype: "High metal content body"},
+        {name: "A 3", type: "Planet", body_id: 3, dist_ls: 900, gravity: 2.43, atmosphere: "Thin Ammonia", bio: 3, genera: ["Stratum", "Bacterium", "Fungoida"], subtype: "Rocky body"},
+        {name: "B 2", type: "Planet", body_id: 5, dist_ls: 50, gravity: 0.1, atmosphere: "None", bio: 0, genera: [], subtype: "Icy body"}],
+        leaving: {honked: true, unscanned: 0, body_count: 4, all_found: true,
+          bio_pending: [{body: "A 3", signals: 3, genera: ["Stratum", "Bacterium", "Fungoida"], partial: {}, potential: 19e6, factor: 1, dist_ls: 900, gravity: 2.43, atmosphere: "Thin Ammonia"}],
+          unmapped: [{body: "A 1", subtype: "High metal content body", terraformable: false, increment: 50e6, special: false, dist_ls: 100}]}};
+      const at = id => { data.destination = {body_id: id, name: "", near: null}; return statusReportText(); };
+      const o = {next: at(1), other: at(3), done: at(5), none: (data.destination = null, statusReportText())};
+      data.destination = {body_id: 3, name: "A 3", near: null};
+      o.now = nowDestText(hereData, hereData.leaving, planItems(hereData.leaving), hereData.bodies[2]).replace(/<[^>]+>/g, "");
+      data = d; hereData = hd0; return JSON.stringify(o); })()`));
+    // S3: a 50-line pool: 50 different lines before any repeats, across a reload; a ▶ voice sample is not counted
+    const st = w.localStorage.getItem("speechStyles");
+    w.localStorage.setItem("speechStyles", '["business"]');
+    got.bag = JSON.parse(w.eval(`(() => {
+      const many = Array.from({length: 50}, (_, i) => "Pool line " + i + ".");
+      speechLib = {styles: {business: "Business"}, lines: {codex: {business: many}}, version: speechLib.version, banned: {}};
+      for (const k of Object.keys(recentLines)) delete recentLines[k];
+      const seen = [];
+      for (let i = 0; i < 30; i++) seen.push(line("codex", {}));
+      const stored = (store.get("speechHeard", {}).codex || []).length;
+      for (const k of Object.keys(recentLines)) delete recentLines[k];     // a reload: the list comes back from storage
+      Object.assign(recentLines, store.get("speechHeard", {}));
+      for (let i = 0; i < 20; i++) seen.push(line("codex", {}));
+      const first50 = new Set(seen).size;
+      const after = []; for (let i = 0; i < 10; i++) after.push(line("codex", {}));   // the pool starts again
+      const last4 = seen.slice(-4);
+      const heard = JSON.stringify(recentLines.codex);
+      lineNoRecord = true; line("codex", {}); lineNoRecord = false;
+      return JSON.stringify({stored, first50, fresh: after.every(x => !last4.includes(x)) && new Set(after).size === 10,
+                             sample: JSON.stringify(recentLines.codex) === heard, capped: SPEECH_HEARD_MAX}); })()`));
+    // the ▶ voice button draws samples without counting them
+    const heardBefore = w.localStorage.getItem("speechHeard"), realSay = w.sayNow;
+    w.sayNow = async () => {};
+    w.document.getElementById("trySpeak").click();
+    await sleep(100);
+    got.trySample = w.localStorage.getItem("speechHeard") === heardBefore;
+    w.sayNow = realSay;
+    if (st === null) w.localStorage.removeItem("speechStyles"); else w.localStorage.setItem("speechStyles", st);
+    // S8: the words, and nothing without the tick
+    got.mapped = JSON.parse(w.eval(`(() => {
+      const l = {honked: true, unscanned: 0, bio_pending: [{body: "C 2", signals: 1, genera: ["Stratum"], partial: {}, potential: 19e6, factor: 1, dist_ls: 400}],
+                 unmapped: [{body: "A 5", subtype: "Icy body", increment: 1, special: false, dist_ls: 10}]};
+      const a = mappedText({body: "A 2", value: 3.4e6, probes: 5, target: 6, leaving: l});
+      const b = mappedText({body: "A 2", value: 3.4e6, probes: 8, target: 6, leaving: {honked: true, unscanned: 0, bio_pending: [], unmapped: []}});
+      const c = mappedText({body: "A 2", value: null, probes: 7, target: 6, leaving: {honked: true, unscanned: 2, bio_pending: [], unmapped: []}});
+      return JSON.stringify([a.say, a.title, b.say, c.say]); })()`));
+    got.mappedRow = w.eval(`(() => { const row = ALERTS.find(a => a[0] === "mapped"); return [!!row, alertCfg.mapped, !!document.getElementById("sayMapped"), sayMapped()]; })()`);
+    w.eval(`speechLog.length = 0; data = Object.assign({}, data, {moments: [{seq: lastMomentSeq + 1, kind: "mapped", system: "1", body: "Q 9", probes: 3, target: 6, value: 1e6,
+      leaving: {honked: true, unscanned: 0, bio_pending: [], unmapped: []}}]}); onData()`);
+    got.mappedOff = w.eval('speechLog.some(e => /Q 9 mapped/.test(e.words))');
+    w.localStorage.setItem("sayMapped", "true");
+    w.eval(`data = Object.assign({}, data, {moments: [{seq: lastMomentSeq + 1, kind: "mapped", system: "1", body: "Q 9", probes: 3, target: 6, value: 1e6,
+      leaving: {honked: true, unscanned: 0, bio_pending: [], unmapped: []}}]}); onData()`);
+    got.mappedOn = w.eval('speechLog.filter(e => /Q 9 mapped/.test(e.words)).map(e => e.kind).join()');
+    w.localStorage.removeItem("sayMapped");
+    // S9: the tally and its mute
+    w.eval(`speechLog.length = 0; for (const k of Object.keys(speechTally)) delete speechTally[k]; alertSpeak.jump = true;
+      alertOut("jump", "Charging", "", {say: "Charging."}); alertOut("jump", "Charging again", "", {say: "Charging again."}); alertOut("codex", "Codex", "", {say: "Codex."});
+      speak("Asked for.");
+      const dlg = document.getElementById("alertDialog"); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", ""); document.getElementById("speechLogBox").open = true; drawSpeechLog()`);
+    const tally = () => w.document.getElementById("speechTally").textContent.replace(/\s+/g, " ").trim();
+    got.tally = tally();
+    const grid = w.document.querySelector('#alertOpts [data-aspeak="jump"]');
+    got.gridBefore = grid.checked;
+    got.mutes = [...w.document.querySelectorAll("#speechTally [data-mute]")].map(b => b.dataset.mute).sort().join();
+    w.document.querySelector('#speechTally [data-mute="jump"]').click();
+    got.muted = [w.eval("alertSpeak.jump"), grid.checked, JSON.parse(w.localStorage.getItem("alertSpeak")).jump, /FSD charge 2 muted undo/.test(tally())];
+    w.document.querySelector('#speechTally [data-unmute="jump"]').click();
+    got.undone = [w.eval("alertSpeak.jump"), grid.checked, !!w.document.querySelector('#speechTally [data-mute="jump"]')];
+    w.eval('document.getElementById("speechLogBox").open = false; const dl2 = document.getElementById("alertDialog"); if (dl2.close) dl2.close(); else dl2.removeAttribute("open")');
+    await sleep(300);
+    w.eval(`[speechOn, isSpeaker] = ${JSON.stringify(flags)}; speechItems = []; speechLast = {}; speechLog.length = 0;
+      Object.assign(alertSpeak, ${savedAs}); store.set("alertSpeak", alertSpeak); data = ${savedData}; speechLib = ${savedLib}; render()`);
+    delete w.navigator.sendBeacon;
+    const want = {capped: ["cut short: the PC's player ran past the line's length", "said"], beacon: ["api/say/stop", true], beaconAfter: 1,
+      status: {next: "Fuel 64 percent, 8 jumps. Next: map A 1, 50.0M, about 15 seconds. 412.0M aboard, 3.2 rebuys. Nearest unvisited: Drojau LL-O b26-3, 6.4 light-years.",
+               other: "A 3: 2.4 g, thin ammonia, 3 bio signals, up to 19.0M, about 30 seconds, worth it. Fuel 64 percent, 8 jumps. Next: map A 1, 50.0M, about 15 seconds. 412.0M aboard, 3.2 rebuys.",
+               done: "Fuel 64 percent, 8 jumps. B 2: nothing to do. Next: map A 1, 50.0M, about 15 seconds. 412.0M aboard, 3.2 rebuys.",
+               none: "Fuel 64 percent, 8 jumps. Next: map A 1, 50.0M, about 15 seconds. 412.0M aboard, 3.2 rebuys. Nearest unvisited: Drojau LL-O b26-3, 6.4 light-years.",
+               now: got.status && /^➜ A 3 · .* · ~30 s · worth it/.test(got.status.now) ? got.status.now : "(heading-to line)"},
+      bag: {stored: 30, first50: 50, fresh: true, sample: true, capped: 300}, trySample: true,
+      mapped: ["A 2 mapped efficiently, 3.4M. Next: biology on C 2, up to 19.0M.", "A 2 mapped efficiently · 3.4M cr",
+               "A 2 mapped, 2 probes over target, no efficiency bonus, 3.4M. Nothing else here over your levels.",
+               "A 2 mapped, 1 probe over target, no efficiency bonus. 2 bodies still to find in the FSS."],
+      mappedRow: [true, false, true, false], mappedOff: false, mappedOn: "mapped",
+      tally: "This session: FSD charge 2 🔇 · Codex 1 🔇 · Asked for 1", gridBefore: true, mutes: "codex,jump",
+      muted: [false, false, false, true], undone: [true, true, true]};
+    for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    const goodD = !bad.length && errors.length === before;
+    allOk = allOk && goodD;
+    console.log(goodD ? "OK" : "FAIL", "| batch D voice |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "capped line cut, beacon on pagehide, status leads with the target, no repeats across a reload, mapped call-out, session tally and mute", errors.slice(before));
+  }
+  // Batch F (review 2026-10-01): S4 Search's mining section (the form, a hit that opens Here) and Nearby's ⛏ count on the
+  // row and in the pop-up; S5 core modules under the level (the hull-area line, the dialog's level, welcome back, status
+  // report, nothing when all are fine); S10 This session on Now in place of Last session
+  {
+    const w = dom.window, before = errors.length, got = {}, bad = [];
+    const savedData = w.eval("JSON.stringify(data)"), savedSearch = w.localStorage.getItem("search"), savedView = w.eval("view");
+    got.form = w.eval(`(() => { const m = document.getElementById("sMining"), n = document.getElementById("sMineral");
+      const had = [!!m, !!n && [...n.options].some(o => o.value === "Platinum"), n && n.options[0].value === ""];
+      m.checked = true; n.value = "Platinum"; const p = formParams();
+      m.checked = false; n.value = ""; loadForm(p);
+      const back = [m.checked, n.value]; document.getElementById("sClear").click();
+      return JSON.stringify([had, p.mining, p.mining_mineral, back, m.checked, n.value]); })()`);
+    got.hit = JSON.parse(w.eval(`(() => {
+      search = {running: false, status: "1 system", results: [{id: "4242", name: "Mine Sys", distance: 3.5, visited: false, firsts: null,
+        matches: {mining: [{t: "A 2 · metal-rich: ⛏ 5, Platinum 46% of surveyed locations (~2 expected)", body: "A 2", here: true}]}}]};
+      renderSearch();
+      const row = document.querySelector("#sRows tr"), hit = row.querySelector("[data-here]");
+      const o = [row.querySelector(".mlbl").textContent, !!hit && hit.textContent];
+      hit.click();
+      o.push(view, pinnedSystem);
+      unpinSystem(); search = null; renderSearch();
+      return JSON.stringify(o); })()`));
+    got.nearby = JSON.parse(w.eval(`(() => {
+      const s = {name: "Rows", bodies_known: 5, stars: 1, planets: 4, ringed: 0, body_count: 5, source: "spansh",
+        detail: {hotspots: [], mining: 8, mining_bodies: 2, rings: {}, ring_bodies: {}, ringed_types: {}, ringed_stars: 0, belts: {},
+                 landable: 3, bio: 0, bio_bodies: 0, geo: 0, geo_bodies: 0, rings_mapped: 0, ring_count: 0},
+        star_types: {}, planet_types: {}, terraformable: 0, firsts: null, curiosity_list: []};
+      const cell = document.createElement("div"); cell.innerHTML = bodies(s);
+      const none = document.createElement("div"); none.innerHTML = bodies(Object.assign({}, s, {detail: Object.assign({}, s.detail, {mining: 0, mining_bodies: 0})}));
+      return JSON.stringify([cell.querySelector(".ic.mine") && cell.querySelector(".ic.mine").textContent, !none.querySelector(".ic.mine"),
+              /⛏ 8 mining locations on 2 bodies/.test(popHtml(s))]); })()`));
+    got.modules = JSON.parse(w.eval(`(() => {
+      const o = {};
+      data = Object.assign({}, data, {modules: [{label: "FSD", pct: 78, ts: "2026-09-25T20:19:46Z", boosts: 6},
+        {label: "Power plant", pct: 79, ts: "2026-09-25T20:19:46Z", boosts: 6}, {label: "Thrusters", pct: 95, ts: "2026-09-25T20:19:46Z", boosts: 6},
+        {label: "AFMU", pct: 100, ts: "2026-09-25T20:19:46Z", boosts: 6}], fuel: Object.assign({}, data.fuel || {}, {pct: 64, jumps_max: 8}),
+        docked: null, on_body: null, destination: null});
+      o.text = modulesText(); o.line = moduleLine().includes("FSD 78% · Power plant 79% (as of 20:19 · 6 boosts since)");
+      o.welcome = welcomeText("3 days", true); o.status = statusReportText();
+      store.set("moduleWarn", 96); o.raised = modulesText();
+      store.set("moduleWarn", 50); o.fine = [modulesText(), moduleLine(), welcomeText("3 days", true).includes("percent,"), statusReportText().includes("FSD")];
+      localStorage.removeItem("moduleWarn");
+      o.dialog = [!!document.getElementById("moduleWarn"), SETTINGS_KEYS.includes("moduleWarn"), moduleWarn()];
+      data = Object.assign({}, data, {modules: null}); o.none = modulesText();
+      return JSON.stringify(o); })()`));
+    got.session = JSON.parse(w.eval(`(() => {
+      const start = new Date(Date.now() - (2 * 60 + 14) * 60000 - 5000).toISOString();
+      data = Object.assign({}, data, {this_session: {start, jumps: 74, ly: 612.4, firsts: 6, bodies_first: 0, mapped: 11, footfalls: 0, samples: 4, codex_new: 0, found: 38e6},
+        last_session: {start: "2026-01-01T00:00:00Z", end: "2026-01-01T02:00:00Z", jumps: 9, ly: 1}});
+      view = "now"; renderNow();
+      const el = document.getElementById("thisSession"), txt = document.getElementById("nowView").textContent;
+      const o = [el && el.textContent, /Last session/.test(txt)];
+      data = Object.assign({}, data, {this_session: null}); renderNow();
+      o.push(/Last session: 9 jumps/.test(document.getElementById("nowView").textContent), sessionTime(new Date(Date.now() - 48 * 60000).toISOString()));
+      return JSON.stringify(o); })()`));
+    w.eval(`data = ${savedData}; view = ${JSON.stringify(savedView)}; render()`);
+    if (savedSearch === null) w.localStorage.removeItem("search"); else w.localStorage.setItem("search", savedSearch);
+    w.eval(`loadForm(store.get("search", null))`);
+    const want = {
+      form: JSON.stringify([[true, true, true], true, "Platinum", [true, "Platinum"], false, ""]),
+      hit: ["⛏ Mining", "A 2 · metal-rich: ⛏ 5, Platinum 46% of surveyed locations (~2 expected)", "here", "4242"],
+      nearby: ["⛏ 8", true, true],
+      modules: {text: "FSD 78% · Power plant 79% (as of 20:19 · 6 boosts since)", line: true,
+                welcome: "Away 3 days. Fuel 64 percent. FSD 78 percent, power plant 79 percent.",
+                status: got.modules && /^Fuel 64 percent, 8 jumps\. FSD 78 percent, power plant 79 percent[.]/.test(got.modules.status) ? got.modules.status : "(fuel, then the modules)",
+                raised: "FSD 78% · Power plant 79% · Thrusters 95% (as of 20:19 · 6 boosts since)", fine: ["", "", false, false],
+                dialog: [true, true, 80], none: ""},
+      session: ["This session 2 h 14 · 74 jumps · 612 ly · 6 new systems · 11 mapped · 4 samples · ~38.0M found", false, true, "48 min"]};
+    for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    const goodF = !bad.length && errors.length === before;
+    allOk = allOk && goodF;
+    console.log(goodF ? "OK" : "FAIL", "| batch F S4/S5/S10 |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "mining search and Nearby ⛏, core modules under the level, This session on Now", errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

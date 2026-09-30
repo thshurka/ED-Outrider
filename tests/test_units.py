@@ -124,7 +124,7 @@ class FirstsAndRings(unittest.TestCase):
 
     def test_organic_state(self):
         self.db.execute("INSERT INTO deaths VALUES ('T2', 'rebuy')")
-        self.db.execute("INSERT INTO bio_sales VALUES ('T4', 3)")
+        self.db.execute("INSERT INTO bio_sales (ts, species) VALUES ('T4', 3)")   # no BioData kept: sells every run
         self.assertEqual(ed_outrider.organic_state(self.db, "T1"), "lost")
         self.assertEqual(ed_outrider.organic_state(self.db, "T3"), "sold")
         self.assertEqual(ed_outrider.organic_state(self.db, "T5"), "aboard")
@@ -409,7 +409,7 @@ class Samples(unittest.TestCase):
         self.j.handle(s)
         self.j.handle({"event": "FSDJump", "timestamp": self.t(0), "StarSystem": "Sys", "SystemAddress": 1, "StarPos": [0, 0, 0]})
         self.sample_run(1, 1, 5, "Bacterial_01")                     # sold below
-        self.j.handle({"event": "SellOrganicData", "timestamp": self.t(2), "BioData": [{"Value": 1, "Bonus": 0}]})
+        self.j.handle({"event": "SellOrganicData", "timestamp": self.t(2), "BioData": [{"Species": "$Codex_Ent_Bacterial_01;", "Value": 1, "Bonus": 0}]})
         self.sample_run(3, 1, 6, "Bacterial_02")                     # lost below
         self.j.handle({"event": "Died", "timestamp": self.t(4)}); self.j.handle({"event": "Resurrect", "timestamp": self.t(4), "Option": "rebuy"})
         self.sample_run(5, 1, 7, "Bacterial_03")                     # aboard
@@ -2090,7 +2090,8 @@ class Batch2Values(unittest.TestCase):
         self.assertEqual(self.body("5")["value_parts"]["bio_now"], value * 5)
         recs = lambda: ed_outrider.merge_records([], *ed_outrider.own_data(self.db, 1, "Sys")[:2])
         self.assertEqual(self.state.system_value(1, "Sys", recs(), None)["value_parts"]["bio_now"], value * 5)
-        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T01:00:00Z", "BioData": [{"Value": value, "Bonus": 0}]})
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T01:00:00Z",
+                       "BioData": [{"Species": "$Codex_Ent_Bacterial_01;", "Value": value, "Bonus": 0}]})
         b = self.body("5")
         self.assertEqual(b["value_parts"]["bio_now"], 0)                            # banked at Vista Genomics
         self.assertEqual(self.state.system_value(1, "Sys", recs(), None)["value_parts"]["bio_now"], 0)
@@ -3519,7 +3520,7 @@ class Batch7Data(unittest.TestCase):
         self.assertTrue(value)
         self.jump("2026-01-01T00:00:00Z", 1, 0)
         run("2026-01-01T01:00:00Z", 1, 3, "A")                       # sold before any death
-        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T02:00:00Z", "BioData": [{"Value": 1}]})
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T02:00:00Z", "BioData": [{"Species": "$Codex_Ent_A;", "Value": 1}]})
         run("2026-01-01T03:00:00Z", 1, 4, "B")                       # lost on foot: the ship survived
         self.j.handle({"event": "Died", "timestamp": "2026-01-01T04:00:00Z"})
         self.j.handle({"event": "Resurrect", "timestamp": "2026-01-01T04:00:01Z", "Option": "recover"})
@@ -4926,7 +4927,10 @@ class FableServer(unittest.TestCase):
         self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="same-site", path="/api/say"), 403)
         self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="same-origin", path="/api/say"), 200)   # the page
         self.assertEqual(guard(self, "GET", "127.0.0.1:8025", path="/api/say"), 200)                      # curl
-        self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path="/api/nearby"), 200)   # reads
+        # R20: every other read under /api/ too, but the overlays' status, a page and its static files stay open
+        self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path="/api/nearby"), 403)
+        self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path="/api/status"), 200)
+        self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path="/"), 200)
 
     # ---- F18 / F19: backups ----
     def test_backup_of_a_missing_database_fails(self):   # F18
@@ -5582,8 +5586,46 @@ class BatchAAudio(unittest.TestCase):
         t0 = time.monotonic()
         with unittest.mock.patch("sys.stderr"):
             result = asyncio.run(pl.play_line(line, b"RIFF"))
-        self.assertEqual(result, "stopped")   # played up to the cap: not failed, or the browser says it again
+        self.assertEqual(result, "capped")   # played up to the cap: not failed, or the browser says it again
+        self.assertTrue(line.stopped)
         self.assertLess(time.monotonic() - t0, 5)
+
+    @staticmethod
+    def wav(seconds, rate=8000):
+        import io
+        import wave
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(b"\0\0" * int(seconds * rate))
+        return buf.getvalue()
+
+    def test_a_long_line_plays_to_its_end_and_a_capped_one_is_reported_as_cut(self):
+        """R11/R21: the time limit is the line's own length plus some slack (the fixed cap only a floor), so a line
+        longer than the cap is heard to its end; a player that hangs past it is cut and the page is told so."""
+        import asyncio
+        import ed_tts
+        self.assertAlmostEqual(ed_tts.wav_seconds(self.wav(1.5)), 1.5, places=3)
+        self.assertIsNone(ed_tts.wav_seconds(b"RIFFnot a wav"))
+        pl = self.fake(seconds=1.2)
+        pl.cap = 0.4                                     # a floor shorter than the line (as 20 s is for a long one)
+        self.assertAlmostEqual(pl.line_cap(self.wav(1.0)), 1.0 + ed_tts.PLAY_SLACK)
+        self.assertEqual(pl.line_cap(b"RIFF"), 0.4)      # its length unknown: the cap
+        self.assertEqual(pl.line_cap(self.wav(0.1)), max(0.4, 0.1 + ed_tts.PLAY_SLACK))
+        line = pl.claim()
+        self.assertEqual(asyncio.run(pl.play_line(line, self.wav(1.0))), "done")   # played on past the 0.4 s floor
+        pl.release(line)
+        # the endpoint: a hung player (unknown length, past the cap) answers capped, which the page logs as cut
+        self.state.player = self.fake(seconds=30)
+        self.state.player.cap = 0.3
+
+        async def go(c):
+            r = await c.post("/api/say/play", json={"text": "a hung player"})
+            return r.status, await r.json()
+        with unittest.mock.patch("sys.stderr"):
+            self.assertEqual(self.client(go), (200, {"ok": True, "stopped": True, "capped": True}))
 
     def test_sound_play(self):
         import asyncio
@@ -5800,6 +5842,83 @@ class BatchBVoiceControl(unittest.TestCase):
             await w.run()   # returns at once: nothing to listen for
             return w.status
         self.assertIn("is not a button name or number", asyncio.run(bad("BTN_NOPE")))
+
+    def stamped_evdev(self, script):
+        """Like fake_evdev, but each event carries a kernel timestamp: `script` is a list of (seconds the loop
+        waits before handing it over, the event's own time in seconds, value), then an unplug."""
+        import types
+        base = time.time()
+
+        class Ev:
+            def __init__(self, value, t):
+                self.type, self.code, self.value, self.t = 1, 300, value, t
+
+            def timestamp(self):
+                return base + self.t
+
+        class Dev:
+            opened = []
+
+            def __init__(self, path):
+                self.path, self.name, self.closed = path, "Saitek X-56 Throttle", False
+                Dev.opened.append(self)
+
+            def close(self):
+                self.closed = True
+
+            async def async_read_loop(self):
+                import asyncio
+                for wait, t, value in script:
+                    await asyncio.sleep(wait)
+                    yield Ev(value, t)
+                await asyncio.sleep(0.5)   # let a lone tap settle before the unplug
+                raise OSError(19, "No such device")
+        ecodes = types.SimpleNamespace(EV_KEY=1, ecodes={"BTN_TRIGGER_HAPPY5": 300}, BTN={300: "BTN_TRIGGER_HAPPY5"}, KEY={})
+        return types.SimpleNamespace(ecodes=ecodes, InputDevice=Dev, list_devices=lambda: ["/dev/input/event5"])
+
+    def watch(self, ev, on_gesture, seconds):
+        import asyncio
+        import ed_button
+
+        async def go():
+            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", on_gesture, hold_ms=300, double_ms=150, evdev=ev)
+            seen = []
+            with unittest.mock.patch.object(ed_button, "RETRY", 30):
+                t = asyncio.ensure_future(w.run())
+                for _ in range(int(seconds / 0.01)):
+                    if w.status not in seen:
+                        seen.append(w.status)
+                    await asyncio.sleep(0.01)
+                t.cancel()
+                await asyncio.gather(t, return_exceptions=True)
+            return seen
+        return asyncio.run(go())
+
+    def test_gestures_are_timed_by_the_event_timestamps(self):
+        """R33: a 50 ms tap whose release reaches the loop 0.6 s late (the loop was busy) is still a tap, and a
+        0.5 s hold whose press and release arrive together is still a hold."""
+        got = []
+        ev = self.stamped_evdev([(0, 0.0, 1), (0.6, 0.05, 0),                 # a tap, its release handed over late
+                                 (0.4, 1.0, 1), (0.0, 1.5, 0)])               # a hold, both events queued together
+        self.watch(ev, got.append, 2.2)
+        self.assertEqual(got, ["status", "hush"])
+
+    def test_a_failing_gesture_handler_does_not_kill_the_button(self):
+        """R12: a handler that raises (a locked database while marking a rig) is logged and shown in the status;
+        the next gestures still arrive."""
+        import sqlite3
+        got = []
+
+        def handler(g):
+            got.append(g)
+            if len(got) == 1:
+                raise sqlite3.OperationalError("database is locked")
+        ev = self.stamped_evdev([(0, 0.0, 1), (0.01, 0.4, 0),                 # a hold: the handler raises
+                                 (0.1, 0.6, 1), (0.01, 0.65, 0)])             # a tap afterwards still gets through
+        with unittest.mock.patch("sys.stderr"):
+            seen = self.watch(ev, handler, 1.2)
+        self.assertEqual(got, ["hush", "status"])
+        self.assertIn("listening to Saitek X-56 Throttle for BTN_TRIGGER_HAPPY5 (the last hush failed: database is locked)", seen)
 
     def test_config(self):
         import tomllib
@@ -6033,11 +6152,13 @@ class BatchDFuel(unittest.TestCase):
         truth = dict(unladen=1600.0, r0=50.0, boost=0, power=2.6, max_fuel=8.0)
         # jumps as that drive would burn them, 100 t in the tank before each
         jumps = [[d, ed_outrider.hop_fuel(truth, d, 1700), 100 - ed_outrider.hop_fuel(truth, d, 1700), 0] for d in (3, 9, 17, 25, 33, 40)]
-        m = ed_outrider.fuel_model({"unladen": 1600.0, "max_range": 50.0, "fsd_size": 8, "booster_ly": 0}, jumps)
+        new = {"unladen": 1600.0, "max_range": 50.0, "fsd_size": 8, "booster_ly": 0,
+               "fsd": "int_hyperdrive_overcharge_size8_class5_somethingnew"}   # a variant neither table knows
+        m = ed_outrider.fuel_model(new, jumps)
         self.assertEqual(m["power"], 2.6)
         self.assertAlmostEqual(m["max_fuel"], 8.0, places=2)
         # too few jumps to tell: no exponent, so no per-hop fuel (the range still works)
-        few = ed_outrider.fuel_model({"unladen": 1600.0, "max_range": 50.0, "fsd_size": 8, "booster_ly": 0}, jumps[:3])
+        few = ed_outrider.fuel_model(new, jumps[:3])
         self.assertIsNone(few["power"])
         self.assertIsNone(ed_outrider.jumps_left(few, 50, 0))
 
@@ -6151,6 +6272,187 @@ class BatchDFuel(unittest.TestCase):
         self.assertEqual(self.state.target_hop(t)["reach"], False)
         self.j.boost = {"value": 4.0, "ts": "x"}                         # a neutron charge reaches it
         self.assertTrue(self.state.target_hop(t)["reach"])
+
+
+class ReviewFuel(unittest.TestCase):
+    """Review 2026-10-01, batch C: the fuel model for any drive (R3), engineering between Loadouts (R4), a tank
+    under one max jump's fuel (R14), how many jumps the fit still needs (R15), rides out of the scoop counts (R16)."""
+
+    MANDALAY = BatchDFuel.MANDALAY
+    MANDALAY_JUMPS = BatchDFuel.MANDALAY_JUMPS
+    # Real jumps of a Caspian Explorer (explorer_nx: the Mk II SCO 8A drive, Guardian booster size 5, UnladenMass
+    # 1290.875 t, MaxJumpRange 83.246773 ly, 32 t in the hold), copied from the author's journals
+    NX = {"unladen": 1290.875, "max_range": 83.246773, "fsd_size": 8, "booster_ly": 10.5, "max_fuel": None,
+          "fsd": "int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"}
+    NX_JUMPS = [[1.87, 0.000678, 157.71933, 32], [5.416, 0.00972, 158.850281, 32], [8.846, 0.032959, 154.267044, 32],
+                [11.716, 0.067139, 159.932861, 32], [13.637, 0.098173, 159.901825, 32], [16.035, 0.147014, 158.712982, 32],
+                [17.58, 0.185373, 159.814621, 32], [52.561, 2.873145, 157.126862, 32], [73.633, 6.624328, 147.675674, 32]]
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    # ---- R3: every drive's power constant, the Mk II's own included ----
+    def test_power_constant_per_drive(self):   # R3
+        p = ed_outrider.fsd_power
+        self.assertEqual(p(self.NX), 2.5025)
+        self.assertEqual(p({"fsd": "int_hyperdrive_overcharge_size8_class5", "fsd_size": 8}), 2.90)
+        self.assertEqual(p({"fsd": "int_hyperdrive_overcharge_size8_class1", "fsd_size": 8}), 2.90)
+        self.assertEqual(p({"fsd": "Int_Hyperdrive_Size5_Class3", "fsd_size": 5}), 2.45)   # case as outfitting writes it
+        self.assertEqual(p({"fsd": "int_hyperdrive_size2_class1_free", "fsd_size": 2}), 2.00)
+        self.assertEqual(p({"fsd": "int_hyperdrive_overcharge_size7_class5", "fsd_size": 7}), 2.75)
+        self.assertIsNone(p({"fsd": "int_hyperdrive_overcharge_size7_class5_mkiii", "fsd_size": 7}))   # unknown: fitted
+        self.assertEqual(p({"fsd_size": 6}), 2.60)                       # a ship saved before the drive's name was kept
+        # the real jumps: per-hop fuel to within 0.5% on every one, and the Mk II's 6.8 t MaxFuelPerJump
+        m = ed_outrider.fuel_model(self.NX, self.NX_JUMPS)
+        self.assertEqual(m["power"], 2.5025)
+        self.assertAlmostEqual(m["max_fuel"], 6.8, delta=0.01)
+        for d, used, left, cargo in self.NX_JUMPS:
+            self.assertAlmostEqual(ed_outrider.hop_fuel(m, d, m["unladen"] + left + used + cargo) / used, 1, delta=0.005)
+        # without the drive's name the size-8 fit still picks the Mk II's constant from the jumps
+        self.assertEqual(ed_outrider.fuel_model(dict(self.NX, fsd="int_hyperdrive_overcharge_size8_class5_x"), self.NX_JUMPS)["power"], 2.5025)
+
+    # ---- R4: engineering at an engineer moves the range before the next Loadout ----
+    def loadout(self, ts, rng=80.403503, opt=1997.5, extra=()):
+        fsd = {"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size5_class5", "Engineering": {"Modifiers": [
+            {"Label": "Mass", "Value": 26.0, "OriginalValue": 20.0}, {"Label": "Integrity", "Value": 84.0, "OriginalValue": 120.0},
+            {"Label": "FSDOptimalMass", "Value": opt, "OriginalValue": 1175.0}]}}
+        self.j.handle({"event": "Loadout", "timestamp": ts, "Ship": "mandalay", "ShipID": 32, "UnladenMass": 324.450012,
+                       "MaxJumpRange": rng, "FuelCapacity": {"Main": 32.0, "Reserve": 0.5},
+                       "Modules": [fsd, {"Slot": "Slot03_Size5", "Item": "int_guardianfsdbooster_size5"},
+                                   {"Slot": "LifeSupport", "Item": "int_lifesupport_size4_class2"}, *extra]})
+
+    def craft(self, ts, slot, module, mods):
+        self.j.handle({"event": "EngineerCraft", "timestamp": ts, "Slot": slot, "Module": module, "BlueprintName": "x",
+                       "Level": 5, "Ingredients": [], "Modifiers": mods})
+
+    def test_engineer_craft_moves_the_range(self):   # R4
+        # the author's journal, 2025-03-18: Loadout 80.403503 ly, a Mass Manager craft (optimal mass 1997.5 -> 2077.4)
+        # and 52 jumps before the next Loadout, which said 83.199631 ly
+        self.loadout("2025-03-18T04:37:11Z")
+        self.j.fuel_hist = [list(x) for x in self.MANDALAY_JUMPS]
+        self.j.jump_range = {"ly": 80.403503, "ts": "2025-03-18T04:37:11Z"}
+        drive = "int_hyperdrive_overcharge_size5_class5"
+        self.craft("2025-03-18T04:40:18Z", "FrameShiftDrive", drive, [
+            {"Label": "Mass", "Value": 26.0, "OriginalValue": 20.0}, {"Label": "Integrity", "Value": 77.28, "OriginalValue": 120.0},
+            {"Label": "FSDOptimalMass", "Value": 2077.399902, "OriginalValue": 1175.0}])
+        self.assertAlmostEqual(self.j.ship["max_range"], 83.199631, delta=0.005)
+        self.assertAlmostEqual(self.j.ship["unladen"], 324.45, delta=0.01)
+        self.assertAlmostEqual(self.j.jump_range["ly"], 83.199631, delta=0.005)
+        self.assertEqual(self.j.fuel_hist, [])                           # the old drive's samples: gone, as on a refit
+        # a 77.5 ly jump the engineered drive makes (at ~356 t) is in range now
+        m = ed_outrider.fuel_model(dict(self.j.ship, max_fuel=5.2), [])
+        self.assertGreater(ed_outrider.fsd_range(m, 356), 77.5)
+        # jumps after the craft are kept when the next Loadout says what was worked out
+        self.j.handle({"event": "Cargo", "timestamp": "2025-03-18T04:41:00Z", "Vessel": "Ship", "Count": 0})
+        self.j.handle({"event": "FSDJump", "timestamp": "2025-03-18T04:50:00Z", "StarSystem": "S", "SystemAddress": 5,
+                       "StarPos": [1, 0, 0], "JumpDist": 77.5, "FuelUsed": 4.9, "FuelLevel": 27.0})
+        self.loadout("2025-03-18T05:55:37Z", rng=83.199631, opt=2077.399902)
+        self.assertEqual(len(self.j.fuel_hist), 1)
+        # a lightweight craft on another module: 4 t off the unladen mass (a module the Loadout listed stock)
+        r0 = self.j.ship["max_range"]
+        self.craft("2025-03-18T06:00:00Z", "LifeSupport", "int_lifesupport_size4_class2",
+                   [{"Label": "Mass", "Value": 1.8, "OriginalValue": 4.0}, {"Label": "Integrity", "Value": 50, "OriginalValue": 70}])
+        self.assertAlmostEqual(self.j.ship["unladen"], 324.45 - 2.2, delta=0.01)
+        self.assertAlmostEqual(self.j.ship["max_range"] - 10.5, (r0 - 10.5) * (324.45 + 5.2) / (322.25 + 5.2), delta=0.02)
+        self.assertEqual(self.j.fuel_hist, [])                           # 2.2 t is a refit: the samples were heavier
+        # a craft that changes nothing about the range (a faster boot) and a craft on another ship's drive: no change
+        before = dict(self.j.ship)
+        self.craft("2025-03-18T06:01:00Z", "PowerDistributor", "int_powerdistributor_size7_class5",
+                   [{"Label": "WeaponsCapacity", "Value": 60, "OriginalValue": 50}])
+        self.craft("2025-03-18T06:02:00Z", "FrameShiftDrive", "int_hyperdrive_size6_class5",
+                   [{"Label": "FSDOptimalMass", "Value": 2900, "OriginalValue": 1800}])
+        self.assertEqual(self.j.ship, before)
+        # a blueprint that drops a modifier the drive had (optimal mass back to a stock value the event doesn't
+        # give): left alone until the next Loadout
+        self.craft("2025-03-18T06:03:00Z", "FrameShiftDrive", drive, [{"Label": "Mass", "Value": 20.0, "OriginalValue": 20.0},
+                                                                     {"Label": "BootTime", "Value": 4, "OriginalValue": 10}])
+        self.assertEqual(self.j.ship["max_range"], before["max_range"])
+        # a Mass Manager on MaxFuelPerJump (p known from the drive): the range grows as MaxFuelPerJump^(1/p)
+        self.loadout("2025-03-18T07:00:00Z", rng=83.199631, opt=2077.399902)
+        self.j.ship["max_fuel"] = None
+        self.craft("2025-03-18T07:01:00Z", "FrameShiftDrive", drive, [
+            {"Label": "Mass", "Value": 26.0, "OriginalValue": 20.0}, {"Label": "FSDOptimalMass", "Value": 2077.399902, "OriginalValue": 1175.0},
+            {"Label": "MaxFuelPerJump", "Value": 5.72, "OriginalValue": 5.2}])
+        self.assertEqual(self.j.ship["max_fuel"], 5.72)
+        want = (83.199631 - 10.5) * (324.45 + 5.2) / (324.45 + 5.72) * (5.72 / 5.2) ** (1 / 2.45) + 10.5
+        self.assertAlmostEqual(self.j.ship["max_range"], want, delta=0.005)
+        # the craft is replayed on a re-read before a newer Loadout: that Loadout wins
+        self.loadout("2025-03-18T08:00:00Z", rng=90.0)
+        self.craft("2025-03-18T07:30:00Z", "FrameShiftDrive", drive, [{"Label": "FSDOptimalMass", "Value": 3000, "OriginalValue": 1175.0},
+                                                                     {"Label": "Mass", "Value": 26.0, "OriginalValue": 20.0}])
+        self.assertEqual(self.j.ship["max_range"], 90.0)
+
+    # ---- R14: a tank under one max jump's fuel ----
+    def test_low_tank_caps_the_range_and_reach(self):   # R14
+        m = ed_outrider.fuel_model(self.MANDALAY, self.MANDALAY_JUMPS)
+        mass = m["unladen"] + 3.0
+        full = ed_outrider.fsd_range(m, mass)
+        capped = ed_outrider.fsd_range(m, mass, 3.0)
+        self.assertAlmostEqual(capped, full * (3.0 / m["max_fuel"]) ** (1 / m["power"]), places=6)
+        self.assertAlmostEqual(ed_outrider.hop_fuel(m, capped, mass), 3.0, places=6)   # the jump 3 t pays for
+        self.assertEqual(ed_outrider.fsd_range(m, mass, 20.0), full)      # a tank over one max jump: no cap
+        self.j.pos = {"id64": 9, "name": "Here", "x": 0, "y": 0, "z": 0, "ts": "2026-01-01T00:00:00Z"}
+        self.db.execute("INSERT INTO route_systems VALUES (77, 'Far', 75.6, 0, 0, 'K', 'x')")
+        self.j.ship = dict(self.MANDALAY, fuel_main=32.0)
+        self.j.fuel_hist = [list(x) for x in self.MANDALAY_JUMPS]
+        self.j.status_json = {"live": True, "fuel_main": 3.0, "cargo": 0}
+        h = self.state.target_hop({"id64": 77, "name": "Far"})
+        self.assertFalse(h["reach"])                                     # was True: "4.0 t · leaves 0 max jumps"
+        self.assertGreater(h["fuel"], 3.0)
+        self.assertAlmostEqual(self.state.range_now(), round(capped, 2), places=2)
+        self.assertLess(self.state.range_now(), 70)
+        self.j.status_json["fuel_main"] = 30.0                           # a full tank reaches it
+        self.assertTrue(self.state.target_hop({"id64": 77, "name": "Far"})["reach"])
+
+    # ---- R15: how many jumps the fit still needs, and jumps before any Cargo record ----
+    def test_fit_says_how_many_jumps_it_needs(self):   # R15
+        new = dict(self.NX, fsd="int_hyperdrive_overcharge_size8_class5_x")   # p to fit: five jumps
+        self.assertEqual(ed_outrider.fuel_model(new, self.NX_JUMPS[:3])["need"], 2)
+        self.assertEqual(ed_outrider.fuel_model(new, self.NX_JUMPS[:5])["need"], 0)
+        self.assertEqual(ed_outrider.fuel_model(self.NX, self.NX_JUMPS[:1])["need"], 2)   # p known: three for MaxFuelPerJump
+        self.assertEqual(ed_outrider.fuel_model(self.NX, [])["need"], 3)
+        self.assertEqual(ed_outrider.fuel_model(dict(self.NX, max_fuel=6.8), [])["need"], 0)
+        self.assertEqual(ed_outrider.fuel_model(new, [s[:3] + [None] for s in self.NX_JUMPS])["need"], 5)   # no cargo figure
+        self.j.ship = dict(self.NX, fuel_main=160.0)
+        self.j.status_json = {"live": True, "fuel_main": 150.0, "cargo": 32, "ts": "2026-07-01T11:00:05Z"}
+        self.assertEqual(self.state.fuel_summary()["model"]["need"], 3)
+        # no Cargo record read yet: a live Status.json hold read within two minutes of the jump stands in
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-07-01T11:00:00Z", "StarSystem": "S", "SystemAddress": 5,
+                       "StarPos": [1, 0, 0], "JumpDist": 52.561, "FuelUsed": 2.873145, "FuelLevel": 157.126862})
+        self.assertEqual(self.j.fuel_hist[-1][3], 32)
+        self.j.status_json["ts"] = "2026-07-01T12:00:00Z"                 # an hour off (a journal being caught up on)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-07-01T11:01:00Z", "StarSystem": "T", "SystemAddress": 6,
+                       "StarPos": [2, 0, 0], "JumpDist": 17.58, "FuelUsed": 0.185373, "FuelLevel": 159.814621})
+        self.assertIsNone(self.j.fuel_hist[-1][3])
+        self.j.handle({"event": "Cargo", "timestamp": "2026-07-01T11:02:00Z", "Vessel": "Ship", "Count": 16})
+        self.j.status_json = {"live": True, "fuel_main": 150.0, "cargo": 32, "ts": "2026-07-01T11:03:00Z"}
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-07-01T11:03:00Z", "StarSystem": "U", "SystemAddress": 7,
+                       "StarPos": [3, 0, 0], "JumpDist": 17.58, "FuelUsed": 0.185373, "FuelLevel": 159.814621})
+        self.assertEqual(self.j.fuel_hist[-1][3], 16)                    # the journal's Cargo, once there is one
+
+    # ---- R16: an Apex shuttle or multicrew jump is not your tank's ----
+    def test_rides_leave_the_scoop_counts(self):   # R16
+        self.j.status_json = {"live": True, "fuel_main": 20.0}
+        self.j.ship = {"fuel_main": 32.0}
+        self.j.last_scoop = "2026-01-01T00:00:00Z"
+        for k in range(8):
+            self.j.handle({"event": "FSDJump", "timestamp": f"2026-01-01T00:0{k + 1}:00Z", "StarSystem": f"S{k}",
+                           "SystemAddress": 10 + k, "StarPos": [k, 0, 0], "FuelUsed": 1.0, "JumpDist": 10})
+            self.db.execute("UPDATE jumps SET star_class = 'K' WHERE id64 = ?", (10 + k,))
+        for k in range(5):   # a five-jump Apex ride to M stars, and one in another commander's ship
+            self.j.handle({"event": "FSDJump", "timestamp": f"2026-01-01T01:0{k}:00Z", "StarSystem": f"T{k}",
+                           "SystemAddress": 30 + k, "StarPos": [50 + k, 0, 0], "Taxi": True})
+            self.db.execute("UPDATE jumps SET star_class = 'L' WHERE id64 = ?", (30 + k,))
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T01:30:00Z", "StarSystem": "M", "SystemAddress": 40,
+                       "StarPos": [70, 0, 0], "Multicrew": True})
+        self.db.execute("UPDATE jumps SET star_class = 'T' WHERE id64 = 40")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM jumps WHERE ride = 1").fetchone()[0], 6)
+        self.assertEqual(self.state.fuel_summary()["since_scoop"], 8)     # was 14
+        self.assertEqual(self.state.scoop_rate(), {"scoopable": 8, "of": 8, "dry_run": 0})   # was 8 of 14, 6 dry
 
 
 class BatchEExobio(unittest.TestCase):
@@ -6722,7 +7024,18 @@ class BatchGHonkBackups(unittest.TestCase):
     def test_honk_learn(self):
         learn = ed_outrider.honk_learn
         self.assertEqual(learn(None, "A", True), {"good": ["A"], "bad": []})
-        self.assertEqual(learn({"good": ["A"], "bad": []}, "C", False), {"good": ["A"], "bad": ["C"]})
+        # R24: one miss is only counted (an alt-tab sends the key to another window, and the game cannot tell);
+        # the second in a row makes the group bad
+        self.assertEqual(learn({"good": ["A"], "bad": []}, "C", False), {"good": ["A"], "bad": [], "miss": {"C": 1}})
+        self.assertEqual(learn({"good": ["A"], "bad": [], "miss": {"C": 1}}, "C", False), {"good": ["A"], "bad": ["C"]})
+        self.assertEqual(learn(learn(None, "A", False), "A", False), {"good": [], "bad": ["A"]})   # no record yet: the same
+        # a success anywhere between ends every run of misses
+        self.assertEqual(learn({"good": [], "bad": [], "miss": {"A": 1, "C": 1}}, "B", True), {"good": ["B"], "bad": []})
+        self.assertEqual(learn(learn(learn(None, "A", False), "B", True), "A", False),
+                         {"good": ["B"], "bad": [], "miss": {"A": 1}})
+        # misses in two groups count apart
+        self.assertEqual(learn(learn(None, "A", False), "C", False), {"good": [], "bad": [], "miss": {"A": 1, "C": 1}})
+        self.assertEqual(learn({"good": [], "bad": ["C"]}, "C", False), {"good": [], "bad": ["C"]})   # already bad
         self.assertEqual(learn({"good": ["A"], "bad": []}, "A", False), {"good": ["A"], "bad": []})   # worked there before
         self.assertEqual(learn({"good": ["A"], "bad": ["C"]}, "C", True), {"good": ["A", "C"], "bad": []})   # a success clears it
         self.assertEqual(learn({"good": ["A"], "bad": []}, None, False), {"good": ["A"], "bad": []})
@@ -6767,6 +7080,9 @@ class BatchGHonkBackups(unittest.TestCase):
         presses, m = self.honk(102, False, self.live(fire_group=2))
         self.assertEqual(presses, [102])
         self.assertEqual(m["why"], "no discovery scan followed with fire group C selected: is the D-Scanner on primary fire there?")
+        self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": [], "miss": {"C": 1}})   # R24: once is not enough
+        presses, m = self.honk(1021, False, self.live(fire_group=2))   # the second in a row
+        self.assertEqual(presses, [1021])
         self.assertEqual(self.state.honk_groups(), {"good": ["A"], "bad": ["C"]})
         self.state.honker.combo = lambda: (["KEY_K"], "K")
         self.assertEqual(self.state.autohonk_info()["groups"], {"good": ["A"], "bad": ["C"]})
@@ -7322,6 +7638,10 @@ class MinedPreviously(unittest.TestCase):
         self.assertEqual([m["tons"] for m in bodies["B 12"]["mined"]], [2])
         self.assertEqual(bodies["B 12"]["mining"], 0)        # mined history with no survey count still shows
 
+
+Q = ed_outrider.SALE_QUIET_S   # s: the wait for a sale's next page
+
+
 class SaleLeft(unittest.TestCase):
     """A sale that leaves data aboard: said once the pages stop and a fresh estimate has run, live sales only."""
 
@@ -7353,17 +7673,17 @@ class SaleLeft(unittest.TestCase):
         self.estimate(-30, 93, 16800000, 300)            # before the sale: it cannot say what the sale left
         self.page(0, 50, 14814687)
         self.state.maybe_sale_left(self.base + 5)
-        self.state.maybe_sale_left(self.base + 12)       # quiet long enough, but no estimate since the page
+        self.state.maybe_sale_left(self.base + Q + 2)    # quiet long enough, but no estimate since the page
         self.assertEqual(self.kinds(), [])
         self.estimate(3, 43, 2026392, 270)
-        self.state.maybe_sale_left(self.base + 20)
+        self.state.maybe_sale_left(self.base + Q + 10)
         m = self.kinds()
         self.assertEqual(len(m), 1)
         self.assertEqual({k: m[0][k] for k in ("kind", "sold_systems", "sold_value", "left_systems", "left_value", "left_firsts")},
                          {"kind": "sale_left", "sold_systems": 50, "sold_value": 14814687, "left_systems": 43,
                           "left_value": 2026392, "left_firsts": 270})
         self.assertIsNone(self.j.sale_run)
-        self.state.maybe_sale_left(self.base + 40)       # said once
+        self.state.maybe_sale_left(self.base + Q + 30)   # said once
         self.assertEqual(len(self.kinds()), 1)
 
     def test_three_pages_all_sold(self):
@@ -7374,12 +7694,12 @@ class SaleLeft(unittest.TestCase):
         self.estimate(5, 10, 1000000, 20)
         self.state.maybe_sale_left(self.base + 7)
         self.page(8, 10, 1000000)
-        self.state.maybe_sale_left(self.base + 12)       # the page-2 estimate is older than the last page
-        self.state.maybe_sale_left(self.base + 19)
+        self.state.maybe_sale_left(self.base + Q + 12)   # the page-2 estimate is older than the last page
+        self.state.maybe_sale_left(self.base + Q + 19)
         self.assertEqual(self.kinds(), [])
         self.assertEqual((self.j.sale_run["systems"], self.j.sale_run["carto"]), (110, 24000000))
         self.estimate(10)                                # everything sold
-        self.state.maybe_sale_left(self.base + 25)
+        self.state.maybe_sale_left(self.base + Q + 25)
         self.assertEqual(self.kinds(), [])
         self.assertIsNone(self.j.sale_run)
 
@@ -7387,7 +7707,7 @@ class SaleLeft(unittest.TestCase):
         for s in (0, 3, 6):
             self.page(s, 50, 5000000)
         self.estimate(8, 43, 2000000, 270)
-        self.state.maybe_sale_left(self.base + 20)
+        self.state.maybe_sale_left(self.base + Q + 20)
         m = self.kinds()
         self.assertEqual([(x["sold_systems"], x["sold_value"], x["left_systems"]) for x in m], [(150, 15000000, 43)])
 
@@ -7396,14 +7716,14 @@ class SaleLeft(unittest.TestCase):
                        "Discovered": [{"SystemName": "Sys", "NumBodies": 3}]})
         self.assertIsNone(self.j.sale_run)
         self.estimate(10, 43, 2000000, 270)
-        self.state.maybe_sale_left(self.base + 60)
+        self.state.maybe_sale_left(self.base + Q + 60)
         self.assertEqual(self.kinds(), [])
         self.assertEqual(self.j.last_sale["carto"], 5000)   # the sale itself still counts
 
     def test_bio_left(self):
         self.at(0, {"event": "SellOrganicData", "BioData": [{"Value": 1000000, "Bonus": 4000000}] * 3})
         self.estimate(2, 40, 3000000, 10, samples=2, bio=30000000)
-        self.state.maybe_sale_left(self.base + 20)
+        self.state.maybe_sale_left(self.base + Q + 20)
         m = self.kinds()
         self.assertEqual([(x["kind"], x["sold_species"], x["sold_value"], x["left_samples"], x["left_value"]) for x in m],
                          [("bio_left", 3, 15000000, 2, 30000000)])   # cartographics aboard: not this sale's news
@@ -7411,7 +7731,7 @@ class SaleLeft(unittest.TestCase):
     def test_carto_sale_says_nothing_of_bio(self):
         self.page(0, 20, 3000000)
         self.estimate(2, samples=4, bio=50000000)
-        self.state.maybe_sale_left(self.base + 20)
+        self.state.maybe_sale_left(self.base + Q + 20)
         self.assertEqual(self.kinds(), [])
 
     def test_failed_tick_does_not_double_the_run(self):
@@ -7420,6 +7740,212 @@ class SaleLeft(unittest.TestCase):
         self.page(2, 50, 1000)
         self.j.restore(cp)
         self.assertEqual(self.j.sale_run["systems"], 50)
+
+
+class SalesAndBioValue(unittest.TestCase):
+    """Review 2026-10-01 batch B: footfall pricing through the journal reader, nav beacons, partial Vista Genomics
+    sales, the sale-left wait, the bio ledger and a failed tick's sales."""
+
+    def setUp(self):
+        import tempfile, types
+        self.tmp = tempfile.mkdtemp()
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def journal(self, events):
+        """A journal folder holding these events: what read_events (and so the server's estimate) reads."""
+        d = os.path.join(self.tmp, f"j{len(os.listdir(self.tmp))}")
+        os.makedirs(d)
+        with open(os.path.join(d, "Journal.2026-01-01T000000.01.log"), "w") as f:
+            for e in [{"timestamp": "2026-01-01T00:00:00Z", "event": "LoadGame", "Commander": "X"}] + events:
+                f.write(json.dumps(e) + "\n")
+        return d
+
+    def unsold(self, events):
+        return ed_unsold.analyse(ed_unsold.read_events([self.journal(events)]), ARGS)
+
+    @staticmethod
+    def body(ts, body_id, footfalled, scan_type="Detailed", disc=True):
+        return {"timestamp": ts, "event": "Scan", "ScanType": scan_type, "BodyName": f"Sys {body_id}", "BodyID": body_id,
+                "StarSystem": "Sys", "SystemAddress": 1, "PlanetClass": "Rocky body", "MassEM": 0.1, "TerraformState": "",
+                "DistanceFromArrivalLS": 500.0, "WasDiscovered": disc, "WasMapped": False, "WasFootfalled": footfalled}
+
+    @staticmethod
+    def analysed(ts, body_id, species="$Codex_Ent_Bacterial_01_Name;"):
+        return {"timestamp": ts, "event": "ScanOrganic", "ScanType": "Analyse", "Species": species,
+                "SystemAddress": 1, "Body": body_id}
+
+    @staticmethod
+    def bio_sale(ts, *entries):
+        return {"timestamp": ts, "event": "SellOrganicData",
+                "BioData": [{"Species": sp, "Value": 1000000, "Bonus": bonus} for sp, bonus in entries]}
+
+    # ---- R1: the reader keeps WasFootfalled, so each run is priced x5 or x1 from its body's scan ----
+    def test_footfall_survives_the_journal_reader(self):
+        b = self.unsold([self.body("2026-01-01T01:00:00Z", 5, False), self.analysed("2026-01-01T01:10:00Z", 5),
+                         self.body("2026-01-01T02:00:00Z", 6, True), self.analysed("2026-01-01T02:10:00Z", 6)])["exobiology"]
+        self.assertEqual((b["x5_runs"], b["x1_runs"], b["unknown_runs"]), (1, 1, 0))
+        self.assertEqual(b["estimated_value"], 6000000)
+
+    # ---- R6: Universal Cartographics does not buy nav-beacon scans ----
+    def test_nav_beacon_scans_are_not_unsold_data(self):
+        ex = self.unsold([self.body("2026-01-01T01:00:00Z", 5, False, "NavBeaconDetail", disc=False),
+                          self.body("2026-01-01T01:00:00Z", 6, False, "NavBeacon", disc=False)])["exploration"]
+        self.assertEqual((ex["bodies"], ex["systems"], ex["first_discoveries"]), (0, 0, 0))
+        ex = self.unsold([self.body("2026-01-01T01:00:00Z", 5, False, "NavBeaconDetail", disc=False),
+                          self.body("2026-01-01T02:00:00Z", 5, False, "Detailed", disc=True)])["exploration"]
+        self.assertEqual((ex["bodies"], ex["first_discoveries"]), (1, 0))   # your own scan of it still counts
+
+    # ---- R7: a Vista Genomics sale takes only the species it names ----
+    def test_partial_bio_sale_leaves_the_rest_aboard(self):
+        cerbrus, stratum = "$Codex_Ent_Bacterial_12_Name;", "$Codex_Ent_Stratum_07_Name;"
+        runs = [self.body("2026-01-01T00:50:00Z", 2, True), self.body("2026-01-01T00:51:00Z", 3, True),
+                self.analysed("2026-01-01T01:00:00Z", 2, cerbrus), self.analysed("2026-01-01T02:00:00Z", 3, stratum)]
+        b = self.unsold(runs + [self.bio_sale("2026-01-01T03:00:00Z", (cerbrus, 0))])["exobiology"]
+        self.assertEqual((b["samples"], [r["species"] for r in b["rows"]], b["estimated_value"]),
+                         (1, ["Stratum Tectonicas"], 19010800))
+        b = self.unsold(runs + [self.bio_sale("2026-01-01T03:00:00Z", (cerbrus, 0), (stratum, 0))])["exobiology"]
+        self.assertEqual(b["samples"], 0)                                            # a full sale empties it
+        b = self.unsold(runs + [self.bio_sale("2026-01-01T03:00:00Z", (cerbrus, 0)),
+                                {"timestamp": "2026-01-01T04:00:00Z", "event": "Died"}])["exobiology"]
+        self.assertEqual(b["samples"], 0)                                            # a death takes the rest
+
+    def test_bio_sale_takes_the_run_its_bonus_says(self):
+        aurasus = "$Codex_Ent_Bacterial_01_Name;"
+        runs = [self.body("2026-01-01T00:50:00Z", 2, True), self.body("2026-01-01T00:51:00Z", 3, False),
+                self.analysed("2026-01-01T01:00:00Z", 2), self.analysed("2026-01-01T02:00:00Z", 3)]
+        b = self.unsold(runs + [self.bio_sale("2026-01-01T03:00:00Z", (aurasus, 4000000))])["exobiology"]
+        self.assertEqual((b["samples"], b["x5_runs"], b["x1_runs"]), (1, 0, 1))      # the x5 run was the one sold
+        b = self.unsold(runs + [self.bio_sale("2026-01-01T03:00:00Z", (aurasus, 0))])["exobiology"]
+        self.assertEqual((b["samples"], b["x5_runs"], b["x1_runs"]), (1, 1, 0))
+
+    def test_bio_left_fires_from_the_real_estimate(self):
+        now = time.time()
+        cerbrus, stratum = "$Codex_Ent_Bacterial_12_Name;", "$Codex_Ent_Stratum_07_Name;"
+        d = self.journal([self.analysed(ed_outrider.iso_ts(now - 600), 2, cerbrus),
+                          self.analysed(ed_outrider.iso_ts(now - 300), 3, stratum)])
+        with unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [d]), \
+                unittest.mock.patch.object(ed_outrider, "LEGACY_DIRS", []):
+            self.j.handle(dict(self.bio_sale(ed_outrider.iso_ts(now), (cerbrus, 0)), timestamp=ed_outrider.iso_ts(now)))
+            with open(os.path.join(d, "Journal.2026-01-01T000000.01.log"), "a") as f:
+                f.write(json.dumps(self.bio_sale(ed_outrider.iso_ts(now), (cerbrus, 0))) + "\n")
+            self.state.unsold = ed_outrider.compute_unsold()
+        self.state.unsold_from = now + 1
+        self.state.maybe_sale_left(now + ed_outrider.SALE_QUIET_S + 5)
+        m = [x for x in self.j.moments if x["kind"] == "bio_left"]
+        self.assertEqual([(x["sold_species"], x["left_samples"]) for x in m], [(1, 1)])
+
+    # ---- R5: the pages of one sale come up to a minute apart ----
+    def test_sale_left_waits_out_the_real_page_gaps(self):
+        base = time.time()
+
+        def page(s, n):
+            with unittest.mock.patch.object(ed_outrider.time, "time", lambda: base + s):
+                self.j.handle({"event": "MultiSellExplorationData", "timestamp": ed_outrider.iso_ts(base + s),
+                               "TotalEarnings": 1000, "BaseValue": 1000, "Bonus": 0,
+                               "Discovered": [{"SystemName": f"S{s}-{i}", "NumBodies": 3} for i in range(n)]})
+
+        def estimate(s, systems):
+            self.state.unsold = {"carto": {"systems": systems, "estimated_payout": systems * 100000, "first_discoveries": 0},
+                                 "bio": {"samples": 0, "estimated_value": 0}}
+            self.state.unsold_from = base + s
+        # one player's real sales: 50-system pages 24, 14, 13 s apart, and a 49-system page followed 67 s later
+        for s, n, left in ((0, 50, 110), (24, 50, 60), (38, 50, 10), (51, 49, 0)):
+            page(s, n)
+            estimate(s + 1, left)
+            for t in range(s + 2, s + 67, 5):
+                self.state.maybe_sale_left(base + t)
+        page(118, 10)
+        estimate(119, 5)
+        for t in range(120, 118 + ed_outrider.SALE_QUIET_S, 5):
+            self.state.maybe_sale_left(base + t)
+        self.assertEqual([m for m in self.j.moments if m["kind"] == "sale_left"], [])
+        self.state.maybe_sale_left(base + 118 + ed_outrider.SALE_QUIET_S + 1)
+        m = [m for m in self.j.moments if m["kind"] == "sale_left"]
+        self.assertEqual([(x["sold_systems"], x["left_systems"]) for x in m], [(209, 5)])   # once, for the whole sale
+
+    # ---- R2 / R13: the bio side of the trip ledger ----
+    def sell_bio(self, ts, n, source):
+        self.j.line_source = source
+        self.j.handle({"event": "SellOrganicData", "timestamp": ts,
+                       "BioData": [{"Species": "$Codex_Ent_Bacterial_01_Name;", "Value": 1000000, "Bonus": 0}] * n})
+
+    def sell_carto(self, ts, source):
+        self.j.line_source = source
+        self.j.handle({"event": "MultiSellExplorationData", "timestamp": ts, "Discovered": [], "BaseValue": 1, "Bonus": 0,
+                       "TotalEarnings": 1})
+
+    def test_bio_visit_in_several_goes_is_one_estimate(self):
+        t = lambda sec: ed_outrider.iso_ts(time.time() - 1800 + sec)
+        self.state.unsold_log = [(t(-5), {"carto": {"estimated_payout": 0}, "bio": {"estimated_value": 5000000}})]
+        self.sell_bio(t(0), 3, "J:1")
+        self.sell_bio(t(11), 2, "J:2")                   # 11 s later: no fresh estimate in between
+        self.state.note_sale_estimates()
+        self.sell_carto(t(200), "J:3")
+        tr = self.state.ledger()["trips"][0]
+        self.assertEqual((tr["paid_bio"], tr["estimate_bio"], tr["paid_bio_estimated"]), (5000000, 5000000, 5000000))
+
+    def test_bio_sales_after_the_last_carto_sale_show_as_the_trip_under_way(self):
+        self.sell_carto("2025-12-01T00:00:00Z", "J:1")
+        self.sell_bio("2026-01-02T00:00:00Z", 2, "J:2")
+        L = self.state.ledger()
+        self.assertEqual([t["paid_bio"] for t in L["trips"]], [0])
+        cur = L["current"]
+        self.assertEqual((cur["start"], cur["end"], cur["paid_bio"], cur["paid_carto"], cur["x5"]["sold"]),
+                         ("2025-12-01T00:00:00Z", None, 2000000, None, 2))
+        self.sell_carto("2026-01-03T00:00:00Z", "J:3")   # the next carto sale closes it
+        L = self.state.ledger()
+        self.assertIsNone(L["current"])
+        self.assertEqual([t["paid_bio"] for t in L["trips"]], [2000000, 0])
+
+    def test_bio_only_player_gets_a_trip(self):
+        self.sell_bio("2026-01-02T00:00:00Z", 1, "J:1")
+        L = self.state.ledger()
+        self.assertEqual((L["trips"], L["current"]["start"], L["current"]["paid"]), ([], None, 1000000))
+
+    # ---- R18: a failure after the commit keeps the tick's sales for their estimate ----
+    def test_post_commit_failure_keeps_the_sale_for_its_estimate(self):
+        import contextlib, io
+        now = time.time()
+        d = os.path.join(self.tmp, "live")
+        os.makedirs(d)
+        with open(os.path.join(d, "Journal.2026-01-01T000000.01.log"), "w") as f:
+            f.write(json.dumps({"timestamp": ed_outrider.iso_ts(now - 30), "event": "MultiSellExplorationData",
+                                "Discovered": [{"SystemName": "A", "NumBodies": 1}], "BaseValue": 9, "Bonus": 0,
+                                "TotalEarnings": 9}, separators=(",", ":")) + "\n")
+        self.state.unsold_log = [(ed_outrider.iso_ts(now - 60), {"carto": {"estimated_payout": 42}, "bio": {"estimated_value": 0}})]
+        quiet = ("maybe_refresh", "maybe_classify_target", "maybe_unsold", "maybe_sale_left", "maybe_locate_carrier",
+                 "maybe_find_sellers", "maybe_backup_on_quit")
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [d]))
+            for name in quiet:
+                stack.enter_context(unittest.mock.patch.object(self.state, name, lambda: None))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            with unittest.mock.patch.object(self.state, "watch_status", side_effect=sqlite3.OperationalError("database is locked")):
+                self.state.tick({})
+            self.assertTrue(self.state.tail_error)
+            self.state.tick({})
+        self.assertIsNone(self.state.tail_error)
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT kind, estimate FROM sale_estimates")], [("carto", 42)])
+
+    def test_failed_estimate_insert_keeps_the_sales(self):
+        now = time.time()
+        self.sell_carto(ed_outrider.iso_ts(now - 30), "J:1")
+        self.state.unsold_log = [(ed_outrider.iso_ts(now - 60), {"carto": {"estimated_payout": 42}, "bio": {"estimated_value": 0}})]
+        real, db = self.db, unittest.mock.MagicMock()
+        db.execute.side_effect = sqlite3.OperationalError("database is locked")
+        self.state.db = db
+        with self.assertRaises(sqlite3.OperationalError):
+            self.state.note_sale_estimates()
+        self.state.db = real
+        self.assertEqual(len(self.j.new_sales), 1)
+        self.state.note_sale_estimates()
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT kind, estimate FROM sale_estimates")], [("carto", 42)])
 
 
 class SurfaceRigs(unittest.TestCase):
@@ -7822,6 +8348,7 @@ class SurfaceRigs(unittest.TestCase):
         self.state.forget_sites(self.SYS, self.BODY)             # the rig is still out, so it stays
         abc = {s["body_id"]: s for s in self.state.mining_sites()}[self.BODY]
         self.assertEqual((abc["tons"], abc["rigs"], abc["unmarked"], abc["locations"]), (9, 1, 0, []))
+        self.assertFalse(abc["saved"])            # R28: only the rig still out is left, and forget never takes it
         self.state.mark_rig(self.base + 1100)                    # not by the rig: a new one (empty rigs are not sites)
         self.status(1110, -7, 0, heading=0)
         self.state.mark_rig(self.base + 1110)                    # by rig 1: picked up, kept as a saved site
@@ -7881,10 +8408,208 @@ class SurfaceRigs(unittest.TestCase):
         for key in ("surface_alt", "rig_spacing", "surface_map_min", "surface_map_strip", "rig_warn"):
             self.assertIn(f"# {key} = ", example)
 
+    # ---- Batch A of the 2026-10-01 review ----
+
+    def test_out_on_foot_and_back_in_keeps_the_rhino(self):
+        """R9: out of the Rhino on foot (the in-SRV flag gone, Flags2 on foot) and back in: still the Rhino, so the
+        button marks rigs and the leash watches; boarding the ship ends it."""
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        self.ev(20, {"event": "Disembark", "SRV": True, "Taxi": False, "Multicrew": False, "ID": 51, "SystemAddress": self.SYS,
+                     "Body": self.NAME, "BodyID": self.BODY, "OnPlanet": True})
+        self.status(21, 5, 5, flags=0, flags2=1 | 16)
+        self.state.watch_surface(self.base + 21)
+        self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino")
+        self.ev(40, {"event": "Embark", "SRV": True, "Taxi": False, "Multicrew": False, "ID": 51, "SystemAddress": self.SYS,
+                     "Body": self.NAME, "BodyID": self.BODY, "OnPlanet": True})
+        self.status(41, 0, 0)
+        self.state.watch_surface(self.base + 41)
+        self.assertTrue(self.state.in_rhino())
+        self.status(50, 3600, 0)
+        self.state.watch_surface(self.base + 50)
+        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away; it is lost at 5."])
+        self.status(60, 3600, 0, flags=1 << 1)            # aboard the ship, landed: not on foot, the SRV is left
+        self.state.watch_surface(self.base + 60)
+        self.assertIsNone(self.j.vehicle)
+
+    def test_rigs_go_with_a_destroyed_rhino_a_death_or_a_relog(self):
+        """R10: SRVDestroyed, Died and a relog (LoadGame) take the rigs out with them; one that collected stays a saved
+        site; a rig placed after the line (a journal re-read) stays; DockSRV alone keeps them (see the rigs-out call)."""
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        self.ev(20, {"event": "SRVDestroyed", "ID": 51, "SRVType": "mev_rhino"})
+        self.assertEqual(self.out(), {})
+        self.launch(30)
+        self.status(31, 100, 0, heading=180)
+        self.assertEqual(self.state.mark_rig(self.base + 31)["n"], 1)   # the game's HUD numbers it 1 too
+        self.status(40, 107, 0)
+        self.refine(41, "Gold", 2)
+        self.state.journals.end_burst(self.base + 100, force=True)
+        self.ev(110, {"event": "Died"})
+        self.assertEqual(self.out(), {})
+        self.assertEqual([(s["kind"], s["tons"]) for s in self.state.surface_sites(self.SYS, self.BODY)], [("rig", 2)])
+        self.ev(200, {"event": "SupercruiseExit", "StarSystem": "S", "SystemAddress": self.SYS, "Body": self.NAME,
+                      "BodyID": self.BODY, "BodyType": "Planet"})
+        self.launch(210)
+        self.status(211, 0, 0)
+        self.state.mark_rig(self.base + 211)
+        self.ev(220, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})
+        self.assertEqual(sorted(self.out()), [1])
+        self.j.handle({"event": "LoadGame", "timestamp": self.ts(100), "Commander": "X"})   # an older session, re-read
+        self.assertEqual(sorted(self.out()), [1])
+        self.ev(300, {"event": "LoadGame", "Commander": "X", "Ship": "Explorer_NX"})
+        self.assertEqual(self.out(), {})
+
+    def test_docking_the_rhino_with_rigs_out_says_so(self):
+        """S1: a live DockSRV of the Rhino with rigs still marked out on its body: one rigs_out moment naming them and
+        the probably full ones (the body from the SRV state, which DockSRV clears); the rigs stay out."""
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        self.status(400, 300, 0, heading=180)
+        self.state.mark_rig(self.base + 400)
+        self.ev(500, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})
+        m = [m for m in self.j.moments if m["kind"] == "rigs_out"]
+        self.assertEqual([x["text"] for x in m], ["Rigs 1 and 2 still marked out; rig 1 is probably full."])
+        self.assertEqual((m[0]["system"], m[0]["body_id"], m[0]["rigs"], m[0]["full"]), (str(self.SYS), self.BODY, [1, 2], [1]))
+        self.assertEqual(sorted(self.out()), [1, 2])
+        self.assertIsNone(self.j.vehicle)
+        self.ev(510, {"event": "Liftoff", "SystemAddress": self.SYS, "BodyID": self.BODY, "PlayerControlled": True})
+        self.assertEqual(len([m for m in self.j.moments if m["kind"] == "rigs_out"]), 1)   # no repeat on Liftoff
+        # one rig: singular
+        self.launch(600)
+        self.status(601, 307, 0, heading=0)
+        self.assertEqual(self.state.mark_rig(self.base + 601)["what"], "picked")   # by rig 2
+        self.ev(620, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})
+        self.assertEqual(self.texts(("rigs_out",))[-1], "Rig 1 still marked out; it is probably full.")
+
+    def test_rigs_out_is_quiet_without_rigs_for_a_scarab_and_on_a_reread(self):
+        self.launch()
+        self.ev(20, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})    # nothing out
+        self.launch(30, "testbuggy")
+        self.status(31, 0, 0)
+        self.db.execute("INSERT INTO surface_rigs (system, body_id, n, lat, lon, placed_ts, minerals, tons) "
+                        "VALUES (?, ?, 1, 0, 0, ?, '{}', 0)", (self.SYS, self.BODY, self.ts(31)))
+        self.ev(40, {"event": "DockSRV", "SRVType": "testbuggy", "ID": 51})     # a Scarab
+        self.launch(50)
+        self.line += 1
+        self.j.line_source = f"Journal.2026-09-30T030000.01.log:{self.line}"
+        with unittest.mock.patch.object(ed_outrider.time, "time", lambda: self.base + 3600):
+            self.j.handle({"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51, "timestamp": self.ts(60)})   # read an hour later
+        self.j.line_source = ""
+        self.assertEqual([m for m in self.j.moments if m["kind"] == "rigs_out"], [])
+        self.launch(70)
+        self.ev(80, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})
+        self.assertEqual(self.texts(("rigs_out",)), ["Rig 1 still marked out."])
+
+    def test_the_maps_remove_marks_a_rig_picked_up(self):
+        """S1: the legend's ✕ (POST /api/rigs/remove) on a rig picked up without a tap: picked up as a tap would, its
+        tons kept as a saved site; a second remove forgets the saved site."""
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        rid = self.state.mark_rig(self.base + 10)["id"]
+        self.status(20, 7, 0)
+        self.refine(21, "Water", 3)
+        self.state.journals.end_burst(self.base + 100, force=True)
+        self.assertTrue(self.state.remove_rig(rid))
+        self.assertEqual(self.out(), {})
+        self.assertEqual([(s["kind"], s["tons"]) for s in self.state.surface_sites(self.SYS, self.BODY)], [("rig", 3)])
+        self.assertTrue(self.state.remove_rig(rid))
+        self.assertEqual(self.state.surface_sites(self.SYS, self.BODY), [])
+        self.assertFalse(self.state.remove_rig(rid))
+
+    def test_a_dropped_runs_sample_points_go_with_it(self):
+        """R17: a new species' Log drops the run in progress, and a death drops the one after it: their points go too,
+        and the surface map never shows a species with no run (its raw codex key and ?/3)."""
+        def scan(s, kind, species, genus):
+            self.ev(s, {"event": "ScanOrganic", "ScanType": kind, "Genus": f"$Codex_Ent_{genus}_Genus_Name;", "Genus_Localised": genus,
+                        "Species": species, "Species_Localised": species.strip("$;"), "SystemAddress": self.SYS, "Body": self.BODY})
+        self.status(10, 0, 0, flags=0, flags2=1)
+        scan(10, "Log", "$Codex_Ent_Stratum_07_Name;", "Stratum")
+        self.status(20, 200, 0, flags=0, flags2=1)
+        scan(20, "Log", "$Codex_Ent_Bacterial_04_Name;", "Bacterial")
+        points = lambda: sorted({r[0] for r in self.db.execute("SELECT species FROM sample_points")})
+        self.assertEqual(points(), ["$Codex_Ent_Bacterial_04_Name;"])
+        self.db.execute("INSERT INTO sample_points VALUES (?, ?, 'stale', 'g', 1, 0, 0, ?)", (self.SYS, self.BODY, self.ts(5)))
+        self.status(30, 0, 0, flags=0, flags2=1)
+        h = self.state.surface_here()
+        self.assertEqual([b["species"] for b in self.state.surface_bio(h)], ["Codex_Ent_Bacterial_04_Name"])
+        self.ev(40, {"event": "Died"})
+        self.assertEqual(points(), ["stale"])
+        self.assertEqual(self.state.surface_bio(h), [])
+
+    def test_site_tags_keep_their_order_while_you_mine(self):
+        """R29: the page numbers U1, U2... in the server's order: mining more at the first site must not move it."""
+        order = lambda: [round(s["lon"] * math.pi / 180 * self.R) for s in self.state.surface_sites(self.SYS, self.BODY)]
+        self.launch()
+        for i, east in enumerate((500, 1000, 1500)):
+            self.status(100 * (i + 1), 0, east)
+            self.refine(100 * (i + 1) + 1, "Gold", 1)
+        self.assertEqual(order(), [500, 1000, 1500])
+        self.status(500, 0, 500)
+        self.refine(501, "Gold", 2)                       # back at the first: its latest ton is now the newest
+        self.assertEqual(order(), [500, 1000, 1500])
+
+    def test_a_stale_first_position_moves_onto_the_rig(self):
+        """R31: the tick read the first ton before the Status.json of the Rhino settling over rig 2 (the recorded
+        03:38:30/31 readings after the ton): the site that stale reading made moves onto the rig, 6 tons in one."""
+        lines = list(RHINO_SESSION)
+        i30 = next(i for i, x in enumerate(lines) if x.startswith("S") and "03:38:30Z" in x)
+        s30, s31 = lines.pop(i30), lines.pop(i30)
+        at = next(i for i, x in enumerate(lines) if "MiningRefined" in x and "03:38:31Z" in x)
+        lines[at + 1:at + 1] = [s30, s31]
+        said, db = self.replay(lines)
+        self.assertEqual(said[-1], "Rig 2: 6 tons of Methanol Monohydrate Crystals.")
+        self.assertEqual(db.execute("SELECT count(*) FROM surface_sites").fetchone()[0], 0)
+        self.assertEqual({r["n"]: r["tons"] for r in db.execute("SELECT * FROM surface_rigs")}, {1: 10, 2: 20, 3: 0})
+
+    def test_an_unmarked_site_then_a_rig_within_the_minute_stays_two(self):
+        """R31's limit: a site mined from a reading of its own moment is kept when you drive on to a rig."""
+        self.launch()
+        self.status(10, 80, 0, heading=180)
+        self.state.mark_rig(self.base + 10)               # rig 1 at 87 m north
+        self.status(100, 0, 0)
+        self.refine(100, "Water", 3)                      # the reading is from the ton's own second: no rig near
+        self.status(103, 87, 0)                           # at the rig 3 s later
+        self.refine(103, "Water", 2)
+        self.state.watch_surface(self.base + 150)
+        self.assertEqual(self.texts()[-2:], ["3 tons of Water. No rig marked here; site saved.", "Rig 1: 2 tons of Water."])
+
     def test_replay_of_the_rhino_session(self):
         """The author's 30 Sep Rhino run on ABC 3 d (journal and Status.json as recorded), with the presses where the
         recording shows the rigs were placed: rig 1 at 03:10:13, rig 2 at 03:22:59, and at 03:35:21 (rig 2 still out,
         so that press is rig 3). Water 10 from rig 1; Methanol 11 + 3 + 6 from rig 2."""
+        said, db = self.replay(RHINO_SESSION)
+        self.assertEqual(said, ["Rig 1 placed.", "Rig 1: 10 tons of Water.", "Rig 2 placed.",
+                                "Rig 2: 11 tons of Methanol Monohydrate Crystals.",
+                                "Rig 2: 3 tons of Methanol Monohydrate Crystals.", "Rig 3 placed.",
+                                "Rig 2: 6 tons of Methanol Monohydrate Crystals."])
+        j, state = self.replayed
+        # S1: the DockSRV at 03:41:31 with rigs 1-3 still marked out (rig 1 was picked up with no press in this
+        # replay), and only rig 1 8 minutes past its last collection
+        self.assertEqual([m["text"] for m in j.moments if m["kind"] == "rigs_out"],
+                         ["Rigs 1, 2 and 3 still marked out; rig 1 is probably full."])
+        water = [m for m in j.moments if m.get("what") == "collected"][0]
+        self.assertEqual((water["lat"], water["lon"]), (-53.794037, -144.581116))   # where the Water was refined
+        rigs = {r["n"]: r for r in db.execute("SELECT * FROM surface_rigs")}
+        self.assertEqual({n: (json.loads(r["minerals"]), r["tons"]) for n, r in rigs.items()},
+                         {1: ({"Water": 10}, 10), 2: ({"Methanol Monohydrate Crystals": 20}, 20), 3: ({}, 0)})
+        self.assertEqual((rigs[1]["site_lat"], rigs[1]["site_lon"]), (-53.794037, -144.581116))
+        r = 1204549.875
+        self.assertLess(ed_outrider.surface_m(rigs[1]["lat"], rigs[1]["lon"], -53.794037, -144.581116, r), 10)
+        self.assertLess(ed_outrider.surface_m(rigs[2]["lat"], rigs[2]["lon"], -53.868797, -144.483139, r), 1)   # 7 m behind: spot on
+        self.assertEqual(db.execute("SELECT count(*) FROM surface_sites").fetchone()[0], 0)   # every collection had its rig
+        # the journal's own count agrees, ton for ton
+        self.assertEqual({x["name"]: x["tons"] for x in db.execute("SELECT * FROM own_mined")},
+                         {"Water": 10, "Methanol Monohydrate Crystals": 20})
+        self.assertIsNone(j.vehicle)                     # docked
+        self.assertFalse(state.in_rhino())
+
+    def replay(self, session):
+        """Play a recorded Rhino run ("S " Status.json, "J " journal lines) with the watch loop's ticks in between and
+        the presses where the recording shows the rigs were placed. The rig lines said, and the database."""
         presses = {"2026-09-30T03:10:13Z", "2026-09-30T03:22:59Z", "2026-09-30T03:35:21Z"}
         t0 = ed_outrider.ts_seconds("2026-09-30T03:06:00Z")
         db = ed_outrider.open_db(":memory:")
@@ -7892,9 +8617,10 @@ class SurfaceRigs(unittest.TestCase):
         j = ed_outrider.Journals(db)
         import types
         state = ed_outrider.State(db, j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.replayed = (j, state)
         clock = [t0]
         with unittest.mock.patch.object(ed_outrider.time, "time", lambda: clock[0]):
-            for i, line in enumerate(RHINO_SESSION):
+            for i, line in enumerate(session):
                 kind, doc = line[0], json.loads(line[2:])
                 t = ed_outrider.ts_seconds(doc["timestamp"])
                 while clock[0] < t:              # the watch loop's ticks in between
@@ -7913,31 +8639,331 @@ class SurfaceRigs(unittest.TestCase):
             for _ in range(90):
                 clock[0] += 1
                 state.watch_surface(clock[0])
-        said = [m["text"] for m in j.moments if m["kind"] in ("rig", "rig_leash")]
-        self.assertEqual(said, ["Rig 1 placed.", "Rig 1: 10 tons of Water.", "Rig 2 placed.",
-                                "Rig 2: 11 tons of Methanol Monohydrate Crystals.",
-                                "Rig 2: 3 tons of Methanol Monohydrate Crystals.", "Rig 3 placed.",
-                                "Rig 2: 6 tons of Methanol Monohydrate Crystals."])
-        water = [m for m in j.moments if m.get("what") == "collected"][0]
-        self.assertEqual((water["lat"], water["lon"]), (-53.794037, -144.581116))   # where the Water was refined
-        rigs = {r["n"]: r for r in db.execute("SELECT * FROM surface_rigs")}
-        self.assertEqual({n: (json.loads(r["minerals"]), r["tons"]) for n, r in rigs.items()},
-                         {1: ({"Water": 10}, 10), 2: ({"Methanol Monohydrate Crystals": 20}, 20), 3: ({}, 0)})
-        self.assertEqual((rigs[1]["site_lat"], rigs[1]["site_lon"]), (-53.794037, -144.581116))
-        r = 1204549.875
-        self.assertLess(ed_outrider.surface_m(rigs[1]["lat"], rigs[1]["lon"], -53.794037, -144.581116, r), 10)
-        self.assertLess(ed_outrider.surface_m(rigs[2]["lat"], rigs[2]["lon"], -53.868797, -144.483139, r), 1)   # 7 m behind: spot on
-        self.assertEqual(db.execute("SELECT count(*) FROM surface_sites").fetchone()[0], 0)   # every collection had its rig
-        # the journal's own count agrees, ton for ton
-        self.assertEqual({x["name"]: x["tons"] for x in db.execute("SELECT * FROM own_mined")},
-                         {"Water": 10, "Methanol Monohydrate Crystals": 20})
-        self.assertIsNone(j.vehicle)                     # docked
-        self.assertFalse(state.in_rhino())
+        return [m["text"] for m in j.moments if m["kind"] in ("rig", "rig_leash")], db
 
 
 # The author's Rhino run of 2026-09-30 on Smojooe AR-E b25-8 ABC 3 d: the journal lines (Journal.2026-09-29T223726.01.log)
 # and the Status.json changes recorded during it (Pips, Fuel, FireGroup, LegalState and Balance left out), trimmed to the
 # presses and the collections. "S " = Status.json, "J " = a journal line.
+class MappedCallout(unittest.TestCase):
+    """S8 (review 2026-10-01): the "mapped" call-out's moment and facts (the page says it only with speak_mapped
+    ticked), and its config key."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        Batch6Voice.jump(self, "2026-01-01T00:00:00Z", 1, 0)
+        Batch6Voice.honk(self, "2026-01-01T00:00:10Z", 1, 3)
+
+    def mapped(self, ts, body_id, name, probes=5, target=6):
+        self.j.handle({"event": "SAAScanComplete", "timestamp": ts, "SystemAddress": 1, "BodyID": body_id,
+                       "BodyName": f"S1 {name}", "ProbesUsed": probes, "EfficiencyTarget": target})
+
+    def moments(self):
+        self.db.commit()
+        return [m for m in self.state.moments_summary() if m["kind"] == "mapped"]
+
+    def test_a_first_map_is_a_moment_with_its_value_and_what_is_left(self):
+        Batch6Voice.planet(self, "2026-01-01T00:01:00Z", 1, 1, "A 1", MassEM=2.0)
+        Batch6Voice.planet(self, "2026-01-01T00:01:10Z", 1, 2, "A 2", MassEM=3.0)
+        self.mapped("2026-01-01T00:05:00Z", 1, "A 1", probes=8, target=6)
+        got = self.moments()
+        self.assertEqual(len(got), 1)
+        m = got[0]
+        want = ed_unsold.body_value({"PlanetClass": "High metal content body", "MassEM": 2.0, "TerraformState": "",
+                                     "StarType": None, "StellarMass": None, "first_discovered": True, "first_mapped": True},
+                                    True, False, True)
+        self.assertEqual((m["body"], m["probes"], m["target"], m["value"], m["system"]), ("A 1", 8, 6, want, "1"))
+        self.assertEqual([u["body"] for u in m["leaving"]["unmapped"]], ["A 2"])   # A 1 is done: A 2 is what is next
+        # a remap of a body already mapped, and a ring's probe, add no moment
+        self.mapped("2026-01-01T00:09:00Z", 1, "A 1")
+        self.j.handle({"event": "SAAScanComplete", "timestamp": "2026-01-01T00:10:00Z", "SystemAddress": 1, "BodyID": 9,
+                       "BodyName": "S1 A 2 A Ring", "ProbesUsed": 1, "EfficiencyTarget": 0})
+        self.assertEqual(len(self.moments()), 1)
+        # a body nobody scanned is left out (nothing to say about it)
+        self.mapped("2026-01-01T00:11:00Z", 7, "B 7")
+        self.assertEqual([m["body"] for m in self.moments()], ["A 1"])
+
+    def test_config_key(self):
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = lambda cfg: ed_outrider.settings_from(cfg, args, None, ([], []))
+        self.assertIs(st({})["speak_mapped"], False)
+        self.assertIs(st({"defaults": {"speak_mapped": True}})["speak_mapped"], True)
+        with unittest.mock.patch("sys.stderr"):
+            self.assertIs(st({"defaults": {"speak_mapped": "true"}})["speak_mapped"], False)   # a quoted switch stays off
+        back = tomllib.loads(ed_outrider.config_text(st({"defaults": {"speak_mapped": True}})))["defaults"]
+        self.assertIs(back["speak_mapped"], True)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "ed_outrider.toml.example"), encoding="utf-8") as f:
+            self.assertIn("# speak_mapped = false", f.read().split("[defaults]", 1)[1].split("\n[", 1)[0])
+        with open(os.path.join(root, "README.md"), encoding="utf-8") as f:
+            self.assertIn("`speak_mapped`", f.read())
+        self.assertIn("sayMapped", ed_outrider.BROWSER_SETTINGS)
+        self.assertIn("speak_mapped", self.state.payload()["defaults"])
+
+
+class ReviewBatchE(unittest.TestCase):
+    """Review 2026-10-01, Batch E: the firsts watch's rotation, failures and map-only systems (R8, R25, R26), the
+    Materials sources cache (R19), the cross-site GET guard (R20), a bad port (R22), bad ids (R23), auto honk's
+    fire-group learning (R24, unit only: a fake honker, no device), per-species bio sales (X1) and nav-beacon scans
+    in own_firsts (X2). No network: Spansh is a fake."""
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types_ns(cached=lambda i: (None, None)), 25)
+
+    def discover(self, id64, name, t0, x=0):
+        self.j.handle({"event": "FSDJump", "timestamp": t0, "StarSystem": name, "SystemAddress": id64, "StarPos": [x, 0, 0]})
+        self.j.handle(scan(t0[:-3] + "10Z", name, id64, 1, f"{name} A", star=True)[2])
+        self.j.handle(scan(t0[:-6] + "01:00Z", name, id64, 2, f"{name} A 1")[2])
+        self.db.commit()
+
+    def fake(self, fail=()):
+        calls = []
+
+        class FakeSpansh(ed_outrider.Spansh):
+            async def lookup(self, id64, interactive=True):
+                calls.append(id64)
+                if id64 in fail:
+                    raise RuntimeError("Spansh answered 500")
+                return None
+        return FakeSpansh(self.db), calls
+
+    # ---- R8: the watch goes round every system, within the daily cap ----
+    def test_watch_rotates_past_the_top_150(self):
+        rows, now0 = {}, 1_790_000_000
+        first = ed_outrider.iso_ts(now0 - 86400)   # your first scans there: yesterday (daily checks for a month)
+        unsold = [{"id": str(i), "name": f"S{i}", "state": "unsold", "bodies_by": {"sold": 0, "unsold": 1, "lost": 0}}
+                  for i in range(400)]   # most valuable first
+        self.state.firsts_watch_rows = lambda: rows
+        self.state.firsts_cached = lambda: unsold
+        checks, t = [], now0
+        while t < now0 + 3 * 86400:
+            due = self.state.firsts_watch_due(t)
+            if due:
+                rows[due[0]] = {"id64": due[0], "checked_ts": t, "reported_ts": None, "first_ts": first}
+                checks.append((t, due[0]))
+            t += 120
+        self.assertEqual(len({i for _, i in checks}), 400)   # before: the same top 150 every day, the rest never
+        self.assertEqual(checks[0][1], 0)                     # the most valuable first
+        for k, (t, _) in enumerate(checks):                   # at most FIRSTS_WATCH_DAY_CAP in any 24 h
+            self.assertLessEqual(sum(1 for u, _ in checks[k:] if u - t < 86400), ed_outrider.FIRSTS_WATCH_DAY_CAP)
+        last = {}
+        for t, i in checks:                                   # and no system more than once a day
+            self.assertGreaterEqual(t - last.get(i, -1e18), 86400)
+            last[i] = t
+
+    # ---- R25: one failing system does not hold up the rest ----
+    def test_a_failing_system_is_skipped_for_a_day(self):
+        import asyncio
+        self.discover(9, "Sys", "2026-01-01T00:00:00Z")
+        self.discover(8, "Cheap", "2026-01-02T00:00:00Z", x=5)
+        self.state.system_values = {"Sys": 5_000_000, "Cheap": 100}
+        self.state.spansh, calls = self.fake(fail={9})
+        now = ed_outrider.ts_seconds("2026-01-10T00:00:00Z")
+
+        def step(t):
+            try:
+                return asyncio.run(self.state.firsts_watch_step(t))
+            except RuntimeError:
+                return "failed"
+        self.assertEqual(step(now), "failed")
+        self.assertIsNone(step(now + 620))                    # after the loop's backoff: the next system, not 9 again
+        self.assertEqual(calls, [9, 8])
+        self.assertIsNone(step(now + 1240))                   # nothing due: 9 waits a day, 8 was checked
+        self.assertEqual(calls, [9, 8])
+        self.assertEqual(step(now + 86400 + 10), "failed")    # a day on, 9 is tried again
+        self.assertEqual(calls, [9, 8, 9])
+        # a failed check counts against the daily cap like any other request
+        self.state.firsts_watch_failed = {9: now}
+        self.db.execute("DELETE FROM firsts_watch")
+        with unittest.mock.patch.object(ed_outrider, "FIRSTS_WATCH_DAY_CAP", 1):
+            self.assertIsNone(self.state.firsts_watch_due(now + 10))
+
+    # ---- R26: a system whose only firsts are first-mapped bodies is not watched ----
+    def test_map_only_systems_are_not_watched(self):
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Mapd", "SystemAddress": 7,
+                       "StarPos": [0, 0, 0]})
+        self.j.handle(scan("2026-01-01T00:01:00Z", "Mapd", 7, 2, "Mapd A 1", disc=True)[2])   # discovered by someone else
+        self.j.handle({"event": "SAAScanComplete", "timestamp": "2026-01-01T00:05:00Z", "SystemAddress": 7, "BodyID": 2,
+                       "BodyName": "Mapd A 1", "ProbesUsed": 4, "EfficiencyTarget": 6})           # ...but mapped first by you
+        self.db.commit()
+        self.state.firsts_watch_on = True
+        self.assertEqual([(x["name"], x["state"]) for x in self.state.firsts_list()], [("Mapd", "unsold")])   # still listed
+        now = ed_outrider.ts_seconds("2026-03-01T00:00:00Z")
+        self.assertIsNone(self.state.firsts_watch_due(now))   # before: due every day, forever, finding nothing
+        self.assertEqual(self.state.firsts_watch_info(), {"on": True, "seen": 0, "checked": 0, "of": 0})
+        self.discover(9, "Sys", "2026-01-01T01:00:00Z", x=3)
+        self.state._firsts_cache = None   # (the server's unsold estimate moves on after a scan)
+        self.assertEqual(self.state.firsts_watch_due(now), (9, "Sys"))
+        self.assertEqual(self.state.firsts_watch_info()["of"], 1)
+
+    # ---- R19: the Materials sources are not rebuilt from every body on each scan ----
+    def test_material_sources_only_read_new_rows(self):
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+        def body(bid, mats=True, ts="2026-01-01T00:01:00Z"):
+            ev = scan(ts, "Sys", 1, bid, f"Sys {bid}")[2]
+            ev["Landable"] = True
+            if mats:
+                ev["Materials"] = [{"Name": "polonium", "Percent": 1.0 + bid / 100}, {"Name": "iron", "Percent": 20.0}]
+            self.j.handle(ev)
+        for bid in range(1, 31):
+            body(bid)
+        self.db.commit()
+        got = self.state.material_sources(per=100)
+        self.assertEqual(len(got["polonium"]), 30)
+        body(31)
+        self.state.scan_version += 1
+        with unittest.mock.patch.object(ed_outrider.json, "loads", wraps=json.loads) as loads:
+            got = self.state.material_sources(per=100)
+        self.assertEqual(loads.call_count, 1)                 # the new body only (before: all 31 again)
+        self.assertEqual(len(got["polonium"]), 31)
+        body(5, mats=False, ts="2026-01-01T00:02:00Z")         # a rescan without materials drops the body
+        self.assertEqual({b["body"] for b in self.state.material_sources(per=100)["polonium"]} & {"5"}, set())
+        self.db.execute("DELETE FROM own_bodies")              # a journal re-read empties the table...
+        body(40)
+        self.assertEqual([b["body"] for b in self.state.material_sources(per=100)["polonium"]], ["40"])   # ...rebuilt
+
+    # ---- R20: another site's reads are refused, except the overlays' status ----
+    def test_cross_site_reads_refused(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        guard = Batch0Security.guard
+        for path in ("/api/log", "/api/history", "/api/map", "/api/materials", "/api/export", "/api/system/1",
+                     "/api/firsts", "/api/organics", "/api/search", "/api/speech", "/api/defaults"):
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path=path), 403, path)
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="same-site", path=path), 403, path)
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="same-origin", path=path), 200, path)   # the page
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="none", path=path), 200, path)   # typed in
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", path=path), 200, path)                # curl
+        for path in ("/api/status", "/api/status.txt", "/", "/static/page.js"):
+            self.assertEqual(guard(self, "GET", "127.0.0.1:8025", site="cross-site", path=path), 200, path)
+
+        async def go():   # the real app: the History sums never run for another site
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                with unittest.mock.patch.object(self.state, "history", side_effect=AssertionError("ran")) as h:
+                    r1 = await c.get("/api/history", headers={"Sec-Fetch-Site": "cross-site"})
+                    called = h.called
+                r2 = await c.get("/api/status.txt", headers={"Sec-Fetch-Site": "cross-site"})
+                return r1.status, called, r2.status
+        self.assertEqual(asyncio.run(go()), (403, False, 200))
+
+    # ---- R22: a port out of range is reported, not a traceback ----
+    def test_bad_port_is_reported(self):
+        import contextlib
+        import io
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        for bad in (70000, -1, 0, True, 80.5, "http"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                st = ed_outrider.settings_from({"server": {"port": bad}}, args, None, ([], []))
+            self.assertEqual(st["port"], 8025, bad)
+            self.assertIn("[server] port", err.getvalue())
+        self.assertEqual(ed_outrider.settings_from({"server": {"port": 9000}}, args, None, ([], []))["port"], 9000)
+        self.assertEqual(ed_outrider.settings_from({"server": {"port": 65535}}, args, None, ([], []))["port"], 65535)
+        for bad in ("70000", "-1", "x"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                ed_outrider.main(["--port", bad])   # argparse stops before anything starts
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("not a port from 1 to 65535", err.getvalue())
+            self.assertNotIn("Traceback", err.getvalue())
+
+    # ---- R23: bad ids are a 400 ----
+    def test_bad_ids_are_400(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def go():
+            out = []
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                post = lambda path, data: c.post(path, data=data, headers={"Content-Type": "application/json"})
+                for data in ('{"id": 99999999999999999999999}', '{"id": -1}', '{"id": 1e400}', '{"id": true}'):
+                    out.append((await post("/api/rigs/remove", data)).status)
+                out.append((await post("/api/rigs/remove", '{"id": 5}')).status)   # well formed: no such rig
+                for data in ('{"system": 1, "body": 1e400}', '{"system": 1, "body": 99999999999999999999999}',
+                             '{"system": 1, "body": true}', '{"system": 1, "body": 2.5}', '{"system": 1e400, "body": 1}'):
+                    out.append((await post("/api/sites/forget", data)).status)
+                out.append((await post("/api/sites/forget", '{"system": "1", "body": 1}')).status)
+            return out
+        self.assertEqual(asyncio.run(go()), [400, 400, 400, 400, 404, 400, 400, 400, 400, 400, 200])
+
+    # ---- R24: one miss while the game may not have had the keys does not lock a group out ----
+    def test_one_honk_miss_keeps_the_group(self):
+        live = {"live": True, "ts": ed_outrider.iso_ts(time.time()), "flags": ed_outrider.FLAG_HUD_ANALYSIS,
+                "gui_focus": 0, "fire_group": 0}
+        rec = ed_outrider.honk_learn(None, "A", False)   # a new ship, one miss in A (an alt-tab, say)
+        self.assertEqual(ed_outrider.honk_decision(live, time.time(), rec), ("press", None))   # still pressed
+        rec = ed_outrider.honk_learn(rec, "A", False)
+        self.assertEqual(ed_outrider.honk_decision(live, time.time(), rec),
+                         ("wait", "fire group A selected; honks missed there before"))
+
+    # ---- X1: a Vista Genomics sale takes one run per BioData entry of its species ----
+    SP1, SP2 = "$Codex_Ent_Bacterial_01;", "$Codex_Ent_Bacterial_02;"
+
+    def two_runs(self):
+        s = scan("2026-01-01T00:00:00Z", "Sys", 1, 5, "Sys 5")[2]
+        s["WasFootfalled"] = False
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Sys", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+        self.j.handle(s)
+        for m, sp in ((1, "Bacterial_01"), (2, "Bacterial_02")):
+            for i, k in enumerate(("Log", "Sample", "Analyse")):
+                self.j.handle(org(f"2026-01-01T0{m}:0{i}:00Z", 1, 5, sp, k))
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T03:00:00Z",
+                       "BioData": [{"Species": self.SP1, "Value": 100, "Bonus": 400}]})   # sells one species only
+
+    def test_partial_bio_sale_keeps_the_rest_aboard(self):
+        self.two_runs()
+        by = {(r["ts"][11:13]): r for r in self.state.organics(36500)["rows"]}
+        self.assertEqual((by["01"]["state"], by["01"]["sold_ts"]), ("sold", "2026-01-01T03:00:00Z"))
+        self.assertEqual((by["02"]["state"], by["02"]["sold_ts"]), ("aboard", None))   # before: sold with the first
+        self.assertEqual(ed_outrider.organic_state(self.db, by["02"]["ts"], (1, 5, self.SP2)), "aboard")
+        # a later sale (hours on: another visit) finds the run left aboard in its x5 pool
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-02T00:00:00Z",
+                       "BioData": [{"Species": self.SP2, "Value": 100, "Bonus": 400}]})
+        check = json.loads(self.db.execute("SELECT x5_check FROM sale_events WHERE kind='bio' ORDER BY ts DESC").fetchone()[0])
+        self.assertEqual({k: check[k] for k in ("sold", "predicted", "matched")}, {"sold": 1, "predicted": 1, "matched": 1})
+        by = {(r["ts"][11:13]): r for r in self.state.organics(36500)["rows"]}
+        self.assertEqual((by["02"]["state"], by["02"]["sold_ts"]), ("sold", "2026-01-02T00:00:00Z"))
+        # the sale keeps its species through a journal re-read (PARSER_VERSION 34)
+        self.assertEqual(json.loads(self.db.execute("SELECT bio_data FROM bio_sales ORDER BY ts").fetchone()[0]),
+                         [[self.SP1.lower(), True]])
+
+    def test_run_left_aboard_dies_with_you(self):
+        self.two_runs()
+        self.j.handle({"event": "Died", "timestamp": "2026-01-01T04:00:00Z"})
+        self.j.handle({"event": "Resurrect", "timestamp": "2026-01-01T04:00:01Z", "Option": "recover"})
+        by = {(r["ts"][11:13]): r["state"] for r in self.state.organics(36500)["rows"]}
+        self.assertEqual(by, {"01": "sold", "02": "lost"})
+        losses = self.state.ship_losses()
+        self.assertEqual([(l["ts"][11:13], l["bio_runs"]) for l in losses], [("04", 1)])   # before: nothing lost
+
+    # ---- X2: a nav-beacon scan is no first discovery ----
+    def test_nav_beacon_scans_make_no_firsts(self):
+        self.assertEqual(ed_outrider.PARSER_VERSION, 34)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Old", "SystemAddress": 3,
+                       "StarPos": [0, 0, 0]})
+        for kind in ("NavBeaconDetail", "NavBeacon"):
+            ev = scan("2026-01-01T00:01:00Z", "Old", 3, 4 if kind == "NavBeacon" else 2, f"Old A {kind}")[2]
+            ev["ScanType"] = kind   # a beacon in a long-surveyed system can say WasDiscovered false
+            self.j.handle(ev)
+        self.db.commit()
+        self.assertEqual(self.db.execute("SELECT count(*) FROM own_firsts").fetchone()[0], 0)
+        self.assertEqual(self.state.firsts_list(), [])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM own_bodies").fetchone()[0], 2)   # the bodies still show
+        self.j.handle(scan("2026-01-01T00:02:00Z", "Old", 3, 2, "Old A NavBeaconDetail")[2])     # your own scan counts
+        self.assertEqual(self.db.execute("SELECT count(*) FROM own_firsts").fetchone()[0], 1)
+
+
 RHINO_SESSION = [
     'J {"timestamp":"2026-09-30T02:53:30Z", "event":"Location", "Docked":true, "StationName":"G0X-85Z", "StationType":"FleetCarrier", "StarSystem":"Smojooe AR-E b25-8", "SystemAddress":18207037532889, "StarPos":[-4177.09375, -1.0, 3324.53125]}',
     'J { "timestamp":"2026-09-30T03:06:20Z", "event":"SupercruiseExit", "Taxi":false, "Multicrew":false, "StarSystem":"Smojooe AR-E b25-8", "SystemAddress":18207037532889, "Body":"Smojooe AR-E b25-8 ABC 3 d", "BodyID":19, "BodyType":"Planet" }',
@@ -8021,3 +9047,212 @@ RHINO_SESSION = [
     'S {"timestamp":"2026-09-30T03:41:31Z", "event":"Status", "Flags":471875656, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.864037, "Longitude":-144.486206, "Heading":341, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
     'S {"timestamp":"2026-09-30T03:41:33Z", "event":"Status", "Flags":153092104, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.861923, "Longitude":-144.487473, "Heading":341, "Altitude":30, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
 ]
+
+
+class ReviewBatchF(unittest.TestCase):
+    """Review 2026-10-01, Batch F: planetary mining in Search and Nearby (S4), core module health (S5) and Now's
+    This session line (S10). In-memory databases and temp folders only; no network (the Spansh search is refused
+    before any request)."""
+
+    MINE = "$PlanetaryMiningLocation_Name;"
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types_ns(cached=lambda i: (None, None)), 25)
+
+    @staticmethod
+    def rec(name, subtype, mining, volcanism=None):
+        return {"name": name, "type": "Planet", "subtype": subtype, "volcanism": volcanism, "mining": mining}
+
+    # ---- S4: Search's mining section and Nearby's Rhino-worthy count ----
+    def test_match_system_mining(self):
+        recs = [self.rec("A 1", "Icy body", 20), self.rec("A 2", "Metal-rich body", 5),
+                self.rec("A 3", "Rocky body", 3, "major rocky magma volcanism"), self.rec("A 4", "Rocky body", 4),
+                self.rec("A 5", "High metal content world", 10), self.rec("A 6", "Metal-rich body", 0),
+                {"name": "A", "type": "Star", "subtype": "K (Yellow-Orange) Star", "mining": 9}]
+        match = lambda mineral: ed_outrider.match_system("S", recs, {"stars": set(), "planets": set(), "rings": set(),
+                                                                   "hotspots": set(), "mining": {"mineral": mineral}})
+        anym = match(None)["mining"]
+        self.assertEqual([h["body"] for h in anym], ["A 1", "A 5", "A 2", "A 4", "A 3"])   # most locations first
+        self.assertEqual(anym[0], {"t": "A 1 · icy: ⛏ 20", "body": "A 1", "here": True})
+        plat = match("Platinum")["mining"]   # icy ground has no platinum: left out; ranked by the expected count
+        self.assertEqual([h["t"] for h in plat],
+                         ["A 5 · high-metal-content: ⛏ 10, Platinum 34% of surveyed locations (~3 expected)",
+                          "A 2 · metal-rich: ⛏ 5, Platinum 46% of surveyed locations (~2 expected)"])
+        alex = match("Alexandrite")["mining"]   # rocky with magma is its own ground; plain rocky is 2.8%, under 10%
+        self.assertEqual([h["body"] for h in alex], ["A 3"])
+        self.assertIn("volcanic magma: ⛏ 3, Alexandrite 35%", alex[0]["t"])
+        self.assertNotIn("mining", match("Painite"))                                     # not surveyed anywhere
+        olivine = ed_outrider.match_system("S", [self.rec("B 1", "Rocky Ice world", 7)],
+                                           {"stars": set(), "planets": set(), "rings": set(), "hotspots": set(),
+                                            "mining": {"mineral": "Olivine"}})["mining"]
+        self.assertTrue(olivine[0]["t"].endswith("(~1 expected) · few reports"))           # 14 surveyed locations
+        self.assertNotIn("mining", ed_outrider.match_system("S", recs, {"stars": set(), "planets": set(), "rings": set(),
+                                                                       "hotspots": set()}))   # not asked for
+
+    def test_nearby_counts_rhino_ground_only(self):
+        recs = [dict(self.rec("A 1", "Icy body", 20, "minor water magma volcanism"), full=True),
+                dict(self.rec("A 2", "Metal-rich body", 5), full=True),
+                dict(self.rec("A 3", "Rocky body", 3, "major rocky magma volcanism"), full=True),
+                dict(self.rec("A 4", "Rocky body", 4), full=True), dict(self.rec("A 5", "Rocky Ice world", 6), full=True),
+                {"name": "A", "type": "Star", "subtype": "K (Yellow-Orange) Star", "main": True, "full": True}]
+        d = ed_outrider.summarise(recs, 6)["detail"]
+        self.assertEqual((d["mining"], d["mining_bodies"]), (8, 2))
+        self.assertEqual(ed_outrider.rhino_mining([self.rec("A 1", "Icy body", 20)]), (0, 0))
+
+    def search(self, params):
+        import asyncio
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "S1", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+        for i, (name, cls, n) in enumerate([("A 1", "Icy body", 12), ("A 2", "Metal rich body", 4)]):
+            ev = scan(f"2026-01-01T00:0{i + 1}:00Z", "S1", 1, 10 + i, f"S1 {name}")[2]
+            ev.update(PlanetClass=cls, Landable=True)
+            self.j.handle(ev)
+            self.j.handle({"event": "FSSBodySignals", "timestamp": f"2026-01-01T00:0{i + 1}:30Z", "SystemAddress": 1,
+                           "BodyID": 10 + i, "BodyName": f"S1 {name}", "Signals": [{"Type": self.MINE, "Count": n}]})
+        self.db.commit()
+        s = ed_outrider.Searcher(ed_outrider.State(self.db, self.j, ed_outrider.Spansh(self.db), 25))
+
+        async def go():
+            s.start(dict({"radius": 50}, **params))
+            await s.task
+        asyncio.run(go())
+        return s.result
+
+    def test_search_mining_local_and_spansh_refused(self):
+        r = self.search({"source": "local", "mining": True, "mining_mineral": "Platinum"})
+        self.assertEqual([x["name"] for x in r["results"]], ["S1"])
+        self.assertEqual([h["body"] for h in r["results"][0]["matches"]["mining"]], ["A 2"])   # icy has no platinum
+        r = self.search({"source": "local", "mining": True, "mining_mineral": "Unobtainium"})  # unknown: any mineral
+        self.assertEqual([h["body"] for h in r["results"][0]["matches"]["mining"]], ["A 1", "A 2"])
+        r = self.search({"source": "spansh", "mining": True})
+        self.assertEqual(r["results"], [])
+        self.assertIn("Spansh's search can't filter on planetary mining locations", r["status"])
+        self.assertIn("mining", self.search({"source": "local"})["status"])   # nothing ticked names the section
+        self.assertIn("Platinum", ed_outrider.SEARCH_OPTIONS["mining"])
+
+    # ---- S5: core module health ----
+    def loadout(self, ts, sid, fsd=0.884, extra=()):
+        mods = [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii", "Health": fsd},
+                {"Slot": "PowerPlant", "Item": "int_powerplant_size6_class5", "Health": 0.924},
+                {"Slot": "MainEngines", "Item": "int_engine_size6_class5", "Health": 0.951},
+                {"Slot": "LifeSupport", "Item": "int_lifesupport_size4_class2", "Health": 0.796},
+                {"Slot": "Radar", "Item": "int_sensors_size5_class2", "Health": 0.952},
+                {"Slot": "Slot01_Size7", "Item": "int_fuelscoop_size7_class5", "Health": 1.0},
+                {"Slot": "Slot04_Size6", "Item": "int_repairer_size6_class5", "Health": 0.930},
+                {"Slot": "MediumHardpoint1", "Item": "hpt_heatsinklauncher_turret_tiny", "Health": 0.5,
+                 "AmmoInClip": 1, "AmmoInHopper": 2}] + list(extra)
+        self.j.handle({"event": "Loadout", "timestamp": ts, "Ship": "explorer_nx", "ShipID": sid, "MaxJumpRange": 80,
+                       "HullHealth": 1.0, "Modules": mods})
+
+    def test_module_health_from_loadout_repairs_and_boosts(self):
+        self.loadout("2026-09-25T20:19:46Z", 7)
+        ms = self.state.modules_summary()
+        self.assertEqual([(m["label"], m["pct"]) for m in ms],
+                         [("FSD", 88), ("Power plant", 92), ("Thrusters", 95), ("Life support", 79), ("Sensors", 95),
+                          ("Fuel scoop", 100), ("AFMU", 93)])                    # no hardpoints; 79.6% reads 79
+        self.assertNotIn("ammo", json.dumps(ms).lower())
+        for t in ("2026-09-25T20:25:00Z", "2026-09-25T20:28:00Z"):
+            self.j.handle({"event": "JetConeBoost", "timestamp": t, "BoostValue": 4.0})
+        self.assertEqual({m["boosts"] for m in self.state.modules_summary()}, {2})
+        self.j.handle({"event": "AfmuRepairs", "timestamp": "2026-09-25T21:33:00Z",
+                       "Module": "$int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii_name;",
+                       "Module_Localised": "FSD", "FullyRepaired": False, "Health": 0.97})
+        fsd = self.state.modules_summary()[0]
+        self.assertEqual((fsd["pct"], fsd["boosts"], fsd["ts"]), (97, 0, "2026-09-25T21:33:00Z"))
+        self.assertEqual(self.state.modules_summary()[1]["boosts"], 2)                # the others still stale
+        self.j.handle({"event": "RepairAll", "timestamp": "2026-09-25T22:00:00Z", "Cost": 100})
+        self.assertEqual({m["pct"] for m in self.state.modules_summary()}, {100})
+        self.assertEqual(self.state.payload()["modules"], self.state.modules_summary())
+
+    def test_module_health_per_ship(self):
+        self.loadout("2026-09-25T20:19:46Z", 7)
+        self.loadout("2026-09-26T10:00:00Z", 9, fsd=0.5)             # another ship
+        self.assertEqual(self.state.modules_summary()[0]["pct"], 50)
+        self.j.handle({"event": "JetConeBoost", "timestamp": "2026-09-26T10:05:00Z", "BoostValue": 4.0})
+        self.loadout("2026-09-26T11:00:00Z", 7, fsd=0.884)           # back in the first: its own record
+        self.assertEqual((self.state.modules_summary()[0]["pct"], self.state.modules_summary()[0]["boosts"]), (88, 0))
+        self.j.handle({"event": "Repair", "timestamp": "2026-09-26T11:10:00Z", "Items": ["$int_lifesupport_size4_class2_name;"]})
+        self.assertEqual([m["pct"] for m in self.state.modules_summary()][3], 100)
+        self.assertEqual(self.state.modules_summary()[0]["pct"], 88)                   # only the one named
+        self.loadout("2026-09-20T10:00:00Z", 7, fsd=0.3)             # an older Loadout read late: ignored
+        self.assertEqual(self.state.modules_summary()[0]["pct"], 88)
+        j2 = ed_outrider.Journals(self.db)                           # kept over a restart
+        self.assertEqual(j2.modules["9"]["mods"]["FrameShiftDrive"]["health"], 0.5)
+        self.assertIn("modules", ed_outrider.RESET_JOURNAL_DATA)
+
+    def test_module_warn_config(self):
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = ed_outrider.settings_from({}, args, None, ([], []))
+        self.assertEqual(st["module_warn"], 80)
+        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["defaults"]["module_warn"], 80)
+        for raw, want in ((90, 90), (0, 1), (150, 100)):
+            self.assertEqual(ed_outrider.settings_from({"defaults": {"module_warn": raw}}, args, None, ([], []))["module_warn"], want)
+        self.assertEqual(self.state.payload()["defaults"]["module_warn"], ed_outrider.MODULE_WARN)
+        self.assertIn("moduleWarn", ed_outrider.BROWSER_SETTINGS)
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
+            self.assertIn("module_warn = 80", f.read())
+
+    # ---- S10: This session ----
+    def jump(self, ts, id64, x):
+        self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def test_this_session(self):
+        self.assertIsNone(self.state.this_session())                                    # no login yet
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T01:00:00Z", "Commander": "X", "Credits": 1000})
+        self.db.commit()
+        self.assertIsNone(self.state.this_session())                                    # nothing done yet
+        for i in range(3):
+            self.jump(f"2026-01-01T01:0{i + 1}:00Z", 10 + i, 10 * (i + 1))
+        self.j.handle(scan("2026-01-01T01:03:05Z", "S12", 12, 0, "S12", disc=False, star=True)[2])
+        self.db.commit()
+        self.state.bump()
+        ts = self.state.this_session()
+        self.assertEqual((ts["jumps"], ts["ly"], ts["firsts"], ts["start"], ts["found"]), (3, 20.0, 1, "2026-01-01T01:00:00Z", None))
+        self.assertIsNone(self.state.last_session())                                    # never both
+        # found: the estimate now less the one from before the login, plus what was sold since
+        self.j.handle({"event": "SellOrganicData", "timestamp": "2026-01-01T01:10:00Z", "MarketID": 1,
+                       "BioData": [{"Genus": "$Codex_Ent_Bacterial_Genus_Name;", "Species": "$Codex_Ent_Bacterial_01_Name;",
+                                    "Value": 5_000_000, "Bonus": 0}]})
+        self.state.unsold, self.state.unsold_login = {"total": 30_000_000}, ("2026-01-01T01:00:00Z", 10_000_000)
+        self.assertEqual(self.state.this_session()["found"], 25_000_000)
+        self.state.unsold_login = ("2025-12-31T01:00:00Z", 10_000_000)                 # another login's: not used
+        self.assertIsNone(self.state.this_session()["found"])
+        self.state.unsold_login = ("2026-01-01T01:00:00Z", 90_000_000)                 # a death took more: not below 0
+        self.assertEqual(self.state.this_session()["found"], 0)
+        self.assertEqual(self.state.payload()["this_session"]["jumps"], 3)
+        self.j.handle({"event": "Shutdown", "timestamp": "2026-01-01T02:00:00Z"})
+        self.db.commit()
+        self.assertIsNone(self.state.this_session())                                    # quit: Last session instead
+        self.assertEqual(self.state.last_session()["jumps"], 3)
+
+    def test_unsold_before_the_login(self):
+        import asyncio, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            lines = [scan("2026-01-01T00:01:00Z", "S1", 1, 0, "S1", star=True)[2],
+                     scan("2026-01-01T02:01:00Z", "S2", 2, 0, "S2", star=True)[2]]
+            with open(os.path.join(d, "Journal.2026-01-01T000000.01.log"), "w") as f:
+                f.write("".join(json.dumps(ev) + "\n" for ev in lines))
+            with unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", [d]), unittest.mock.patch.object(ed_outrider, "LEGACY_DIRS", []):
+                before, after = ed_outrider.unsold_total_at("2026-01-01T01:00:00Z"), ed_outrider.unsold_total_at("2026-01-01T03:00:00Z")
+                self.assertGreater(before, 0)
+                self.assertGreater(after, before)
+                self.assertEqual(ed_outrider.unsold_total_at("2025-01-01T00:00:00Z"), 0)
+        self.assertIsNone(ed_outrider.unsold_total_at("not a time"))
+        # worked out once per login, beside the ordinary estimate
+        calls = []
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T01:00:00Z", "Commander": "X"})
+
+        async def once():
+            self.state.unsold_dirty, self.state.unsold_at = True, 0
+            self.state.maybe_unsold()
+            await self.state.unsold_task
+        with unittest.mock.patch.object(ed_outrider, "compute_unsold", lambda: {"total": 5, "system_values": {}}), \
+                unittest.mock.patch.object(ed_outrider, "unsold_total_at", lambda t: calls.append(t) or 3):
+            asyncio.run(once())
+            asyncio.run(once())
+        self.assertEqual((calls, self.state.unsold_login), (["2026-01-01T01:00:00Z"], ("2026-01-01T01:00:00Z", 3)))

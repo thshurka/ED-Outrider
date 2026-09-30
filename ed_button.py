@@ -1,6 +1,7 @@
 """The co-pilot button: one HOTAS or keyboard button that talks to Outrider's voice (optional, Linux).
 
-    tap          a status report: fuel and jumps, the next stop, what is aboard, the nearest unvisited system
+    tap          a status report: fuel and jumps, the next stop, what is aboard, the nearest unvisited system,
+                 led by the body targeted in the nav panel when it is not the next stop
                  (on a body with a sample run under way: the sampling progress instead)
     double tap   say the last line again
     hold         hush the voice until the next jump (danger lines still speak); another hold ends it early
@@ -131,6 +132,8 @@ class ButtonWatch:
         self.hold_ms, self.double_ms = hold_ms, double_ms
         self.evdev = evdev   # tests hand in a stand-in; None imports the real one
         self.status = "starting"
+        self.listening = None    # "listening to <device> for <button>" while it reads one
+        self.last_error = None   # what the last failed gesture raised
 
     async def run(self):
         if self.evdev is None and not sys.platform.startswith("linux"):
@@ -150,32 +153,65 @@ class ButtonWatch:
             if dev is None:
                 self.status = f"{why}; looking again every {RETRY:g} s"
             else:
-                self.status = f"listening to {dev.name} for {code_name(ev, code)}"
+                self.status = self.listening = f"listening to {dev.name} for {code_name(ev, code)}"
                 try:
                     await self._read(dev, ev, code)
                     self.status = f"{dev.name} stopped sending; looking again every {RETRY:g} s"
                 except OSError as e:   # unplugged, or the machine slept
                     self.status = f"{dev.name}: {e.strerror or e}; looking again every {RETRY:g} s"
                 finally:
+                    self.listening = None
                     try:
                         dev.close()
                     except OSError:
                         pass
             await asyncio.sleep(RETRY)
 
+    def _hand(self, gesture):
+        """on_gesture, guarded: a handler that raises (a locked database while marking a rig, a bug) is logged
+        and shown in the status, and the button keeps listening instead of going dead for the rest of the run."""
+        try:
+            self.on_gesture(gesture)
+        except Exception as e:
+            import traceback
+            print(f"co-pilot button: the {gesture} gesture failed: {e!r}", file=sys.stderr)
+            traceback.print_exc()
+            self.last_error = f"the last {gesture} failed: {e}"
+            if self.listening:
+                self.status = f"{self.listening} ({self.last_error})"
+
     async def _read(self, dev, ev, code):
         loop, g, timer = asyncio.get_running_loop(), Gestures(self.hold_ms, self.double_ms), None
         now = lambda: time.monotonic() * 1000
+        # Gestures are timed by the kernel's timestamp on each event (when the press happened), not by when the
+        # event loop got round to it: a loop busy for half a second would turn a tap into a hold, or two queued
+        # events into a tap. `lag` maps event time onto the loop's clock for the settle timer: the smallest gap
+        # seen between an event's arrival and its timestamp (a big change is a clock step: start again).
+        lag = None
+
+        def stamp(e):
+            nonlocal lag
+            ts = getattr(e, "timestamp", None)
+            try:
+                t = float(ts()) * 1000 if callable(ts) else None
+            except (TypeError, ValueError):
+                t = None
+            if t is None:   # no kernel time (a stand-in): the arrival time
+                return now()
+            gap = now() - t
+            if lag is None or gap < lag or gap - lag > 60000:
+                lag = gap
+            return t
 
         def settle():   # a lone tap's wait for a second one has run out
-            for x in g.due(now()):
-                self.on_gesture(x)
+            for x in g.due(now() - (lag or 0)):
+                self._hand(x)
         try:
             async for e in dev.async_read_loop():
                 if e.type != ev.ecodes.EV_KEY or e.code != code:
                     continue
-                for x in g.feed(now(), e.value):
-                    self.on_gesture(x)
+                for x in g.feed(stamp(e), e.value):
+                    self._hand(x)
                 if timer:
                     timer.cancel()
                 timer = loop.call_later(self.double_ms / 1000 + 0.02, settle) if g.tap is not None else None

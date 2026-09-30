@@ -64,6 +64,9 @@
 #                                    # Now always includes them: it is what a sale would actually pay.
 # high_gravity = 2.0              # g (0.1 or more): dropping into orbital cruise at a landable body this heavy or more warns
 #                                    # you when the data aboard is over the amber level or the rebuy multiple
+# module_warn = 80              # %: core module health (FSD, power plant, thrusters, life support, sensors, fuel
+#                                    # scoop, AFMU) shows next to hull, in the welcome back and the co-pilot's status
+#                                    # report when one is under this (1 to 100), as of its last Loadout or repair
 # surface_alt = 1000             # m: the surface map on Now shows below this altitude and hides above it plus
 #                                    # 100 m (in the SRV or on foot it always shows)
 # rig_spacing = 78               # m: the faint ring round a Rhino mining rig: an estimate (SrvSurvey's) of how
@@ -86,6 +89,8 @@
 #                                # carrier leaving without you, the ship-loss debrief) come only from the business lists, never swearing
 # speak_bio_signals = true        # say "2 Biological Signals on body A 3" as the FSS finds them
 # speak_geo_signals = true        # and the geological ones
+# speak_mapped = false            # after mapping a planet: "A 2 mapped efficiently, 3.4M. Next: biology on
+#                                 # C 2, up to 19M." (a card and a spoken line; also a tick in the alerts dialog)
 # speech_speed = 1.0              # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 # speech_names = "Boss, Hefay, Sir"   # what the voice calls you, comma separated; one is picked at random
 #                                    # each time (commander names are often unpronounceable)
@@ -121,8 +126,9 @@
 
 [copilot]
 # One HOTAS (or keyboard) button for the voice (Linux; ed_button.py). Tap: a status report (fuel and jumps, the
-# next stop, what is aboard against your rebuy, the nearest unvisited system; the sampling while you sample).
-# Double tap: the last line again. Hold: hush the voice until the next jump (danger still speaks); hold again to end it.
+# next stop, what is aboard against your rebuy, the nearest unvisited system; a targeted body first; the sampling
+# while you sample). Double tap: the last line again. Hold: hush the voice until the next jump (danger still
+# speaks); hold again to end it. In the Rhino on a planet any press marks a mining rig placed or picked up instead.
 # Outrider only reads the button, never grabs it: unbind it in Elite's controls, or it does its game action too.
 # On an X-56, avoid the latching toggles and the mode wheel: they report as buttons held down.
 # Joysticks and throttles are readable through uaccess; a keyboard or mouse needs the input group.

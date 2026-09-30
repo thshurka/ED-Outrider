@@ -94,6 +94,7 @@ tr.prev.visited td { opacity: .7; }
 .ic svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .ic.star svg { fill: currentColor; stroke: none; color: var(--warn); }
 .ic.ring svg { color: var(--info); } .ic.hot svg { color: #c77dff; } .ic.plain svg { color: var(--muted); }
+.ic.mine { font-size: 0.85em; color: var(--muted); }   /* ⛏ N: mining locations on Rhino-worthy ground (S4) */
 .scoop { color: var(--good); font-weight: 600; } .noscoop { color: var(--bad); }
 .unk { color: var(--muted); }
 .mono { font-family: ui-monospace, Menlo, monospace; }
@@ -589,6 +590,7 @@ body.nowmode header, body.nowmode main { display: none; }
 /* the alerts dialog's spoken-line transcript: each line's fate coloured by what became of it */
 details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: pointer; color: var(--accent); font-size: 12px; }
 #speechLog { max-height: 320px; overflow-y: auto; font-size: 12px; margin-top: 6px; }
+#speechTally .stally { white-space: nowrap; }
 #speechLog .slog { padding: 3px 0; border-bottom: 1px solid var(--line, rgba(128,128,128,.2)); overflow-wrap: anywhere; }
 #speechLog .said b { color: var(--good); } #speechLog .cut b { color: var(--warn); }
 #speechLog .dropped b { color: var(--bad); } #speechLog .silent b, #speechLog .wait b { color: var(--muted); }
@@ -616,6 +618,7 @@ details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: poin
 .smap-legend .lg-slot.empty { border-style: dashed; opacity: .55; } .smap-legend .lg-slot.empty .rn { color: var(--muted); }
 .smap-legend .lg-slot.full { border-color: var(--good); }
 .smap-legend .lg-slot.far { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); } .smap-legend .lg-slot.far .rn { color: var(--bad); }
+.smap-legend .lg-slot .rx { color: var(--muted); text-decoration: none; margin-left: .3em; }
 .smap-legend .bad, .smap-line .bad { color: var(--bad); }
 .relarr { display: inline-block; font-weight: 700; color: var(--accent); }
 @media (min-width: 1100px) { .smap-legend .lg-slots { grid-template-columns: 1fr 1fr; } }

@@ -266,7 +266,14 @@
         <fieldset><legend>Exobiology</legend><div class="opts" id="sBio"></div>
           <div class="hint">bodies with bio signals you have not finished sampling; values are what the rest could pay at plain Vista Genomics prices (no first-footfall ×5)</div></fieldset>
       </div>
-      <fieldset><legend>Ring hotspots</legend><div class="opts" id="sHotspots"></div></fieldset>
+      <div class="sstack">
+        <fieldset><legend>Ring hotspots</legend><div class="opts" id="sHotspots"></div></fieldset>
+        <fieldset><legend>Planetary mining locations</legend>
+          <label><input type="checkbox" id="sMining"> ⛏ bodies with mining locations</label>
+          <label class="mod">likely to hold <select id="sMineral"></select></label>
+          <div class="hint"><b>Local</b> only (Spansh's search can't filter on them). With a mineral, a body is kept when the EDFM survey found it at 10% or more of its ground's
+            mining locations: survey odds for the ground, not the body's contents. A click opens the system in Here.</div></fieldset>
+      </div>
     </div>
     <div class="hint">Within a section any ticked item counts (OR); a system must match every section you tick something in (AND across sections).
       <b>Local</b> only covers systems you've visited or passed within 25 ly of — out in the black that is thin, especially for ring hotspots,
@@ -318,6 +325,8 @@
       <span class="hint">arriving somewhere known with every body already found, a scoopable star, and nothing over your body or bio levels: a soft two-note sound instead of the arrival briefing (and of "nothing worth staying for" after the FSS); the card stays</span></label>
     <label class="mod"><input type="checkbox" id="sayHazard"> Say the hazard when the FSD charges for a neutron star, white dwarf or black hole
       <span class="hint">"… Neutron star ahead: throttle down on arrival, mind the jet cone" (part of the jump line)</span></label>
+    <label class="mod"><input type="checkbox" id="sayMapped"> Say when a planet is mapped
+      <span class="hint">"A 2 mapped efficiently, 3.4M. Next: biology on C 2, up to 19M." after each DSS mapping (or "2 probes over target, no efficiency bonus"; or "Nothing else here over your levels"); its row in the table above chooses the card, notification and voice. Off by default ([defaults] speak_mapped)</span></label>
     <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
       <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
       <span class="hint">1× is the voice's own pace; reset goes back to the config file's speech_speed</span></label>
@@ -375,6 +384,10 @@
     <label class="mod">Approach warning: a landable body of
       <input type="number" id="highG" min="0" step="0.1" style="width:5em"> g or more<span class="reset" data-reset="highG">reset</span>
       <span class="hint">said when you drop into orbital cruise there with unsold data over the amber level or the rebuy multiple below ("2.6 g, 480 million aboard, 3.2 rebuys"); the approach alert above switches it off</span></label>
+    <label class="mod">Core modules: show them next to hull under
+      <input type="number" id="moduleWarn" min="1" max="100" step="1" style="width:4.5em"> % health<span class="reset" data-reset="moduleWarn">reset</span>
+      <span class="hint">FSD, power plant, thrusters, life support, sensors, fuel scoop and the AFMU, as of their last reading in the journal (a Loadout, an AFMU repair or a repair at a station),
+        with the jet-cone boosts since; also in the welcome back and the co-pilot's status report. Nothing shows while all are over it. Blank = the config file's <code>module_warn</code> (80).</span></label>
     <label class="mod">Fuel alerts: also warn under
       <input type="number" id="fuelJumps" min="0" max="99" step="1" style="width:4.5em"> jumps of fuel left<span class="reset" data-reset="fuelJumps">reset</span>
       <span class="hint">blank = off (the default). Once when the jumps left at your pace fall under it (said like the game's low fuel warning), and the low-fuel warnings for an unscoopable arrival star or target then count it as well as under 30%; it also becomes the level for the "top up here" warning, which otherwise asks for two of your usual gaps between scoopable stars (at least 4 jumps)</span></label>
@@ -414,6 +427,7 @@
         silent (speech off, not ticked, another window speaks, hushed). Only this window's, and a reload starts afresh.
         👎 on a line from the lines file means never say that one again (for every browser and the voice lab; the last line of a list stays).
         <button type="button" class="try" id="speechLogCopy">copy</button></div>
+      <div id="speechTally" class="hint"></div>
       <div id="speechBans" class="hint"></div>
       <div id="speechLog"></div></details>
     <div class="btns"><span class="grow"></span><button value="close" class="primary">Done</button></div>

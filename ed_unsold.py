@@ -342,9 +342,12 @@ INTERESTING = (
 
 SCAN_KEEP = (
     "BodyName", "BodyID", "StarSystem", "SystemAddress", "StarType", "StellarMass",
-    "PlanetClass", "TerraformState", "MassEM", "WasDiscovered", "WasMapped", "ScanType",
+    "PlanetClass", "TerraformState", "MassEM", "WasDiscovered", "WasMapped", "WasFootfalled", "ScanType",
     "DistanceFromArrivalLS",
 )
+# Scans read off a nav beacon: Universal Cartographics neither lists nor buys them, and their Was* flags are not
+# the game's record of the body (a beacon in a system surveyed for centuries can say WasDiscovered false).
+NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
 
 def journal_files(dirs):
@@ -533,8 +536,9 @@ def analyse(events, args):
 
     # Cartographic data is matched per SYSTEM: a sale lists every system it paid for
     # (in pages of 50), so a scan is sold only once a later sale names its system, and lost
-    # if the ship went first. Exobiology sales do not say where the samples came from, so
-    # that side keeps a time cut-off: the last Vista Genomics sale or the last death.
+    # if the ship went first. Exobiology sales do not say where the samples came from, only
+    # which species: each sale takes out one run per entry of its species, and a death takes
+    # them all (see pass 2; bio_cut is only the report's "counting from").
     hard_cut = parse_ts(args.since) if args.since else None
     sales_by_system = {}
     for ts, ev in explo_sales:
@@ -572,7 +576,7 @@ def analyse(events, args):
     map_sold_at = {}                # (system, bodyid) -> when its mapping was sold
     mapped = {}                     # (system, bodyid) -> efficient?  (mapping still aboard)
     system_name = {}                # SystemAddress -> name, for events that carry only the address
-    organics = []                   # completed (Analyse) samples since the bio cut-off
+    organics = []                   # completed (Analyse) samples still aboard: not in a sale, not lost to a death
     footfalled = {}                 # (system, bodyid) -> WasFootfalled from your first Scan of it that says
     death_in_window = None
 
@@ -582,6 +586,8 @@ def analyse(events, args):
         name = ev.get("event")
 
         if name == "Scan":
+            if ev.get("ScanType") in NAV_BEACON_SCANS:
+                continue
             if "WasFootfalled" in ev:
                 # Vista Genomics pays x5 where nobody had set foot when you scanned the body (the first scan
                 # counts: a rescan after your own landing says footfalled)
@@ -633,11 +639,25 @@ def analyse(events, args):
         elif name == "ScanOrganic":
             if ev.get("ScanType") != "Analyse":
                 continue
-            if bio_cut and ts <= bio_cut:
+            if hard_cut and ts <= hard_cut:
                 continue
             organics.append(ev)
 
+        elif name in SELL_ORGANIC and not args.since:
+            # Vista Genomics lets you sell some species and keep the rest: each BioData entry takes one run of its
+            # species out (a paid bonus takes an x5 run first, no bonus an x1 run), and the runs it does not name
+            # stay aboard. An entry with no run on record (sampled before your journals start) takes nothing.
+            for b in ev.get("BioData") or []:
+                sp = (b.get("Species") or "").lower()
+                order = (False, None, True) if b.get("Bonus") else (True, None, False)
+                runs = [o for o in organics if (o.get("Species") or "").lower() == sp]
+                runs.sort(key=lambda r: order.index(footfalled.get((r.get("SystemAddress"), r.get("Body")))))
+                if runs:
+                    organics.remove(runs[0])
+
         elif name in RESET_EVENTS:
+            if not args.since and not args.ignore_deaths:
+                organics = []   # exobiology data dies with you, whether or not the ship survives
             earliest_cut = min([c for c in (explo_cut, bio_cut) if c], default=None)
             if earliest_cut and ts > earliest_cut:
                 death_in_window = ts
@@ -908,7 +928,7 @@ def calibrate(events, args):
             if args.commander and cmdr and cmdr.lower() != args.commander.lower():
                 continue
             name = ev.get("event")
-            if name == "Scan" and ev.get("StarSystem") in num_bodies:
+            if name == "Scan" and ev.get("StarSystem") in num_bodies and ev.get("ScanType") not in NAV_BEACON_SCANS:
                 key = (ev.get("SystemAddress"), ev.get("BodyID"))
                 if key not in bodies or ev.get("ScanType") == "Detailed":
                     bodies[key] = ev
@@ -984,7 +1004,11 @@ Caveats
 * Bodies re-scanned after a sale are only counted for a new mapping; bodies
   re-scanned after a ship loss count in full (that data was never sold).
 * Belt clusters and rings are not counted as bodies; ring probes are not
-  counted as mapping.
+  counted as mapping. Nav beacon scans are not counted either: Universal
+  Cartographics does not buy them.
+* Vista Genomics lets you sell some species and keep the rest: each sold
+  entry takes one completed run of its species out, and the others stay
+  aboard until they are sold or you die.
 * Cartographic data is matched per system: a sale event names every system it
   paid for, so a scan counts as sold only once a later sale names its system
   (partial "sell 50 systems" sales are handled), and as lost if the ship went
