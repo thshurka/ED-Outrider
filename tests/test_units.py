@@ -6402,7 +6402,7 @@ class BatchFSpansh(unittest.TestCase):
     # ---- P16 ----
 
     def test_record_keeps_update_time_and_signals_block(self):
-        self.assertEqual(ed_outrider.CACHE_VERSION, 15)
+        self.assertEqual(ed_outrider.CACHE_VERSION, 16)   # 16: mining (Batch M4)
         r = self.rec()
         self.assertEqual((r["updated"], r["signals_known"]), ("2019-06-01 10:00:00+00", False))
         self.assertTrue(self.rec(signals={"signals": {}, "updateTime": "2019-06-01"})["signals_known"])
@@ -7058,3 +7058,364 @@ class BatchGHonkBackups(unittest.TestCase):
             readme = f.read()
         self.assertIn("--restore", readme)
         self.assertIn("--list-backups", readme)
+
+
+class MiningLocations(unittest.TestCase):
+    """Batch M4: planetary mining locations in Here, with the EDFM survey's odds as a tooltip."""
+
+    MINE = "$PlanetaryMiningLocation_Name;"
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "S1", "SystemAddress": 1,
+                       "StarPos": [0, 0, 0]})
+
+    def body(self, name, cls="Rocky body", volcanism=""):
+        ev = scan("2026-01-01T00:01:00Z", "S1", 1, sum(map(ord, name)), f"S1 {name}")[2]
+        ev.update(PlanetClass=cls, Volcanism=volcanism, Landable=True)
+        self.j.handle(ev)
+
+    def detail(self, name):
+        self.db.commit()
+        return next(b for b in self.state.system_detail(1)["bodies"] if b["name"] == name)
+
+    def test_count_from_fss_and_dss(self):
+        self.body("A 1", "Icy body")
+        self.body("A 2", "Metal rich body")
+        self.j.handle({"event": "FSSBodySignals", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 1, "BodyID": 3,
+                       "BodyName": "S1 A 1", "Signals": [
+                           {"Type": self.MINE, "Type_Localised": "Planetary Mining Location", "Count": 4},
+                           {"Type": "$SAA_SignalType_Geological;", "Type_Localised": "Geological", "Count": 2}]})
+        self.j.handle({"event": "SAASignalsFound", "timestamp": "2026-01-01T00:03:00Z", "SystemAddress": 1, "BodyID": 3,
+                       "BodyName": "S1 A 2", "Signals": [
+                           {"Type": "$SAA_SignalType_Biological;", "Type_Localised": "Biological", "Count": 7},
+                           {"Type": self.MINE, "Type_Localised": "Planetary Mining Location", "Count": 19}],
+                       "Genuses": []})
+        a1, a2 = self.detail("A 1"), self.detail("A 2")
+        self.assertEqual((a1["mining"], a1["geo"], a2["mining"], a2["bio"]), (4, 2, 19, 7))
+        self.assertEqual(a1["mining_odds"]["ground"], "icy")
+        self.assertEqual(a2["mining_odds"]["ground"], "metal-rich")
+
+    def test_no_count_no_tooltip(self):
+        self.body("A 1", "Icy body")
+        self.j.handle({"event": "FSSBodySignals", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 1, "BodyID": 3,
+                       "BodyName": "S1 A 1", "Signals": [{"Type": "$SAA_SignalType_Geological;", "Count": 2}]})
+        b = self.detail("A 1")
+        self.assertEqual((b["mining"], b["mining_odds"]), (0, None))
+
+    def test_ground_classification(self):
+        g = ed_outrider.mining_ground
+        self.assertEqual(g("Metal-rich body", None), "metal-rich")
+        self.assertEqual(g("High metal content world", "major rocky magma volcanism"), "high-metal-content")
+        self.assertEqual(g("Rocky Ice world", ""), "rocky-ice")
+        self.assertEqual(g("Icy body", "water geysers volcanism"), "icy")
+        self.assertEqual(g("Rocky body", ""), "rocky")
+        self.assertEqual(g("Rocky body", None), "rocky")
+        self.assertEqual(g("Rocky body", "carbon dioxide geysers volcanism"), "rocky")
+        self.assertEqual(g("Rocky body", "minor metallic magma volcanism"), "volcanic magma")
+        self.assertEqual(g("Rocky body", "Rocky Magma"), "volcanic magma")          # Spansh's wording
+        self.assertEqual(g("Rocky body", "major silicate vapour geysers volcanism"), "volcanic silicate")
+        self.assertEqual(g("Rocky body", "Silicate Vapour Geysers"), "volcanic silicate")
+        self.assertIsNone(g("Water world", ""))
+        self.assertIsNone(g("Class I gas giant", None))
+        # a scan's journal class is normalised to these names on the record
+        self.body("B 1", "Rocky ice body")
+        self.j.handle({"event": "FSSBodySignals", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 1, "BodyID": 3,
+                       "BodyName": "S1 B 1", "Signals": [{"Type": self.MINE, "Count": 3}]})
+        self.assertEqual(self.detail("B 1")["mining_odds"]["ground"], "rocky-ice")
+
+    def test_odds_file_loads(self):
+        with open(ed_outrider.MINING_ODDS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+        self.assertIn("CC BY-SA 4.0", raw["_note"]["license"])
+        self.assertIn("edfieldmanual.com", raw["_note"]["source"])
+        self.assertEqual(raw["attribution"]["researcher"], "CMDR Grumlop")
+        odds = ed_outrider.load_mining_odds()
+        self.assertEqual(set(odds), {"metal-rich", "high-metal-content", "rocky-ice", "rocky", "icy",
+                                     "volcanic magma", "volcanic silicate"})
+        for e in odds.values():
+            pcts = [p for _, p in e["materials"]]
+            self.assertEqual(pcts, sorted(pcts, reverse=True))
+        self.assertEqual(ed_outrider.load_mining_odds("/nonexistent/mining_odds.json"), {})
+
+    def test_odds_for_one_ground(self):
+        o = ed_outrider.mining_odds("volcanic magma")
+        self.assertEqual((o["surveyed"], o["few"]), (57, False))
+        self.assertEqual([m["name"] for m in o["top"][:4]], ["Olivine", "Monazite", "Bastnasite", "Alexandrite"])
+        self.assertEqual(o["top"][0]["pct"], 56.1)
+        self.assertEqual((len(o["top"]), o["more"]), (ed_outrider.MINING_TOP, True))
+        icy = ed_outrider.mining_odds("icy")
+        self.assertEqual(icy["surveyed"], 124)
+        self.assertEqual(icy["top"][0]["name"], "Deuterium")
+        self.assertTrue(ed_outrider.mining_odds("rocky-ice")["few"])      # 14 locations surveyed
+        self.assertIsNone(ed_outrider.mining_odds(None))
+        self.assertIsNone(ed_outrider.mining_odds("gas giant"))
+
+    def test_spansh_count_for_unscanned_and_scanned_bodies(self):
+        dump = {"name": "S1 A 3", "type": "Planet", "subType": "Rocky body", "volcanismType": "Silicate Vapour Geysers",
+                "signals": {"signals": {self.MINE: 12}, "updateTime": "2026-09-28T03:16:00Z"}}
+        r = ed_outrider.record_from_dump("S1", dump)
+        self.assertEqual(r["mining"], 12)
+        self.assertEqual(ed_outrider.mining_ground(r["subtype"], r["volcanism"]), "volcanic silicate")
+        # your scan without an FSS signal count takes Spansh's
+        own = {"A 3": {"name": "A 3", "subtype": "Rocky body", "bio": 0, "geo": 0, "rings": []}}
+        merged = ed_outrider.merge_records([r], own, {})
+        self.assertEqual(merged[0]["mining"], 12)
+
+    def test_old_database_gets_the_column(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "old.sqlite")
+            con = sqlite3.connect(path)
+            con.execute("CREATE TABLE own_signals (system INTEGER, name TEXT, bio INTEGER, geo INTEGER, ts TEXT, "
+                        "PRIMARY KEY (system, name))")
+            con.commit()
+            con.close()
+            db = ed_outrider.open_db(path)
+            self.addCleanup(db.close)
+            self.assertIn("mining", {r["name"] for r in db.execute("PRAGMA table_info(own_signals)")})
+            j = ed_outrider.Journals(db)
+            j.handle({"event": "FSSBodySignals", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 1, "BodyID": 3,
+                      "BodyName": "S1 A 1", "Signals": [{"Type": self.MINE, "Count": 5}]})
+            self.assertEqual(db.execute("SELECT mining FROM own_signals").fetchone()[0], 5)
+
+
+
+class MinedPreviously(unittest.TestCase):
+    """Batch M4b: what the SRV's refinery collected on each body (MiningRefined, 1 t each), rebuilt by a re-read."""
+
+    SYS = 18207037532889
+
+    def setUp(self):
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+
+    @staticmethod
+    def session(t0="2026-09-30T03:00:"):
+        """A login, a Rhino on body 19 (3 refined, docked), then relaunched on body 12 (2 refined)."""
+        sys_ = MinedPreviously.SYS
+        n = iter(range(10, 60))
+        t = lambda: f"{t0}{next(n):02d}Z"
+        body = lambda ev, bid, **kw: dict({"event": ev, "timestamp": t(), "StarSystem": "Smojooe AR-E b25-8",
+                                           "SystemAddress": sys_, "Body": f"B {bid}", "BodyID": bid}, **kw)
+        refine = lambda kind, loc: {"event": "MiningRefined", "timestamp": t(), "Type": f"${kind};", "Type_Localised": loc}
+        return [
+            {"event": "LoadGame", "timestamp": t(), "Commander": "X", "Ship": "Explorer_NX"},
+            {"event": "Location", "timestamp": t(), "StarSystem": "Smojooe AR-E b25-8", "SystemAddress": sys_,
+             "StarPos": [0, 0, 0], "Docked": True, "StationName": "G0X-85Z", "StationType": "FleetCarrier"},
+            body("ApproachBody", 19), body("SupercruiseExit", 19, BodyType="Planet"),
+            {"event": "LaunchSRV", "timestamp": t(), "SRVType": "mev_rhino", "ID": 51, "PlayerControlled": True},
+            refine("water_name", "Water"), refine("water_name", "Water"),
+            refine("methanolmonohydratecrystals_name", "Methanol Monohydrate Crystals"),
+            {"event": "DockSRV", "timestamp": t(), "SRVType": "mev_rhino", "ID": 51},
+            refine("water_name", "Water"),                     # the ship's own refinery (no SRV out): not counted
+            body("LeaveBody", 19), body("ApproachBody", 12), body("Touchdown", 12, PlayerControlled=True),
+            {"event": "LaunchSRV", "timestamp": t(), "SRVType": "mev_rhino", "ID": 51, "PlayerControlled": True},
+            refine("gold_name", "Gold"), refine("gold_name", "Gold"),
+            {"event": "DockSRV", "timestamp": t(), "SRVType": "mev_rhino", "ID": 51},
+        ]
+
+    def mined(self, db=None):
+        return {(r["body_id"], r["name"]): (r["tons"], r["first_ts"], r["last_ts"]) for r in
+                (db or self.db).execute("SELECT * FROM own_mined WHERE system=?", (self.SYS,))}
+
+    def test_launch_refine_dock_relaunch_on_another_body(self):
+        for ev in self.session():
+            self.j.handle(ev)
+        got = self.mined()
+        self.assertEqual({k: v[0] for k, v in got.items()},
+                         {(19, "Water"): 2, (19, "Methanol Monohydrate Crystals"): 1, (12, "Gold"): 2})
+        self.assertEqual(got[(19, "Water")][1:], ("2026-09-30T03:00:15Z", "2026-09-30T03:00:16Z"))
+        self.assertIsNone(self.j.srv_state[""]["srv"])       # docked
+
+    def test_refined_with_no_known_body_is_ignored(self):
+        ts = iter(f"2026-09-30T04:00:{i:02d}Z" for i in range(10, 60))
+        # a ring: the ship's refinery
+        self.j.handle({"event": "MiningRefined", "timestamp": next(ts), "Type": "$painite_name;", "Type_Localised": "Painite"})
+        # an SRV launched with no body known (the journals began mid-session)
+        self.j.handle({"event": "LaunchSRV", "timestamp": next(ts), "SRVType": "mev_rhino"})
+        self.j.handle({"event": "MiningRefined", "timestamp": next(ts), "Type": "$water_name;", "Type_Localised": "Water"})
+        # at a station, not a planet
+        self.j.handle({"event": "SupercruiseExit", "timestamp": next(ts), "SystemAddress": 5, "Body": "Port", "BodyID": 40,
+                       "BodyType": "Station"})
+        self.j.handle({"event": "LaunchSRV", "timestamp": next(ts), "SRVType": "mev_rhino"})
+        self.j.handle({"event": "MiningRefined", "timestamp": next(ts), "Type": "$water_name;"})
+        # on a body, but supercruise in between ends the SRV
+        self.j.handle({"event": "Touchdown", "timestamp": next(ts), "SystemAddress": 5, "Body": "P", "BodyID": 7})
+        self.j.handle({"event": "LaunchSRV", "timestamp": next(ts), "SRVType": "mev_rhino"})
+        self.j.handle({"event": "SupercruiseEntry", "timestamp": next(ts), "SystemAddress": 5})
+        self.j.handle({"event": "MiningRefined", "timestamp": next(ts), "Type": "$water_name;"})
+        self.assertEqual(self.db.execute("SELECT count(*) FROM own_mined").fetchone()[0], 0)
+
+    def test_login_in_the_srv(self):
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-09-19T15:48:00Z", "Commander": "X", "Ship": "Lander01"})
+        self.j.handle({"event": "Location", "timestamp": "2026-09-19T15:49:04Z", "InSRV": True, "StarSystem": "Scaulae",
+                       "SystemAddress": 8, "StarPos": [0, 0, 0], "Body": "Scaulae 8 g", "BodyID": 29, "BodyType": "Planet"})
+        self.j.handle({"event": "MiningRefined", "timestamp": "2026-09-19T15:50:00Z", "Type": "$gold_name;",
+                       "Type_Localised": "Gold"})
+        self.assertEqual(self.db.execute("SELECT system, body_id, tons FROM own_mined").fetchall()[0][:], (8, 29, 1))
+
+    def write_journals(self, d):
+        """Two sessions in two files: the second's lines must not borrow the first's SRV."""
+        first = self.session()
+        second = [{"event": "MiningRefined", "timestamp": "2026-09-30T05:00:00Z", "Type": "$gold_name;",
+                   "Type_Localised": "Gold"}]   # no LoadGame, no body: an SRV the journals never saw launched
+        # the first session leaves an SRV out when its journal ends (a crash): drop its last DockSRV
+        first = first[:-1]
+        for name, evs in (("Journal.2026-09-30T030000.01.log", first), ("Journal.2026-09-30T045900.01.log", second)):
+            with open(os.path.join(d, name), "w") as f:
+                f.write("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in evs))   # the game writes "event":"X"
+
+    def test_a_reread_gives_the_same_totals(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            jdir = os.path.join(d, "j"); os.mkdir(jdir)
+            self.write_journals(jdir)
+            path = os.path.join(d, "m.sqlite")
+            db = ed_outrider.open_db(path)
+            ed_outrider.Journals(db).scan_dir(jdir)
+            db.commit()
+            before = self.mined(db)
+            self.assertEqual({k: v[0] for k, v in before.items()},
+                             {(19, "Water"): 2, (19, "Methanol Monohydrate Crystals"): 1, (12, "Gold"): 2})
+            # the same file read again (a line handled twice) adds nothing: offsets, and the source guard
+            j = ed_outrider.Journals(db)
+            j.line_source = "Journal.2026-09-30T030000.01.log:999"
+            j.srv_state[j.session_key()] = {"at": None, "srv": {"system": self.SYS, "body_id": 12, "ts": ""}}
+            ev = {"event": "MiningRefined", "timestamp": "2026-09-30T03:01:00Z", "Type": "$gold_name;", "Type_Localised": "Gold"}
+            j.handle(ev); j.handle(ev)
+            self.assertEqual(self.mined(db)[(12, "Gold")][0], 3)
+            db.close()
+            db = ed_outrider.open_db(path, rescan=True)
+            self.addCleanup(db.close)
+            self.assertEqual(db.execute("SELECT count(*) FROM own_mined").fetchone()[0], 0)
+            self.assertIsNone(ed_outrider.meta_get(db, "srv_state"))
+            ed_outrider.Journals(db).scan_dir(jdir)
+            db.commit()
+            self.assertEqual(self.mined(db), before)
+
+    def test_session_key_drops_the_part_number(self):
+        self.j.line_source = "Journal.2026-09-30T023726.02.log:12345"
+        self.assertEqual(self.j.session_key(), "Journal.2026-09-30T023726")
+        self.j.line_source = ""
+        self.assertEqual(self.j.session_key(), "")
+
+    def test_payload(self):
+        import types
+        state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        for ev in self.session():
+            self.j.handle(ev)
+        for bid in (19, 12):
+            self.j.handle(dict(scan("2026-09-30T03:01:00Z", "Smojooe AR-E b25-8", self.SYS, bid,
+                                    f"Smojooe AR-E b25-8 B {bid}")[2], PlanetClass="Icy body", Landable=True))
+        self.db.commit()
+        bodies = {b["name"]: b for b in state.system_detail(self.SYS)["bodies"]}
+        self.assertEqual(bodies["B 19"]["mined"], [
+            {"name": "Water", "tons": 2, "last": "2026-09-30T03:00:16Z"},
+            {"name": "Methanol Monohydrate Crystals", "tons": 1, "last": "2026-09-30T03:00:17Z"}])
+        self.assertEqual([m["tons"] for m in bodies["B 12"]["mined"]], [2])
+        self.assertEqual(bodies["B 12"]["mining"], 0)        # mined history with no survey count still shows
+
+class SaleLeft(unittest.TestCase):
+    """A sale that leaves data aboard: said once the pages stop and a fresh estimate has run, live sales only."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.base = time.time()
+
+    def at(self, s, ev):
+        """Handle ev as a journal line read s seconds after the test's start (its timestamp then too)."""
+        with unittest.mock.patch.object(ed_outrider.time, "time", lambda: self.base + s):
+            self.j.handle(dict(ev, timestamp=ed_outrider.iso_ts(self.base + s)))
+
+    def page(self, s, systems, earned):
+        self.at(s, {"event": "MultiSellExplorationData", "TotalEarnings": earned, "BaseValue": earned, "Bonus": 0,
+                    "Discovered": [{"SystemName": f"S{i}", "NumBodies": 3} for i in range(systems)]})
+
+    def estimate(self, started, systems=0, payout=0, firsts=0, samples=0, bio=0):
+        self.state.unsold = {"carto": {"systems": systems, "estimated_payout": payout, "first_discoveries": firsts},
+                             "bio": {"samples": samples, "estimated_value": bio}}
+        self.state.unsold_from = self.base + started
+
+    def kinds(self):
+        return [m for m in self.j.moments if m["kind"] in ("sale_left", "bio_left")]
+
+    def test_one_page_with_data_left(self):
+        self.estimate(-30, 93, 16800000, 300)            # before the sale: it cannot say what the sale left
+        self.page(0, 50, 14814687)
+        self.state.maybe_sale_left(self.base + 5)
+        self.state.maybe_sale_left(self.base + 12)       # quiet long enough, but no estimate since the page
+        self.assertEqual(self.kinds(), [])
+        self.estimate(3, 43, 2026392, 270)
+        self.state.maybe_sale_left(self.base + 20)
+        m = self.kinds()
+        self.assertEqual(len(m), 1)
+        self.assertEqual({k: m[0][k] for k in ("kind", "sold_systems", "sold_value", "left_systems", "left_value", "left_firsts")},
+                         {"kind": "sale_left", "sold_systems": 50, "sold_value": 14814687, "left_systems": 43,
+                          "left_value": 2026392, "left_firsts": 270})
+        self.assertIsNone(self.j.sale_run)
+        self.state.maybe_sale_left(self.base + 40)       # said once
+        self.assertEqual(len(self.kinds()), 1)
+
+    def test_three_pages_all_sold(self):
+        self.page(0, 50, 14000000)
+        self.estimate(1, 60, 9000000, 100)               # between pages: data left, but the sale is still going
+        self.state.maybe_sale_left(self.base + 3)
+        self.page(4, 50, 9000000)
+        self.estimate(5, 10, 1000000, 20)
+        self.state.maybe_sale_left(self.base + 7)
+        self.page(8, 10, 1000000)
+        self.state.maybe_sale_left(self.base + 12)       # the page-2 estimate is older than the last page
+        self.state.maybe_sale_left(self.base + 19)
+        self.assertEqual(self.kinds(), [])
+        self.assertEqual((self.j.sale_run["systems"], self.j.sale_run["carto"]), (110, 24000000))
+        self.estimate(10)                                # everything sold
+        self.state.maybe_sale_left(self.base + 25)
+        self.assertEqual(self.kinds(), [])
+        self.assertIsNone(self.j.sale_run)
+
+    def test_three_pages_with_data_left_counts_the_whole_sale(self):
+        for s in (0, 3, 6):
+            self.page(s, 50, 5000000)
+        self.estimate(8, 43, 2000000, 270)
+        self.state.maybe_sale_left(self.base + 20)
+        m = self.kinds()
+        self.assertEqual([(x["sold_systems"], x["sold_value"], x["left_systems"]) for x in m], [(150, 15000000, 43)])
+
+    def test_replayed_sale_says_nothing(self):
+        self.j.handle({"event": "MultiSellExplorationData", "timestamp": "2026-01-01T01:00:00Z", "TotalEarnings": 5000,
+                       "Discovered": [{"SystemName": "Sys", "NumBodies": 3}]})
+        self.assertIsNone(self.j.sale_run)
+        self.estimate(10, 43, 2000000, 270)
+        self.state.maybe_sale_left(self.base + 60)
+        self.assertEqual(self.kinds(), [])
+        self.assertEqual(self.j.last_sale["carto"], 5000)   # the sale itself still counts
+
+    def test_bio_left(self):
+        self.at(0, {"event": "SellOrganicData", "BioData": [{"Value": 1000000, "Bonus": 4000000}] * 3})
+        self.estimate(2, 40, 3000000, 10, samples=2, bio=30000000)
+        self.state.maybe_sale_left(self.base + 20)
+        m = self.kinds()
+        self.assertEqual([(x["kind"], x["sold_species"], x["sold_value"], x["left_samples"], x["left_value"]) for x in m],
+                         [("bio_left", 3, 15000000, 2, 30000000)])   # cartographics aboard: not this sale's news
+
+    def test_carto_sale_says_nothing_of_bio(self):
+        self.page(0, 20, 3000000)
+        self.estimate(2, samples=4, bio=50000000)
+        self.state.maybe_sale_left(self.base + 20)
+        self.assertEqual(self.kinds(), [])
+
+    def test_failed_tick_does_not_double_the_run(self):
+        self.page(0, 50, 1000)
+        cp = self.j.checkpoint()
+        self.page(2, 50, 1000)
+        self.j.restore(cp)
+        self.assertEqual(self.j.sale_run["systems"], 50)

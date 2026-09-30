@@ -182,6 +182,7 @@ main > #hereView.detail > #bodyPanel { position: sticky; top: calc(var(--head-h,
   main > #hereView.detail > #bodyPanel { position: static; max-height: none; border-left: 0; padding-left: 0; } }
 #sell { margin-top: 4px; font-size: 13px; color: var(--good); font-weight: 600; }
 #sell.urgent { color: var(--bad); }
+#sell.left { color: var(--warn); }   /* a sale that left data aboard */
 .strip .stale { color: var(--warn); } .strip .dead { color: var(--bad); }
 #firstsView { margin-top: 12px; }
 #firstsRows td.by { white-space: normal; font-size: 12px; }
@@ -441,6 +442,7 @@ main.nearPinned #hereSchematic .sbody { width: 64px; }
 
 /* ---- geology ---- */
 .sp.geo { color: #d9a066; }
+#hereTable td.mine { white-space: nowrap; } .minec { cursor: help; color: #b9a58a; font-size: 12px; } .minec.nodds { cursor: default; } .mined { margin-top: 4px; }
 .volc { cursor: help; color: #e8875a; font-size: 12px; white-space: nowrap; } .volc.land { color: #ff9a5c; font-weight: 600; }
 
 #radiusSel { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; font-size: 12px; padding: 0 2px; }

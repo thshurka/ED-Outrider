@@ -81,6 +81,9 @@ KEYS = {
                     "{text} (e.g. 'Away 3 days. 412 million aboard, unsold for 5 days. Fuel 64 percent.')",
     "ship_lost": "your ship was destroyed with data aboard and you paid the rebuy: "
                  "{text} (e.g. 'Lost 212 million: 148 million cartographics, 64 million exobiology, 31 systems.')",
+    "sale_left": "a sale's pages stopped with data still unsold (Universal Cartographics sells 50 systems a page), or "
+                 "completed samples still unsold after a Vista Genomics sale: {text} (e.g. 'Sold 50 systems for 14.8 million. "
+                 "43 systems are still unsold, 2 million, 270 first discoveries: sell the next page.')",
 }
 # keys with lines in speech.json that nothing speaks yet (the shipped-lines test allows them); none now
 RESERVED = ()
@@ -355,6 +358,8 @@ SAMPLES = {
     "welcome_back": {"text": "Away 3 days. 412.0M aboard, unsold for 5 days. Fuel 64 percent. Docked at Jaques Station."},
     "ship_lost": {"text": "Lost 212.4M: 148.1M cartographics, 64.3M exobiology, 31 systems and 9 first discoveries. "
                           "The nearest lost system is Drojau LL-O b26-3, 42 light-years."},
+    "sale_left": {"text": "Sold 50 systems for 14.8M. 43 systems are still unsold, 2.0M, 270 first discoveries: "
+                          "sell the next page."},
 }
 # the voice lab's Audition: one personality across the alerts that matter, in the order a session hears them
 AUDITION = ("game_start", "arrival_brief", "find_body", "leaving", "fuel_low", "sold", "bio_done_last", "session_recap")

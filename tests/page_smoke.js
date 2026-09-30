@@ -89,10 +89,11 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     // F31: a run under way on a body with no DSS still names the signals nobody has identified
     const noDss = w.eval(`leavingText({bio_pending: [{body: "B 7", signals: 2, genera: null, partial: {Stratum: 1}, potential: 5e6}], unmapped: []})`)
       .replace(/<[^>]+>/g, "");
-    const saved = w.eval("[data.jump_range, data.boost]");
-    w.eval("data.jump_range = 50; data.boost = 4");
+    // jump_range_now (the fuel model's range at this mass) wins over jump_range once the journals give a loadout
+    const saved = w.eval("[data.jump_range, data.boost, data.jump_range_now]");
+    w.eval("data.jump_range = 50; data.boost = 4; data.jump_range_now = null");
     const jumps = w.eval("[jumpsFor(150), jumpsFor(400)]");
-    w.eval(`data.jump_range = ${JSON.stringify(saved[0])}; data.boost = ${JSON.stringify(saved[1])}`);
+    w.eval(`data.jump_range = ${JSON.stringify(saved[0])}; data.boost = ${JSON.stringify(saved[1])}; data.jump_range_now = ${JSON.stringify(saved[2] ?? null)}`);
     const goodV = pop.includes("8.4M") && !pop.includes("9.1M") && /Stratum Tectonicas lost ✗/.test(pop)
       && (leave.match(/Stratum/g) || []).length === 1 && jumps.join() === "1,5" && errors.length === before
       && noDss.includes("B 7 (Stratum 1/3, 2 signals not DSS'd)");
@@ -927,6 +928,35 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodS2;
     console.log(goodS2 ? "OK" : "FAIL", "| batch S2 |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(got)}` : `names, one personality per system, welcome back, ship lost, transcript (${got.fates.length} lines) ok`, errors.slice(before));
   }
+  // batch S2b: a sale that left data aboard: the facts line (cartographics and samples), its card under the header
+  // (a new sale clears it) and the spoken line wrapping the facts
+  {
+    const w = dom.window, before = errors.length, bad = [];
+    const got = JSON.parse(w.eval(`(() => {
+      const texts = [saleLeftText({kind: "sale_left", sold_systems: 50, sold_value: 14814687, left_systems: 43, left_value: 2026392, left_firsts: 270}),
+        saleLeftText({kind: "sale_left", sold_systems: 50, sold_value: 5000000, left_systems: 1, left_value: 40000, left_firsts: 0}),
+        saleLeftText({kind: "bio_left", sold_species: 3, sold_value: 15000000, left_samples: 2, left_value: 30000000})];
+      const keep = leftCard; leftCard = {text: texts[0], until: Date.now() + 60000}; renderStrip();
+      const se = document.getElementById("sell"), card = [se.className, se.textContent.includes("43 systems are still unsold"), !!se.querySelector("[data-leftclose]")];
+      se.querySelector("[data-leftclose]").click();
+      const closed = leftCard === null && !se.textContent.includes("still unsold"); leftCard = keep; renderStrip();
+      const said = line("sale_left", {text: texts[0]}, texts[0]);
+      return JSON.stringify({texts, card, closed, said: said.includes(texts[0]), spoken: spokenText(texts[0]),
+                             row: ALERTS.some(a => a[0] === "saleleft") && alertCfg.saleleft && alertSound.saleleft && alertSpeak.saleleft});
+    })()`));
+    const want = {
+      texts: ["Sold 50 systems for 14.8M. 43 systems are still unsold, 2.0M, 270 first discoveries: sell the next page.",
+              "Sold 50 systems for 5.0M. 1 system is still unsold, 40k: sell the next page.",
+              "Sold 3 species for 15.0M. 2 completed samples are still unsold, 30.0M: sell them too."],
+      card: ["left", true, true], closed: true, said: true,
+      spoken: "Sold 50 systems for 14.8 million. 43 systems are still unsold, 2 million, 270 first discoveries: sell the next page.",
+      row: true,
+    };
+    for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    const goodS2b = !bad.length && errors.length === before;
+    allOk = allOk && goodS2b;
+    console.log(goodS2b ? "OK" : "FAIL", "| batch S2b |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(got)}` : "sale left: facts line, card, spoken line, alert row ok", errors.slice(before));
+  }
   // batch S3: the colour variant after the guess and in the ✦ title (species wording kept when unsure); the name box
   // finds the system you are in (a local answer: no EDSM call) and opens Here, and an over-long name is refused
   {
@@ -1392,6 +1422,80 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const goodGH = !bad.length && errors.length === before;
     allOk = allOk && goodGH;
     console.log(goodGH ? "OK" : "FAIL", "| batch G honk/backups |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "verified on the Data tile, learned fire groups line + forget, group letter in the spoken miss", errors.slice(before));
+  }
+  // Batch M4: the ⛏ column in Here, its survey-odds pop-up, and the same in the body pop-up and panel
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const hd = hereData, hk = hereKey, o = {};
+      const odds = {ground: "volcanic magma", surveyed: 57, few: false, top: [{name: "Olivine", pct: 56.1}, {name: "Monazite", pct: 45.6},
+        {name: "Bastnasite", pct: 42.1}, {name: "Alexandrite", pct: 35.1}, {name: "Rhodplumsite", pct: 29.8}, {name: "Serendibite", pct: 28.1}], more: true};
+      const body = (name, id, extra) => Object.assign({name, body_id: id, type: "Planet", subtype: "Rocky body", genera: [], bio: 0, geo: 0,
+        dist_ls: 1200, gravity: 0.3, atmosphere: "None", value_max: 0, organics: [], codex: [], curiosities: [], bio_guess: [],
+        value_parts: {bio_factor: 1}, mining: 0, mining_odds: null}, extra);
+      hereData = Object.assign({id64: "77", name: "Mine Test", leaving: null, phenomena: []}, hd && !hd.error ? hd : {},
+        {bodies: [body("M 1", 1, {mining: 12, mining_odds: odds}), body("M 2", 2), body("M 3", 3, {subtype: "Water world", mining: 2})], tree: null});
+      renderHere();
+      const th = [...document.querySelectorAll("#hereTable thead th")].map(t => t.textContent);
+      const row = n => document.querySelector('#hereRows tr[data-body="' + n + '"]');
+      const col = th.indexOf("⛏");
+      o.col = col > 0; o.cells = ["M 1", "M 2", "M 3"].map(n => row(n) ? row(n).querySelectorAll("td")[col].textContent.trim() : "missing");
+      const span = row("M 1").querySelector("[data-minepop]");
+      span.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: 10, clientY: 10}));
+      o.pop = document.getElementById("pop").textContent;
+      o.noPop = !row("M 3").querySelector("[data-minepop]");
+      hidePop();
+      o.bodyPop = bodyPopHtml(hereData.bodies[0]).includes("12 planetary mining locations");
+      const panel = document.createElement("div");
+      renderBodyInto(panel, {full_name: "Mine Test M 1", row: hereData.bodies[0], own: null, spansh: null, rings: []}, "M 1", "closeBody()");
+      o.panel = panel.textContent;
+      hereData = hd; hereKey = hk; if (hd) renderHere();
+      return JSON.stringify(o);
+    })()`));
+    const want = [got.col, JSON.stringify(got.cells) === JSON.stringify(["⛏ 12", "", "⛏ 2"]), got.noPop, got.bodyPop,
+      /Valuable minerals seen at this ground's mining locations \(EDFM survey, 57 locations\): Olivine 56% · Monazite 46% · Bastnasite 42% · Alexandrite 35%/.test(got.pop),
+      /Odds, not contents; common materials such as water are not surveyed/.test(got.pop), /12 planetary mining locations/.test(got.panel) && /Olivine 56%/.test(got.panel)];
+    const goodM = want.every(Boolean) && errors.length === before;
+    allOk = allOk && goodM;
+    console.log(goodM ? "OK" : "FAIL", "| M4 mining column |", goodM ? "⛏ counts, survey odds on hover, body pop-up and panel" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // Batch M4b: "Mined previously" under the survey odds in the ⛏ pop-up and the panel, and on a body with no survey count
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const hd = hereData, hk = hereKey, o = {};
+      const odds = {ground: "icy", surveyed: 124, few: false, top: [{name: "Deuterium", pct: 40}], more: false};
+      const mined = [{name: "Methanol Monohydrate Crystals", tons: 14, last: "2026-09-30T03:38:37Z"},
+                     {name: "Water", tons: 10, last: "2026-09-30T03:17:07Z"}];
+      const body = (name, id, extra) => Object.assign({name, body_id: id, type: "Planet", subtype: "Icy body", genera: [], bio: 0, geo: 0,
+        dist_ls: 1200, gravity: 0.3, atmosphere: "None", value_max: 0, organics: [], codex: [], curiosities: [], bio_guess: [],
+        value_parts: {bio_factor: 1}, mining: 0, mining_odds: null, mined: []}, extra);
+      hereData = Object.assign({id64: "78", name: "Mined Test", leaving: null, phenomena: []}, hd && !hd.error ? hd : {},
+        {bodies: [body("D 1", 1, {mining: 5, mining_odds: odds, mined}), body("D 2", 2, {mined: mined.slice(1)}), body("D 3", 3)], tree: null});
+      renderHere();
+      const row = n => document.querySelector('#hereRows tr[data-body="' + n + '"]');
+      const popOf = n => { const sp = row(n).querySelector("[data-minepop]"); if (!sp) return null;
+        sp.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: 10, clientY: 10}));
+        const t = document.getElementById("pop").textContent; hidePop(); return t; };
+      o.pop1 = popOf("D 1"); o.pop2 = popOf("D 2"); o.pop3 = popOf("D 3");
+      o.cell2 = row("D 2").querySelector("td.mine").textContent.trim();
+      o.bodyPop2 = bodyPopHtml(hereData.bodies[1]);
+      const panel = document.createElement("div");
+      renderBodyInto(panel, {full_name: "Mined Test D 2", row: hereData.bodies[1], own: null, spansh: null, rings: []}, "D 2", "closeBody()");
+      o.panel = panel.textContent;
+      o.day = shortDay("2026-09-30T03:38:37Z");
+      hereData = hd; hereKey = hk; if (hd) renderHere();
+      return JSON.stringify(o);
+    })()`));
+    const day = got.day.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const line = new RegExp("Mined previously:Methanol Monohydrate Crystals 14 t \\(Last: " + day + "\\)Water 10 t \\(Last: " + day + "\\)");
+    const want = [/Deuterium 40%/.test(got.pop1) && line.test(got.pop1) && got.pop1.indexOf("Deuterium") < got.pop1.indexOf("Mined previously"),
+      !!got.pop2 && new RegExp("Mined previously:Water 10 t \\(Last: " + day + "\\)").test(got.pop2) && !/planetary mining location/.test(got.pop2),
+      got.pop3 === null, got.cell2 === "⛏", /Mined previously/.test(got.bodyPop2), /Mined previously:Water 10 t/.test(got.panel),
+      /30|Sep/.test(got.day)];
+    const goodMB = want.every(Boolean) && errors.length === before;
+    allOk = allOk && goodMB;
+    console.log(goodMB ? "OK" : "FAIL", "| M4b mined previously |", goodMB ? "heading and tons under the odds, a body with no survey count too, pop-up and panel" : JSON.stringify({want, got}), errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

@@ -317,6 +317,9 @@ function renderStrip() {
     se.innerHTML = `💀 ${esc(lossCard.text)}` + (m.top && m.top.length ? `<br><span class="unk">most valuable lost: ${m.top.map(x =>
       `${esc(x.name)} ${credits(x.value)} cr${x.distance != null ? ` · ${x.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly` : ""}`).join("; ")}</span>` : "") +
       ` <a href="#" data-lossfirsts>My firsts (lost)</a> <a href="#" data-lossclose title="close">✕</a>`;
+  } else if (leftCard && Date.now() < leftCard.until) {
+    se.className = "left";
+    se.innerHTML = `💰 ${esc(leftCard.text)} <a href="#" data-leftclose title="close">✕</a>`;
   } else if (saleBanner && Date.now() < saleBanner.until) {
     se.className = "ok"; se.textContent = saleBanner.text;
   } else if (sellHere && sellHere.level && sellHere.level !== "ok") {
@@ -734,6 +737,7 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
   ["approach", "approaching a landable body at or over your high-gravity level with unsold data over the amber level or rebuy multiple", "alert"],
   ["bodybrief", "approaching a body with biological signals: what they could be (the FSS already said so, so off by default)", null],
   ["sell", "docked where you can sell, and what you banked", "cash"],
+  ["saleleft", "a sale left data aboard: Universal Cartographics sells 50 systems a page, so a sale that stops after one page leaves the rest unsold (said once the pages stop and the estimate has caught up); likewise completed samples still unsold after a Vista Genomics sale", "alert"],
   ["unsold", "unsold data crosses a threshold", "cash"], ["hull", "hull damage, heat damage, interdiction", "danger"],
   ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"],
   ["loss", "your ship was destroyed with data aboard (or samples died with you): what was lost, and the nearest system to rescan", "danger"]];
@@ -1175,6 +1179,7 @@ const LINE_SAMPLES = {
   streak_known: {count: 10}, streak_new: {count: 5},
   welcome_back: {text: "Away 3 days. 412.0M aboard, unsold for 5 days. Fuel 64 percent. Docked at Jaques Station."},
   ship_lost: {text: "Lost 212.4M: 148.1M cartographics and 64.3M exobiology, 31 systems and 9 first discoveries. The nearest lost system is Drojau LL-O b26-3, 42 light-years."},
+  sale_left: {text: "Sold 50 systems for 14.8M. 43 systems are still unsold, 2.0M, 270 first discoveries: sell the next page."},
 };
 // ---- the words of the composed call-outs: the server sends the facts, these apply your thresholds ----
 // The login greeting after a long break: how long, what is at stake, the tank, where you are. The amount aboard
@@ -1203,6 +1208,18 @@ function lossText(m) {
     `${what.length ? `, ${andList(what)}` : ""}.` + (n && n.distance != null ? ` The nearest lost system is ${n.name}, ${Math.round(n.distance)} light-years.` : "");
 }
 let lossCard = null;   // the debrief card under the header: {m, text, until}, until closed or half an hour
+// A sale that left data aboard (the server's sale_left / bio_left moments, once the pages have stopped): what
+// was sold and what is still unsold. UC sells 50 systems a page, so one page of a bigger haul leaves the rest.
+function saleLeftText(m) {
+  const n = (c, one, many) => `${c} ${c === 1 ? one : many}`;
+  if (m.kind === "bio_left")
+    return `Sold ${m.sold_species ? n(m.sold_species, "species", "species") + " " : "exobiology "}for ${credits(m.sold_value)}. ` +
+      `${n(m.left_samples, "completed sample is", "completed samples are")} still unsold, ${credits(m.left_value)}: sell ${m.left_samples === 1 ? "it" : "them"} too.`;
+  return `Sold ${m.sold_systems ? n(m.sold_systems, "system", "systems") : "cartographics"} for ${credits(m.sold_value)}. ` +
+    `${n(m.left_systems, "system is", "systems are")} still unsold, ${credits(m.left_value)}` +
+    `${m.left_firsts ? `, ${n(m.left_firsts, "first discovery", "first discoveries")}` : ""}: sell the next page.`;
+}
+let leftCard = null;   // the sale-left card under the header: {text, until}, until closed, the next sale or half an hour
 const andList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "";
 const orList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}` : xs[0] || "";
 const nBodies = n => `${n} bod${n === 1 ? "y" : "ies"}`;
@@ -1832,7 +1849,7 @@ function renderHere() {
   if (!h) { head.textContent = "loading…"; return; }
   if (h.error) {
     head.textContent = h.error; lv.innerHTML = "";
-    document.getElementById("hereRows").innerHTML = `<tr><td colspan="10" class="unk">${esc(h.error)}</td></tr>`;
+    document.getElementById("hereRows").innerHTML = `<tr><td colspan="11" class="unk">${esc(h.error)}</td></tr>`;
     if (selectedBody) closeBody();
     return;
   }
@@ -1891,6 +1908,7 @@ function renderHere() {
       <td class="num${b.gravity >= highGravity() ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
       <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}${b.stale_bio ? ` <span class="unk old" title="${esc(staleBodyTitle(b))}">landable? (old data)</span>` : ""}</td>
       <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}</td>
+      <td class="num mine">${mineTag(b)}</td>
       <td>${b.rings ? `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}` : ""}</td>
       <td>${firsts}</td>
       <td class="num" title="${bodyValueTitle(b)}">${b.value_now ? credits(b.value_now) : ""}</td>
@@ -1902,7 +1920,7 @@ function renderHere() {
   const byMax = maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => (maxOf(b) || 0) - (maxOf(a) || 0));
   const fk = focusKey("hereRows");
   document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
-    || `<tr><td colspan="10" class="unk">No bodies known here.</td></tr>`;
+    || `<tr><td colspan="11" class="unk">No bodies known here.</td></tr>`;
   refocus("hereRows", fk);
   // the body targeted in-game: a line saying what it is worth going to, and its row brought into view
   if (destBody) {
@@ -1969,7 +1987,7 @@ function treeRowsHtml(h, rowHtml) {
         : members.length > 1 ? `${list(members)} orbit a shared centre (barycentre)`
         : members.length ? `${members[0]} orbits a barycentre whose other members are not known yet`
         : `barycentre ${esc(n.label)}`;
-      out.push(`<tr class="bary"><td colspan="10">${ind}<span class="unk">${n.kind === "unknown" ? "?" : "⊕"} ${what}</span></td></tr>`);
+      out.push(`<tr class="bary"><td colspan="11">${ind}<span class="unk">${n.kind === "unknown" ? "?" : "⊕"} ${what}</span></td></tr>`);
     }
     n.children.forEach(c => walk(c, depth + 1));
   };
@@ -2009,7 +2027,7 @@ function discHtml(b, depth) {
   const cls = ["disc", b.scanned ? "" : "hollow", b.landable ? "landable" : "", selectedBody === b.name ? "sel" : ""].filter(Boolean).join(" ");
   const ring = b.rings ? `<svg class="ringmark" viewBox="0 0 16 16" style="width:${size + 14}px;height:${size + 14}px"><ellipse cx="8" cy="8" rx="7.6" ry="2.3" transform="rotate(-18 8 8)"/></svg>` : "";
   const badges = [b.first_discovered && "🏁", b.first_mapped ? "🗺" : b.mapped ? `<span class="unk">🗺</span>` : "",
-    (b.bio || b.genera.length) && `🧬${b.bio || b.genera.length}`, b.geo && `🪨${b.geo}`, hasVolcanism(b) && `<span title="${esc(b.volcanism)}">🌋</span>`, b.first_footfall && "👣",
+    (b.bio || b.genera.length) && `🧬${b.bio || b.genera.length}`, b.geo && `🪨${b.geo}`, b.mining && `⛏${b.mining}`, hasVolcanism(b) && `<span title="${esc(b.volcanism)}">🌋</span>`, b.first_footfall && "👣",
     b.terraformable && `<span class="nb T">T</span>`, b.notable && `<span class="nb ${b.notable}">${b.notable}</span>`,
     b.type === "Star" && b.scoopable && `<span class="scoop">⛽</span>`].filter(Boolean).join("");
   const belts = (b.belts || []).length ? `<span class="belt" title="${b.belts.length} belt${b.belts.length === 1 ? "" : "s"}">⋯</span>` : "";
@@ -2103,6 +2121,7 @@ function bodyPopHtml(b, region) {
   }
   h += curiosityList(b.curiosities);
   if (b.geo) h += `<div class="sec">${b.geo} geological signal${b.geo === 1 ? "" : "s"}</div>`;
+  if (b.mining || (b.mined || []).length) h += `<div class="sec">${b.mining ? `⛏ ${mineCount(b.mining)}` : ""}${b.mining_odds ? `<div class="unk">${mineOddsLine(b.mining_odds)}</div>` : ""}${minedHtml(b)}</div>`;
   const flags = [b.first_discovered && "🏁 first discovered", b.first_mapped && "🗺 first mapped", !b.first_mapped && b.mapped && "mapped", b.first_footfall && "👣 first footfall", !b.scanned && "not scanned by you"].filter(Boolean);
   h += `<div class="sec"><span>${maxOf(b) ? `now ${credits(b.value_now || 0)} · max ${credits(maxOf(b))}` : ""}</span>` +
        (flags.length ? `<div class="unk">${flags.join(" · ")}</div>` : "") + `</div><div class="sec unk">click for everything known</div>`;
@@ -2227,7 +2246,9 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
     bioSec = sec("bio", `🧬 Exobiology${row.bio ? ` · ${row.bio} signal${row.bio === 1 ? "" : "s"}` : ""}${bioRange(row)}`, `<ul>${lines.join("")}</ul>`);
   }
   const curSec = (row.curiosities || []).length ? sec("curiosities", "🔭 Curiosities", row.curiosities.map(c => `<div><b>${esc(c.tag)}</b> · ${esc(c.why)}</div>`).join("")) : "";
-  h += curSec + bioSec + ringSec + compSec + `<div class="two">${physSec}${orbitSec}</div>`;
+  const mineSec = row.mining || (row.mined || []).length ? sec("mining", row.mining ? `⛏ ${mineCount(row.mining)}` : "⛏ Mining",
+    (row.mining ? row.mining_odds ? mineOddsHtml(row.mining_odds) : `<span class="unk">no survey odds for this ground</span>` : "") + minedHtml(row)) : "";
+  h += curSec + bioSec + mineSec + ringSec + compSec + `<div class="two">${physSec}${orbitSec}</div>`;
   h += sec("value", "Value and discovery", kv([
     ["Pays now", has(row.value_now) ? credits(row.value_now) + " cr" : null], ["Could pay", has(row.value_max) ? credits(row.value_max) + " cr" + (has(row.value_max_base) && row.value_max_base !== row.value_max ? ` (${credits(row.value_max_base)} without bonuses)` : "") : null],
     ["Of which", row.value_parts ? `${credits(row.value_parts.carto_now)} + ${credits(row.value_parts.bio_now)} bio held · ${credits(row.value_parts.carto_left)} + ${credits(row.value_parts.bio_left)} bio still there (bio ×${row.value_parts.bio_factor})` : null],
@@ -3187,6 +3208,7 @@ function copyText(text, what = text) {   // `what`: the toast's name for it (a l
 }
 document.addEventListener("click", e => {
   if (e.target.closest("[data-lossclose]")) { e.preventDefault(); lossCard = null; return renderStrip(); }
+  if (e.target.closest("[data-leftclose]")) { e.preventDefault(); leftCard = null; return renderStrip(); }
   if (e.target.closest("[data-lossfirsts]")) {   // the systems to rescan: My firsts with the lost ones shown
     e.preventDefault(); fShowLost.checked = true; store.set("fShowLost", true);
     return document.querySelector('[data-view="firsts"]').click();
@@ -3261,6 +3283,11 @@ function placePop(x, y) {
   pop.style.left = left + "px"; pop.style.top = top + "px";
 }
 function showPop(td, x, y) {
+  if (td.dataset.minepop !== undefined) {   // a mining count: the survey's odds for the body's ground
+    popId = "mine" + (td.closest("[data-bodypop]") || {dataset: {}}).dataset.bodypop;
+    pop.innerHTML = td.dataset.minepop; pop.style.display = "block"; placePop(x, y);
+    return;
+  }
   if (td.dataset.unsold !== undefined) {
     const h = data && unsoldHtml(data.unsold);
     if (!h) return hidePop();
@@ -3305,23 +3332,23 @@ let lastPointer = null;
 document.addEventListener("mousemove", e => {
   if (e.target === mapCanvas) return;  // the map draws its own hover
   lastPointer = {x: e.clientX, y: e.clientY};
-  const td = e.target.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
+  const td = e.target.closest("[data-minepop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, e.clientX, e.clientY) : popId !== null && hidePop();
 });
 function refreshPop() {
   // render() has just rebuilt the DOM: re-resolve whatever the pointer is over.
   if (popId === null || popId === "map" || !lastPointer) return;
   const el = document.elementFromPoint(lastPointer.x, lastPointer.y);
-  const td = el && el.closest && el.closest("[data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
+  const td = el && el.closest && el.closest("[data-minepop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, lastPointer.x, lastPointer.y) : hidePop();
 }
 document.addEventListener("mouseleave", hidePop);
 // Touch: tap the bodies cell to toggle.
 document.addEventListener("touchstart", e => {
   if (e.target.closest("[data-bm]")) return;  // taps on a star open the bookmark dialog
-  const td = e.target.closest("[data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
+  const td = e.target.closest("[data-minepop], [data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
   const t = e.touches[0];
-  const key = td.dataset.unsold !== undefined ? "unsold" : td.dataset.sbodypop !== undefined ? "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop
+  const key = td.dataset.minepop !== undefined ? "mine" + (td.closest("[data-bodypop]") || {dataset: {}}).dataset.bodypop : td.dataset.unsold !== undefined ? "unsold" : td.dataset.sbodypop !== undefined ? "sbody" + td.dataset.sys + "|" + td.dataset.sbodypop
     : td.dataset.bodypop !== undefined ? "body" + td.dataset.bodypop : td.dataset.id;
   popId === key ? hidePop() : showPop(td, t.clientX, t.clientY);
 }, {passive: true});
@@ -3517,6 +3544,7 @@ function onData() {
     const u = data.unsold || {}, bioLeft = (u.bio || {}).estimated_value || 0, cartoLeft = (u.carto || {}).estimated_payout || 0;
     const still = sale.carto && !sale.bio && bioLeft > 0 ? `Exobiology still aboard: ${credits(bioLeft)} cr (Vista Genomics)`
                 : sale.bio && !sale.carto && cartoLeft > 0 ? `Cartographics still aboard: ${credits(cartoLeft)} cr (Universal Cartographics)` : "";
+    leftCard = null;   // a new sale: what the last one left is old news (its own leftovers come after its pages)
     saleBanner = {text: `💰 Sold ${parts.join(" · ")}${sale.systems ? ` · ${sale.systems} systems` : ""}${still ? ` — ${still}` : ""}`, until: Date.now() + 60000};
     alertOut("sell", `Sold ${parts.join(" and ")}`, still,
              {say: () => line("sold", {sold: parts.join(" and "), still: still ? still.replace(/ \((.+)\)$/, " at $1") + "." : ""}, `Sold ${parts.join(" and ")}. ${still}`)});
@@ -3583,6 +3611,13 @@ function onData() {
         lossCard = {m, text, until: Date.now() + 30 * 60000};
         alertOut("loss", m.ship ? `Ship lost with ${credits(m.value)} cr of data` : `Samples lost: ${credits(m.bio)} cr`, text,
                  {tag: "ship_lost", say: () => m.ship ? line("ship_lost", {text}, `Rebuy complete. ${text}`) : `Your samples died with you. ${text}`});
+        renderStrip();
+      }
+      else if (m.kind === "sale_left" || m.kind === "bio_left") {   // the pages stopped with data still aboard
+        const text = saleLeftText(m);
+        leftCard = {text, until: Date.now() + 30 * 60000};
+        alertOut("saleleft", m.kind === "bio_left" ? `Samples still unsold: ${credits(m.left_value)} cr` : `Still unsold: ${m.left_systems} systems, ${credits(m.left_value)} cr`,
+                 text, {tag: "sale_left", say: () => line("sale_left", {text}, text)});
         renderStrip();
       }
       else if (m.kind === "signals") {   // the FSS found signals on a body: counts only, per the two ticks
@@ -4121,6 +4156,29 @@ const hasVolcanism = b => b.type === "Planet" && !!b.volcanism && !/^no volcanis
 const volcanoIcon = b => hasVolcanism(b)
   ? ` <span class="volc${b.landable ? " land" : ""}" title="${esc(b.volcanism)}${b.landable ? " · landable: geological sites possible" : " · not landable"}">🌋</span>` : "";
 const geoTag = b => b.geo ? ` <span class="sp geo" title="geological signals">🪨 ${b.geo} geo</span>` : "";
+// Planetary mining locations (the FSS count, or Spansh's): the count, with the ground's odds from the Elite Dangerous
+// Field Manual's survey (CMDR Grumlop, CC BY-SA 4.0; mining_odds.json) as a pop-up. Odds, not the body's contents.
+const mineCount = n => `${n} planetary mining location${n === 1 ? "" : "s"}`;
+const minePcts = o => o.top.map(m => `${esc(m.name)} ${Math.round(m.pct)}%`).join(" · ") + (o.more ? " …" : "");
+const mineSurvey = o => `EDFM survey, ${o.surveyed} location${o.surveyed === 1 ? "" : "s"}${o.few ? ", few reports" : ""}`;
+// the survey tracks 22 valuable commodities only: water, methanol crystals and the like are never in it
+const MINE_NOTE = "Odds, not contents; common materials such as water are not surveyed.";
+const mineOddsLine = o => `valuable minerals seen at this ground's locations (${mineSurvey(o)}): ${minePcts(o)}`;
+const mineOddsHtml = o => `<div>Valuable minerals seen at this ground's mining locations (${mineSurvey(o)}): ${minePcts(o)}.</div><div class="unk">${MINE_NOTE} Ground: ${esc(o.ground)}.</div>`;
+// "Mined previously": what your SRV's refinery collected here (1 t per MiningRefined, from the journals), most
+// first, one line each: the total ever mined here and the date of the latest collection, "Water 20 t (Last: 30 Sep)"
+const shortDay = ts => { const d = new Date(ts); return isNaN(d) ? "" : d.toLocaleDateString([], {day: "numeric", month: "short"}); };
+const minedLines = b => (b.mined || []).map(x => `<div>${esc(x.name)} ${x.tons} t${x.last ? ` (Last: ${shortDay(x.last)})` : ""}</div>`).join("");
+const minedHtml = b => (b.mined || []).length ? `<div class="mined"><b>Mined previously:</b>${minedLines(b)}</div>` : "";
+const mineTag = b => {
+  const mined = minedHtml(b);
+  if (!b.mining && !mined) return "";
+  if (!b.mining_odds && !mined)
+    return `<span class="minec nodds" title="${mineCount(b.mining)} (no survey odds for this ground)">⛏ ${b.mining}</span>`;
+  const head = b.mining ? mineCount(b.mining) : "Mined previously";
+  const odds = b.mining_odds ? mineOddsHtml(b.mining_odds) : b.mining ? `<div class="unk">No survey odds for this ground.</div>` : "";
+  return `<span class="minec" data-minepop="${esc(`<h3>⛏ ${head} <span class="src">${esc(b.name)}</span></h3>` + odds + mined)}">⛏${b.mining ? " " + b.mining : ""}</span>`;
+};
 // Max with or without first-discovery / first-mapped / first-footfall bonuses: body_max_value_include_bonus in
 // ed_outrider.toml, overridable per browser. Now always includes them (it is what a sale would pay).
 let maxBonusCfg = store.get("maxBonus", null);

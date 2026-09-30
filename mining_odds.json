@@ -1,0 +1,606 @@
+{
+ "_note": {
+  "what": "Surface mining prospecting odds: for each ground type, the share of surveyed planetary mining locations that carried each material. Copied unchanged below from the Elite Dangerous Field Manual.",
+  "source": "https://edfieldmanual.com/index.php?title=Module:Data/SurfaceMiningProspecting",
+  "source_site": "Elite Dangerous Field Manual (EDFM), https://edfieldmanual.com/",
+  "contributor": "CMDR Grumlop (research and data collection)",
+  "license": "CC BY-SA 4.0 (Creative Commons Attribution-ShareAlike 4.0 International), the EDFM site licence this data follows",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "retrieved": "2026-09-29",
+  "use": "ED Outrider only reads this file, to show likely minerals when you hover a body's planetary mining location count. The data remains under CC BY-SA 4.0; changes to it must carry the same licence and credit."
+ },
+ "schema_version": 1,
+ "generated": "2026-09-08 20:09 UTC",
+ "methodology": {
+  "source": "planet_mining_location_materials, read off the in-game target panel",
+  "description": "Percentages are the share of a ground's mining locations that carried the material."
+ },
+ "attribution": {
+  "contributor": "CMDR Grumlop",
+  "researcher": "CMDR Grumlop",
+  "contribution": "This dataset was collected and explicitly contributed for use by EDFM.",
+  "license": "It follows the same license as EDFM as a whole."
+ },
+ "materials": [
+  {
+   "commodity": "alexandrite",
+   "name": "Alexandrite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 20,
+     "locations_surveyed": 57,
+     "observed_percentage": 35.1
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 11,
+     "locations_surveyed": 147,
+     "observed_percentage": 7.5
+    },
+    {
+     "ground": "rocky",
+     "hits": 4,
+     "locations_surveyed": 143,
+     "observed_percentage": 2.8
+    }
+   ]
+  },
+  {
+   "commodity": "bastnasite",
+   "name": "Bastnasite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 24,
+     "locations_surveyed": 57,
+     "observed_percentage": 42.1
+    },
+    {
+     "ground": "rocky",
+     "hits": 13,
+     "locations_surveyed": 143,
+     "observed_percentage": 9.1
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 12,
+     "locations_surveyed": 147,
+     "observed_percentage": 8.2
+    }
+   ]
+  },
+  {
+   "commodity": "deuterium",
+   "name": "Deuterium",
+   "family": "ice",
+   "observations": [
+    {
+     "ground": "icy",
+     "hits": 67,
+     "locations_surveyed": 124,
+     "observed_percentage": 54
+    },
+    {
+     "ground": "rocky-ice",
+     "hits": 5,
+     "locations_surveyed": 14,
+     "observed_percentage": 35.7
+    },
+    {
+     "ground": "rocky",
+     "hits": 9,
+     "locations_surveyed": 143,
+     "observed_percentage": 6.3
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 3,
+     "locations_surveyed": 147,
+     "observed_percentage": 2
+    }
+   ]
+  },
+  {
+   "commodity": "diamond",
+   "name": "Diamond",
+   "family": "volcanic",
+   "observations": [
+    {
+     "ground": "metal-rich",
+     "hits": 34,
+     "locations_surveyed": 114,
+     "observed_percentage": 29.8
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 5,
+     "locations_surveyed": 57,
+     "observed_percentage": 8.8
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 6,
+     "locations_surveyed": 160,
+     "observed_percentage": 3.8
+    },
+    {
+     "ground": "rocky",
+     "hits": 2,
+     "locations_surveyed": 143,
+     "observed_percentage": 1.4
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 2,
+     "locations_surveyed": 147,
+     "observed_percentage": 1.4
+    }
+   ]
+  },
+  {
+   "commodity": "grandidierite",
+   "name": "Grandidierite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "rocky",
+     "hits": 17,
+     "locations_surveyed": 143,
+     "observed_percentage": 11.9
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 17,
+     "locations_surveyed": 147,
+     "observed_percentage": 11.6
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 4,
+     "locations_surveyed": 57,
+     "observed_percentage": 7
+    }
+   ]
+  },
+  {
+   "commodity": "helium",
+   "name": "Helium",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic silicate",
+     "hits": 75,
+     "locations_surveyed": 147,
+     "observed_percentage": 51
+    },
+    {
+     "ground": "rocky",
+     "hits": 15,
+     "locations_surveyed": 143,
+     "observed_percentage": 10.5
+    },
+    {
+     "ground": "metal-rich",
+     "hits": 6,
+     "locations_surveyed": 114,
+     "observed_percentage": 5.3
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 3,
+     "locations_surveyed": 57,
+     "observed_percentage": 5.3
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 8,
+     "locations_surveyed": 160,
+     "observed_percentage": 5
+    }
+   ]
+  },
+  {
+   "commodity": "helium3",
+   "name": "Helium-3",
+   "family": "ice",
+   "observations": [
+    {
+     "ground": "icy",
+     "hits": 21,
+     "locations_surveyed": 124,
+     "observed_percentage": 16.9
+    }
+   ]
+  },
+  {
+   "commodity": "iridium",
+   "name": "Iridium",
+   "family": "metal",
+   "observations": [
+    {
+     "ground": "metal-rich",
+     "hits": 34,
+     "locations_surveyed": 114,
+     "observed_percentage": 29.8
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 26,
+     "locations_surveyed": 160,
+     "observed_percentage": 16.2
+    }
+   ]
+  },
+  {
+   "commodity": "jadeite",
+   "name": "Jadeite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic silicate",
+     "hits": 83,
+     "locations_surveyed": 147,
+     "observed_percentage": 56.5
+    },
+    {
+     "ground": "rocky",
+     "hits": 31,
+     "locations_surveyed": 143,
+     "observed_percentage": 21.7
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 6,
+     "locations_surveyed": 57,
+     "observed_percentage": 10.5
+    }
+   ]
+  },
+  {
+   "commodity": "low_temperature_diamonds",
+   "name": "Low Temp Diamonds",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "icy",
+     "hits": 33,
+     "locations_surveyed": 124,
+     "observed_percentage": 26.6
+    },
+    {
+     "ground": "rocky-ice",
+     "hits": 1,
+     "locations_surveyed": 14,
+     "observed_percentage": 7.1
+    },
+    {
+     "ground": "rocky",
+     "hits": 6,
+     "locations_surveyed": 143,
+     "observed_percentage": 4.2
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 6,
+     "locations_surveyed": 147,
+     "observed_percentage": 4.1
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 2,
+     "locations_surveyed": 57,
+     "observed_percentage": 3.5
+    }
+   ]
+  },
+  {
+   "commodity": "magnesite",
+   "name": "Magnesite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "rocky",
+     "hits": 62,
+     "locations_surveyed": 143,
+     "observed_percentage": 43.4
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 45,
+     "locations_surveyed": 147,
+     "observed_percentage": 30.6
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 12,
+     "locations_surveyed": 57,
+     "observed_percentage": 21.1
+    }
+   ]
+  },
+  {
+   "commodity": "monazite",
+   "name": "Monazite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 26,
+     "locations_surveyed": 57,
+     "observed_percentage": 45.6
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 12,
+     "locations_surveyed": 147,
+     "observed_percentage": 8.2
+    },
+    {
+     "ground": "rocky",
+     "hits": 3,
+     "locations_surveyed": 143,
+     "observed_percentage": 2.1
+    }
+   ]
+  },
+  {
+   "commodity": "olivine",
+   "name": "Olivine",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 32,
+     "locations_surveyed": 57,
+     "observed_percentage": 56.1
+    },
+    {
+     "ground": "rocky-ice",
+     "hits": 2,
+     "locations_surveyed": 14,
+     "observed_percentage": 14.3
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 18,
+     "locations_surveyed": 147,
+     "observed_percentage": 12.2
+    },
+    {
+     "ground": "rocky",
+     "hits": 9,
+     "locations_surveyed": 143,
+     "observed_percentage": 6.3
+    }
+   ]
+  },
+  {
+   "commodity": "osmium",
+   "name": "Osmium",
+   "family": "metal",
+   "observations": [
+    {
+     "ground": "high-metal-content",
+     "hits": 63,
+     "locations_surveyed": 160,
+     "observed_percentage": 39.4
+    },
+    {
+     "ground": "metal-rich",
+     "hits": 38,
+     "locations_surveyed": 114,
+     "observed_percentage": 33.3
+    }
+   ]
+  },
+  {
+   "commodity": "periclasedunite",
+   "name": "Periclase Dunite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "rocky",
+     "hits": 17,
+     "locations_surveyed": 143,
+     "observed_percentage": 11.9
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 6,
+     "locations_surveyed": 147,
+     "observed_percentage": 4.1
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 1,
+     "locations_surveyed": 57,
+     "observed_percentage": 1.8
+    }
+   ]
+  },
+  {
+   "commodity": "platinum",
+   "name": "Platinum",
+   "family": "metal",
+   "observations": [
+    {
+     "ground": "metal-rich",
+     "hits": 53,
+     "locations_surveyed": 114,
+     "observed_percentage": 46.5
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 55,
+     "locations_surveyed": 160,
+     "observed_percentage": 34.4
+    }
+   ]
+  },
+  {
+   "commodity": "quartzpyroxenite",
+   "name": "Quartz Pyroxenite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 10,
+     "locations_surveyed": 57,
+     "observed_percentage": 17.5
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 6,
+     "locations_surveyed": 147,
+     "observed_percentage": 4.1
+    }
+   ]
+  },
+  {
+   "commodity": "rhodplumsite",
+   "name": "Rhodplumsite",
+   "family": "metal",
+   "observations": [
+    {
+     "ground": "metal-rich",
+     "hits": 12,
+     "locations_surveyed": 114,
+     "observed_percentage": 10.5
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 6,
+     "locations_surveyed": 160,
+     "observed_percentage": 3.8
+    }
+   ]
+  },
+  {
+   "commodity": "ruby",
+   "name": "Ruby",
+   "family": "volcanic",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 7,
+     "locations_surveyed": 57,
+     "observed_percentage": 12.3
+    },
+    {
+     "ground": "metal-rich",
+     "hits": 7,
+     "locations_surveyed": 114,
+     "observed_percentage": 6.1
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 6,
+     "locations_surveyed": 160,
+     "observed_percentage": 3.8
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 5,
+     "locations_surveyed": 147,
+     "observed_percentage": 3.4
+    },
+    {
+     "ground": "rocky",
+     "hits": 2,
+     "locations_surveyed": 143,
+     "observed_percentage": 1.4
+    }
+   ]
+  },
+  {
+   "commodity": "sapphire",
+   "name": "Sapphire",
+   "family": "volcanic",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 10,
+     "locations_surveyed": 57,
+     "observed_percentage": 17.5
+    },
+    {
+     "ground": "metal-rich",
+     "hits": 9,
+     "locations_surveyed": 114,
+     "observed_percentage": 7.9
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 10,
+     "locations_surveyed": 147,
+     "observed_percentage": 6.8
+    },
+    {
+     "ground": "high-metal-content",
+     "hits": 10,
+     "locations_surveyed": 160,
+     "observed_percentage": 6.2
+    },
+    {
+     "ground": "rocky",
+     "hits": 2,
+     "locations_surveyed": 143,
+     "observed_percentage": 1.4
+    }
+   ]
+  },
+  {
+   "commodity": "serendibite",
+   "name": "Serendibite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic magma",
+     "hits": 18,
+     "locations_surveyed": 57,
+     "observed_percentage": 31.6
+    },
+    {
+     "ground": "volcanic silicate",
+     "hits": 8,
+     "locations_surveyed": 147,
+     "observed_percentage": 5.4
+    },
+    {
+     "ground": "rocky",
+     "hits": 4,
+     "locations_surveyed": 143,
+     "observed_percentage": 2.8
+    }
+   ]
+  },
+  {
+   "commodity": "thortveitite",
+   "name": "Thortveitite",
+   "family": "rock",
+   "observations": [
+    {
+     "ground": "volcanic silicate",
+     "hits": 15,
+     "locations_surveyed": 147,
+     "observed_percentage": 10.2
+    },
+    {
+     "ground": "rocky",
+     "hits": 14,
+     "locations_surveyed": 143,
+     "observed_percentage": 9.8
+    },
+    {
+     "ground": "volcanic magma",
+     "hits": 3,
+     "locations_surveyed": 57,
+     "observed_percentage": 5.3
+    }
+   ]
+  }
+ ]
+}

@@ -204,6 +204,8 @@ FIRSTS_OWN_GRACE = 120            # s: a body Spansh updated this soon after you
 
 # Unsold data: recompute at most this often while the journal is growing (a full pass is ~1 s).
 UNSOLD_MIN_SECONDS = 15
+SALE_QUIET_S = 10          # s with no further sale page before a sale's leftovers are said (a 'Sell all' is still going)
+SALE_LEFT_GIVE_UP_S = 300  # s after a sale with no fresh estimate (a failing one): say nothing rather than wait on
 # Header colour thresholds for "how much are you risking by not selling" (credits).
 UNSOLD_WARN = 50_000_000
 UNSOLD_URGENT = 250_000_000
@@ -679,19 +681,26 @@ RANK_NAMES = {   # the two ranks an explorer cares about
 # Engineering materials: the login snapshot and everything that adds or spends them (see ed_materials).
 # Flying to and from a body: the approach briefing, the leaving-a-body warning (and what you touched down on).
 BODY_EVENTS = ("ApproachBody", "LeaveBody", "Touchdown")
+# The SRV on a body, and what its refinery collects (1 t per MiningRefined): "Mined previously" per body (own_mined).
+# These are read for that alone; the body comes from SRV_TRACKED (see Journals.track_srv).
+SRV_EVENTS = ("LaunchSRV", "DockSRV", "SRVDestroyed", "MiningRefined", "SupercruiseExit", "SupercruiseEntry")
+SRV_TRACKED = frozenset(SRV_EVENTS) | {"ApproachBody", "LeaveBody", "Touchdown", "Location", "LoadGame",
+                                       "FSDJump", "CarrierJump", "Died"}
 MATERIAL_EVENTS = ("Materials", "MaterialCollected", "MaterialDiscarded", "Synthesis", "EngineerCraft",
                    "MaterialTrade", "TechnologyBroker", "ScientificResearch", "MissionCompleted",
                    "EngineerContribution")
 WANTED = tuple(f'"event":"{e}"'.encode()
                for e in POSITION_EVENTS + STAR_CLASS_EVENTS + SCAN_EVENTS + DATA_EVENTS + SHIP_EVENTS
-               + CMDR_EVENTS + MATERIAL_EVENTS + BODY_EVENTS + ("Loadout", "Shutdown"))
+               + CMDR_EVENTS + MATERIAL_EVENTS + BODY_EVENTS + SRV_EVENTS + ("Loadout", "Shutdown"))
 
 # Bump when the journal parser learns new events: forces a one-off re-read of every journal.
 # 27: sale pages keyed by journal position (same-second 'Sell all' pages were dropped before); logins.
 # 28: return visits get the 'visited' streak verdict on the jump itself.
 # 30: body records keep pressure_raw (the bio rules compare finer than the rounded pressure).
 # 31: Vista Genomics sales keep the x5 sale check (x5_check: the runs predicted x5 against those paid it).
-PARSER_VERSION = 31
+# 32: body signals keep the planetary mining location count (own_signals.mining).
+# 33: what the SRV's refinery collected on each body (own_mined: "Mined previously").
+PARSER_VERSION = 33
 
 SCOOPABLE = set("OBAFGKM")
 ON_FOOT_DOCKED = (1 << 3) | (1 << 13) | (1 << 14)   # Status.json Flags2: on foot in a station, hangar, social space
@@ -709,6 +718,64 @@ SCOOP_RATE_MIN = 8         # fewer known arrival stars than this: no share (carr
 NOTABLE_PLANETS = {"Earth-like world": "ELW", "Water world": "WW", "Ammonia world": "AW"}
 BIO = "$SAA_SignalType_Biological;"
 GEO = "$SAA_SignalType_Geological;"
+MINING = "$PlanetaryMiningLocation_Name;"   # planetary mining locations (Rhino mining sites), counted like bio/geo
+
+# Planetary mining odds (mining_odds.json, from the Elite Dangerous Field Manual's survey by CMDR Grumlop, CC BY-SA 4.0):
+# the share of each ground type's surveyed mining locations that carried each material. Odds, not a body's contents.
+MINING_ODDS_FILE = os.path.join(SCRIPT_DIR, "mining_odds.json")
+MINING_TOP = 6             # materials a tooltip lists
+MINING_FEW = 30            # fewer surveyed locations than this: "few reports"
+# a body record's planet class (Spansh's names, which own scans are normalised to; the journal's too) -> ground
+MINING_GROUNDS = {"Metal-rich body": "metal-rich", "Metal rich body": "metal-rich",
+                  "High metal content world": "high-metal-content", "High metal content body": "high-metal-content",
+                  "Rocky Ice world": "rocky-ice", "Rocky ice body": "rocky-ice", "Icy body": "icy"}
+
+
+def mining_ground(subtype, volcanism):
+    """The survey's ground type for a planet class and volcanism (a Scan's or a Spansh record's), or None.
+    A rocky body splits by its volcanism: any magma is 'volcanic magma', silicate vapour geysers 'volcanic
+    silicate', anything else (none included) 'rocky'."""
+    if subtype in MINING_GROUNDS:
+        return MINING_GROUNDS[subtype]
+    if subtype != "Rocky body":
+        return None
+    v = (volcanism or "").lower()
+    return "volcanic magma" if "magma" in v else "volcanic silicate" if "silicate vapour" in v else "rocky"
+
+
+def load_mining_odds(path=MINING_ODDS_FILE):
+    """mining_odds.json -> {ground: {"surveyed": locations, "materials": [(name, share %)] highest first}};
+    {} when the file is missing or unreadable (the count still shows, without the tooltip)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for m in d.get("materials") or []:
+        for o in m.get("observations") or []:
+            g, pct = o.get("ground"), o.get("observed_percentage")
+            if not g or pct is None or not m.get("name"):
+                continue
+            e = out.setdefault(g, {"surveyed": 0, "materials": []})
+            e["surveyed"] = max(e["surveyed"], o.get("locations_surveyed") or 0)
+            e["materials"].append((m["name"], pct))
+    for e in out.values():
+        e["materials"].sort(key=lambda x: (-x[1], x[0]))
+    return out
+
+
+MINING_ODDS = load_mining_odds()
+
+
+def mining_odds(ground, odds=None):
+    """What a body's mining-count tooltip lists: {ground, surveyed, few, top: [{name, pct}], more}, or None. The survey
+    tracks the valuable commodities only (no water or methanol crystals): the tooltip says so."""
+    e = (MINING_ODDS if odds is None else odds).get(ground) if ground else None
+    if not e or not e["materials"]:
+        return None
+    return {"ground": ground, "surveyed": e["surveyed"], "few": e["surveyed"] < MINING_FEW,
+            "top": [{"name": n, "pct": p} for n, p in e["materials"][:MINING_TOP]], "more": len(e["materials"]) > MINING_TOP}
 
 # --------------------------------------------------------------------------
 # Database
@@ -748,13 +815,18 @@ CREATE TABLE IF NOT EXISTS own_barycentres (
     system INTEGER, body_id INTEGER, record TEXT, ts TEXT,
     PRIMARY KEY (system, body_id));
 CREATE TABLE IF NOT EXISTS own_signals (
-    system INTEGER, name TEXT, bio INTEGER, geo INTEGER, ts TEXT,
+    system INTEGER, name TEXT, bio INTEGER, geo INTEGER, ts TEXT, mining INTEGER,
     PRIMARY KEY (system, name));
 -- Discovery flags from your *first* scan of each body (later rescans say "discovered" once you've sold).
 CREATE TABLE IF NOT EXISTS own_firsts (
     system INTEGER, body_id INTEGER, name TEXT, is_main INTEGER,
     was_discovered INTEGER, was_mapped INTEGER, was_footfalled INTEGER,
     first_ts TEXT, undisc_ts TEXT, PRIMARY KEY (system, body_id));
+-- What the SRV's refinery collected on each body (MiningRefined, 1 t each, while in the SRV on that body).
+-- source: the journal line last counted (file:offset), so a line handled twice is not counted twice.
+CREATE TABLE IF NOT EXISTS own_mined (
+    system INTEGER, body_id INTEGER, commodity TEXT, name TEXT, tons INTEGER, first_ts TEXT, last_ts TEXT,
+    source TEXT, PRIMARY KEY (system, body_id, commodity));
 CREATE TABLE IF NOT EXISTS own_mapped (system INTEGER, body_id INTEGER, ts TEXT, first_ts TEXT, PRIMARY KEY (system, body_id));
 CREATE TABLE IF NOT EXISTS own_footfall (system INTEGER, body_id INTEGER, ts TEXT, PRIMARY KEY (system, body_id));
 CREATE TABLE IF NOT EXISTS sales (name TEXT, ts TEXT, bodies INTEGER);
@@ -825,6 +897,7 @@ DELETE FROM own_systems; DELETE FROM own_bodies; DELETE FROM own_signals; DELETE
 DELETE FROM own_firsts; DELETE FROM own_mapped; DELETE FROM own_footfall; DELETE FROM sales; DELETE FROM deaths;
 DELETE FROM own_genera; DELETE FROM own_organic; DELETE FROM codex; DELETE FROM bio_sales;
 DELETE FROM own_barycentres; DELETE FROM phenomena; DELETE FROM sale_events; DELETE FROM logins;
+DELETE FROM own_mined; DELETE FROM meta WHERE key = 'srv_state';
 DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials', 'last_session', 'cargo');
 DELETE FROM meta WHERE key LIKE 'legacy:%' OR key IN ('pos', 'prev', 'jump_range', 'state_ts');
 """
@@ -1254,7 +1327,7 @@ def record_from_dump(system, b):
         "pressure": round(b["surfacePressure"], 4) if b.get("surfacePressure") is not None else None,
         "pressure_raw": b.get("surfacePressure"),   # the spawn rules' limits are finer than 0.0001 atm
         "belts": [r.get("type") for r in b.get("belts") or []],
-        "bio": signals.get(BIO, 0), "geo": signals.get(GEO, 0), "full": True,
+        "bio": signals.get(BIO, 0), "geo": signals.get(GEO, 0), "mining": signals.get(MINING, 0), "full": True,
         "gravity": round(b["gravity"], 2) if b.get("gravity") is not None else None,
         "gravity_raw": b.get("gravity"),   # the spawn rules' limits are finer than 0.01 g
         "atmosphere": b.get("atmosphereType"), "dist_ls": b.get("distanceToArrival"),
@@ -1337,7 +1410,7 @@ def own_data(db, id64, system):
     for row in db.execute("SELECT * FROM own_signals WHERE system=?", (id64,)):
         r = records.get(short_name(system, row["name"]))
         if r:
-            r["bio"], r["geo"] = row["bio"], row["geo"]
+            r["bio"], r["geo"], r["mining"] = row["bio"], row["geo"], row["mining"] or 0
     hotspots = {}
     for row in db.execute("SELECT * FROM own_ring_signals WHERE system=?", (id64,)):
         hotspots[split_ring_name(system, row["name"])] = json.loads(row["hotspots"])
@@ -1354,6 +1427,8 @@ def merge_records(spansh, own, hotspots):
         if base and not r.get("bio") and not r.get("geo"):
             # Your scan may predate the DSS that gave Spansh its signal counts.
             r = dict(r, bio=base.get("bio", 0), geo=base.get("geo", 0))
+        if base and not r.get("mining") and base.get("mining"):
+            r = dict(r, mining=base["mining"])   # Spansh has the count from someone else's FSS
         if base:
             spansh_rings = {x["name"]: x for x in base.get("rings") or []}
             r = dict(r, rings=[dict(x, hotspots=x["hotspots"] or
@@ -1435,6 +1510,9 @@ class Journals:
         self.regions_said = set()  # galactic regions announced (or left) this game session: see note_region
         self.region_entered = None  # the latest region crossing {id64, ts, region, spoken, count}
         self.jumponium = None      # this system's best jumponium body so far {system, body, material, pct, said}
+        # a live sale still coming in (a 'Sell all' writes a page every few seconds): State.maybe_sale_left says
+        # what it left aboard once the pages stop. {carto, systems, bio, species, read_at (wall clock)}
+        self.sale_run = None
         self.reload()
 
     def moment(self, kind, ts, **kw):
@@ -1492,11 +1570,11 @@ class Journals:
         rollback and reload(), or the retry would announce its moments twice."""
         return (self.moment_seq, list(self.moments), self.last_heat,
                 set(self.body_touched), set(self.approached), self.brief_key,
-                set(self.regions_said), self.region_entered, self.jumponium)
+                set(self.regions_said), self.region_entered, self.jumponium, dict(self.sale_run or {}) or None)
 
     def restore(self, cp):
         (self.moment_seq, moments, self.last_heat, touched, approached, self.brief_key,
-         regions, self.region_entered, self.jumponium) = cp
+         regions, self.region_entered, self.jumponium, self.sale_run) = cp
         self.body_touched, self.approached, self.regions_said = set(touched), set(approached), set(regions)
         self.moments = collections.deque(moments, maxlen=self.moments.maxlen)
 
@@ -1538,6 +1616,8 @@ class Journals:
         self.hull = meta_get(db, "hull")            # {pct, ts}: your ship's hull, from Loadout / HullDamage
         self.boost = meta_get(db, "boost")          # {value, ts}: a jet-cone charge, until the next FSDJump
         self.last_sale = meta_get(db, "last_sale")  # {ts, carto, bio, systems, species} of the latest sale
+        # per game session (see session_key): {"at": the body you are at, "srv": the body your SRV is out on}
+        self.srv_state = meta_get(db, "srv_state", {})
 
     def import_legacy(self):
         for d in LEGACY_DIRS:
@@ -1627,6 +1707,10 @@ class Journals:
         if name in ("FSSSignalDiscovered", "SupercruiseDestinationDrop"):
             self.handle_phenomenon(name, ev, ts)
             return
+        if name in SRV_TRACKED:
+            self.track_srv(name, ev, ts)
+            if name in SRV_EVENTS:
+                return
         if name == "Loadout":
             if ev.get("HullHealth") is not None and ts >= (self.hull or {}).get("ts", ""):
                 self.hull = {"pct": round(ev["HullHealth"] * 100), "ts": ts}
@@ -1738,6 +1822,7 @@ class Journals:
                                  self.line_source, check and json.dumps(check)))
                 self.new_sales.append((ts, "bio"))
                 self.note_sale(ts, bio=paid, species=len(ev.get("BioData") or []))
+                self.note_live_sale(ts, "bio", bio=paid, species=len(ev.get("BioData") or []))
             elif name == "Resurrect":
                 death = self.db.execute("SELECT max(ts) FROM deaths WHERE ts <= ?", (ts,)).fetchone()[0]
                 self.db.execute("UPDATE deaths SET option = ? WHERE ts = ?", (ev.get("Option"), death))
@@ -1761,6 +1846,7 @@ class Journals:
                                  self.line_source))
                 self.new_sales.append((ts, "carto"))
                 self.note_sale(ts, carto=ev.get("TotalEarnings") or 0, systems=len(ev.get("Discovered") or []))
+                self.note_live_sale(ts, "carto", carto=ev.get("TotalEarnings") or 0, systems=len(ev.get("Discovered") or []))
                 for d in ev.get("Discovered") or []:
                     self.db.execute("INSERT INTO sales VALUES (?, ?, ?)",
                                     (d.get("SystemName"), ts, d.get("NumBodies")))
@@ -1770,6 +1856,7 @@ class Journals:
                                 (ts, ev.get("BaseValue"), ev.get("Bonus"), ev.get("TotalEarnings"), len(ev.get("Systems") or []),
                                  self.line_source))
                 self.new_sales.append((ts, "carto"))
+                self.note_live_sale(ts, "carto", carto=ev.get("TotalEarnings") or 0, systems=len(ev.get("Systems") or []))
                 for sysname in ev.get("Systems") or []:
                     self.db.execute("INSERT INTO sales VALUES (?, ?, NULL)", (sysname, ts))
             self.sales_changed = True
@@ -1916,6 +2003,60 @@ class Journals:
                         touched=key in self.body_touched)
             self.body_touched.discard(key)
 
+    def session_key(self):
+        """The game session the line being read belongs to: its journal's name without the part number
+        (Journal.2026-09-30T023726 for Journal.2026-09-30T023726.01.log:1234). The SRV state is kept per session,
+        so journals read out of order (a legacy folder imported later) never lend one session's SRV to another."""
+        return re.sub(r"\.\d+\.log:\d*$", "", self.line_source)
+
+    def track_srv(self, name, ev, ts):
+        """Which body your SRV is out on, for MiningRefined (which names neither body nor position).
+        The body you are at comes from ApproachBody, Touchdown, a SupercruiseExit at a planet or a Location on
+        one; LaunchSRV puts the SRV on it, and a Location that says InSRV (a login in the SRV) does too.
+        DockSRV, SRVDestroyed, supercruise, a login, a death, leaving the body or the system end it."""
+        key = self.session_key()
+        st = self.srv_state.get(key) or {"at": None, "srv": None}
+        at, srv = st["at"], st["srv"]
+        system, body = ev.get("SystemAddress"), ev.get("BodyID")
+        here = {"system": system, "body_id": body} if system is not None and body is not None else None
+        if name == "MiningRefined":
+            self.mining_refined(srv, ev, ts)
+            return
+        if name in ("ApproachBody", "Touchdown"):
+            at = here or at
+        elif name in ("SupercruiseExit", "Location"):
+            at = here if ev.get("BodyType") == "Planet" else None
+            if name == "Location":
+                srv = dict(at, ts=ts) if at and ev.get("InSRV") else None
+        elif name == "LaunchSRV":
+            srv = dict(at, ts=ts) if at else None
+        elif name in ("DockSRV", "SRVDestroyed", "SupercruiseEntry"):
+            srv = None
+        else:   # LeaveBody, FSDJump, CarrierJump, LoadGame, Died
+            at = srv = None
+        if st != {"at": at, "srv": srv}:
+            self.srv_state[key] = {"at": at, "srv": srv}
+            # this session and the latest few others only (journals read out of order)
+            for old in [k for k in sorted(self.srv_state) if k != key][:-3]:
+                del self.srv_state[old]
+            meta_set(self.db, "srv_state", self.srv_state)
+
+    def mining_refined(self, srv, ev, ts):
+        """1 t of a commodity refined by the SRV on the body it is out on; nothing when that body is unknown
+        (a ship in a ring refines too, and an SRV launched before the journals being read began)."""
+        commodity = re.sub(r"^\$|_name;$|;$", "", (ev.get("Type") or "").lower())
+        if not srv or not commodity or ts < srv.get("ts", ""):
+            return
+        src = self.line_source
+        self.db.execute(
+            """INSERT INTO own_mined VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+               ON CONFLICT (system, body_id, commodity) DO UPDATE SET tons = tons + 1, name = excluded.name,
+                   first_ts = min(first_ts, excluded.first_ts), last_ts = max(last_ts, excluded.last_ts),
+                   source = excluded.source
+               WHERE excluded.source = '' OR own_mined.source IS NOT excluded.source""",
+            (srv["system"], srv["body_id"], commodity, ev.get("Type_Localised") or commodity.title(), ts, ts, src))
+        self.dirty.add(srv["system"])
+
     def note_sample_point(self, system, body, species, genus, kind, n, ts):
         """Remember where a sample was taken, from the live Status.json reading (at most a second old at
         walking pace). Only live play records positions: a journal read later has no position to pair with."""
@@ -2007,6 +2148,15 @@ class Journals:
             last = {"ts": ts, "carto": carto, "bio": bio, "systems": systems, "species": species}
         self.last_sale = last
         meta_set(self.db, "last_sale", last)
+
+    def note_live_sale(self, ts, kind, carto=0, bio=0, systems=0, species=0):
+        """A sale just made (not one in a journal being re-read or caught up on): add it to the run of pages
+        State.maybe_sale_left waits out before saying what is still aboard."""
+        if not live_event(ts):
+            return
+        r = self.sale_run or {"carto": 0, "systems": 0, "bio": 0, "species": 0, "kinds": []}
+        self.sale_run = dict(r, carto=r["carto"] + carto, systems=r["systems"] + systems, bio=r["bio"] + bio,
+                             species=r["species"] + species, kinds=sorted(set(r["kinds"]) | {kind}), read_at=time.time())
 
     def add_earnings(self, ts, amount):
         c = self.commander
@@ -2267,8 +2417,9 @@ class Journals:
                 self.db.execute("INSERT OR REPLACE INTO own_ring_signals VALUES (?, ?, ?, ?)",
                                 (system, body, json.dumps(minerals(signals)), ts))
             else:
-                self.db.execute("INSERT OR REPLACE INTO own_signals VALUES (?, ?, ?, ?, ?)",
-                                (system, body, signals.get(BIO, 0), signals.get(GEO, 0), ts))
+                self.db.execute("INSERT OR REPLACE INTO own_signals (system, name, bio, geo, ts, mining) "
+                                "VALUES (?, ?, ?, ?, ?, ?)",
+                                (system, body, signals.get(BIO, 0), signals.get(GEO, 0), ts, signals.get(MINING, 0)))
                 if name == "FSSBodySignals" and (signals.get(BIO) or signals.get(GEO)):   # the FSS just found them
                     self.moment("signals", ts, system=system, body_name=body, bio=signals.get(BIO, 0), geo=signals.get(GEO, 0))
                 if signals.get(BIO) and ev.get("BodyID") is not None and name == "FSSBodySignals":
@@ -3022,7 +3173,7 @@ def summarise(records, body_count, star=None, ctx=None, genera=None):
 FIND_NAME_MAX = 100   # /api/find: the longest system name taken (real ones are far shorter)
 
 # Bump when the cached record layout changes so cached systems get re-fetched.
-CACHE_VERSION = 15   # 14: pressure_raw; 15: updated, signals_known (stale_bio_body)
+CACHE_VERSION = 16   # 14: pressure_raw; 15: updated, signals_known (stale_bio_body); 16: mining
 
 
 def cached_base(db, id64):
@@ -3456,6 +3607,7 @@ class State:
         self.unsold_log = []       # [(finished at, result)]: the last few good estimates (sale estimates)
         self.unsold_dirty = ed_unsold is not None
         self.unsold_at = 0.0
+        self.unsold_from = 0.0     # when the estimate in self.unsold was started (wall clock): maybe_sale_left
         self.unsold_task = None
         self.map_cache = {}        # (id64, radius) -> Spansh systems, so reopening the map is instant
         self.dump_cache = {}       # id64 -> (time, Spansh dump) for the body detail panel
@@ -4673,6 +4825,10 @@ class State:
         genera = {}
         for r in self.db.execute("SELECT body_id, genus_name FROM own_genera WHERE system=?", (id64,)):
             genera.setdefault(r["body_id"], []).append(r["genus_name"])
+        mined = {}   # what the SRV's refinery collected on each body, most first
+        for r in self.db.execute("SELECT body_id, name, tons, last_ts FROM own_mined WHERE system=?"
+                                 " ORDER BY tons DESC, name", (id64,)):
+            mined.setdefault(r["body_id"], []).append({"name": r["name"], "tons": r["tons"], "last": r["last_ts"]})
         codex = {}
         for r in self.db.execute("SELECT body_id, name, is_new, voucher FROM codex WHERE system=?", (id64,)):
             codex.setdefault(r["body_id"], []).append({"name": r["name"], "new": bool(r["is_new"]), "voucher": r["voucher"]})
@@ -4727,6 +4883,11 @@ class State:
                 "belts": r.get("belts") or [],   # belt types: the schematic marks a body with belts
                 "rings_mapped": sum(1 for x in r.get("rings") or [] if x.get("hotspots") or x.get("mapped")),
                 "bio": r.get("bio") or 0, "geo": r.get("geo") or 0,
+                # planetary mining locations, and the survey's odds for this ground (a tooltip on the count)
+                "mining": r.get("mining") or 0,
+                "mining_odds": mining_odds(mining_ground(r["subtype"], r.get("volcanism"))) if r.get("mining") else None,
+                # "Mined previously": [{name, tons, last}] from your SRV's refinery here
+                "mined": mined.get(bid if bid is not None else r.get("body_id"), []),
                 "genera": known_genera,
                 "bio_guess": [{"genus": g["genus"], "best": g["best"], "value": g["value"], "min_value": g["min_value"],
                                "species": [ed_bio.short_species(x["name"], g["genus"]) for x in g["species"]],
@@ -6420,6 +6581,7 @@ class State:
         if self.unsold_task and not self.unsold_task.done():
             return
         self.unsold_dirty, self.unsold_at = False, time.time()
+        started = self.unsold_at
 
         async def run():
             try:
@@ -6434,8 +6596,36 @@ class State:
                     self.value_dirty |= {i for i, (_, b) in self.bases.items() if b.get("name") in moved}
             except (Exception, SystemExit) as e:  # read_events() fails if it finds no journals
                 self.unsold = {"error": str(e)}
+            self.unsold_from = started
             self.bump()
         self.unsold_task = asyncio.create_task(run())
+
+    def maybe_sale_left(self, now=None):
+        """Once a live sale's pages have stopped coming (SALE_QUIET_S with no further page: Universal
+        Cartographics sells 50 systems a page) and an estimate started after the last page has finished, say
+        what it left aboard: a sale_left moment when cartographic data is still unsold after a cartographic
+        sale, bio_left when completed samples are after a Vista Genomics one. The run is only ever filled by
+        live sales (Journals.note_live_sale), so a re-read or catch-up says nothing."""
+        run = self.journals.sale_run
+        now = time.time() if now is None else now
+        if not run or now - run["read_at"] < SALE_QUIET_S:
+            return
+        if self.unsold_from <= run["read_at"]:   # no estimate yet that began after the last page was read
+            if now - run["read_at"] > SALE_LEFT_GIVE_UP_S:
+                self.journals.sale_run = None
+            return
+        self.journals.sale_run = None
+        u = self.unsold or {}
+        if "error" in u:
+            return
+        c, b, ts = u.get("carto") or {}, u.get("bio") or {}, iso_ts(now)
+        if "carto" in run["kinds"] and (c.get("systems") or 0) > 0 and (c.get("estimated_payout") or 0) > 0:
+            self.journals.moment("sale_left", ts, sold_systems=run["systems"], sold_value=run["carto"],
+                                 left_systems=c["systems"], left_value=c["estimated_payout"],
+                                 left_firsts=c.get("first_discoveries") or 0)
+        if "bio" in run["kinds"] and (b.get("samples") or 0) > 0 and (b.get("estimated_value") or 0) > 0:
+            self.journals.moment("bio_left", ts, sold_species=run["species"], sold_value=run["bio"],
+                                 left_samples=b["samples"], left_value=b["estimated_value"])
 
     async def watch(self):
         """Tail the live journals and NavRoute.json forever."""
@@ -6493,6 +6683,7 @@ class State:
             self.apply_own_changes()
             self.maybe_classify_target()
             self.maybe_unsold()
+            self.maybe_sale_left()
             self.maybe_locate_carrier()
             self.maybe_find_sellers()
             self.maybe_backup_on_quit()

@@ -83,6 +83,10 @@ hold life nobody has sampled. Hover it for details; it is never added to the val
 <td width="50%" valign="top">
 <b>Here</b> — the current system body by body, with bio and geo signals and 🌋 for volcanism. Before the
 DSS each bio signal shows the genera it could be. Hover a body for a summary, click it for everything.
+The ⛏ column counts planetary mining locations (from your FSS, or Spansh's for bodies you have not scanned).
+Hover or tap a count for the valuable minerals seen at that ground type's mining locations in a community
+survey ("Deuterium 54% · Low Temp Diamonds 27% · Helium-3 17%"), odds rather than what the body holds.
+Under the odds, "Mined previously" lists the total of each material your SRV's refinery has collected on that body, with the latest date ("Water 10 t (Last: 30 Sep)").
 The to-do line ticks itself off as you honk, map and sample, in a <i>suggested order</i>: nearest first, with
 supercruise time and credits per minute ("~2 min · 450k/min"), and "skip?" on anything not worth the trip.
 Bio nobody had set foot on is valued with the ×5 first-footfall bonus ("up to 95.0M 👣×5"). In a system
@@ -188,6 +192,7 @@ notification and be spoken (🗣), chosen per alert in the **🔔 alerts** dialo
 - a valuable body the moment the FSS resolves it, and a new codex entry
 - low fuel where you cannot scoop, and a top-up worth taking before a dry stretch
 - docking where the station buys your data, and what you banked when you sold
+- a sale that left data aboard (Universal Cartographics sells 50 systems a page), said once the pages stop
 - hull damage, heat damage, interdiction, and unsold data past a threshold
 - your carrier arriving somewhere new or leaving without you
 
@@ -434,6 +439,7 @@ network can read the page.
 | `ed_honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
 | `ed_bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
 | `bio_rules.json` | Spawn rules, colour variants, nebulae and regions from BioScan, ExploData and klightspeed's region map |
+| `mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page |
 
 For overlays, `GET /api/status` returns a compact JSON status and
@@ -449,7 +455,10 @@ Data from <a href="https://spansh.co.uk">Spansh</a> and <a href="https://www.eds
 Exobiology spawn conditions are the community's work, as gathered by the Canonn Research Group and maintained in
 <a href="https://github.com/Silarn/EDMC-BioScan">EDMC-BioScan</a>; the galactic region map is
 <a href="https://github.com/klightspeed/EliteDangerousRegionMap">klightspeed's</a> (MIT); sample colony
-distances and colour variants are from <a href="https://github.com/Silarn/EDMC-ExploData">EDMC-ExploData</a> (GPL-2.0).<br>
+distances and colour variants are from <a href="https://github.com/Silarn/EDMC-ExploData">EDMC-ExploData</a> (GPL-2.0).
+Planetary mining odds are CMDR Grumlop's survey from the
+<a href="https://edfieldmanual.com/index.php?title=Module:Data/SurfaceMiningProspecting">Elite Dangerous Field Manual</a>
+(<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>), shipped unchanged in <code>mining_odds.json</code>.<br>
 ED Outrider is free software under the <a href="LICENSE">GNU GPL v2 or later</a>.<br>
 Elite Dangerous © Frontier Developments — this is a fan-made tool, not affiliated with Frontier.
 </p>
