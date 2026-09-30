@@ -36,14 +36,19 @@
 # radius = 25          # ly: the sphere of nearby systems the page lists (Spansh is asked once per jump; at least 1)
 # radius_choices = [20, 25, 30, 40, 50]   # ly: the page's radius dropdown; larger spheres (up to your jump range,
 #                                         # say) work but fetch and redraw more — ~1,500 systems at 100 ly in the black
-# db = "ed_outrider.sqlite"   # relative to ed_outrider.py here (a relative --db is relative to the current folder)
-# backup_dir = "backups"   # backups: dated zips of the database, and every live journal copied once into
-#                          # backups/journals (restore: --legacy backups/journals; see the README)
+# Relative paths below (db, backup_dir, speech_file) are relative to the folder ed_outrider.py is in (a relative
+# --db flag is relative to the current folder). Your own files go in data/ (git-ignored); resources/ holds the
+# shipped ones.
+# db = "data/ed_outrider.sqlite"   # browser_defaults.json is kept next to it
+# backup_dir = "data/backups"   # backups: dated zips of the database, and every live journal copied once into
+#                          # data/backups/journals (restore: --legacy data/backups/journals; see the README)
 # backup_keep = 7          # dated database zips kept (outrider-<database name>-*.zip; older ones are deleted
 #                          # after a new one is written); the journal archive is never pruned
 # backup_every_days = 1    # an automatic backup at start when the last one is older than this, and when the game
 #                          # quits (its Shutdown event); 0 turns automatic backups off ("back up now" still works)
-# speech_file = "speech.json"   # the spoken alerts' lines, per personality (edit it, or point this at your own copy)
+# speech_file = "resources/speech.json"   # the spoken alerts' lines, per personality (edit it, or point this at
+#                          # your own copy; lines banned with the page's 👎 go in data/speech_banned.json, or next
+#                          # to a copy of your own)
 
 [defaults]
 # What a browser uses until its user changes it in the page's 🔔 alerts & thresholds dialog.
@@ -76,8 +81,8 @@
 # rig_warn = 3500                # m: say so when a mining rig is this far from your Rhino (again at 4,500 m); the
 #                                    # game destroys a rig 5,000 m from its Rhino
 # voice = "en_GB-southern_english_female-low"   # spoken alerts (🗣 in the page): the Piper voice, downloaded
-#                                               # into piper-voices/ on first use; needs `pip install piper-tts`
-#                                               # (see ed_tts.py), otherwise the browser's own speech is used;
+#                                               # into data/piper-voices/ on first use; needs `pip install piper-tts`
+#                                               # (see outrider/tts.py), otherwise the browser's own speech is used;
 #                                               # a voice picked in the page's alerts dialog wins over this
 # voice_fallback = "en_GB-jenny_dioco-medium"   # used while the voice above is missing
 # speech_styles = ["business"]   # spoken alerts' personalities, picked from at random: any of the styles in
@@ -96,7 +101,7 @@
 #                                    # each time (commander names are often unpronounceable)
 
 [autohonk]
-# Hold Primary Fire on arriving in a system by hyperspace, so the Discovery Scanner fires (Linux; ed_honk.py).
+# Hold Primary Fire on arriving in a system by hyperspace, so the Discovery Scanner fires (Linux; outrider/honk.py).
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump.
 # Primary Fire needs a keyboard binding in Elite's controls (as its second binding, keeping your trigger first).
 # enabled = false        # the page's 🔔 alerts dialog switches it on and off too (and remembers)
@@ -125,14 +130,14 @@
 #                          # by name, or "off" (the tick then falls back to the browser playing them)
 
 [copilot]
-# One HOTAS (or keyboard) button for the voice (Linux; ed_button.py). Tap: a status report (fuel and jumps, the
+# One HOTAS (or keyboard) button for the voice (Linux; outrider/button.py). Tap: a status report (fuel and jumps, the
 # next stop, what is aboard against your rebuy, the nearest unvisited system; a targeted body first; the sampling
 # while you sample). Double tap: the last line again. Hold: hush the voice until the next jump (danger still
 # speaks); hold again to end it. In the Rhino on a planet any press marks a mining rig placed or picked up instead.
 # Outrider only reads the button, never grabs it: unbind it in Elite's controls, or it does its game action too.
 # On an X-56, avoid the latching toggles and the mode wheel: they report as buttons held down.
 # Joysticks and throttles are readable through uaccess; a keyboard or mouse needs the input group.
-# python3 ed_button.py --listen  lists the devices and prints the name of each button you press.
+# python3 -m outrider.button --listen  lists the devices and prints the name of each button you press.
 # enabled = false
 # device = "X-56 Rhino Throttle"   # a part of the device's name, or a /dev/input/by-id/... path
 # button = "BTN_TRIGGER_HAPPY5"    # the button's evdev name, or its code number, as --listen prints it

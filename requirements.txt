@@ -2,8 +2,8 @@
 aiohttp>=3.9
 
 # Spoken alerts with a natural voice (optional: without it the page uses the browser's own speech).
-# Pulls in onnxruntime, about 100 MB. See ed_tts.py.
+# Pulls in onnxruntime, about 100 MB. See outrider/tts.py.
 piper-tts>=1.3
 
-# Auto honk on Linux (optional: presses a key through a virtual keyboard). See ed_honk.py.
+# Auto honk on Linux (optional: presses a key through a virtual keyboard). See outrider/honk.py.
 evdev>=1.6; sys_platform == "linux"

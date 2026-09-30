@@ -11,14 +11,16 @@ plain wording.
 
 The file is re-read whenever it changes, so an edit takes effect without restarting Outrider.
 
-Lines you never want to hear again go in speech_banned.json next to it ({alert: [line, ...]}, written by the 👎 in
-the page's "Spoken lines" list and the voice lab's "Cut this line"). They are left out here, so the page and the
-voice lab both get the trimmed lists; a ban never empties a list (the last line of one cannot be banned, and a
+Lines you never want to hear again go in data/speech_banned.json, or next to a speech file of your own
+({alert: [line, ...]}, written by the 👎 in the page's "Spoken lines" list and the voice lab's "Cut this line").
+They are left out here, so the page and the voice lab both get the trimmed lists; a ban never empties a list (the last line of one cannot be banned, and a
 list whose every line is banned by hand is used whole).
 """
 import json
 import os
 import re
+
+from . import DATA_DIR, RESOURCES_DIR
 
 # every line the page speaks, and the {placeholders} it fills for it. Always available: {name} (one of the
 # names you asked to be called, at random: game commander names are often unpronounceable), {cmdr} (the
@@ -89,7 +91,7 @@ KEYS = {
 RESERVED = ()
 ALWAYS = ("name", "cmdr", "ship", "here")
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
-# a Piper voice name (the same rule as ed_tts.VOICE_NAME: nothing that could leave piper-voices/)
+# a Piper voice name (the same rule as outrider.tts.VOICE_NAME: nothing that could leave piper-voices/)
 VOICE_NAME = re.compile(r"^[a-z]{2,3}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)$")
 
 
@@ -160,11 +162,16 @@ def check(doc):
     return problems
 
 
-BANNED_FILE = "speech_banned.json"   # next to the speech file (git-ignored: your own choice of lines)
+BANNED_FILE = "speech_banned.json"   # your own choice of lines: in data/ (git-ignored)
 
 
 def banned_path(speech_path):
-    return os.path.join(os.path.dirname(os.path.abspath(speech_path)), BANNED_FILE)
+    """Where the bans for a speech file live: data/speech_banned.json for the shipped resources/speech.json,
+    and next to the file for a copy of your own (so each lines file keeps its own bans)."""
+    folder = os.path.dirname(os.path.abspath(speech_path))
+    if os.path.normcase(folder) == os.path.normcase(os.path.abspath(RESOURCES_DIR)):
+        folder = DATA_DIR
+    return os.path.join(folder, BANNED_FILE)
 
 
 def read_bans(path):
@@ -209,7 +216,7 @@ def apply_bans(lines, bans):
 
 class SpeechLines:
     """speech.json, re-read when its modification time changes. A broken edit keeps the last good copy
-    in use and reports what is wrong, so a typo never silences the alerts. speech_banned.json beside it is
+    in use and reports what is wrong, so a typo never silences the alerts. Its speech_banned.json (see banned_path) is
     re-read the same way, and its lines are left out of lines()."""
 
     def __init__(self, path):
@@ -306,6 +313,7 @@ class SpeechLines:
             bans.pop(alert, None)
         tmp = self.bans_path + ".tmp"
         try:
+            os.makedirs(os.path.dirname(self.bans_path), exist_ok=True)   # data/ on a fresh copy
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(bans, f, indent=1, ensure_ascii=False)
                 f.write("\n")

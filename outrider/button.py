@@ -19,14 +19,14 @@ a keyboard or a mouse needs membership of the input group, which also lets every
 
 Turn it on in ed_outrider.toml ([copilot] enabled, device, button). To find the button:
 
-    python3 ed_button.py --listen     list the input devices, then print the code of each button you press
+    python3 -m outrider.button --listen     list the input devices, then print the code of each button you press
 """
 import asyncio
 import os
 import sys
 import time
 
-from ed_honk import _import_evdev
+from .honk import _import_evdev
 
 HOLD_MS, DOUBLE_MS = 600, 350
 RETRY = 5.0   # s between tries to (re)open the device: unplugged, suspended, not there yet
@@ -99,7 +99,7 @@ def find_device(evdev, spec):
     (device, None), or (None, why not)."""
     spec = str(spec or "").strip()
     if not spec:
-        return None, "no [copilot] device set (python3 ed_button.py --listen lists them)"
+        return None, "no [copilot] device set (python3 -m outrider.button --listen lists them)"
     if spec.startswith("/dev/"):
         try:
             return evdev.InputDevice(spec), None
@@ -146,7 +146,7 @@ class ButtonWatch:
         code = button_code(ev, self.button)
         if code is None:
             self.status = (f"[copilot] button = {self.button!r} is not a button name or number "
-                           "(python3 ed_button.py --listen prints them)")
+                           "(python3 -m outrider.button --listen prints them)")
             return
         while True:
             dev, why = find_device(ev, self.device)

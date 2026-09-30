@@ -1,35 +1,31 @@
 # Machine-specific configuration (journal paths) — start from ed_outrider.toml.example
 ed_outrider.toml
 
-# Local database built from your journals, and caches
-ed_outrider.sqlite
-ed_outrider.sqlite-journal
-# what --restore moved aside (the database and browser_defaults.json it replaced), and its temp file
+# Your own data: the database built from your journals, browser_defaults.json, the lines you banned
+# (speech_banned.json), backups/ (database + journals), downloaded Piper voices (piper-voices/), and what
+# --restore moved aside (*.pre-restore-*, *.restore-*.part)
+data/
+
+# restore leftovers beside a database kept outside data/ (--db, or db in the config)
 *.pre-restore-*
 *.restore-*.part
+
 __pycache__/
 *.pyc
 
 # Node modules if you install jsdom for tests/page_smoke.js
 node_modules/
+package-lock.json
 
 # Half-written rules download
-bio_rules.json.tmp
+resources/bio_rules.json.tmp
 
 # private planning notes, never committed
 project/
 
-# Python virtual environment and downloaded Piper voices (spoken alerts)
+# Python virtual environment
 .venv/
-piper-voices/
-
-# Lines banned with the 👎 in the page's "Spoken lines" (or the voice lab's Cut this line): your own choice
-speech_banned.json
-speech_banned.json.tmp
-
-# Backups made from the page (database + journals)
-backups/
 
 # Local install and launch scripts
-install.sh
+scripts/install.sh
 run.sh

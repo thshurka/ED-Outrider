@@ -5,11 +5,11 @@ Piper is not required: without it the page falls back to the browser's own speec
     python3 -m venv --system-site-packages .venv
     .venv/bin/pip install piper-tts
 
-Outrider finds Piper whether it is started with .venv/bin/python or plain python3 (a .venv next to
-this script is searched when the system Python has no Piper). Voices live in piper-voices/ next to
-the script; a configured voice that is missing is downloaded there in the background on first use
+Outrider finds Piper whether it is started with .venv/bin/python or plain python3 (a .venv in the
+repository folder is searched when the system Python has no Piper). Voices live in data/piper-voices/; a
+configured voice that is missing is downloaded there in the background on first use
 (about 63 MB each, from the Piper voices repository on Hugging Face). Installing them beforehand
-with `python -m piper.download_voices --download-dir piper-voices <voice>` just skips that wait.
+with `python -m piper.download_voices --download-dir data/piper-voices <voice>` just skips that wait.
 
 "Play speech and sounds on this PC" (a tick on the page) plays the lines and the alert sounds here instead of in
 the browser, through the first of pw-play, paplay, aplay or ffplay found (Linux; [speech] server_player picks
@@ -32,8 +32,9 @@ import urllib.request
 import wave
 from collections import OrderedDict
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-VOICES_DIR = os.path.join(HERE, "piper-voices")
+from . import DATA_DIR, ROOT
+
+VOICES_DIR = os.path.join(DATA_DIR, "piper-voices")
 DEFAULT_VOICE = "en_GB-southern_english_female-low"
 DEFAULT_FALLBACK = "en_GB-jenny_dioco-medium"
 CACHE_PHRASES = 50
@@ -61,7 +62,7 @@ PLAYERS = (("pw-play", ["pw-play"], None),
 PLAYER_CHOICES = ("auto",) + tuple(p[0] for p in PLAYERS) + ("off",)
 PLAY_MAX = 20.0   # s: the longest a sound (or a line whose length is unknown) may play on the server before its player is killed
 PLAY_SLACK = 5.0  # s: a line may play this much past its own length (player start-up, the feed) before it is killed
-SOUNDS_FILE = os.path.join(HERE, "static", "sounds.json")
+SOUNDS_FILE = os.path.join(ROOT, "static", "sounds.json")
 SOUND_RATE = 22050
 
 
@@ -149,13 +150,13 @@ def download_voice_files(files, voices_dir, progress=None, timeout=60):
 
 
 def _import_piper():
-    """PiperVoice, from this interpreter or from a .venv next to the script; None if neither has it."""
+    """PiperVoice, from this interpreter or from the repository's .venv; None if neither has it."""
     try:
         from piper import PiperVoice
         return PiperVoice
     except ImportError:
         pass
-    venv = os.path.join(HERE, ".venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+    venv = os.path.join(ROOT, ".venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
     if os.path.isdir(venv) and venv not in sys.path:
         sys.path.append(venv)
         try:

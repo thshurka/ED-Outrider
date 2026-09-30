@@ -1,0 +1,140 @@
+# What Outrider reads from the game, and the traps
+
+The game writes a journal (`Journal.<date>T<time>.<part>.log`, one JSON object per line, UTC timestamps
+to the second) plus a few companion files that it rewrites in place. This lists what Outrider uses and for
+what, then the behaviour of the game that the code has to work around. Everything here was checked against
+the code; the constants named are in `ed_outrider.py` unless another file is given.
+
+## Line format
+
+- The game writes `"event":"Name"` with no space after the colon. `Journals.read_file` only parses lines
+  containing one of the `WANTED` byte strings built from the `*_EVENTS` tuples, so **an event that is not in
+  one of those tuples is never seen**. `outrider/unsold.py` has its own list (`INTERESTING`); `outrider/log.py` reads
+  every line for the Log.
+- Only complete lines are consumed (the game may be mid-write). Offsets are stored per file in
+  `journal_files`; the same file seen in two folders (a copied legacy folder, two Proton prefixes) is read
+  once (`twins`).
+- A line missing a field the handler indexes is skipped with a message, not the whole file.
+
+## Journal events used
+
+| Events | What for |
+|---|---|
+| `FSDJump`, `CarrierJump`, `Location` | Visits, the jump path (`jumps`), current and previous position, region crossings. `FSDJump` `JumpDist`/`FuelUsed`/`FuelLevel` feed the fuel model (not when `BoostUsed`). `Taxi`/`Multicrew` mark rides that are not your ship's fuel or honk. A `Location` in the system you are already in is a relog, not an arrival. |
+| `FSDTarget` | The targeted system (sound verdict, "leaving unfinished work" check) and its star class. |
+| `StartJump` | Star class of the destination; `JumpType: Hyperspace` means the FSD is charging (the charge line, the speech queue clears). |
+| `Scan` | Bodies (`own_bodies`, the record used everywhere), the arrival star's `WasDiscovered` (discovery streak verdict), first-scan `WasDiscovered`/`WasMapped`/`WasFootfalled` (`own_firsts`), landable `Materials` (jumponium), valuable finds. Nav-beacon scans (`ScanType` NavBeaconDetail/NavBeacon) never count as your discoveries. |
+| `FSSDiscoveryScan` | The honk: `BodyCount`, `Progress`; triggers the arrival briefing. |
+| `FSSAllBodiesFound` | All bodies found: the FSS debrief. |
+| `FSSBodySignals` | Bio, geo and planetary mining location counts found by the FSS (spoken signal counts, bio finds). |
+| `SAASignalsFound` | DSS results: signal counts, `Genuses` (which genera are on the body), ring hotspots. |
+| `SAAScanComplete` | A body mapped (`own_mapped`, the "mapped" call-out); for a ring, the only record that it was probed. |
+| `ScanBaryCentre` | Barycentre orbits for the schematic. |
+| `ScanOrganic` | Sample runs: `Log` starts (and abandons any other run), `Sample`, `Analyse` completes. `Body` is the body id. |
+| `CodexEntry` | Codex entries, "new to your codex", vouchers. |
+| `Disembark` | Footfall on a planet (`OnPlanet`). |
+| `ApproachBody`, `LeaveBody`, `Touchdown` | Approach briefing, leaving a body mid-run, the body you are at; your ship's landing spot. |
+| `LaunchSRV`, `DockSRV`, `SRVDestroyed`, `SupercruiseExit`, `SupercruiseEntry`, `Liftoff` | Which body your SRV is out on and which SRV (`SRVType` `mev_rhino` is the Rhino); the ship marker; rigs lost with the Rhino. |
+| `MiningRefined` | 1 t of a commodity refined by the SRV (`own_mined`, "Mined previously", Rhino collections). |
+| `MultiSellExplorationData`, `SellExplorationData` | Cartographic sales (one row per page, keyed by file:offset), which systems were sold. |
+| `SellOrganicData` | Vista Genomics sales, each `BioData` entry with its `Bonus` (the x5 check). |
+| `Died`, `Resurrect` | Deaths and whether the ship (and its data) was lost (`Option`). |
+| `LoadGame`, `Commander`, `Rank`, `Progress`, `Promotion`, `Statistics`, `Shutdown` | Logins and sessions, credits at login, ranks, career statistics, the quit (recap, quit backup). |
+| `Loadout` | Ship, jump range, fuel capacity, unladen mass, FSD and Guardian booster, engineering modifiers, hull and core module health, rebuy. |
+| `EngineerCraft` | Engineering that moves the jump range before the next `Loadout`. |
+| `Cargo` (`Vessel: Ship`) | Tonnes in the hold: the ship's mass for the fuel model. |
+| `FuelScoop`, `RefuelAll`, `RefuelPartial` | Last refuel. |
+| `HullDamage`, `Repair`, `RepairAll`, `RepairDrone`, `AfmuRepairs`, `HeatDamage`, `Interdicted`, `JetConeBoost` | Hull and module health, danger alerts, a neutron/white dwarf charge. |
+| `Docked`, `Undocked` | Docked state and services (`exploration` = Universal Cartographics, `vistagenomics`), dock/undock alerts. |
+| `CarrierStats`, `CarrierLocation`, `CarrierJumpRequest`, `CarrierJumpCancelled` | Your fleet carrier. |
+| `NavRouteClear` | The plotted route was cleared. |
+| `FSSSignalDiscovered`, `SupercruiseDestinationDrop` | Notable stellar phenomena (`$Fixed_Event_Life_*`). |
+| `Materials`, `MaterialCollected`, `MaterialDiscarded`, `Synthesis`, `MaterialTrade`, `TechnologyBroker`, `ScientificResearch`, `MissionCompleted`, `EngineerContribution` | The materials inventory (`outrider.materials.apply`; each login's `Materials` is a full snapshot). |
+| `CrewHire`, `CrewFire`, `Statistics.Crew` | `outrider/unsold.py`: an NPC crew member's cut of payouts. |
+
+## Companion files
+
+- **Status.json** (read on mtime change, `read_status`): `Fuel.FuelMain`/`FuelReservoir`, `Flags`, `Flags2`,
+  `BodyName`, `Latitude`, `Longitude`, `Altitude`, `PlanetRadius`, `Heading`, `Cargo`, `Destination`,
+  `GuiFocus`, `FireGroup`, `timestamp`. Flags used: landed (bit 1), scooping (11), FSD charging (17), in SRV
+  (26), HUD analysis mode (27), altitude from average radius (29), in the hyperspace tunnel (30); Flags2
+  bit 0 on foot, bits 3/13/14 on foot in a station, hangar or social space (counted as docked).
+- **NavRoute.json** (`read_navroute`): `Route[]` of `StarSystem`, `SystemAddress`, `StarPos`, `StarClass`; the
+  route strip, star classes and "unreported" systems. An empty route means it was cleared.
+- **Controls bindings** (`outrider/honk.py`): the active preset's `.binds` file in the game's Options/Bindings folder,
+  for Primary Fire's keyboard binding.
+
+## Traps and facts learned
+
+**Status.json**
+- It is rewritten only when something in it changes. A player standing still (a stopped Rhino included)
+  produces no new reading, so "fresh" means "the game is live and this is the latest reading", not "written
+  in the last second". Positions are paired with journal events only within 90 s of the event.
+- With two live folders a stale Status.json in the other one must not replace the newer reading (compare
+  `timestamp`).
+- `Destination` appears only for navigation targets locked from the ship. A planetary mining location shows as
+  `Name: "$SAA_Unknown_Signal:#type=$PlanetaryMiningLocation_Name;:#index=3;"` (`MINING_LOCATION_RE`), with
+  `System` and `Body`. Targets selected from an SRV (a rig, a deposit) write nothing at all.
+- The on-foot-in-station bits come from the documented flags and have not been confirmed in a live file.
+
+**Mining and the Rhino**
+- `MiningRefined` is 1 t and names neither body nor position. The body comes from the SRV state (per game
+  session, `track_srv`); the position must come from Status.json at that moment. Ship-based ring mining writes
+  it too and is ignored (no SRV out).
+- The game logs nothing when a Rhino mining rig is deployed, picked up or targeted (preparing one only opens a
+  panel: `GuiFocus` 2). Outrider therefore marks rigs with the co-pilot button (`State.mark_rig`). Frontier
+  usually adds journal events some weeks after a feature ships, so rig events are expected eventually: route
+  them into `mark_rig` and the pickup path and make the button optional.
+- Collecting from a rig writes one `MiningRefined` per ton (plus an SRV `Cargo`) at a fixed spot right over the
+  rig. One rig can give several collections; an empty rig gives nothing. Rig numbers are the lowest free slot
+  1-6 and a collection leaves the rig deployed.
+- A rig lands about 7 m behind the cockpit along the heading (`RIG_BEHIND_M`, from SrvSurvey; a replayed run
+  put the collection within 0.3 m of that point). Pickup range is under 5 m (`RIG_TAP_M`).
+- The game allowed two rigs about 44-51 m apart and draws a 50 m ring (`RIG_SPACING` default 50).
+- Leash: a community guide ("Rhino Planetary Mining", CMDR Dunn Actual) found a warning at 4 km and the rig
+  destroyed at 5 km (`RIG_LOST_M`). Outrider warns earlier by default (`rig_warn` 3.5 km, again at 4.5 km).
+- A rig refills in about 5.5-8 minutes (same guide), hence "probably full" after 8 (`RIG_FULL_S`).
+- `LoadGame` inside an SRV names the ship; `Location` only says `InSRV`. The SRV type is carried over from the
+  last `LaunchSRV` that was never docked.
+- `Liftoff` fires for every hop between sample sites and when the ship is dismissed with you on foot; use
+  `LeaveBody` for "left the body".
+
+**Selling**
+- Universal Cartographics sells 50 systems per page and writes one `MultiSellExplorationData` per page. Pages
+  of one "sell all" came 7 to 67 s apart in one player's journals, so the "data still aboard" line waits 90 s
+  after the last page (`SALE_QUIET_S`). Several pages can share a second, so sale rows are keyed by the
+  journal file and byte offset.
+- Vista Genomics pays x5 when nobody had set foot on the body; the `WasFootfalled` of your first scan decides
+  (a rescan after your own landing says footfalled). A sale can sell some species and keep others aboard.
+
+**Discovery flags**
+- `WasDiscovered`, `WasMapped` and `WasFootfalled` are kept from your *first* scan of a body: after you sell,
+  a rescan says "discovered". Older journals lack `WasFootfalled`; treat it as unknown, not false.
+
+**Spansh and EDSM**
+- Spansh stamps bodies uploaded through EDDN with the journal's own event time. Your own upload therefore looks
+  like an update at the moment of your scan; the firsts watch allows `FIRSTS_OWN_GRACE` (120 s) for that.
+- Spansh's body search cannot filter on planetary mining locations, and Spansh stores only the mining
+  location count, not what a location holds or where it is. Search for them in the Local database.
+- Bodies last reported by a pre-Odyssey client (before `LEGACY_CUTOFF`, 2022-11-29) have no signals block and
+  thin-atmosphere worlds marked not landable: shown as "old data", never added to values.
+- A system Spansh lists may still 404 on its dump for a while (`NO_DUMP_RETRY`).
+
+**Fuel and the frame shift drive**
+- Fuel per jump = `MaxFuelPerJump` x (distance / range at this mass) ^ p. `FSD_POWER` holds p per drive size
+  (size 2 = 2.00 ... size 8 = 2.90, standard and SCO alike); the Caspian's Mk II SCO drive
+  (`FSD_POWER_ITEM`) is 2.5025. Guardian boosters add `GUARDIAN_BOOST` light years. Sources: EDCD
+  coriolis-data (`frame_shift_drive.json` "fuelpower", `guardian_fsd_booster.json` "jumpboost") and
+  EDDiscovery's EliteDangerousCore (`ModuleList.cs` "PowerConstant", which rounds the Mk II to 2.503).
+- `Loadout` is only written at login and at outfitting, so an `EngineerCraft` in between is applied by hand.
+  Jet-cone boosts wear modules but health only updates at the next `Loadout`.
+
+**Other**
+- `Shutdown` is written only on a clean quit; a crash writes nothing, so the last event is where a session
+  ended.
+- `CarrierLocation` is written at login and at a booked jump's departure, but only while the game runs; a
+  booked jump is assumed done 300 s after departure until confirmed (`CARRIER_SETTLE`).
+- `HullDamage` also reports fighters and SRVs (`PlayerPilot`, `Fighter`), and `HeatDamage` can repeat every few
+  seconds (one alert per 30 s).
+- A replay (re-read, legacy import, catch-up after a restart) delivers old events; anything spoken or
+  position-based must check `live_event(ts)`.

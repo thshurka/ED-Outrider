@@ -1,0 +1,1 @@
+{ "timestamp":"2026-09-20T19:13:39Z", "event":"NavRoute", "Route":[{"StarSystem":"Talvik Reach", "SystemAddress":3333333333, "StarPos":[1030.0, -25.5, 2030.0], "StarClass":"K"}, {"StarSystem":"Ossia", "SystemAddress":4444444444, "StarPos":[1041.0, -27.0, 2049.5], "StarClass":"M"}] }

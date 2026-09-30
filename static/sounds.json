@@ -1,6 +1,6 @@
 {
   "_about": [
-    "The alert sounds, shared by the page (built as WebAudio oscillators in page.js) and the server (rendered to WAV by ed_tts.render_sound for 'Play speech and sounds on this PC').",
+    "The alert sounds, shared by the page (built as WebAudio oscillators in page.js) and the server (rendered to WAV by outrider.tts.render_sound for 'Play speech and sounds on this PC').",
     "Each tone: freq (Hz), start and dur (s from the sound's start), type (sine, triangle, square, sawtooth), vol (peak gain), attack (s to the peak; it then fades out exponentially by the end), glideTo (Hz, an exponential glide over dur).",
     "lowpass (Hz) filters the sound's tones, except a tone marked dry. gain scales every sound."
   ],

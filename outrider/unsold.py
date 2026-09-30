@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ed_unsold.py -- How much unsold exploration and exobiology data are you carrying?
+outrider/unsold.py -- How much unsold exploration and exobiology data are you carrying?
 
 Scans Elite Dangerous journal files across one or more save directories, finds
 the most recent time you sold cartographic data and the most recent time you

@@ -5,18 +5,18 @@
 
 A small window, separate from Outrider (it does not need the server running):
 
-- Voice: any Piper voice installed in piper-voices/, with its speaker (for voices that have several)
+- Voice: any Piper voice installed in data/piper-voices/, with its speaker (for voices that have several)
   and a speed control.
 - Download: browse every Piper voice (the catalogue on Hugging Face), filter by language or name, and
-  download one into piper-voices/. Outrider's voice picker lists it too from then on.
-- Lines: play a random line from speech.json, from one alert and personality or any, filled in with
+  download one into data/piper-voices/. Outrider's voice picker lists it too from then on.
+- Lines: play a random line from resources/speech.json (or your [server] speech_file), from one alert and personality or any, filled in with
   made-up values and the names you want to be called, exactly as Outrider would say it (in the personality's
   own voice and pace when speech.json gives it one). Audition plays eight key alerts in a row per personality.
-  Cut this line bans the line just played (speech_banned.json, the same file the page's 👎 writes): Outrider
+  Cut this line bans the line just played (data/speech_banned.json, the same file the page's 👎 writes): Outrider
   and the lab never say it again.
 - Your own text: type anything and hear it; Save WAV keeps the audio.
 
-Needs Piper (pip install piper-tts, or install.sh); tkinter comes with Python on Windows and macOS, and is
+Needs Piper (pip install piper-tts, or scripts/install.sh); tkinter comes with Python on Windows and macOS, and is
 the python3-tk package on some Linux distributions. Audio plays through pw-play, paplay, aplay or ffplay on
 Linux, afplay on macOS and winsound on Windows.
 """
@@ -42,11 +42,11 @@ try:
 except ImportError:
     sys.exit("The voice lab needs tkinter: install your distribution's python3-tk package.")
 
-import ed_speech
-import ed_tts
+import outrider.speech
+import outrider.tts
 
-VOICES_DIR = ed_tts.VOICES_DIR
-SPEECH_FILE = os.path.join(ed_tts.HERE, "speech.json")
+VOICES_DIR = outrider.tts.VOICES_DIR
+SPEECH_FILE = os.path.join(outrider.RESOURCES_DIR, "speech.json")
 CATALOGUE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json?download=true"
 CATALOGUE_CACHE = os.path.join(VOICES_DIR, "voices.json")
 CATALOGUE_MAX_AGE = 7 * 86400
@@ -59,7 +59,7 @@ def _config():
     """ed_outrider.toml as a dict ({} without one, without tomllib (Python before 3.11) or when it is broken)."""
     try:
         import tomllib
-        with open(os.path.join(ed_tts.HERE, "ed_outrider.toml"), "rb") as f:
+        with open(os.path.join(outrider.ROOT, "ed_outrider.toml"), "rb") as f:
             cfg = tomllib.load(f)
         return cfg if isinstance(cfg, dict) else {}
     except Exception:
@@ -77,10 +77,10 @@ def configured_speed():
 
 def configured_speech_file():
     """The lines file Outrider speaks from: [server] speech_file in ed_outrider.toml, resolved as the server
-    does (~ expanded, relative to the script folder), else the shipped speech.json."""
+    does (~ expanded, relative to the repository folder), else the shipped resources/speech.json."""
     sv = _config().get("server")
     name = sv.get("speech_file") if isinstance(sv, dict) else None
-    return os.path.join(ed_tts.HERE, os.path.expanduser(str(name))) if name else SPEECH_FILE
+    return os.path.join(outrider.ROOT, os.path.expanduser(str(name))) if name else SPEECH_FILE
 
 
 class Player:
@@ -95,7 +95,7 @@ class Player:
         elif system == "Darwin" and shutil.which("afplay"):
             self.cmd = ["afplay"]
         else:   # the same players, in the same order, as Outrider's "Play speech and sounds on this PC"
-            found = ed_tts.find_player()
+            found = outrider.tts.find_player()
             self.cmd = found[1] if found else None
 
     @property
@@ -139,13 +139,13 @@ class Voices:
     MAX_LOADED = 2
 
     def __init__(self):
-        self.PiperVoice = ed_tts._import_piper()
+        self.PiperVoice = outrider.tts._import_piper()
         self.loaded = OrderedDict()   # least recently used first
         self.current = None
         self.lock = threading.Lock()
 
     def installed(self):
-        return ed_tts.installed_voices(VOICES_DIR)
+        return outrider.tts.installed_voices(VOICES_DIR)
 
     @staticmethod
     def speakers(name):
@@ -184,7 +184,7 @@ class Voices:
 
 def fetch_catalogue(force=False):
     """Piper's voices.json: {voice: {language, quality, num_speakers, files: {path: {size_bytes, md5_digest}}}}.
-    Kept in piper-voices/ for a week."""
+    Kept in data/piper-voices/ for a week."""
     if not force and os.path.exists(CATALOGUE_CACHE) and time.time() - os.path.getmtime(CATALOGUE_CACHE) < CATALOGUE_MAX_AGE:
         try:
             with open(CATALOGUE_CACHE, encoding="utf-8") as f:
@@ -214,11 +214,11 @@ def fetch_catalogue(force=False):
 
 
 def download(entry, progress):
-    """Download a catalogue entry's model and config into piper-voices/ (via .part files, checked against
+    """Download a catalogue entry's model and config into data/piper-voices/ (via .part files, checked against
     the catalogue's MD5 and moved into place only when both are complete, so an interrupted download never
-    looks installed or leaves anything behind: see ed_tts.download_voice_files). progress(done, total)."""
+    looks installed or leaves anything behind: see outrider.tts.download_voice_files). progress(done, total)."""
     files = [(p, m) for p, m in entry["files"].items() if p.endswith((".onnx", ".onnx.json"))]
-    ed_tts.download_voice_files(files, VOICES_DIR, progress)
+    outrider.tts.download_voice_files(files, VOICES_DIR, progress)
 
 
 def load_lines(path=None):
@@ -226,7 +226,7 @@ def load_lines(path=None):
     path = path or configured_speech_file()
     with open(path, encoding="utf-8") as f:
         doc = json.load(f)
-    lines, _ = ed_speech.apply_bans(doc.get("lines") or {}, ed_speech.read_bans(ed_speech.banned_path(path)))
+    lines, _ = outrider.speech.apply_bans(doc.get("lines") or {}, outrider.speech.read_bans(outrider.speech.banned_path(path)))
     return doc.get("styles") or {}, lines
 
 
@@ -320,7 +320,7 @@ class Lab:
         lf.columnconfigure(1, weight=1)
         lf.columnconfigure(3, weight=1)
         ttk.Label(lf, text="Alert").grid(row=0, column=0, sticky="w")
-        self.alert = ttk.Combobox(lf, state="readonly", values=[ANY_ALERT] + list(ed_speech.KEYS))
+        self.alert = ttk.Combobox(lf, state="readonly", values=[ANY_ALERT] + list(outrider.speech.KEYS))
         self.alert.set(ANY_ALERT)
         self.alert.grid(row=0, column=1, sticky="ew", padx=6)
         self.alert.bind("<<ComboboxSelected>>", lambda e: self.alert_changed())
@@ -333,7 +333,7 @@ class Lab:
         self.style.bind("<<ComboboxSelected>>", lambda e: self.style_changed())
         ttk.Label(lf, text="Call me").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.names = ttk.Entry(lf)
-        self.names.insert(0, ed_speech.DEFAULT_NAMES)
+        self.names.insert(0, outrider.speech.DEFAULT_NAMES)
         self.names.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
         ttk.Label(lf, text="comma separated; each {name} is a random one", foreground="#777").grid(row=1, column=2, columnspan=2, sticky="w", pady=(6, 0))
         self.when = ttk.Label(lf, text="", foreground="#777", wraplength=680)
@@ -407,7 +407,7 @@ class Lab:
     def refresh_installed(self, select=None):
         names = self.voices.installed()
         self.voice.configure(values=names)
-        want = select or self.voice.get() or (ed_tts.DEFAULT_VOICE if ed_tts.DEFAULT_VOICE in names else names[0] if names else "")
+        want = select or self.voice.get() or (outrider.tts.DEFAULT_VOICE if outrider.tts.DEFAULT_VOICE in names else names[0] if names else "")
         self.voice.set(want if want in names else "")
         self.voice_changed()
 
@@ -479,15 +479,15 @@ class Lab:
         return key if key == ANY_STYLE else key.replace("_profane", ", with profanity").capitalize()
 
     def style_changed(self):
-        """A personality with a voice of its own in speech.json (see ed_speech.style_voice): preselect it."""
+        """A personality with a voice of its own in speech.json (see outrider.speech.style_voice): preselect it."""
         chosen = self.style_keys[self.style.current()] if self.style.current() > 0 else None
-        voice, _ = ed_speech.style_voice(self.styles, chosen)
+        voice, _ = outrider.speech.style_voice(self.styles, chosen)
         if voice and voice != self.voice.get() and voice in self.voices.installed():
             self.refresh_installed(select=voice)
 
     def alert_changed(self):
         a = self.alert.get()
-        self.when.configure(text="" if a == ANY_ALERT else f"When: {ed_speech.KEYS.get(a, '')}")
+        self.when.configure(text="" if a == ANY_ALERT else f"When: {outrider.speech.KEYS.get(a, '')}")
 
     def chosen_style(self):
         return self.style_keys[self.style.current()] if self.style.current() > 0 else None
@@ -504,15 +504,15 @@ class Lab:
 
     def show_line(self, alert, style, line):
         """A line filled in and put in the text box, as Outrider would say it."""
-        values = dict(ALWAYS, **ed_speech.SAMPLES.get(alert, {}))
-        text = ed_speech.spoken_text(ed_speech.fill(line, values, self.names.get()))
+        values = dict(ALWAYS, **outrider.speech.SAMPLES.get(alert, {}))
+        text = outrider.speech.spoken_text(outrider.speech.fill(line, values, self.names.get()))
         self.text.delete("1.0", "end")
         self.text.insert("1.0", text)
         self.picked.configure(text=f"{alert} · {self.style_label(style)}", foreground="#777")
         self.last_pick = (alert, style, line)
         # a personality's own voice and pace in speech.json, as in Outrider (kept while this line is the text):
         # its voice wins over the lab's, its pace multiplies yours
-        voice, pace = ed_speech.style_voice(self.styles, style)
+        voice, pace = outrider.speech.style_voice(self.styles, style)
         self.line_pace = (self.current_text(), pace) if pace else None
         self.line_voice = (self.current_text(), voice, style.removesuffix("_profane")) if voice else None
 
@@ -530,13 +530,13 @@ class Lab:
         self.speak()
 
     def cut_line(self):
-        """Ban the random line on show, in speech_banned.json next to the speech file (the page's 👎 writes the same
+        """Ban the random line on show, in data/speech_banned.json (next to a speech file of your own; the page's 👎 writes the same
         file), and drop it from the lab's lists. The last line of a list stays, so no alert ever goes quiet."""
         if not self.last_pick:
             self.picked.configure(text="play a random line first, then cut it", foreground="#c0392b")
             return
         alert, style, line = self.last_pick
-        status, out = ed_speech.ban_line(self.speech_file, alert, line)
+        status, out = outrider.speech.ban_line(self.speech_file, alert, line)
         if status != 200:
             self.picked.configure(text=f"not cut: {out.get('error')}", foreground="#c0392b")
             return
@@ -549,12 +549,12 @@ class Lab:
 
     # ---- audition: eight key alerts in a row, per personality, each in its own voice ----
     def audition(self):
-        """The alerts in ed_speech.AUDITION for the chosen personality (or each one in turn, clean lines only),
+        """The alerts in outrider.speech.AUDITION for the chosen personality (or each one in turn, clean lines only),
         grouped by personality so each voice loads once, with a two-second gap between lines."""
         self.end_audition()
         chosen = self.chosen_style()
         styles = [chosen] if chosen else [s for s in self.style_keys[1:] if not s.endswith("_profane")]
-        steps = [(s, k) for s in styles for k in ed_speech.AUDITION
+        steps = [(s, k) for s in styles for k in outrider.speech.AUDITION
                  if any(isinstance(x, str) for x in (self.lines.get(k, {}).get(s) or []))]   # a pair without lines is skipped
         if not steps:
             self.picked.configure(text="no lines to audition", foreground="#c0392b")
@@ -574,7 +574,7 @@ class Lab:
         # the gap after this line loads the next personality's own voice, so the switch does not pause
         nxt = steps[i + 1][0] if i + 1 < len(steps) else None
         if nxt and nxt != style:
-            voice, _ = ed_speech.style_voice(self.styles, nxt)
+            voice, _ = outrider.speech.style_voice(self.styles, nxt)
             if voice and voice in self.voices.installed() and self.voices.PiperVoice:
                 self.run(lambda: self.voices.load(voice))
         self.speak(note=f"audition {i + 1} of {len(steps)}: {self.style_label(style)} · {key}",
@@ -591,7 +591,7 @@ class Lab:
 
     # ---- speaking ----
     def current_text(self):
-        return ed_speech.spoken_text(self.text.get("1.0", "end"))
+        return outrider.speech.spoken_text(self.text.get("1.0", "end"))
 
     def synth_args(self):
         """(voice, speaker, speed, personality pace, personality whose own voice it is): the speed is the slider

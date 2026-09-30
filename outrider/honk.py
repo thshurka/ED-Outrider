@@ -13,8 +13,8 @@ game sees ordinary key presses, under Wayland or X and through Proton alike. For
 The keys go to whichever window has focus: if you alt-tab away during a jump they land there instead,
 so the page's alerts dialog has a quick on/off.
 
-    python3 ed_honk.py --test 10     count down 10 s (click into the game), then press Primary Fire once
-    python3 ed_honk.py --show        print the binding it would press
+    python3 -m outrider.honk --test 10     count down 10 s (click into the game), then press Primary Fire once
+    python3 -m outrider.honk --show        print the binding it would press
 """
 import glob
 import os
@@ -24,7 +24,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+from . import ROOT   # the repository: ed_outrider.toml and .venv are there
+
 DEFAULT_KEY = "auto"   # read Primary Fire's keyboard binding from the active controls preset
 
 # Elite's key names -> evdev's, where they differ by more than the prefix
@@ -47,13 +48,13 @@ ELITE_KEYS = {
 
 
 def _import_evdev():
-    """evdev, from this interpreter or from a .venv next to the script; None if neither has it."""
+    """evdev, from this interpreter or from the repository's .venv; None if neither has it."""
     try:
         import evdev
         return evdev
     except ImportError:
         pass
-    venv = os.path.join(HERE, ".venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+    venv = os.path.join(ROOT, ".venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
     if os.path.isdir(venv) and venv not in sys.path:
         sys.path.append(venv)
         try:
@@ -323,7 +324,7 @@ def main(argv=None):
     cfg = {}
     try:   # ed_outrider's config, when it can be read: the same folders and key the server uses
         import tomllib
-        with open(os.path.join(HERE, "ed_outrider.toml"), "rb") as f:
+        with open(os.path.join(ROOT, "ed_outrider.toml"), "rb") as f:
             cfg = tomllib.load(f)
     except Exception:   # no file, no tomllib (Python before 3.11), a broken file
         pass
@@ -334,8 +335,8 @@ def main(argv=None):
         dirs = [live] if isinstance(live, str) else [d for d in live if isinstance(d, str)] if isinstance(live, list) else []
     if not dirs and sec("journals").get("live") is None:   # as the server does: auto-detect
         try:
-            import ed_unsold
-            dirs = ed_unsold.find_journal_dirs()[0]
+            from . import unsold
+            dirs = unsold.find_journal_dirs()[0]
         except Exception:
             dirs = []
     dirs = [os.path.expanduser(d) for d in dirs]

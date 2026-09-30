@@ -13,7 +13,7 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              scoopability, body and ring icons, notable bodies (ELW/WW/AW/terraformable), Spansh's
              credit estimate, your 🏁 first-discovery markers (sold / unsold / lost), bookmarks
   Here       every body in the current system: value as scanned and if mapped, gravity, atmosphere,
-             bio genera with 0/3..3/3 sampling progress and which species they could be (ed_bio.py
+             bio genera with 0/3..3/3 sampling progress and which species they could be (outrider/bio.py
              spawn rules plus BioScan's colour check, with credit values; "one of these" with a range
              when a body has fewer signals than possible genera), ring hotspots, codex entries,
              curiosities (ringed landables, close orbits, planet pairs...), your firsts, planetary mining
@@ -30,10 +30,10 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
   History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
              each death cost including exobiology), your most valuable finds; exports
-  Log        every journal event with a one-line summary (ed_log.py), filtered by category, time and
+  Log        every journal event with a one-line summary (outrider/log.py), filtered by category, time and
              text, read straight from the journal files and updated live
   Materials  engineering materials against their caps, and how many FSD injections and other
-             syntheses (limpets, SRV refuel and repair, Rhino rig restocks) you can make (ed_materials.py);
+             syntheses (limpets, SRV refuel and repair, Rhino rig restocks) you can make (outrider/materials.py);
              Mining sites: each body your SRV mined, with minerals and tons, saved rig spots, mining locations
   My firsts  unsold first discoveries, and visited systems nearby with work worth going back for
              (Left behind, including bio signals never probed); a daily Spansh check flags unsold
@@ -49,30 +49,30 @@ sales since, ship), fuel (jumps left simulated from your ship's mass and your ow
 scoopable your recent stars were, jumps since the last scoop and FSD boosts on hand), core modules under
 module_warn health, your
 carrier (distance, UC / Vista services), the latest codex first, unsold firsts, and the unsold
-cartographic + exobiology estimate from ed_unsold.py. Targeting a system plays a sound: fanfare if
+cartographic + exobiology estimate from outrider/unsold.py. Targeting a system plays a sound: fanfare if
 neither Spansh nor EDSM has heard of it, upbeat if it is not fully scanned, thud if you have been
 there or it is fully scanned, plus an alert if you are leaving unfinished work behind. Arriving
 somewhere undiscovered is announced by the voice (a sound only corrects a targeting call that was
 wrong). Desktop notifications are optional (🔔 alerts).
 
-Alerts can be spoken (🗣): with Piper (ed_tts.py) when it is installed, else the browser's voice, in
-the personalities of speech.json (ed_speech.py: business, sarcastic, sweet, with swearing versions at
+Alerts can be spoken (🗣): with Piper (outrider/tts.py) when it is installed, else the browser's voice, in
+the personalities of resources/speech.json (outrider/speech.py: business, sarcastic, sweet, with swearing versions at
 a chosen rate), calling you by the names you choose. Besides the alerts the voice can say signal
 counts as the FSS finds them, where the frame shift drive is taking you and whether that star is
 scoopable, brief you on arrival, after the FSS, on approach and on leaving a body, welcome you back
 after a break, debrief a ship loss and recap the session on quit, and it names the galactic region you cross into. Lines you tire of can be
-banned from the Spoken lines list (speech_banned.json). Lines go through a priority queue in
+banned from the Spoken lines list (data/speech_banned.json). Lines go through a priority queue in
 one browser window (danger first; the queue clears when the FSD charges). voice_lab.py is a separate
 window for trying voices and lines. Optionally the server plays the speech and the alert sounds itself
-(POST /api/say/play, /api/sound/play; static/sounds.json), so no click on the page is needed. Auto honk (ed_honk.py, Linux, optional) holds Primary Fire's
+(POST /api/say/play, /api/sound/play; static/sounds.json), so no click on the page is needed. Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
 keyboard binding on arriving by hyperspace so the Discovery Scanner fires, and says how many bodies
 it found. The voice can be hushed for a while (the page, or POST /api/hush: the state is the server's, so
-every window and device sees it), and a co-pilot button (ed_button.py, Linux, optional, read-only) asks the
+every window and device sees it), and a co-pilot button (outrider/button.py, Linux, optional, read-only) asks the
 speaking window for a status report, the last line again, or a hush until the next jump.
 
 The database backs itself up (a dated zip, the newest kept) at start when a day old and after quitting
 the game (each copy checked with quick_check and the zip with testzip before older ones rotate out), and
-every live journal is archived once into backups/journals/; --restore puts a zip back and --list-backups
+every live journal is archived once into data/backups/journals/; --restore puts a zip back and --list-backups
 lists them. Every request goes through a Host/Origin guard (request_guard), and a GET another site's page
 sends (Sec-Fetch-Site) is refused except OPEN_GETS (/api/status for overlays), so another web site cannot
 read the journals or trigger actions.
@@ -98,9 +98,12 @@ are remembered by path and byte offset, so a restart only reads what is new; leg
 imported once. Pass --rescan to rebuild everything from scratch.
 
 Settings come from ed_outrider.toml next to this script (see ed_outrider.toml.example; make one with
---write-config); flags and ED_JOURNALS override it, and nothing is required.
+--write-config); flags and ED_JOURNALS override it, and nothing is required. Relative paths in it are
+relative to this folder. The layout: outrider/ the modules, resources/ the shipped data (bio_rules.json,
+mining_odds.json, speech.json), data/ your own files (the database, browser_defaults.json,
+speech_banned.json, backups/, piper-voices/; git-ignored), docs/ the notes and screenshots.
 The page itself is static/page.html + page.css + page.js next to this script (edit and reload).
-Tests: python3 -m unittest discover tests; ed_bio.py --backtest scores the bio rules against
+Tests: python3 -m unittest discover tests; python3 -m outrider.bio --backtest scores the bio rules against
 your journals.
 
 Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp;
@@ -125,28 +128,29 @@ from glob import glob, escape as glob_escape
 
 from aiohttp import ClientSession, ClientTimeout, web
 
-try:  # the unsold-data estimate (and journal-folder detection) live in a script next to this one
-    import ed_unsold
+import outrider  # the package beside this script: ROOT, RESOURCES_DIR, DATA_DIR and the modules below
+try:  # the unsold-data estimate (and journal-folder detection)
+    import outrider.unsold
 except ImportError:
-    ed_unsold = None
+    outrider.unsold = None
 try:  # exobiology spawn rules: which species a body could host
-    import ed_bio
+    import outrider.bio
 except ImportError:
-    ed_bio = None
-import ed_materials  # engineering materials and synthesis recipes (no dependencies)
-import ed_tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
-import ed_speech     # the words for spoken alerts, per personality (speech.json)
-import ed_honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
-import ed_button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
+    outrider.bio = None
+import outrider.materials  # engineering materials and synthesis recipes (no dependencies)
+import outrider.tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
+import outrider.speech     # the words for spoken alerts, per personality (resources/speech.json)
+import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
+import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 try:  # one-line summaries of every journal event, for the Log view
-    import ed_log
+    import outrider.log
 except ImportError:
-    ed_log = None
+    outrider.log = None
 
 
-# Which deaths cost the ship (and its cartographic data): shared with ed_unsold so the
+# Which deaths cost the ship (and its cartographic data): shared with outrider.unsold so the
 # header and the per-system markers can never disagree about the same death.
-SHIP_SURVIVED_OPTIONS = ed_unsold.SHIP_SURVIVED_OPTIONS if ed_unsold else ("recover", "rejoin")
+SHIP_SURVIVED_OPTIONS = outrider.unsold.SHIP_SURVIVED_OPTIONS if outrider.unsold else ("recover", "rejoin")
 SHIP_LOSS_SQL = ("coalesce(option, 'rebuy') NOT IN (" +
                  ",".join("'%s'" % o for o in SHIP_SURVIVED_OPTIONS) + ")")
 
@@ -154,14 +158,11 @@ SHIP_LOSS_SQL = ("coalesce(option, 'rebuy') NOT IN (" +
 # Journal locations. LIVE_DIRS are tailed; LEGACY_DIRS are imported once.
 # --------------------------------------------------------------------------
 
-# Auto-detected (see ed_unsold.find_journal_dirs); --journals / --legacy / ED_JOURNALS override.
-LIVE_DIRS, LEGACY_DIRS = ed_unsold.find_journal_dirs() if ed_unsold else ([], [])
+# Auto-detected (see outrider.unsold.find_journal_dirs); --journals / --legacy / ED_JOURNALS override.
+LIVE_DIRS, LEGACY_DIRS = outrider.unsold.find_journal_dirs() if outrider.unsold else ([], [])
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(SCRIPT_DIR, "ed_outrider.sqlite")
-_OLD_DB = os.path.join(SCRIPT_DIR, "ed_nearby.sqlite")   # the name before the tool was called ED Outrider
-if not os.path.exists(DB_PATH) and os.path.exists(_OLD_DB):
-    os.replace(_OLD_DB, DB_PATH)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))   # the repository: relative config paths start here
+DB_PATH = os.path.join(outrider.DATA_DIR, "ed_outrider.sqlite")   # data/ holds your own files (git-ignored)
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "ed_outrider.toml")   # optional; see ed_outrider.toml.example
 
 SPANSH_SEARCH = "https://spansh.co.uk/api/systems/search"
@@ -239,9 +240,9 @@ MODULE_WARN = 80
 # The Nearby radius choices offered on the page (ly). Bigger spheres cost Spansh requests and page redraws:
 # ~1,500 systems at 100 ly out in the black, far more near the bubble.
 RADIUS_CHOICES = (20, 25, 30, 40, 50)
-# Spoken alerts: the Piper voice, and the one used when it is missing (see ed_tts.py).
-VOICE, VOICE_FALLBACK = ed_tts.DEFAULT_VOICE, ed_tts.DEFAULT_FALLBACK
-BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups")   # where backups go (git-ignored); journals are archived in its journals/
+# Spoken alerts: the Piper voice, and the one used when it is missing (see outrider/tts.py).
+VOICE, VOICE_FALLBACK = outrider.tts.DEFAULT_VOICE, outrider.tts.DEFAULT_FALLBACK
+BACKUP_DIR = os.path.join(outrider.DATA_DIR, "backups")   # where backups go (in data/, git-ignored); journals are archived in its journals/
 BACKUP_KEEP = 7            # dated database zips kept (outrider-<db name>-*.zip); the journal archive is never pruned
 BACKUP_EVERY_DAYS = 1.0    # an automatic backup at start when the last is older than this, and when the game quits (0 = off)
 SHUTDOWN_BACKUP_DELAY = 10  # s after a live Shutdown before its backup (the game is still closing its files)
@@ -257,15 +258,15 @@ BROWSER_SETTINGS = ("alerts", "alertSound", "alertSpeak", "speech", "speechStyle
                     "surfaceCfg", "moduleWarn")
 BROWSER_DEFAULTS_MAX = 64 * 1024   # bytes
 BROWSER_DEFAULTS_FILE = "browser_defaults.json"   # next to the database
-# Spoken alerts' wording: the lines file, and the personalities a browser starts with (see ed_speech.py).
-SPEECH_FILE = os.path.join(SCRIPT_DIR, "speech.json")
+# Spoken alerts' wording: the lines file, and the personalities a browser starts with (see outrider/speech.py).
+SPEECH_FILE = os.path.join(outrider.RESOURCES_DIR, "speech.json")
 SPEECH_STYLES, SPEECH_PROFANITY = ("business",), False
 SPEECH_PROFANITY_PCT = 50   # with profanity on: how often (%) a line comes from the swearing versions
 SPEECH_DANGER_BUSINESS = True   # hull, heat, interdiction, fuel and carrier-departure lines only from the business lists
 SPEECH_NAMES = "Boss, Hefay, Sir"   # what the voice calls you ({name}), one at random per line
-# Auto honk (see ed_honk.py): on arriving by hyperspace, hold a key bound to Primary Fire so the Discovery
+# Auto honk (see outrider/honk.py): on arriving by hyperspace, hold a key bound to Primary Fire so the Discovery
 # Scanner fires. The D-Scanner MUST be on PRIMARY FIRE in the active fire group when you jump.
-AUTOHONK = {"enabled": False, "key": ed_honk.DEFAULT_KEY, "delay": 2.0, "hold": 6.0, "skip_honked": True,
+AUTOHONK = {"enabled": False, "key": outrider.honk.DEFAULT_KEY, "delay": 2.0, "hold": 6.0, "skip_honked": True,
             "announce": True}   # announce: say the body count (or "all bodies were found") when it completes
 AUTOHONK_MAX_AGE = 30   # s: an arrival older than this is a journal being caught up on, not a live jump
 AUTOHONK_WAIT_MAX = 90  # s: how long the honk waits for you to close the galaxy map / FSS / a panel
@@ -406,8 +407,8 @@ SPEAK_MAPPED = False   # the "mapped" call-out after each planet's DSS mapping (
 SPEECH_SPEED = 1.0   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 # the player for the page's "Play speech and sounds on this PC" tick: auto (the first found), one by name, or off
 SERVER_PLAYER = "auto"
-# The co-pilot button (see ed_button.py): tap a status report, double tap say again, hold hush until the next jump.
-COPILOT = {"enabled": False, "device": "", "button": "", "hold_ms": ed_button.HOLD_MS, "double_ms": ed_button.DOUBLE_MS}
+# The co-pilot button (see outrider/button.py): tap a status report, double tap say again, hold hush until the next jump.
+COPILOT = {"enabled": False, "device": "", "button": "", "hold_ms": outrider.button.HOLD_MS, "double_ms": outrider.button.DOUBLE_MS}
 COPILOT_ACTIONS = ("status", "again", "hush", "replay")
 HUSH_MODES = {"10m": 600, "30m": 1800, "jump": None}   # s a timed hush lasts; "jump" lasts until you leave the system
 
@@ -509,10 +510,10 @@ def _config_str(v):
 
 
 def _config_player(v):
-    """[speech] server_player: one of ed_tts.PLAYER_CHOICES."""
-    if isinstance(v, str) and v.strip().lower() in ed_tts.PLAYER_CHOICES:
+    """[speech] server_player: one of outrider.tts.PLAYER_CHOICES."""
+    if isinstance(v, str) and v.strip().lower() in outrider.tts.PLAYER_CHOICES:
         return v.strip().lower()
-    raise ValueError("not a player: " + ", ".join(ed_tts.PLAYER_CHOICES))
+    raise ValueError("not a player: " + ", ".join(outrider.tts.PLAYER_CHOICES))
 
 
 def _config_button(v):
@@ -612,7 +613,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "radius": max(1.0, pick(args.radius, num("server", sv, "radius", _config_radius, None), 25.0)),
         "radius_choices": radius_choices,
         # a relative --db is relative to the current folder, like every other path flag; a relative db in the
-        # config file is relative to the script, so a copied folder keeps working
+        # config file is relative to the repository folder (where this script is), so a copied folder keeps working
         "db": (os.path.abspath(os.path.expanduser(args.db)) if args.db
                else os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("db") or DB_PATH)))),
         "unsold_warn": num("defaults", df, "unsold_warn", int, UNSOLD_WARN),
@@ -668,6 +669,16 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
     }
 
 
+def _root_relative(path):
+    """A path inside the repository as the config file writes it: relative to it (resources/speech.json,
+    data/ed_outrider.sqlite); anything elsewhere stays absolute."""
+    try:
+        rel = os.path.relpath(path, SCRIPT_DIR)
+    except ValueError:   # another drive (Windows)
+        return path
+    return path if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel) else rel
+
+
 def config_text(st):
     """The effective settings as a TOML document (what --write-config writes)."""
     q = lambda v: '"' + str(v).replace("\\", "/").replace('"', '\\"') + '"'
@@ -688,8 +699,8 @@ radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: w
 backup_dir = {q(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
 backup_keep = {st["backup_keep"]}   # dated database zips kept (the journal archive is never pruned)
 backup_every_days = {st["backup_every_days"]:g}   # automatic backup at start when the last is older than this, and when the game quits (0 = off)
-speech_file = {q(os.path.basename(st["speech_file"]) if os.path.dirname(st["speech_file"]) == SCRIPT_DIR else st["speech_file"])}   # the spoken alerts' lines, per personality
-db = {q(os.path.basename(st["db"]) if os.path.dirname(st["db"]) == SCRIPT_DIR else st["db"])}
+speech_file = {q(_root_relative(st["speech_file"]))}   # the spoken alerts' lines, per personality
+db = {q(_root_relative(st["db"]))}
 
 [defaults]   # what a browser uses until its user changes it (page settings stay per browser)
 unsold_warn = {st["unsold_warn"]}     # amber "worth selling soon", credits on board
@@ -706,7 +717,7 @@ rig_spacing = {st["rig_spacing"]:g}   # m: the ring round a Rhino mining rig (an
 surface_map_min = {st["surface_map_min"]:g}   # m: the surface map never shows less than this across
 surface_map_strip = {"true" if st["surface_map_strip"] else "false"}   # also a small copy of the map in the on-body strip
 rig_warn = {st["rig_warn"]:g}   # m: say so when a mining rig is this far from the Rhino (again at 4,500; the game destroys it at 5,000)
-voice = {q(st["voice"])}          # spoken alerts: Piper voice (downloaded into piper-voices/ on first use; one picked on the page wins)
+voice = {q(st["voice"])}          # spoken alerts: Piper voice (downloaded into data/piper-voices/ on first use; one picked on the page wins)
 voice_fallback = {q(st["voice_fallback"])}  # used while the voice above is missing
 speech_styles = [{", ".join(q(x) for x in st["speech_styles"])}]   # spoken alerts' personalities: any of the styles in the speech file
 speech_profanity = {"true" if st["speech_profanity"] else "false"}   # also use the swearing versions (sarcastic, sweet)
@@ -727,7 +738,7 @@ watch_firsts = {"true" if st["watch_firsts"] else "false"}   # check your unsold
 [speech]   # for the page's "Play speech and sounds on this PC" tick (per browser, off until ticked)
 server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay, aplay, ffplay found), one of those, or off (Linux)
 
-[autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see ed_honk.py)
+[autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see outrider/honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
 # and Primary Fire needs a keyboard binding (key = "auto" reads it, modifiers too, from your controls preset).
 enabled = {"true" if st["autohonk"]["enabled"] else "false"}   # the page's alerts dialog can switch it on and off too
@@ -737,11 +748,11 @@ hold = {st["autohonk"]["hold"]:g}    # seconds to hold the trigger (the scanner 
 skip_honked = {"true" if st["autohonk"]["skip_honked"] else "false"}   # leave systems you have already honked alone
 announce = {"true" if st["autohonk"]["announce"] else "false"}   # say "System scan completed, 12 bodies discovered" (or all found) afterwards
 
-[copilot]   # one HOTAS or keyboard button for the voice (Linux, read-only; see ed_button.py): tap a status report, double tap the last line again, hold hush until the next jump
+[copilot]   # one HOTAS or keyboard button for the voice (Linux, read-only; see outrider/button.py): tap a status report, double tap the last line again, hold hush until the next jump
 # Unbind the button in Elite's controls. On an X-56 avoid the latching toggles and the mode wheel (they read as held).
 # Joysticks are readable through uaccess; a keyboard or mouse needs the input group.
 enabled = {"true" if st["copilot"]["enabled"] else "false"}
-device = {q(st["copilot"]["device"])}   # a part of the device's name, or a /dev/input/by-id/... path (python3 ed_button.py --listen lists them)
+device = {q(st["copilot"]["device"])}   # a part of the device's name, or a /dev/input/by-id/... path (python3 -m outrider.button --listen lists them)
 button = {q(st["copilot"]["button"])}   # the button's evdev name (e.g. BTN_TRIGGER_HAPPY5) or code number, as --listen prints it
 hold_ms = {st["copilot"]["hold_ms"]}   # ms held (or more) that make a hold
 double_ms = {st["copilot"]["double_ms"]}   # ms between a tap's release and the next press that make a double tap
@@ -787,7 +798,7 @@ RANK_NAMES = {   # the two ranks an explorer cares about
     "Exobiologist": ["Directionless", "Mostly Directionless", "Compiler", "Collector", "Cataloguer", "Taxonomist",
                      "Ecologist", "Geneticist", "Elite", "Elite I", "Elite II", "Elite III", "Elite IV", "Elite V"],
 }
-# Engineering materials: the login snapshot and everything that adds or spends them (see ed_materials).
+# Engineering materials: the login snapshot and everything that adds or spends them (see outrider.materials).
 # Flying to and from a body: the approach briefing, the leaving-a-body warning (and what you touched down on).
 BODY_EVENTS = ("ApproachBody", "LeaveBody", "Touchdown")
 # The SRV on a body, and what its refinery collects (1 t per MiningRefined): "Mined previously" per body (own_mined).
@@ -812,7 +823,7 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 33: what the SRV's refinery collected on each body (own_mined: "Mined previously").
 # 34: nav-beacon scans make no own_firsts rows; Vista Genomics sales keep their BioData species (bio_sales.bio_data).
 PARSER_VERSION = 34
-# Scans read off a nav beacon (as ed_unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
+# Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
 SCOOPABLE = set("OBAFGKM")
@@ -844,7 +855,7 @@ MINING = "$PlanetaryMiningLocation_Name;"   # planetary mining locations (Rhino 
 
 # Planetary mining odds (mining_odds.json, from the Elite Dangerous Field Manual's survey by CMDR Grumlop, CC BY-SA 4.0):
 # the share of each ground type's surveyed mining locations that carried each material. Odds, not a body's contents.
-MINING_ODDS_FILE = os.path.join(SCRIPT_DIR, "mining_odds.json")
+MINING_ODDS_FILE = os.path.join(outrider.RESOURCES_DIR, "mining_odds.json")
 MINING_TOP = 6             # materials a tooltip lists
 MINING_FEW = 30            # fewer surveyed locations than this: "few reports"
 # a body record's planet class (Spansh's names, which own scans are normalised to; the journal's too) -> ground
@@ -1270,7 +1281,7 @@ SPANSH_TERRAFORM = {"Candidate for terraforming": "Terraformable", "Terraforming
 
 
 def ed_from_dump(b):
-    """The fields ed_unsold.body_value prices by, from a Spansh dump body; None if it cannot be priced
+    """The fields outrider.unsold.body_value prices by, from a Spansh dump body; None if it cannot be priced
     (a star or planet class, or a mass, missing)."""
     st = b.get("subType") or ""
     if b.get("type") == "Star":
@@ -1301,16 +1312,16 @@ def carto_values(r, scanned, f, scan_state, map_state, odyssey=True):
     `scan_state` / `map_state` are pickup_judge verdicts (unsold / sold / lost) for your latest scan
     and your latest map; None when you have not scanned or mapped. Lost data counts as recoverable
     (scan and map it again); sold data is done. Bodies with pricing fields ("ed", from your scan or a
-    Spansh dump) use ed_unsold.body_value; the rest fall back to Spansh's search estimates.
+    Spansh dump) use outrider.unsold.body_value; the rest fall back to Spansh's search estimates.
     """
     planet = r.get("type") == "Planet"
     first_disc = bool(f and f["was_discovered"] == 0)
     first_map = bool(f and f["was_mapped"] == 0)
-    if r.get("ed") and ed_unsold:
+    if r.get("ed") and outrider.unsold:
         def price(bonus):
             body = dict(r["ed"], first_discovered=first_disc and bonus, first_mapped=first_map and bonus)
-            return (ed_unsold.body_value(body, False, False, odyssey),
-                    ed_unsold.body_value(body, True, False, odyssey) if planet else None)
+            return (outrider.unsold.body_value(body, False, False, odyssey),
+                    outrider.unsold.body_value(body, True, False, odyssey) if planet else None)
         (scan_b, map_b), (scan_p, map_p) = price(True), price(False)
     else:   # Spansh's search-level estimates (scan, scan + map), no bonuses in them
         scan_b = scan_p = r.get("scan_value") or 0
@@ -1478,7 +1489,7 @@ def record_from_search(system, b):
 def genus_label(g):
     """A genus from a Spansh dump ({name: ...} or '$Codex_Ent_..._Genus_Name;') -> its display name."""
     name = g.get("name") or g.get("genus") if isinstance(g, dict) else g
-    return ed_bio.genus_from_id(name) if ed_bio else name
+    return outrider.bio.genus_from_id(name) if outrider.bio else name
 
 
 def record_from_dump(system, b):
@@ -1503,7 +1514,7 @@ def record_from_dump(system, b):
         "temperature": b.get("surfaceTemperature"), "volcanism": b.get("volcanismType"),
         # Spansh lists the DSS's genera as objects in some dumps and as bare genus codes in others
         "genera": [genus_label(g) for g in (b.get("signals") or {}).get("genuses") or [] if g],
-        # what the exobiology rules ask about beyond the basics (see ed_bio)
+        # what the exobiology rules ask about beyond the basics (see outrider.bio)
         "body_id": b.get("bodyId"), "luminosity": b.get("luminosity"),
         "parents": [p["Star"] for p in b.get("parents") or [] if "Star" in p],
         "orbital_period_s": round(b["orbitalPeriod"] * 86400) if b.get("orbitalPeriod") else None,
@@ -1564,7 +1575,7 @@ def record_from_scan(ev):
         "atmo_comp": ({c["Name"]: c["Percent"] for c in ev.get("AtmosphereComposition") or []}
                       if "AtmosphereComposition" in ev else None),
         "materials": surface_materials(ev.get("Materials")),
-        # what ed_unsold.body_value needs to price it
+        # what outrider.unsold.body_value needs to price it
         "ed": {k: ev.get(k) for k in ("StarType", "StellarMass", "PlanetClass", "TerraformState", "MassEM")},
     }
 
@@ -1917,7 +1928,7 @@ class Journals:
         self.jump_range = meta_get(db, "jump_range")
         # {name, fid, credits (at the last LoadGame), login_ts, earned (exploration sales since)}
         self.commander = meta_get(db, "commander")
-        self.materials = meta_get(db, "materials") or ed_materials.new_state()
+        self.materials = meta_get(db, "materials") or outrider.materials.new_state()
         self.hull = meta_get(db, "hull")            # {pct, ts}: your ship's hull, from Loadout / HullDamage
         # core module health per ShipID (S5): {ship id: {"ts": the Loadout, "mods": {slot: {label, item, health, ts,
         # boosts: jet-cone boosts since that reading}}}}, from Loadout, AfmuRepairs and repairs
@@ -2102,7 +2113,7 @@ class Journals:
         if name == "EngineerCraft":
             self.engineer_craft(ev, ts)
         if name in MATERIAL_EVENTS:
-            if ed_materials.apply(self.materials, ev):
+            if outrider.materials.apply(self.materials, ev):
                 meta_set(self.db, "materials", self.materials)
                 self.materials_changed = True
             # no Synthesis mends the ship's hull: "Repair Basic" is the SRV's repair (only limpets and stations
@@ -2262,28 +2273,28 @@ class Journals:
         (region_entered, read by State.arrival_facts) and a "region" moment speaks it when the briefing does not.
         Both regions join regions_said, so hopping back and forth along a border says nothing more. Nothing
         outside the region map, or when the previous position has no coordinates."""
-        if not ed_bio or prev.get("x") is None or x is None:
+        if not outrider.bio or prev.get("x") is None or x is None:
             return
-        old, new = ed_bio.region_name(prev["x"], prev["y"], prev["z"]), ed_bio.region_name(x, y, z)
+        old, new = outrider.bio.region_name(prev["x"], prev["y"], prev["z"]), outrider.bio.region_name(x, y, z)
         if not new or new == old:
             return
         said, self.regions_said = new in self.regions_said, self.regions_said | {r for r in (old, new) if r}
         if said:
             return
-        count = region_codex_count(self.db, new, ed_bio.region_number(x, y, z))
+        count = region_codex_count(self.db, new, outrider.bio.region_number(x, y, z))
         self.region_entered = {"id64": id64, "ts": ts, "region": new, "spoken": region_spoken(new), "count": count}
         self.moment("region", ts, system=id64, region=new, spoken=region_spoken(new), count=count)
 
     def note_jumponium(self, system, ev, ts):
-        """A new landable body carrying a material your FSD injections are short of (ed_materials.jumponium_short),
+        """A new landable body carrying a material your FSD injections are short of (outrider.materials.jumponium_short),
         if it beats this system's best so far (a scarcer material, or a richer share of the same). Said with the
         FSS debrief (take_jumponium), or alone once the FSS is already done here, or when you leave or close the
         FSS unfinished (flush_jumponium). Nothing while the material counts are stale."""
         m = self.materials or {}
         if not m.get("snapshot_ts") or materials_stale(m, self.commander):
             return
-        short = ed_materials.jumponium_short(m.get("counts") or {})
-        pick = ed_materials.jumponium_pick(ev.get("Materials"), short)
+        short = outrider.materials.jumponium_short(m.get("counts") or {})
+        pick = outrider.materials.jumponium_pick(ev.get("Materials"), short)
         if not pick:
             return
         j = self.jumponium
@@ -2291,7 +2302,7 @@ class Journals:
             return   # a body as good or better was already found here
         self.jumponium = dict(pick, system=system, body_id=ev["BodyID"], said=False,
                               body=short_name(ev.get("StarSystem") or (self.pos or {}).get("name"), ev.get("BodyName") or ""),
-                              name=ed_materials.display_name(m, pick["material"]))
+                              name=outrider.materials.display_name(m, pick["material"]))
         la = self.last_all_found
         if la and la["id64"] == system:   # the FSS debrief has been and gone: say it alone
             self.flush_jumponium(ts)
@@ -2902,7 +2913,7 @@ class Journals:
                     self.moment("scan", ts, system=system, body_id=ev["BodyID"])
                     if ev.get("Landable") and ev.get("Materials"):
                         self.note_jumponium(system, ev, ts)
-                # a nav-beacon scan's Was* flags are not the game's record of the body (ed_unsold skips them too):
+                # a nav-beacon scan's Was* flags are not the game's record of the body (outrider.unsold skips them too):
                 # it must not make a first discovery, a footfall flag or an unsold rescan time
                 if ev.get("ScanType") not in NAV_BEACON_SCANS:
                     self.db.execute(
@@ -3075,12 +3086,12 @@ def region_spoken(name):
 def region_codex_count(db, region, number):
     """Species logged in your codex in other regions, not yet in this one, that the bio rules let grow here (a
     species the rules do not know is left out): what a crossing into `region` could add. 0 when none or unknown."""
-    if not ed_bio or not region:
+    if not outrider.bio or not region:
         return 0
     logged = {(r[0] or "").strip().lower().split(" - ")[0].strip()
               for r in db.execute("SELECT DISTINCT name FROM codex WHERE region IS NOT NULL AND region != ?", (region,))}
     here = codex_species(db, region)[1]
-    return sum(1 for sp in logged - here if sp and ed_bio.region_allows(sp, number))
+    return sum(1 for sp in logged - here if sp and outrider.bio.region_allows(sp, number))
 
 
 def codex_species(db, region):
@@ -3120,7 +3131,7 @@ def sale_species(bio_data):
 
 def organic_replay(db, until=None):
     """Every completed sample run's fate, replayed in time order against the Vista Genomics sales and deaths (all
-    of them, or those before `until`), by ed_unsold's rule: each BioData entry of a sale takes one run of its species
+    of them, or those before `until`), by outrider.unsold's rule: each BioData entry of a sale takes one run of its species
     out (a paid bonus takes an x5 run first, one where your first scan of the body said nobody had set foot there,
     no bonus an x1 run first; the earliest done of those), the runs a sale does not name stay aboard, and any death
     takes every run aboard (exobiology data dies with you, ship or not). A sale stored before bio_sales kept its
@@ -3227,7 +3238,7 @@ def pickup_judge(db, system):
         """`first`: when you first scanned (or mapped) the body. A sale between that and `pickup` already bought
         the body, so a later rescan (an arrival AutoScan, a return visit) is sold data, not new data -- unless
         the ship was lost between the first scan and that sale: the data died with it and the sale could not
-        include it (as ed_unsold judges it)."""
+        include it (as outrider.unsold judges it)."""
         if not pickup:
             return "unsold", None
         earlier = next((t for t in sales if first and first < t < pickup
@@ -3293,14 +3304,14 @@ def own_firsts(db, id64, system):
 
 def firsts_body_value(row, mapped):
     """What a body on the rescan checklist pays (an own_firsts row with its own_bodies record as body_record), as
-    top_finds and lost_bodies value it: ed_unsold.body_value with the first-discovery and first-mapped bonuses you
-    earned there, without the efficiency bonus. 0 with no scan record (or no ed_unsold)."""
+    top_finds and lost_bodies value it: outrider.unsold.body_value with the first-discovery and first-mapped bonuses you
+    earned there, without the efficiency bonus. 0 with no scan record (or no outrider.unsold)."""
     raw = row["body_record"] if "body_record" in row.keys() else None
     rec = json.loads(raw) if raw else {}
-    if not ed_unsold or not rec.get("ed"):
+    if not outrider.unsold or not rec.get("ed"):
         return 0
     body = dict(rec["ed"], first_discovered=row["was_discovered"] == 0, first_mapped=row["was_mapped"] == 0)
-    return ed_unsold.body_value(body, mapped, False, True)
+    return outrider.unsold.body_value(body, mapped, False, True)
 
 
 def firsts_recovery(disc, disc_states, mapped, map_states, losses, system=None):
@@ -3693,12 +3704,12 @@ def _bio_body(r, star, ctx):
 
 def bio_guess(r, star=None, genera=None, ctx=None):
     """What a body's bio signals could be: (upper-bound credits, genus groups) or (None, [])."""
-    if not ed_bio or r.get("type") != "Planet":
+    if not outrider.bio or r.get("type") != "Planet":
         return None, []
-    cands = ed_bio.predict(_bio_body(r, star, ctx), ctx)
+    cands = outrider.bio.predict(_bio_body(r, star, ctx), ctx)
     if not cands and not genera:
         return None, []
-    val, groups = ed_bio.potential(cands, signals=r.get("bio") or None, genera=genera)
+    val, groups = outrider.bio.potential(cands, signals=r.get("bio") or None, genera=genera)
     return (val if any(g.get("value") for g in groups) else None), groups
 
 
@@ -3723,15 +3734,15 @@ def bio_options(r, star=None, ctx=None, known=()):
     `known`: genera you sampled there without a DSS; each accounts for one signal and is no longer an option."""
     known = set(known or ())
     n = (r.get("bio") or 0) - len(known)
-    if not ed_bio or r.get("type") != "Planet" or n <= 0:
+    if not outrider.bio or r.get("type") != "Planet" or n <= 0:
         return None
-    groups = [g for g in ed_bio.by_genus(ed_bio.predict(_bio_body(r, star, ctx), ctx)) if g["genus"] not in known]
+    groups = [g for g in outrider.bio.by_genus(outrider.bio.predict(_bio_body(r, star, ctx), ctx)) if g["genus"] not in known]
     if len(groups) <= n:
         return None
     lows = sorted(g.get("min_value") or 0 for g in groups)
     return {"low": sum(lows[:n]), "high": sum(g.get("value") or 0 for g in groups[:n]),
             "genera": [{"genus": g["genus"], "best": g["best"], "value": g["value"],
-                        "species": [ed_bio.short_species(x["name"], g["genus"]) for x in g["species"]]} for g in groups]}
+                        "species": [outrider.bio.short_species(x["name"], g["genus"]) for x in g["species"]]} for g in groups]}
 
 
 # Odyssey's legacy/live split (29 Nov 2022): body data reported before it came from pre-Odyssey clients, which marked
@@ -3746,12 +3757,12 @@ def stale_bio_groups(r, star=None, ctx=None):
     scan replaces the Spansh record (it has no `updated`), so a body you have scanned is never one of these."""
     if not stale_bio_candidate(r):
         return []
-    return ed_bio.by_genus(ed_bio.predict(_bio_body(r, star, ctx), ctx))
+    return outrider.bio.by_genus(outrider.bio.predict(_bio_body(r, star, ctx), ctx))
 
 
 def stale_bio_candidate(r):
     """stale_bio_groups' checks short of the rules: cheap, so a caller can skip building the bio context."""
-    if not ed_bio or r.get("type") != "Planet" or r.get("landable") or r.get("signals_known") is not False:
+    if not outrider.bio or r.get("type") != "Planet" or r.get("landable") or r.get("signals_known") is not False:
         return False
     updated = r.get("updated")
     if not isinstance(updated, str) or not updated[:10] or updated[:10] >= LEGACY_CUTOFF:
@@ -4256,12 +4267,12 @@ class State:
         self.target_seq = 0
         self.target_task = None
         self.searcher = None       # set once the Searcher exists
-        self.speaker = None        # ed_tts.Speaker, set at start (None in tests)
-        self.player = None         # ed_tts.LinePlayer: the tick that plays speech and sounds here (None in tests)
-        self.sounds = ed_tts.SoundBank()   # static/sounds.json rendered to WAV for it
-        self.speech = None         # ed_speech.SpeechLines, set at start (None in tests)
-        self.honker = None         # ed_honk.Honker, set at start (None in tests)
-        self.button = None         # ed_button.ButtonWatch when [copilot] enabled (None otherwise and in tests)
+        self.speaker = None        # outrider.tts.Speaker, set at start (None in tests)
+        self.player = None         # outrider.tts.LinePlayer: the tick that plays speech and sounds here (None in tests)
+        self.sounds = outrider.tts.SoundBank()   # static/sounds.json rendered to WAV for it
+        self.speech = None         # outrider.speech.SpeechLines, set at start (None in tests)
+        self.honker = None         # outrider.honk.Honker, set at start (None in tests)
+        self.button = None         # outrider.button.ButtonWatch when [copilot] enabled (None otherwise and in tests)
         # the voice's hush ({mode, until, sys}): here, not per browser, so the co-pilot button, a tablet and the
         # window that is speaking all see the same one. In memory only: a restart ends it
         self.hush = None
@@ -4291,7 +4302,7 @@ class State:
         self._sampling_key = None
         self.unsold = None         # compute_unsold() result
         self.unsold_log = []       # [(finished at, result)]: the last few good estimates (sale estimates)
-        self.unsold_dirty = ed_unsold is not None
+        self.unsold_dirty = outrider.unsold is not None
         self.unsold_at = 0.0
         self.unsold_from = 0.0     # when the estimate in self.unsold was started (wall clock): maybe_sale_left
         self.unsold_task = None
@@ -4411,7 +4422,7 @@ class State:
                          "speak_mapped": SPEAK_MAPPED,
                          "surface_alt": SURFACE_ALT, "rig_spacing": RIG_SPACING, "surface_map_min": SURFACE_MAP_MIN,
                          "surface_map_strip": SURFACE_MAP_STRIP, "rig_warn": RIG_WARN},
-            "bio_rules": ed_bio.rules_info() if ed_bio else None,
+            "bio_rules": outrider.bio.rules_info() if outrider.bio else None,
             "fuel": self.fuel_summary(),
             "ship": self.journals.ship,
             "carrier": self.carrier_summary(),
@@ -4750,7 +4761,7 @@ class State:
             if not s:
                 s = out[p["species"]] = {"species": p["species_name"] or p["species"], "genus": p["genus_name"],
                                          "samples": p["samples"], "current": cur == (h["system"], h["body_id"], p["species"]),
-                                         "need": ed_bio.colony_distance(p["genus"], p["genus_name"]) if ed_bio else None,
+                                         "need": outrider.bio.colony_distance(p["genus"], p["genus_name"]) if outrider.bio else None,
                                          "points": []}
             d = surface_m(h["lat"], h["lon"], p["lat"], p["lon"], h["radius"])
             s["points"].append({"n": p["n"], "lat": p["lat"], "lon": p["lon"], "dist": round(d)})
@@ -4827,8 +4838,8 @@ class State:
                 # your lines and your settings: extras, so one that cannot be read is a warning, never a failed
                 # backup (the database is what the zip is for)
                 extra_failed = []
-                banned = ed_speech.banned_path(self.speech_path) if self.speech_path else None
-                for src_path, arc in ((self.speech_path, "speech.json"), (banned, ed_speech.BANNED_FILE),
+                banned = outrider.speech.banned_path(self.speech_path) if self.speech_path else None
+                for src_path, arc in ((self.speech_path, "speech.json"), (banned, outrider.speech.BANNED_FILE),
                                       (self.config_path, "ed_outrider.toml")):
                     if not src_path or not os.path.exists(src_path):
                         continue
@@ -4950,7 +4961,7 @@ class State:
         (the page shows it at 2 of 3, or when the run is worth your bio threshold)."""
         st, pos = self.journals.status_json or {}, self.journals.pos
         ob = self.on_body()
-        if not ob or not ed_bio:
+        if not ob or not outrider.bio:
             return None
         run = self.db.execute("SELECT system, body_id, species, genus_name, species_name, samples FROM own_organic "
                               "WHERE done_ts IS NULL ORDER BY ts DESC LIMIT 1").fetchone()
@@ -4966,11 +4977,11 @@ class State:
             return None
         pts = [dict(r) for r in self.db.execute("SELECT genus, lat, lon, n FROM sample_points WHERE system=? AND body_id=? AND species=?",
                                                 (run["system"], run["body_id"], run["species"]))]
-        need = ed_bio.colony_distance(pts[0]["genus"] if pts else None, run["genus_name"])
+        need = outrider.bio.colony_distance(pts[0]["genus"] if pts else None, run["genus_name"])
         out = {"genus": run["genus_name"], "species": run["species_name"], "samples": run["samples"], "need": need,
                "points": len(pts), "nearest": None, "to_go": None, "clear": None}
         if pts and need:
-            nearest = min(ed_bio.surface_distance(st["lat"], st["lon"], p["lat"], p["lon"], st["planet_radius"]) for p in pts)
+            nearest = min(outrider.bio.surface_distance(st["lat"], st["lon"], p["lat"], p["lon"], st["planet_radius"]) for p in pts)
             out.update(nearest=round(nearest), to_go=max(0, round(need - nearest)), clear=nearest >= need)
         return out
 
@@ -4981,7 +4992,7 @@ class State:
         where = self.locate(run["system"])
         sysname = where[0] if where else None
         f = self.db.execute("SELECT was_footfalled FROM own_firsts WHERE system=? AND body_id=?", (run["system"], run["body_id"])).fetchone()
-        v = ed_bio.species_value(run["species_name"])
+        v = outrider.bio.species_value(run["species_name"])
         return {"species": run["species_name"], "genus": run["genus_name"], "samples": run["samples"],
                 "body": short_name(sysname, body["name"]) if body and sysname else body["name"] if body else None,
                 "system": sysname if run["system"] != self.journals.pos["id64"] else None,
@@ -5012,10 +5023,10 @@ class State:
     def region_info(self):
         """The galactic region you are in (codex entries are per region) and whether it is a nebula zone."""
         pos = self.journals.pos
-        if not pos or not ed_bio:
+        if not pos or not outrider.bio:
             return None
-        name = ed_bio.region_name(pos["x"], pos["y"], pos["z"])
-        return {"name": name, "nebula": bool(ed_bio.in_nebula({"name": pos["name"], "x": pos["x"], "y": pos["y"], "z": pos["z"]}))}
+        name = outrider.bio.region_name(pos["x"], pos["y"], pos["z"])
+        return {"name": name, "nebula": bool(outrider.bio.in_nebula({"name": pos["name"], "x": pos["x"], "y": pos["y"], "z": pos["z"]}))}
 
     def moments_summary(self):
         """The latest journal moments for the page's alerts, with scans and bio signals priced: the page
@@ -5040,8 +5051,8 @@ class State:
                          subtype=rec.get("subtype"), terraformable=bool(rec.get("terraformable")),
                          landable=bool(rec.get("landable")), first_discovered=rec.get("was_discovered") is False,
                          notable=NOTABLE_PLANETS.get(rec.get("subtype")))
-                if rec.get("ed") and ed_unsold:
-                    m["base_value"] = ed_unsold.body_value(dict(rec["ed"], first_discovered=False, first_mapped=False),
+                if rec.get("ed") and outrider.unsold:
+                    m["base_value"] = outrider.unsold.body_value(dict(rec["ed"], first_discovered=False, first_mapped=False),
                                                            True, False, True)
                 if m["kind"] == "bio":
                     if m["system"] not in ctxs:
@@ -5103,7 +5114,7 @@ class State:
             else:
                 extra.update(bb)
                 if kind == "bio_done":
-                    v = ed_bio.species_value(m.get("species")) if ed_bio else None
+                    v = outrider.bio.species_value(m.get("species")) if outrider.bio else None
                     extra["value"] = v * bb["factor"] if v else None
         elif kind == "approach":
             extra.update(self.approach_facts(sid, m["body_id"], m.get("body_name")))
@@ -5140,8 +5151,8 @@ class State:
         f = self.db.execute("SELECT was_discovered, was_mapped FROM own_firsts WHERE system=? AND body_id=?",
                             (id64, body_id)).fetchone()
         value = None
-        if rec.get("ed") and ed_unsold:
-            value = ed_unsold.body_value(dict(rec["ed"], first_discovered=bool(f and f["was_discovered"] == 0),
+        if rec.get("ed") and outrider.unsold:
+            value = outrider.unsold.body_value(dict(rec["ed"], first_discovered=bool(f and f["was_discovered"] == 0),
                                               first_mapped=bool(f and f["was_mapped"] == 0)), True, False, True)
         return {"body": short_name(where[0], row["name"]) if where else row["name"], "value": value}
 
@@ -5265,8 +5276,8 @@ class State:
                     bio = {"body": r["name"], "value": val}
             if r["name"] in mapped:
                 continue
-            value = ed_unsold.body_value(dict(r["ed"], first_discovered=False, first_mapped=False), True, False, True) \
-                if r.get("ed") and ed_unsold else r.get("value")
+            value = outrider.unsold.body_value(dict(r["ed"], first_discovered=False, first_mapped=False), True, False, True) \
+                if r.get("ed") and outrider.unsold else r.get("value")
             worth.append({"body": r["name"], "subtype": r.get("subtype"), "terraformable": bool(r.get("terraformable")),
                           "notable": NOTABLE_PLANETS.get(r.get("subtype")), "value": value})
         worth.sort(key=lambda w: -(w["value"] or 0))
@@ -5309,7 +5320,7 @@ class State:
         if not m or not m.get("snapshot_ts"):
             return None
         return {"ts": m.get("ts"), "snapshot_ts": m["snapshot_ts"], "version": self.materials_version,
-                "boosts": ed_materials.boosts(m["counts"]), "count": sum(m["counts"].values()),
+                "boosts": outrider.materials.boosts(m["counts"]), "count": sum(m["counts"].values()),
                 "stale": materials_stale(m, self.journals.commander)}
 
     def fuel_now(self):
@@ -5592,7 +5603,7 @@ class State:
                 left = sorted(gs - done.get((sid, bid), set()))
                 if left and bid in bs:
                     bio.append({"body": short_name(c["name"], bs[bid]["name"]), "genera": left,
-                                "value": sum((ed_bio.genus_value(g) or 0) if ed_bio else 0 for g in left)})
+                                "value": sum((outrider.bio.genus_value(g) or 0) if outrider.bio else 0 for g in left)})
             for bid, rec in recs.items():
                 n_sig = signals.get((id64, rec.get("name")), 0)
                 if not n_sig or (id64, bid) in genera:   # a DSS'd body is listed above (its genera win)
@@ -5610,7 +5621,7 @@ class State:
             judge = None
             for bid, r in bs.items():
                 rec = recs[bid]
-                if rec.get("type") != "Planet" or not rec.get("ed") or not ed_unsold:
+                if rec.get("type") != "Planet" or not rec.get("ed") or not outrider.unsold:
                     continue
                 m = mapped.get((id64, bid))
                 if m:
@@ -5618,7 +5629,7 @@ class State:
                     if judge(*m)[0] != "lost":
                         continue
                 plain = dict(rec["ed"], first_discovered=False, first_mapped=False)
-                inc = ed_unsold.body_value(plain, True, False, True) - ed_unsold.body_value(plain, False, False, True)
+                inc = outrider.unsold.body_value(plain, True, False, True) - outrider.unsold.body_value(plain, False, False, True)
                 maps.append({"body": short_name(c["name"], r["name"]), "subtype": rec.get("subtype"),
                              "terraformable": bool(rec.get("terraformable")), "increment": inc})
             if unfound or bio or maps or old_data:
@@ -5838,7 +5849,7 @@ class State:
                 d["partial"][r["genus_name"]] = r["samples"]
         bio_signals = {r["name"]: r["bio"] for r in self.db.execute(
             "SELECT name, bio FROM own_signals WHERE system=? AND bio > 0", (id64,))}
-        region = ed_bio.region_name(where[1], where[2], where[3]) if ed_bio and where[1] is not None else None
+        region = outrider.bio.region_name(where[1], where[2], where[3]) if outrider.bio and where[1] is not None else None
         known_codex = codex_species(self.db, region)
         codex_new = lambda bid, groups: any(codex_new_group(g, known_codex) for g in with_logged_variants(groups, logged.get(bid, {}))) \
             if region else False
@@ -5889,9 +5900,9 @@ class State:
             # what mapping would add, bonus-free (the green-row level is bonus-free too); the page keeps
             # only the ones over that level, so ordinary bodies never sound the leaving alert
             inc = None
-            if rec.get("ed") and ed_unsold:
+            if rec.get("ed") and outrider.unsold:
                 plain = dict(rec["ed"], first_discovered=False, first_mapped=False)
-                inc = ed_unsold.body_value(plain, True, False, True) - ed_unsold.body_value(plain, False, False, True)
+                inc = outrider.unsold.body_value(plain, True, False, True) - outrider.unsold.body_value(plain, False, False, True)
             unmapped_all.append({"body": name_of(bid), "subtype": rec["subtype"], "terraformable": bool(rec.get("terraformable")),
                                  "increment": inc, "special": special, "dist_ls": rec.get("dist_ls")})   # the suggested order
         unmapped_all.sort(key=lambda u: -(u["increment"] or 0))
@@ -5927,7 +5938,7 @@ class State:
                 {"genus": r["genus_name"], "species": r["species_name"], "variant": r["variant_name"],
                  "samples": r["samples"], "done": bool(r["done_ts"]) and st != "lost", "state": st,
                  "lost": st == "lost",
-                 "value": ed_bio.species_value(r["species_name"]) if ed_bio and r["species_name"] else None})
+                 "value": outrider.bio.species_value(r["species_name"]) if outrider.bio and r["species_name"] else None})
         genera = {}
         for r in self.db.execute("SELECT body_id, genus_name FROM own_genera WHERE system=?", (id64,)):
             genera.setdefault(r["body_id"], []).append(r["genus_name"])
@@ -5942,7 +5953,7 @@ class State:
         star_row = self.db.execute("SELECT star_class FROM jumps WHERE id64=? ORDER BY ts DESC LIMIT 1", (id64,)).fetchone()
         star = star_row["star_class"] if star_row else None
         ctx = bio_context(name, records, where[1], where[2], where[3], star, body_count)
-        region = ed_bio.region_name(where[1], where[2], where[3]) if ed_bio and where[1] is not None else None
+        region = outrider.bio.region_name(where[1], where[2], where[3]) if outrider.bio and where[1] is not None else None
         known_codex = codex_species(self.db, region)
         judge = pickup_judge(self.db, name)
         # your latest scan of each body: data re-collected after a loss or a sale counts again
@@ -5996,7 +6007,7 @@ class State:
                 "mined": mined.get(bid if bid is not None else r.get("body_id"), []),
                 "genera": known_genera,
                 "bio_guess": [{"genus": g["genus"], "best": g["best"], "value": g["value"], "min_value": g["min_value"],
-                               "species": [ed_bio.short_species(x["name"], g["genus"]) for x in g["species"]],
+                               "species": [outrider.bio.short_species(x["name"], g["genus"]) for x in g["species"]],
                                "unruled": bool(g.get("unruled")),
                                # the colour candidates of the likeliest species ([] when it cannot be told)
                                "variants": g.get("variants") or [], "variant": g.get("variant"),
@@ -6287,7 +6298,7 @@ class State:
         firsts = {r[0]: r[1] for r in self.db.execute(
             f"SELECT system, count(*) FROM own_firsts WHERE was_discovered = 0 AND system IN ({marks}) GROUP BY system", ids)}
         value = dict.fromkeys(ids, 0)
-        if ed_unsold:
+        if outrider.unsold:
             mapped = {(r[0], r[1]) for r in self.db.execute(f"SELECT system, body_id FROM own_mapped WHERE system IN ({marks})", ids)}
             fl = {(r[0], r[1]): r for r in self.db.execute(
                 f"SELECT system, body_id, was_discovered, was_mapped FROM own_firsts WHERE system IN ({marks})", ids)}
@@ -6296,7 +6307,7 @@ class State:
                 if ed:
                     f = fl.get((r["system"], r["body_id"]))
                     body = dict(ed, first_discovered=bool(f and f["was_discovered"] == 0), first_mapped=bool(f and f["was_mapped"] == 0))
-                    value[r["system"]] += ed_unsold.body_value(body, (r["system"], r["body_id"]) in mapped, False, True)
+                    value[r["system"]] += outrider.unsold.body_value(body, (r["system"], r["body_id"]) in mapped, False, True)
         arrivals = [{"ts": r["ts"], "id": str(r["id64"]), "name": r["name"], "verdict": r["verdict"],
                      "firsts": firsts.get(r["id64"], 0), "value": value.get(r["id64"], 0)} for r in reversed(shown)]
         out = {"arrivals": arrivals, "new": sum(1 for a in arrivals if a["verdict"] == "new"), "total": len(arrivals),
@@ -6389,7 +6400,7 @@ class State:
         """(death ts, system, value, first discovery) for each scanned body that died with the ship at one of
         `deaths` (the ship losses, oldest first): scanned since the previous loss, not sold before this one and
         not scanned again since, valued with the bonuses. ship_losses totals them; loss_facts groups them by system."""
-        if not ed_unsold or not deaths:
+        if not outrider.unsold or not deaths:
             return
         sales = {}
         for r in self.db.execute("SELECT name, ts FROM sales"):
@@ -6417,7 +6428,7 @@ class State:
             m_aboard = bool(m and m < deaths[i] and (i == 0 or m > deaths[i - 1]))
             body = dict(rec["ed"], first_discovered=bool(f and f["was_discovered"] == 0),
                         first_mapped=bool(f and f["was_mapped"] == 0))
-            yield deaths[i], r["system"], ed_unsold.body_value(body, m_aboard, False, True), bool(f and f["was_discovered"] == 0)
+            yield deaths[i], r["system"], outrider.unsold.body_value(body, m_aboard, False, True), bool(f and f["was_discovered"] == 0)
 
     def ship_losses(self):
         """What each death cost: the cartographic data that died with the ship (bodies scanned since the previous
@@ -6445,7 +6456,7 @@ class State:
             state, death = fates.get((r["system"], r["body_id"], r["species"])) or (None, None)
             if state != "lost" or death not in out:
                 continue
-            base = ed_bio.species_value(r["species_name"]) if ed_bio and r["species_name"] else None
+            base = outrider.bio.species_value(r["species_name"]) if outrider.bio and r["species_name"] else None
             out[death]["bio_runs"] += 1
             out[death]["bio_value"] += (base or 0) * (5 if r["was_footfalled"] == 0 else 1)
         return [x for x in out.values() if x["ship"] or x["bio_runs"]]
@@ -6475,7 +6486,7 @@ class State:
 
     def top_finds(self, n=25):
         """Your most valuable bodies ever (cartographics, with the bonuses you earned), and what became of them."""
-        if not ed_unsold:
+        if not outrider.unsold:
             return []
         judges, best = {}, []
         names = {r[0]: r[1] for r in self.db.execute("SELECT id64, name FROM visits")}
@@ -6490,7 +6501,7 @@ class State:
             m = mapped.get((r["system"], r["body_id"]))
             body = dict(rec["ed"], first_discovered=bool(f and f["was_discovered"] == 0),
                         first_mapped=bool(f and f["was_mapped"] == 0))
-            v = ed_unsold.body_value(body, bool(m), False, True)
+            v = outrider.unsold.body_value(body, bool(m), False, True)
             if len(best) < n or v > best[-1][0]:
                 best.append((v, r, rec, bool(m), body))
                 best.sort(key=lambda t: -t[0])
@@ -6593,7 +6604,7 @@ class State:
             fate = fates.get((r["system"], r["body_id"], r["species"])) if r["done_ts"] else None
             st = fate[0] if fate else organic_state(self.db, r["done_ts"]) or "in progress"
             factor = 5 if r["was_footfalled"] == 0 else 1
-            base = ed_bio.species_value(r["species_name"]) if ed_bio and r["species_name"] else None
+            base = outrider.bio.species_value(r["species_name"]) if outrider.bio and r["species_name"] else None
             value = base * factor if base else None
             body = short_name(sysname, r["body_name"]) if r["body_name"] else f"body #{r['body_id']}"
             rows.append({"ts": r["done_ts"] or r["ts"], "system": {"id": str(r["system"]), "name": sysname},
@@ -6612,7 +6623,7 @@ class State:
     def _unsold_rows(self):
         args = argparse.Namespace(commander=None, since=None, ignore_deaths=False, bonus_rate=None,
                                   efficiency_bonus=False, no_odyssey=False, top=0)
-        return ed_unsold.analyse(ed_unsold.read_events(LIVE_DIRS + LEGACY_DIRS), args)["exploration"]["rows"]
+        return outrider.unsold.analyse(outrider.unsold.read_events(LIVE_DIRS + LEGACY_DIRS), args)["exploration"]["rows"]
 
     def export_rows(self, what):
         """Rows for the export endpoint: (columns, rows)."""
@@ -6674,7 +6685,7 @@ class State:
             return ["id64", "name", "x", "y", "z", "system_first_discovered", "system_state", "system_state_ts",
                     "bodies_first_discovered", "bodies_sold", "bodies_unsold", "bodies_lost", "first_mapped",
                     "first_footfalls"], rows
-        if what == "unsold" and ed_unsold:
+        if what == "unsold" and outrider.unsold:
             rows = self._unsold_rows()
             return ["system", "body", "type", "first_discovered", "first_mapped", "mapped", "efficient", "value"], rows
         return None, None
@@ -6811,7 +6822,7 @@ class State:
                                  "WHERE system=? AND done_ts IS NOT NULL", (id64,)):
             st = organic_state(self.db, r["done_ts"], (id64, r["body_id"], r["species"]))
             if st != "lost":
-                v = (ed_bio.species_value(r["species_name"]) if ed_bio else 0) or 0
+                v = (outrider.bio.species_value(r["species_name"]) if outrider.bio else 0) or 0
                 done.setdefault(r["body_id"], {})[r["genus_name"]] = v
                 if st == "aboard":
                     aboard.setdefault(r["body_id"], {})[r["genus_name"]] = v
@@ -7891,22 +7902,22 @@ class State:
 
 
 def unsold_total_at(ts):
-    """ed_unsold's total estimate over the journal events before ts (the unsold data aboard at a login), or None."""
+    """outrider.unsold's total estimate over the journal events before ts (the unsold data aboard at a login), or None."""
     try:
-        cut = ed_unsold.parse_ts(ts)
+        cut = outrider.unsold.parse_ts(ts)
         args = argparse.Namespace(commander=None, since=None, ignore_deaths=False, bonus_rate=None,
                                   efficiency_bonus=False, no_odyssey=False, top=0)
-        result = ed_unsold.analyse([e for e in ed_unsold.read_events(LIVE_DIRS + LEGACY_DIRS) if e[0] < cut], args)
+        result = outrider.unsold.analyse([e for e in outrider.unsold.read_events(LIVE_DIRS + LEGACY_DIRS) if e[0] < cut], args)
     except (Exception, SystemExit):
         return None
     return result["exploration"]["estimated_payout"] + result["exobiology"]["estimated_value"]
 
 
 def compute_unsold():
-    """ed_unsold's estimate of the cartographic and exobiology data on board, trimmed for the page."""
+    """outrider.unsold's estimate of the cartographic and exobiology data on board, trimmed for the page."""
     args = argparse.Namespace(commander=None, since=None, ignore_deaths=False, bonus_rate=None,
                               efficiency_bonus=False, no_odyssey=False, top=0)
-    result = ed_unsold.analyse(ed_unsold.read_events(LIVE_DIRS + LEGACY_DIRS), args)
+    result = outrider.unsold.analyse(outrider.unsold.read_events(LIVE_DIRS + LEGACY_DIRS), args)
     ex, bio = result["exploration"], result["exobiology"]
     total = ex["estimated_payout"] + bio["estimated_value"]
     system_values = {}
@@ -8335,7 +8346,7 @@ def sounds_json():
     """static/sounds.json for inlining into the page (the alert sounds, which the server can also play), or
     "null" when it cannot be read: the page then plays no sounds."""
     try:
-        return json.dumps(ed_tts.load_sounds()).replace("<", "\\u003c")
+        return json.dumps(outrider.tts.load_sounds()).replace("<", "\\u003c")
     except (OSError, ValueError) as e:
         print(f"sounds: {e}", file=sys.stderr)
         return "null"
@@ -8712,7 +8723,7 @@ def make_app(state, hosts=None):
         if voice and voice not in sp.installed():
             voice = None
         if voice and state.speech:   # room for every personality voice, so none is reloaded before each line
-            sp.size_extra(ed_speech.style_voices(state.speech.lines()["styles"]))
+            sp.size_extra(outrider.speech.style_voices(state.speech.lines()["styles"]))
         try:
             return await asyncio.get_running_loop().run_in_executor(None, sp.say, text, speed, voice)
         except Exception as e:  # noqa: BLE001 -- a line Piper cannot speak: the page uses browser speech for it
@@ -8721,7 +8732,7 @@ def make_app(state, hosts=None):
 
     async def say_view(request):
         """A spoken alert as WAV (Piper). 503 while no voice is ready: the page then uses browser speech."""
-        text = ed_tts.clip_text(request.query.get("text"))   # a long line is cut at a boundary, not mid-word
+        text = outrider.tts.clip_text(request.query.get("text"))   # a long line is cut at a boundary, not mid-word
         sp = state.speaker
         if not sp or not sp.ready or not text.strip():
             return web.json_response({"error": "no Piper voice ready" if text.strip() else "no text"}, status=503)
@@ -8754,7 +8765,7 @@ def make_app(state, hosts=None):
         return body if isinstance(body, dict) else None
 
     # "Play speech and sounds on this PC": the page still picks and queues the lines, and this machine's player
-    # (ed_tts.LinePlayer) says them, so no click on the page is needed. POSTs, so request_guard refuses another
+    # (outrider.tts.LinePlayer) says them, so no click on the page is needed. POSTs, so request_guard refuses another
     # site's request (the same Origin and Sec-Fetch-Site check GET /api/say gets).
     async def say_play_view(request):
         """{text, voice, speed, id}: speak a line here, answering only once it has played to the end or been
@@ -8767,7 +8778,7 @@ def make_app(state, hosts=None):
         refused = no_player()
         if refused:
             return refused
-        text, sp = ed_tts.clip_text(str(body.get("text") or "")), state.speaker
+        text, sp = outrider.tts.clip_text(str(body.get("text") or "")), state.speaker
         if not text.strip():
             return web.json_response({"error": "no text"}, status=400)
         if not sp or not sp.ready:
@@ -8819,8 +8830,8 @@ def make_app(state, hosts=None):
         return web.json_response(state.speech.lines() if state.speech else {"styles": {}, "lines": {}, "version": None})
 
     async def speech_ban_view(request):
-        """{alert, template}: /api/speech/ban leaves that line out from now on (in speech_banned.json next to the
-        speech file), /api/speech/unban brings it back. Only a line that is in the speech file is accepted, and the
+        """{alert, template}: /api/speech/ban leaves that line out from now on (in data/speech_banned.json, or next to
+        a speech file of your own), /api/speech/unban brings it back. Only a line that is in the speech file is accepted, and the
         last line of a list cannot be banned. Behind request_guard like every POST."""
         body = await json_object(request)
         if body is None or not isinstance(body.get("alert"), str) or not isinstance(body.get("template"), str):
@@ -8849,7 +8860,7 @@ def make_app(state, hosts=None):
         words = body.get("words")
         if body["action"] == "replay" and not (isinstance(words, str) and words.strip()):
             return web.json_response({"error": "replay needs the words"}, status=400)
-        state.copilot_action(body["action"], ed_tts.clip_text(words) if body["action"] == "replay" else None)
+        state.copilot_action(body["action"], outrider.tts.clip_text(words) if body["action"] == "replay" else None)
         return web.json_response({"ok": True, "seq": state.copilot["seq"]})
 
     async def autohonk_test_view(_):
@@ -8893,26 +8904,26 @@ def make_app(state, hosts=None):
         return web.json_response({"radius": state.radius})
 
     async def materials_view(_):
-        inv = ed_materials.inventory(state.journals.materials)
+        inv = outrider.materials.inventory(state.journals.materials)
         inv["stale"] = bool((state.materials_summary() or {}).get("stale"))
         inv["sources"] = state.material_sources()
         inv["mining_sites"] = state.mining_sites()
         return web.json_response(inv)
 
     async def log_view(request):
-        if not ed_log:
-            return web.json_response({"error": "ed_log.py is missing"}, status=500)
+        if not outrider.log:
+            return web.json_response({"error": "outrider/log.py is missing"}, status=500)
         qs = request.query
         try:
             days = max(1, min(int(qs.get("days", 7)), 3650))
             limit = max(1, min(int(qs.get("limit", 200)), 500))
         except ValueError:
             return web.json_response({"error": "bad request"}, status=400)
-        cats = {c for c in qs["cat"].split(",") if c in ed_log.CATEGORIES} if "cat" in qs else None  # empty: nothing
+        cats = {c for c in qs["cat"].split(",") if c in outrider.log.CATEGORIES} if "cat" in qs else None  # empty: nothing
         kw = dict(days=days, limit=limit, cats=cats, q=(qs.get("q") or "").strip()[:200] or None,
                   noise=qs.get("noise") in ("1", "true"), before=qs.get("before"), after=qs.get("after"))
         dirs = LIVE_DIRS + LEGACY_DIRS
-        out = await asyncio.get_running_loop().run_in_executor(None, lambda: ed_log.read_log(dirs, **kw))
+        out = await asyncio.get_running_loop().run_in_executor(None, lambda: outrider.log.read_log(dirs, **kw))
         return web.json_response(out)
 
     async def export_view(request):
@@ -8980,12 +8991,12 @@ async def check_bio_rules(state):
     whether BioScan or the region map changed and fetches the new data if so (offline just keeps
     the copy). Rows carry bio estimates, so they are rebuilt after an update."""
     try:
-        updated = await asyncio.get_running_loop().run_in_executor(None, lambda: ed_bio.update_if_newer(log=print))
+        updated = await asyncio.get_running_loop().run_in_executor(None, lambda: outrider.bio.update_if_newer(log=print))
     except Exception as e:  # noqa: BLE001 -- no shipped copy and no network: the page works without predictions
         print(f"exobiology rules: none available ({e}); no species guesses until "
-              f"python3 ed_bio.py --update-rules  succeeds.", file=sys.stderr)
+              f"python3 -m outrider.bio --update-rules  succeeds.", file=sys.stderr)
         return
-    info = ed_bio.rules_info()
+    info = outrider.bio.rules_info()
     if updated:
         print(f"exobiology rules: updated from BioScan ({info['species']} species)")
         state.journals.dirty |= set(state.bases)
@@ -9122,9 +9133,9 @@ async def run(args, st):
     SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES = st["concurrency"], st["map_max_radius"], st["map_max_pages"]
     radius_flag = args.radius   # --radius on the command line beats a radius chosen on the page
     args.host, args.port, args.radius, args.db = st["host"], st["port"], st["radius"], st["db"]
-    if ed_unsold:
-        ed_unsold.LIVE_DIRS, ed_unsold.LEGACY_DIRS = LIVE_DIRS, LEGACY_DIRS
-        ed_unsold.DEFAULT_DIRS = LIVE_DIRS + LEGACY_DIRS
+    if outrider.unsold:
+        outrider.unsold.LIVE_DIRS, outrider.unsold.LEGACY_DIRS = LIVE_DIRS, LEGACY_DIRS
+        outrider.unsold.DEFAULT_DIRS = LIVE_DIRS + LEGACY_DIRS
     if not LIVE_DIRS:
         print("No Elite Dangerous journal folder found. Pass --journals PATH (the folder holding "
               "Journal.*.log, usually '<Saved Games>/Frontier Developments/Elite Dangerous') or set "
@@ -9135,6 +9146,7 @@ async def run(args, st):
         print(f"port {args.port} is already in use: is ED Outrider already running? "
               f"(open http://127.0.0.1:{args.port}/, or start this one with --port N)", file=sys.stderr)
         raise SystemExit(1)
+    os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)   # data/ on a fresh copy
     db = open_db(args.db, rescan=args.rescan)
     journals = Journals(db)
 
@@ -9172,15 +9184,15 @@ async def run(args, st):
     state.speech_path, state.config_path = st["speech_file"], args.config
     loop = asyncio.get_running_loop()
     voice = meta_get(db, "voice_choice")   # picked in the alerts dialog: beats the config file once used
-    if not (isinstance(voice, str) and ed_tts.VOICE_NAME.fullmatch(voice)):
+    if not (isinstance(voice, str) and outrider.tts.VOICE_NAME.fullmatch(voice)):
         voice = VOICE
     # the voice picked in the dialog is remembered once it loads, on the loop thread (not Piper's)
-    state.speaker = ed_tts.Speaker(voice, VOICE_FALLBACK, on_change=lambda: loop.call_soon_threadsafe(state.bump),
+    state.speaker = outrider.tts.Speaker(voice, VOICE_FALLBACK, on_change=lambda: loop.call_soon_threadsafe(state.bump),
                                    on_switched=lambda name: loop.call_soon_threadsafe(state.remember_voice, name))
     print("spoken alerts: " + ("Piper found, preparing a voice" if state.speaker.available else
-                               "Piper not installed, the page uses browser speech (see ed_tts.py)"))
+                               "Piper not installed, the page uses browser speech (see outrider/tts.py)"))
     state.speaker.start()
-    state.player = ed_tts.LinePlayer(st["server_player"])
+    state.player = outrider.tts.LinePlayer(st["server_player"])
     print("playing on this PC (the page's tick): " + (state.player.name or (
         "off ([speech] server_player)" if state.player.choice == "off" else
         f"{st['server_player']} not found" if state.player.choice != "auto" else
@@ -9189,7 +9201,7 @@ async def run(args, st):
     saved = meta_get(db, "autohonk_enabled")   # the page's toggle beats the config file once used
     if saved is not None:
         state.autohonk["enabled"] = bool(saved)
-    state.honker = ed_honk.Honker(state.autohonk["key"], state.autohonk["hold"], LIVE_DIRS)
+    state.honker = outrider.honk.Honker(state.autohonk["key"], state.autohonk["hold"], LIVE_DIRS)
     if state.autohonk["enabled"]:
         state.honker.open()
     print("auto honk: " + (state.honker.status if state.autohonk["enabled"] else "off")
@@ -9197,17 +9209,17 @@ async def run(args, st):
     button_task = None
     if st["copilot"]["enabled"]:   # read-only: never grabs the device, never presses anything
         cp = st["copilot"]
-        state.button = ed_button.ButtonWatch(cp["device"], cp["button"], lambda g: state.copilot_gesture(g),
+        state.button = outrider.button.ButtonWatch(cp["device"], cp["button"], lambda g: state.copilot_gesture(g),
                                              cp["hold_ms"], cp["double_ms"])
         button_task = asyncio.create_task(state.button.run())
     print("co-pilot button: " + (f"{st['copilot']['button'] or '?'} on {st['copilot']['device'] or '?'}"
                                  if st["copilot"]["enabled"] else "off ([copilot] enabled)"))
-    state.speech = ed_speech.SpeechLines(st["speech_file"])
+    state.speech = outrider.speech.SpeechLines(st["speech_file"])
     sp = state.speech.info()
     print(f"spoken alerts: wording from {sp['file']}" if sp["version"] else f"spoken alerts: {sp['error']}")
     for msg in sp["problems"]:
         print(f"  {sp['file']}: {msg}", file=sys.stderr)
-    rules_task = asyncio.create_task(check_bio_rules(state)) if ed_bio else None
+    rules_task = asyncio.create_task(check_bio_rules(state)) if outrider.bio else None
     watcher = asyncio.create_task(state.watch())
     state.firsts_watch_on = st["watch_firsts"]
     firsts_task = asyncio.create_task(state.watch_firsts()) if st["watch_firsts"] else None
@@ -9302,7 +9314,7 @@ def main(argv=None):
     p.add_argument("--list-backups", action="store_true",
                    help="List this database's backup zips in backup_dir (name, size, time) and exit.")
     args = p.parse_args(argv)
-    detected = (ed_unsold.LIVE_DIRS, ed_unsold.LEGACY_DIRS) if ed_unsold else ([], [])
+    detected = (outrider.unsold.LIVE_DIRS, outrider.unsold.LEGACY_DIRS) if outrider.unsold else ([], [])
     st = settings_from(load_config(args.config), args, os.environ.get("ED_JOURNALS"), detected)
     if args.write_config:
         if os.path.exists(args.config):

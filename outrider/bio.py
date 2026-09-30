@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ed_bio.py -- Which exobiology species can a planet host, and what are they worth?
+outrider/bio.py -- Which exobiology species can a planet host, and what are they worth?
 
 The game only spawns each species inside known bands of planet class, atmosphere, gravity,
 surface temperature, pressure and volcanism, and some care about the stars in the system, the
@@ -19,12 +19,12 @@ is ruled out on that account. The colour tables come from EDMC-ExploData
 The spawn conditions are the community's work, maintained in the BioScan plugin for EDMC
 (https://github.com/Silarn/EDMC-BioScan, GPL-2.0-or-later). They are not shipped with this
 tool: `--update-rules` downloads them (plus ExploData's colour variants and the galactic region map
-from https://github.com/klightspeed/EliteDangerousRegionMap, MIT) into bio_rules.json next to this
-file, and ED Outrider does that itself on first start and refreshes it whenever upstream changes.
+from https://github.com/klightspeed/EliteDangerousRegionMap, MIT) into resources/bio_rules.json, and ED Outrider does that itself on first start and refreshes
+it whenever upstream changes.
 
-    python3 ed_bio.py --update-rules     fetch the latest spawn rules
-    python3 ed_bio.py --backtest         check the rules against your own journals
-    python3 ed_bio.py --body '{"class":"Rocky body","atmosphere":"Ammonia","gravity":0.15,"temperature":170}'
+    python3 -m outrider.bio --update-rules     fetch the latest spawn rules
+    python3 -m outrider.bio --backtest         check the rules against your own journals
+    python3 -m outrider.bio --body '{"class":"Rocky body","atmosphere":"Ammonia","gravity":0.15,"temperature":170}'
 
 A prediction is a possibility, not a promise: the genus is usually reliable, the species within
 it (which sets the value) often depends on things the scan does not tell you, so several
@@ -73,12 +73,14 @@ import urllib.request
 from glob import glob, escape as glob_escape
 
 try:
-    from ed_unsold import ORGANIC_VALUES, find_journal_dirs
+    from .unsold import ORGANIC_VALUES, find_journal_dirs
 except ImportError:  # standalone use without the price table
     ORGANIC_VALUES = {}
     find_journal_dirs = None
 
-RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bio_rules.json")
+from . import RESOURCES_DIR  # noqa: E402
+
+RULES_FILE = os.path.join(RESOURCES_DIR, "bio_rules.json")
 
 BIOSCAN = "https://raw.githubusercontent.com/Silarn/EDMC-BioScan/master/src/bio_scan/"
 BIOSCAN_API = "https://api.github.com/repos/Silarn/EDMC-BioScan/"
@@ -203,7 +205,7 @@ def luminosity_matches(want, have):
 # --------------------------------------------------------------------------
 
 def _get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "ED-Outrider ed_bio"})
+    req = urllib.request.Request(url, headers={"User-Agent": "ED-Outrider outrider.bio"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8")
 
@@ -908,7 +910,7 @@ def _json_line(line):
 def backtest(dirs, verbose=False, since=None):
     """since: only score samples/DSS results at or after this 'YYYY-MM' (an out-of-sample check)."""
     if not load_rules():
-        print(f"no rules at {RULES_FILE}: run  python3 ed_bio.py --update-rules  first")
+        print(f"no rules at {RULES_FILE}: run  python3 -m outrider.bio --update-rules  first")
         return
     scans, systems, analysed, genera = {}, {}, [], collections.defaultdict(set)
     for d in dirs:
@@ -1041,7 +1043,7 @@ def backtest(dirs, verbose=False, since=None):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--update-rules", action="store_true", help="Download the latest spawn rules to bio_rules.json.")
+    p.add_argument("--update-rules", action="store_true", help="Download the latest spawn rules to resources/bio_rules.json.")
     p.add_argument("--rules", metavar="PATH", help=f"Rules file to use (default {RULES_FILE}).")
     p.add_argument("--backtest", action="store_true", help="Check the rules against your journals.")
     p.add_argument("--since", metavar="YYYY-MM", help="With --backtest: only score finds from this month on (out-of-sample).")
@@ -1057,7 +1059,7 @@ def main(argv=None):
         if not (a.body or a.backtest or a.region):
             return
     if not available():
-        print(f"no rules at {a.rules or RULES_FILE}: run  python3 ed_bio.py --update-rules  first")
+        print(f"no rules at {a.rules or RULES_FILE}: run  python3 -m outrider.bio --update-rules  first")
         return
     if a.region:
         print(region_name(*a.region) or "outside the mapped galaxy")

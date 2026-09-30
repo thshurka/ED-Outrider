@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.png" alt="ED Outrider" width="800">
+  <img src="docs/images/banner.png" alt="ED Outrider" width="800">
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ It runs on your own machine. It asks [Spansh](https://spansh.co.uk) (and
 around you, then layers your own scans on top — nothing is ever uploaded.
 
 <p align="center">
-  <img src="docs/overview.png" alt="The Overview: the neighbourhood on the left, the system you're in on the right" width="900">
+  <img src="docs/images/overview.png" alt="The Overview: the neighbourhood on the left, the system you're in on the right" width="900">
 </p>
 
 ## ✨ At a glance
@@ -67,7 +67,8 @@ Open **<http://127.0.0.1:8025/>** and go fly.
 - **evdev** (Linux only) for auto honk and the co-pilot button. It is built from source, so it needs your
   distribution's Python development headers.
 
-A `.venv` next to the script is found even when you start Outrider with plain `python3 ed_outrider.py`.
+A `.venv` in the Outrider folder is found even when you start Outrider with plain `python3 ed_outrider.py`.
+Your own files (the database, backups, downloaded voices, banned lines) all go in `data/`.
 
 ## 🖥️ The views
 
@@ -80,7 +81,7 @@ visited or fully scanned systems. The radius (20–50 ly) is a dropdown in the W
 <i>old data</i> mark flags a system whose Spansh records predate Odyssey: thin-atmosphere planets there may
 hold life nobody has sampled; it is never added to the values or spoken. ⛏ N counts planetary mining
 locations on ground worth a Rhino (metal-rich, high metal content, rocky with magma volcanism; not icy).
-<br><br><img src="docs/nearby.png" alt="Nearby systems">
+<br><br><img src="docs/images/nearby.png" alt="Nearby systems">
 </td>
 <td width="50%" valign="top">
 <b>Here</b> — the current system body by body, with bio and geo signals and 🌋 for volcanism. Before the
@@ -92,7 +93,7 @@ The to-do line ticks itself off as you honk, map and sample, in a <i>suggested o
 supercruise time and credits per minute ("~2 min · 450k/min"), and "skip?" on anything not worth the trip.
 Bio nobody had set foot on is valued with the ×5 first-footfall bonus ("up to 95.0M 👣×5"). In a system
 Spansh knows, it says how many bodies Spansh is missing ("2 not on Spansh").
-<br><br><img src="docs/here.png" alt="The current system">
+<br><br><img src="docs/images/here.png" alt="The current system">
 </td>
 </tr>
 <tr>
@@ -100,7 +101,7 @@ Spansh knows, it says how many bodies Spansh is missing ("2 not on Spansh").
 <b>Map</b> — a 3D view: left-drag to rotate, right-drag to move, scroll to zoom. Your path in orange,
 your first discoveries in gold, visited systems in blue; tick <i>boost stars</i> for neutron stars and
 white dwarfs.
-<br><br><img src="docs/map.png" alt="The 3D map">
+<br><br><img src="docs/images/map.png" alt="The 3D map">
 </td>
 <td width="50%" valign="top">
 <b>History</b> — your sessions (jumps, light-years, first discoveries, mapping, samples, codex), an
@@ -109,7 +110,7 @@ sale with what it actually paid against Outrider's estimate, a check of the exob
 prediction ("🧬 47 sold, 44 with x5 as predicted, 3 without"), credits per hour and per jump, what each
 death cost, and your 25 most valuable finds. The trip under way shows what you have sold to Vista Genomics
 since your last cartographic sale (a player who sells only exobiology sees every sale there).
-<br><br><img src="docs/history.png" alt="History">
+<br><br><img src="docs/images/history.png" alt="History">
 </td>
 </tr>
 <tr>
@@ -118,12 +119,12 @@ since your last cartographic sale (a player who sells only exobiology sees every
 <i>aboard</i>, <i>sold</i> or <i>lost</i> (a Vista Genomics sale of some species leaves the others aboard). Filter, sort, export. Codex entries sit underneath. Unsold runs are
 priced one by one ("x5 on 42 of 47 runs"); a run whose body scan is missing from your journals is priced
 at your past sales' ×5 rate.
-<br><br><img src="docs/samples.png" alt="Samples">
+<br><br><img src="docs/images/samples.png" alt="Samples">
 </td>
 <td width="50%" valign="top">
 <b>Log</b> — every journal event, newest first, one readable line each. Filter by category and time,
 search any text, click a row for the raw event.
-<br><br><img src="docs/log.png" alt="The log">
+<br><br><img src="docs/images/log.png" alt="The log">
 </td>
 </tr>
 <tr>
@@ -132,13 +133,13 @@ search any text, click a row for the raw event.
 refuels and repairs, and Rhino mining rig restocks you can make right now. <b>Mining sites</b> lists each
 body your SRV mined: minerals and tons, saved spots, the last date and the distance. ⌖ opens it in Here;
 <b>forget</b> clears its saved spots (the tons come from the journals and stay).
-<br><br><img src="docs/materials.png" alt="Materials">
+<br><br><img src="docs/images/materials.png" alt="Materials">
 </td>
 <td width="50%" valign="top">
 <b>Schematic</b> — Here switches between <i>list</i>, <i>tree</i> (orbital order) and <i>schematic</i>: stars
 with their planets left to right, moons underneath, barycentres boxed. <i>Split</i> (on by default)
 keeps the schematic under the list or tree.
-<br><br><img src="docs/schematic.png" alt="The system schematic">
+<br><br><img src="docs/images/schematic.png" alt="The system schematic">
 </td>
 </tr>
 <tr>
@@ -149,7 +150,7 @@ unfinished exobiology within a radius, from what Outrider knows (<i>Local</i>) o
 when the survey found it at 10% or more of that ground's locations ("A 2 · metal-rich: ⛏ 5, Platinum 46% of
 surveyed locations (~2 expected)"). The name box finds any system, says how far it is and whether you've
 been, and opens it in Here, where ☆ bookmarks it or makes it the next stop.
-<br><br><img src="docs/search.png" alt="Search">
+<br><br><img src="docs/images/search.png" alt="Search">
 </td>
 <td width="50%" valign="top">
 <b>My firsts</b> — visited systems with first-discovery data you haven't sold. The <b>firsts watch</b>
@@ -158,7 +159,7 @@ and marks any someone else has scanned since you ("👁 8 d after you"). Selling
 you. Tick <b>show lost</b> and set <b>within N ly</b> for a rescan checklist of data lost with a ship, nearest first: amber
 part-way ("rescanned 5 of 12 · 2 maps to redo", hover for which are left), green once it is all scanned again, gone once sold; the Lost columns price what is still to scan and map (sort by Lost total). <b>Left behind</b> lists visited systems nearby with work over your thresholds. <b>Bookmarks</b> hold
 notes and your <b>next stop</b>.
-<br><br><img src="docs/firsts.png" alt="My firsts">
+<br><br><img src="docs/images/firsts.png" alt="My firsts">
 </td>
 </tr>
 </table>
@@ -237,7 +238,7 @@ browser starts with.
 | Surface map | 1,000 m / 500 m / 50 m / 3,500 m | Altitude it shows below, narrowest view, rig spacing ring (0 = none), rig leash warning. |
 
 **Export settings** and **Import settings** move them to another browser profile. **Use these for new
-browsers** keeps a copy on the server (`browser_defaults.json`, included in backups), so a tablet running
+browsers** keeps a copy on the server (`data/browser_defaults.json`, included in backups), so a tablet running
 Now starts with your voice, names and alert choices. The view and layouts stay per device.
 
 Targeting a system plays its sound; arriving is announced by the voice. Walking about a station counts
@@ -248,16 +249,16 @@ as docked. A carrier jump booked just before you quit shows as "not yet confirme
 Outrider backs itself up at start when the last backup is over a day old, and a few seconds after you quit
 the game. **Back up now** in the Data tile does it on demand.
 
-- Each backup is a dated zip in `backups/` holding the database, `browser_defaults.json`, the speech files
+- Each backup is a dated zip in `data/backups/` holding the database, `browser_defaults.json`, the speech files
   and your config file. The newest 7 are kept (`backup_keep`).
-- Every journal is also copied into `backups/journals/` and never deleted. Under Steam/Proton an uninstall
+- Every journal is also copied into `data/backups/journals/` and never deleted. Under Steam/Proton an uninstall
   deletes your journals, so this copy matters.
 - Every backup is checked before it counts; a bad one never rotates a good one out.
 - The Data tile reads "backed up 3 h ago · verified · 7 kept", amber when overdue, red when one failed.
 - `backup_every_days = 0` turns automatic backups off.
 
 **Restoring.** The journals alone can rebuild everything:
-`python3 ed_outrider.py --legacy backups/journals` reads them into a fresh database.
+`python3 ed_outrider.py --legacy data/backups/journals` reads them into a fresh database.
 
 To get the database back (bookmarks, the Spansh cache, your settings), stop Outrider and run
 `python3 ed_outrider.py --restore` for the newest zip, or name one
@@ -270,7 +271,7 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
 
 Alerts are spoken when 🗣 in the header is on. **Piper**, a neural voice running on your CPU, sounds far
 better than the browser's own voice, which is used when Piper isn't installed. The voice (`voice` in the
-config file) downloads into `piper-voices/` the first time; the dialog switches between installed voices.
+config file) downloads into `data/piper-voices/` the first time; the dialog switches between installed voices.
 
 **Choosing how it sounds**
 
@@ -280,7 +281,7 @@ config file) downloads into `piper-voices/` the first time; the dialog switches 
 - **Your names.** Commander names are often unpronounceable, so the voice calls you by the names in
   **Call me** (default "Boss, Hefay, Sir").
 - **Speed.** 1× is the voice's own pace. Some Piper voices respond to it less than others.
-- **Your own lines.** Edit `speech.json` to change lines or add a personality; no restart needed.
+- **Your own lines.** Edit `resources/speech.json` (or a copy named by `speech_file`) to change lines or add a personality; no restart needed.
 - **A voice per personality.** In `speech.json`, a personality can name its own installed Piper voice and
   speed: `"sarcastic": {"label": "Sarcastic", "voice": "en_US-ryan-high", "speed": 1.1}`. Each extra voice
   takes 60–100 MB of memory.
@@ -334,7 +335,8 @@ puts it on the clipboard.
   40 (3 dropped)"). **🔇** beside one stops speaking that alert (its 🗣 tick), with an undo.
 - Press **👎** beside a line to never hear that wording again, in any browser or in the voice lab.
 - "3 lines banned · review / undo" above the list lets you take a ban back.
-- Bans live in `speech_banned.json` beside `speech.json`, so editing `speech.json` never loses them.
+- Bans live in `data/speech_banned.json` (beside your own copy when `speech_file` names one), so editing
+  `speech.json` never loses them.
 - The last line of a list can't be banned, so no alert ever goes quiet.
 
 **The voice lab.** `python3 voice_lab.py` opens a small window for trying voices before you settle on one.
@@ -348,7 +350,7 @@ On a planet, Now shows a map under its lines: on the ground, in the SRV, on foot
 (it hides again 100 m higher). Hiding deletes nothing.
 
 <p align="center">
-  <img src="docs/surface.png" alt="The surface map on Now: rigs, samples, a mining location and the ship" width="900">
+  <img src="docs/images/surface.png" alt="The surface map on Now: rigs, samples, a mining location and the ship" width="900">
 </p>
 
 - **Heading-up:** the way you face is the top, you are the arrow in the middle, N on the rim is north. It
@@ -404,8 +406,8 @@ Setting it up:
   the first). Outrider reads it from your active controls preset, modifiers too. A built-in preset can't be
   read: save it as a custom preset, or set `[autohonk] key`. A binding that needs a joystick modifier can't
   be pressed.
-- **Try it first.** The dialog's *test in 5 s* button, or `python3 ed_honk.py --test 10`, holds Primary Fire
-  once. `python3 ed_honk.py --show` prints the binding it will press.
+- **Try it first.** The dialog's *test in 5 s* button, or `python3 -m outrider.honk --test 10`, holds Primary Fire
+  once. `python3 -m outrider.honk --show` prints the binding it will press.
 - It presses keys through a virtual keyboard (`evdev`; Steam's controller rule already gives you access),
   and **the keys go to whichever window has focus**, so switch it off before alt-tabbing away mid-jump.
 
@@ -423,7 +425,7 @@ On Linux, one button on your HOTAS (or a spare key) talks to the voice:
 
 Set it up under `[copilot]` in `ed_outrider.toml`: `enabled = true`, the `device` (part of its name, such
 as `"X-56 Rhino Throttle"`, or a `/dev/input/by-id/…` path) and the `button`. Run
-`python3 ed_button.py --listen` to find the button's name. `hold_ms` and `double_ms` tune the gestures. The
+`python3 -m outrider.button --listen` to find the button's name. `hold_ms` and `double_ms` tune the gestures. The
 alerts dialog shows whether it is listening.
 
 - **Unbind the button in Elite's controls.** Outrider only reads it, so the game would act on it too.
@@ -459,8 +461,10 @@ alerts dialog shows whether it is listening.
 <br>
 
 Copy `ed_outrider.toml.example` to `ed_outrider.toml` next to the script and edit the lines you need.
-The example explains every key. `python3 ed_outrider.py --write-config` writes one with the settings in
-effect. Switches take a bare `true` or `false`; a wrong value is reported at start and the default kept.
+The example explains every key. Relative paths in it (`db`, `backup_dir`, `speech_file`) are relative to the
+Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `resources/speech.json`.
+`python3 ed_outrider.py --write-config` writes one with the settings in effect. Switches take a bare `true` or
+`false`; a wrong value is reported at start and the default kept.
 
 | Section | What it holds |
 |---|---|
@@ -495,6 +499,8 @@ network can read the page.
 
 ## 🔬 For the curious
 
+Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md).
+
 <details>
 <summary>What's in the box</summary>
 <br>
@@ -503,19 +509,24 @@ network can read the page.
 |---|---|
 | `ed_outrider.py` | The server and the journal reader |
 | `static/` | The page (HTML, CSS, JS) — edit and reload; `sounds.json` holds the alert sounds |
-| `ed_unsold.py` | The unsold-data estimate; also works on its own from the command line |
-| `ed_log.py` | One-line summaries of journal events for the Log view |
-| `ed_materials.py` | Material names, grades and caps, synthesis recipes, and the running inventory |
-| `ed_tts.py` | Spoken alerts with Piper (optional), and playing lines and sounds on the PC |
-| `speech.json` | The spoken lines, yours to edit (bans go in `speech_banned.json` beside it) |
-| `ed_speech.py` | Loads and checks `speech.json` |
+| `outrider/` | The modules below; those with a command line run as `python3 -m outrider.<name>` from this folder |
+| `outrider/unsold.py` | The unsold-data estimate; also works on its own (`python3 -m outrider.unsold --help`) |
+| `outrider/log.py` | One-line summaries of journal events for the Log view |
+| `outrider/materials.py` | Material names, grades and caps, synthesis recipes, and the running inventory |
+| `outrider/tts.py` | Spoken alerts with Piper (optional), and playing lines and sounds on the PC |
+| `resources/speech.json` | The spoken lines, yours to edit (bans go in `data/speech_banned.json`) |
+| `outrider/speech.py` | Loads and checks `speech.json` |
 | `voice_lab.py` | A window for trying voices and lines, and downloading Piper voices |
-| `ed_button.py` | The co-pilot button (Linux, optional); `--listen` |
-| `ed_honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
-| `ed_bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
-| `bio_rules.json` | Spawn rules, colour variants, nebulae and regions from BioScan, ExploData and klightspeed's region map |
-| `mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |
+| `outrider/button.py` | The co-pilot button (Linux, optional); `--listen` |
+| `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
+| `outrider/bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
+| `resources/bio_rules.json` | Spawn rules, colour variants, nebulae and regions from BioScan, ExploData and klightspeed's region map |
+| `resources/mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page |
+| `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
+| `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server |
+| `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/` |
+| `docs/` | Notes for contributors and their coding agents (code map, rules, journal traps, design notes, changelog); `images/` holds the screenshots |
 
 For overlays, `GET /api/status` returns a compact JSON status and
 `GET /api/status.txt?fields=system,region,fuel,target,unsold,body,sampling` one line for an OBS text
@@ -535,7 +546,7 @@ Exobiology spawn conditions are the community's work, as gathered by the Canonn 
 distances and colour variants are from <a href="https://github.com/Silarn/EDMC-ExploData">EDMC-ExploData</a> (GPL-2.0).
 Planetary mining odds are CMDR Grumlop's survey from the
 <a href="https://edfieldmanual.com/index.php?title=Module:Data/SurfaceMiningProspecting">Elite Dangerous Field Manual</a>
-(<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>), shipped unchanged in <code>mining_odds.json</code>.<br>
+(<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>), shipped unchanged in <code>resources/mining_odds.json</code>.<br>
 ED Outrider is free software under the <a href="LICENSE">GNU GPL v2 or later</a>.<br>
 Elite Dangerous © Frontier Developments — this is a fan-made tool, not affiliated with Frontier.
 </p>

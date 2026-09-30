@@ -18,12 +18,12 @@ import unittest.mock
 import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import ed_bio  # noqa: E402
-import ed_materials  # noqa: E402
-import ed_log  # noqa: E402
+import outrider.bio  # noqa: E402
+import outrider.materials  # noqa: E402
+import outrider.log  # noqa: E402
 import ed_outrider  # noqa: E402
-import ed_unsold  # noqa: E402
-import ed_speech  # noqa: E402
+import outrider.unsold  # noqa: E402
+import outrider.speech  # noqa: E402
 
 
 def T(s):
@@ -58,19 +58,19 @@ class UnsoldEstimate(unittest.TestCase):
     def test_partial_sale_keeps_unsold_systems(self):
         ev = [scan("2026-01-01T00:00:00Z", "A", 1, 0, "A", star=True), scan("2026-01-01T00:00:00Z", "B", 2, 0, "B", star=True),
               sale("2026-01-02T00:00:00Z", ["A"])]
-        ex = ed_unsold.analyse(ev, ARGS)["exploration"]
+        ex = outrider.unsold.analyse(ev, ARGS)["exploration"]
         self.assertEqual({r["system"] for r in ex["rows"]}, {"B"})
 
     def test_ship_loss_before_sale_is_lost_but_rescan_counts(self):
         ev = [scan("2026-01-01T00:00:00Z", "A", 1, 0, "A", star=True)] + death("2026-01-02T00:00:00Z") + \
              [sale("2026-01-03T00:00:00Z", ["A"]), scan("2026-01-04T00:00:00Z", "A", 1, 0, "A", star=True)]
-        ex = ed_unsold.analyse(ev, ARGS)["exploration"]
+        ex = outrider.unsold.analyse(ev, ARGS)["exploration"]
         self.assertEqual([r["system"] for r in ex["rows"]], ["A"])
         self.assertTrue(ex["rows"][0]["first_discovered"])
 
     def test_on_foot_death_keeps_ship_data(self):
         ev = [scan("2026-01-01T00:00:00Z", "A", 1, 0, "A", star=True)] + death("2026-01-02T00:00:00Z", "recover")
-        self.assertEqual(ed_unsold.analyse(ev, ARGS)["exploration"]["bodies"], 1)
+        self.assertEqual(outrider.unsold.analyse(ev, ARGS)["exploration"]["bodies"], 1)
 
     def test_crew_cut_only_from_sales_with_same_crew(self):
         stats = lambda ts, hired, fired: (T(ts), None, {"event": "Statistics", "timestamp": ts,
@@ -78,16 +78,16 @@ class UnsoldEstimate(unittest.TestCase):
         cut = (T("2026-01-02T00:00:00Z"), None, {"event": "MultiSellExplorationData", "timestamp": "2026-01-02T00:00:00Z",
                                                   "TotalEarnings": 910, "BaseValue": 1000, "Bonus": 0, "Discovered": []})
         ev = [stats("2026-01-01T00:00:00Z", 1, 0), cut, stats("2026-02-01T00:00:00Z", 1, 1)]
-        ex = ed_unsold.analyse(ev, ARGS)["exploration"]
+        ex = outrider.unsold.analyse(ev, ARGS)["exploration"]
         self.assertEqual(ex["npc_crew"], 0)
         self.assertEqual(ex["payout_ratio"], 1.0)
         ev = [stats("2026-01-01T00:00:00Z", 1, 0), cut]
-        self.assertAlmostEqual(ed_unsold.analyse(ev, ARGS)["exploration"]["payout_ratio"], 0.91)
+        self.assertAlmostEqual(outrider.unsold.analyse(ev, ARGS)["exploration"]["payout_ratio"], 0.91)
 
     def test_journal_dirs_env_override(self):
         os.environ["ED_JOURNALS"] = os.pathsep.join([os.getcwd(), "/nonexistent/xyz"])
         try:
-            live, legacy = ed_unsold.find_journal_dirs()
+            live, legacy = outrider.unsold.find_journal_dirs()
         finally:
             del os.environ["ED_JOURNALS"]
         self.assertEqual(live, [os.getcwd()])
@@ -139,35 +139,35 @@ class BioNames(unittest.TestCase):
     """Spelling normalisation needs no downloaded rules."""
 
     def test_atmosphere_and_volcanism_spellings(self):
-        self.assertEqual(ed_bio.norm_atmosphere("Hot thin Sulphur dioxide"), "sulphurdioxide")
-        self.assertEqual(ed_bio.norm_atmosphere("CarbonDioxideRich"), "carbondioxiderich")
-        self.assertEqual(ed_bio.norm_atmosphere(None), "none")
-        self.assertEqual(ed_bio.norm_volcanism("Major Rocky Magma"), "major rocky magma volcanism")
-        self.assertEqual(ed_bio.norm_volcanism("No volcanism"), "")
-        self.assertEqual(ed_bio.journal_class("High metal content world"), "High metal content body")
-        self.assertEqual(ed_bio.journal_class("Earth-like world"), "Earthlike body")
+        self.assertEqual(outrider.bio.norm_atmosphere("Hot thin Sulphur dioxide"), "sulphurdioxide")
+        self.assertEqual(outrider.bio.norm_atmosphere("CarbonDioxideRich"), "carbondioxiderich")
+        self.assertEqual(outrider.bio.norm_atmosphere(None), "none")
+        self.assertEqual(outrider.bio.norm_volcanism("Major Rocky Magma"), "major rocky magma volcanism")
+        self.assertEqual(outrider.bio.norm_volcanism("No volcanism"), "")
+        self.assertEqual(outrider.bio.journal_class("High metal content world"), "High metal content body")
+        self.assertEqual(outrider.bio.journal_class("Earth-like world"), "Earthlike body")
 
     def test_star_codes(self):
         for name, code in [("M (Red dwarf) Star", "M"), ("M (Red giant) Star", "M_RedGiant"),
                            ("K (Yellow-Orange giant) Star", "K_OrangeGiant"), ("White Dwarf (DA) Star", "DA"),
                            ("Wolf-Rayet N Star", "WN"), ("Neutron Star", "N"), ("Black Hole", "H"),
                            ("Herbig Ae/Be Star", "AeBe"), ("T Tauri Star", "TTS"), ("DA", "DA"), ("M_RedGiant", "M_RedGiant")]:
-            self.assertEqual(ed_bio.star_code(name), code, name)
-        self.assertTrue(ed_bio.star_matches("M", "M_RedGiant"))
-        self.assertTrue(ed_bio.star_matches("D", "DAB"))
-        self.assertFalse(ed_bio.star_matches("K", "M"))
-        self.assertTrue(ed_bio.luminosity_matches("V", "Vab"))
-        self.assertFalse(ed_bio.luminosity_matches("V", "IV"))
+            self.assertEqual(outrider.bio.star_code(name), code, name)
+        self.assertTrue(outrider.bio.star_matches("M", "M_RedGiant"))
+        self.assertTrue(outrider.bio.star_matches("D", "DAB"))
+        self.assertFalse(outrider.bio.star_matches("K", "M"))
+        self.assertTrue(outrider.bio.luminosity_matches("V", "Vab"))
+        self.assertFalse(outrider.bio.luminosity_matches("V", "IV"))
 
 
-@unittest.skipUnless(ed_bio.available(), "bio_rules.json not downloaded (python3 ed_bio.py --update-rules)")
+@unittest.skipUnless(outrider.bio.available(), "bio_rules.json not downloaded (python3 -m outrider.bio --update-rules)")
 class BioRules(unittest.TestCase):
     """Against the downloaded BioScan rules: the things a wrong evaluator would get wrong."""
     M_SYSTEM = {"x": -3485, "y": 39, "z": 7320, "stars": [{"type": "M", "luminosity": "Va", "main": True}],
                 "planet_types": ["Rocky body", "Icy body"]}
 
     def names(self, body, system=None):
-        return [s["name"] for s in ed_bio.predict(body, system or self.M_SYSTEM)]
+        return [s["name"] for s in outrider.bio.predict(body, system or self.M_SYSTEM)]
 
     def test_icy_argon_is_bacterium_and_fonticulua_only(self):
         n = self.names({"class": "Icy body", "atmosphere": "Argon", "gravity": 0.2, "temperature": 80, "parents": ["M"]})
@@ -196,12 +196,12 @@ class BioRules(unittest.TestCase):
         self.assertNotIn("Roseum Brain Tree", self.names(body))
 
     def test_regions(self):
-        self.assertEqual(ed_bio.region_name(0, 0, 0), "Inner Orion Spur")
-        self.assertEqual(ed_bio.region_name(-9530.5, -910.3, 19808.1), "Inner Scutum-Centaurus Arm")
-        self.assertIsNone(ed_bio.region_number(90000, 0, 0))
+        self.assertEqual(outrider.bio.region_name(0, 0, 0), "Inner Orion Spur")
+        self.assertEqual(outrider.bio.region_name(-9530.5, -910.3, 19808.1), "Inner Scutum-Centaurus Arm")
+        self.assertIsNone(outrider.bio.region_number(90000, 0, 0))
 
     def test_unruled_genus_still_priced(self):
-        val, groups = ed_bio.potential([], genera=["Crystalline Shards"])
+        val, groups = outrider.bio.potential([], genera=["Crystalline Shards"])
         self.assertGreater(val, 1_000_000)
         self.assertTrue(groups[0]["unruled"])
 
@@ -348,38 +348,38 @@ class Materials(unittest.TestCase):
                 "Manufactured": [], "Encoded": []}
 
     def test_snapshot_then_deltas(self):
-        st = ed_materials.new_state()
-        ed_materials.apply(st, self.snap(carbon=5, iron=10, nickel=3))
-        ed_materials.apply(st, {"event": "MaterialCollected", "timestamp": "2026-01-01T00:01:00Z", "Category": "Raw",
+        st = outrider.materials.new_state()
+        outrider.materials.apply(st, self.snap(carbon=5, iron=10, nickel=3))
+        outrider.materials.apply(st, {"event": "MaterialCollected", "timestamp": "2026-01-01T00:01:00Z", "Category": "Raw",
                                 "Name": "carbon", "Count": 2})
-        ed_materials.apply(st, {"event": "Synthesis", "timestamp": "2026-01-01T00:02:00Z", "Name": "Repair Basic",
+        outrider.materials.apply(st, {"event": "Synthesis", "timestamp": "2026-01-01T00:02:00Z", "Name": "Repair Basic",
                                 "Materials": [{"Name": "iron", "Count": 2}, {"Name": "nickel", "Count": 1}]})
-        ed_materials.apply(st, {"event": "MaterialDiscarded", "timestamp": "2026-01-01T00:03:00Z", "Name": "nickel", "Count": 9})
+        outrider.materials.apply(st, {"event": "MaterialDiscarded", "timestamp": "2026-01-01T00:03:00Z", "Name": "nickel", "Count": 9})
         self.assertEqual(st["counts"], {"carbon": 7, "iron": 8})
 
     def test_trade_sign_convention(self):
-        st = ed_materials.new_state()
-        ed_materials.apply(st, self.snap(arsenic=10))
-        ed_materials.apply(st, {"event": "MaterialTrade", "timestamp": "2026-01-01T00:01:00Z", "TraderType": "raw",
+        st = outrider.materials.new_state()
+        outrider.materials.apply(st, self.snap(arsenic=10))
+        outrider.materials.apply(st, {"event": "MaterialTrade", "timestamp": "2026-01-01T00:01:00Z", "TraderType": "raw",
                                 "Paid": {"Material": "arsenic", "Quantity": 6},
                                 "Received": {"Material": "polonium", "Quantity": 1}})
         self.assertEqual(st["counts"], {"arsenic": 4, "polonium": 1})
 
     def test_events_before_snapshot_ignored(self):
-        st = ed_materials.new_state()
-        ed_materials.apply(st, self.snap("2026-01-02T00:00:00Z", carbon=1))
-        ed_materials.apply(st, {"event": "MaterialCollected", "timestamp": "2026-01-01T00:00:00Z", "Name": "carbon", "Count": 5})
-        ed_materials.apply(st, self.snap("2026-01-01T00:00:00Z", carbon=99))
+        st = outrider.materials.new_state()
+        outrider.materials.apply(st, self.snap("2026-01-02T00:00:00Z", carbon=1))
+        outrider.materials.apply(st, {"event": "MaterialCollected", "timestamp": "2026-01-01T00:00:00Z", "Name": "carbon", "Count": 5})
+        outrider.materials.apply(st, self.snap("2026-01-01T00:00:00Z", carbon=99))
         self.assertEqual(st["counts"], {"carbon": 1})
 
     def test_boosts(self):
         counts = {"carbon": 9, "vanadium": 4, "germanium": 5, "cadmium": 2, "niobium": 3, "arsenic": 1,
                   "yttrium": 1, "polonium": 0}
-        self.assertEqual(ed_materials.boosts(counts), {"basic": 4, "standard": 2, "premium": 0})
-        self.assertEqual(ed_materials.craftable(counts, {"carbon": 2, "niobium": 1}), (3, "niobium"))
+        self.assertEqual(outrider.materials.boosts(counts), {"basic": 4, "standard": 2, "premium": 0})
+        self.assertEqual(outrider.materials.craftable(counts, {"carbon": 2, "niobium": 1}), (3, "niobium"))
 
     def test_raw_names_and_caps(self):
-        inv = ed_materials.inventory(None)
+        inv = outrider.materials.inventory(None)
         carbon = next(r for r in inv["rows"] if r["id"] == "carbon")
         self.assertEqual((carbon["name"], carbon["grade"], carbon["cap"]), ("Carbon", 1, 300))
 
@@ -423,7 +423,7 @@ class Samples(unittest.TestCase):
         self.assertEqual(by["body #8"]["state"], "in progress")
         self.assertEqual(o["counts"], {"aboard": 1, "sold": 1, "lost": 1, "in progress": 1})
         self.assertEqual(by["5"]["system"]["name"], "Sys")
-        if ed_outrider.ed_bio:
+        if outrider.bio:
             self.assertEqual(o["totals"]["sold"], by["5"]["value"])
 
 
@@ -513,31 +513,31 @@ class Log(unittest.TestCase):
 
     def test_formatters_never_throw(self):
         for ev in self.SAMPLES:
-            s = ed_log.summary(dict(ev, timestamp="2026-01-01T00:00:00Z"), {(1, 7): "B 7"})
+            s = outrider.log.summary(dict(ev, timestamp="2026-01-01T00:00:00Z"), {(1, 7): "B 7"})
             self.assertIsInstance(s, str, ev["event"])
             self.assertTrue(s, ev["event"])
         # every formatter survives an event with no fields at all
-        for name in ed_log.LOG_FORMAT:
-            self.assertIsInstance(ed_log.summary({"event": name}), str, name)
+        for name in outrider.log.LOG_FORMAT:
+            self.assertIsInstance(outrider.log.summary({"event": name}), str, name)
 
     def test_specific_summaries(self):
-        self.assertEqual(ed_log.summary(self.SAMPLES[0]), "→ Sys · 32.10 ly · 2.40 t · boosted")
-        self.assertIn("🏁 undiscovered", ed_log.summary(self.SAMPLES[10]))
-        self.assertIn("landable 0.19 g", ed_log.summary(self.SAMPLES[10]))
-        self.assertEqual(ed_log.summary(self.SAMPLES[21], {(1, 7): "B 7"}), "Log: Bacterium Cerbrus on B 7")
-        self.assertEqual(ed_log.fallback({"event": "X", "Thing": "$nice;", "Thing_Localised": "Nice", "Count": 3}),
+        self.assertEqual(outrider.log.summary(self.SAMPLES[0]), "→ Sys · 32.10 ly · 2.40 t · boosted")
+        self.assertIn("🏁 undiscovered", outrider.log.summary(self.SAMPLES[10]))
+        self.assertIn("landable 0.19 g", outrider.log.summary(self.SAMPLES[10]))
+        self.assertEqual(outrider.log.summary(self.SAMPLES[21], {(1, 7): "B 7"}), "Log: Bacterium Cerbrus on B 7")
+        self.assertEqual(outrider.log.fallback({"event": "X", "Thing": "$nice;", "Thing_Localised": "Nice", "Count": 3}),
                          "X · Thing: Nice · Count: 3")
-        self.assertEqual(ed_log.fallback({"event": "RepairDrone"}), "Repair drone")   # never blank
-        self.assertEqual(ed_log.category("CarrierBankTransfer"), "carrier")
-        self.assertEqual(ed_log.category("Music"), "noise")
+        self.assertEqual(outrider.log.fallback({"event": "RepairDrone"}), "Repair drone")   # never blank
+        self.assertEqual(outrider.log.category("CarrierBankTransfer"), "carrier")
+        self.assertEqual(outrider.log.category("Music"), "noise")
 
     def test_file_keys_and_window(self):
-        self.assertEqual(ed_log.file_key("/x/Journal.2026-09-27T220610.01.log"), ("2026-09-27T22:06:10", 1))
-        self.assertEqual(ed_log.file_key("Journal.180615221530.02.log"), ("2018-06-15T22:15:30", 2))
+        self.assertEqual(outrider.log.file_key("/x/Journal.2026-09-27T220610.01.log"), ("2026-09-27T22:06:10", 1))
+        self.assertEqual(outrider.log.file_key("Journal.180615221530.02.log"), ("2018-06-15T22:15:30", 2))
         files = [(("2026-01-01T00:00:00", 1), "a"), (("2026-01-05T00:00:00", 1), "b"), (("2026-01-09T00:00:00", 1), "c")]
         now = dt.datetime(2026, 1, 10, tzinfo=dt.timezone.utc).timestamp()
-        self.assertEqual([p for _, p in ed_log.window(files, 2, now)], ["b", "c"])   # the one before runs into it
-        self.assertEqual([p for _, p in ed_log.window(files, 30, now)], ["a", "b", "c"])
+        self.assertEqual([p for _, p in outrider.log.window(files, 2, now)], ["b", "c"])   # the one before runs into it
+        self.assertEqual([p for _, p in outrider.log.window(files, 30, now)], ["a", "b", "c"])
 
     def test_read_paging_tail_and_half_line(self):
         import tempfile
@@ -555,19 +555,19 @@ class Log(unittest.TestCase):
             for i in range(3):
                 f.write(_j.dumps({"timestamp": ts(29 - i), "event": "FSDJump", "StarSystem": f"New{i}", "JumpDist": 1, "FuelUsed": 1}) + "\n")
             f.write('{"timestamp":"' + ts(1) + '","event":"FSDJump","StarSys')   # half-written line
-        r = ed_log.read_log([d], days=1, limit=4)
+        r = outrider.log.read_log([d], days=1, limit=4)
         self.assertEqual([x["system"] for x in r["rows"]], ["New2", "New1", "New0", "Old4"])
-        r2 = ed_log.read_log([d], days=1, limit=4, before=r["next"])
+        r2 = outrider.log.read_log([d], days=1, limit=4, before=r["next"])
         self.assertEqual([x["system"] for x in r2["rows"]], ["Old3", "Old2", "Old1", "Old0"])
-        self.assertTrue(ed_log.read_log([d], days=1, noise=True)["rows"][3]["event"] == "Music")
-        self.assertEqual(len(ed_log.read_log([d], days=1, q="new1")["rows"]), 1)
-        self.assertEqual(len(ed_log.read_log([d], days=1, q="→ old")["rows"]), 5)   # matches the summary only
+        self.assertTrue(outrider.log.read_log([d], days=1, noise=True)["rows"][3]["event"] == "Music")
+        self.assertEqual(len(outrider.log.read_log([d], days=1, q="new1")["rows"]), 1)
+        self.assertEqual(len(outrider.log.read_log([d], days=1, q="→ old")["rows"]), 5)   # matches the summary only
         tail = r["newest"]
         with open(p2, "a") as f:
             f.write('tem":"Fresh","JumpDist":1,"FuelUsed":1}\n')
-        t = ed_log.read_log([d], after=tail)
+        t = outrider.log.read_log([d], after=tail)
         self.assertEqual([x["system"] for x in t["rows"]], ["Fresh"])
-        self.assertEqual(ed_log.read_log([d], after=t["newest"])["rows"], [])
+        self.assertEqual(outrider.log.read_log([d], after=t["newest"])["rows"], [])
 
 
 def B(name, bid=None, parents=None, kind="Planet", main=False):
@@ -759,7 +759,7 @@ class DumpPricing(unittest.TestCase):
                 "terraformingState": "Candidate for terraforming", "bodyId": 1}
         r = ed_outrider.record_from_dump("Sys", dump)
         cv = ed_outrider.carto_values(r, False, None, None, None)
-        expect = ed_unsold.body_value({"PlanetClass": "Water world", "MassEM": 0.5, "TerraformState": "Terraformable"},
+        expect = outrider.unsold.body_value({"PlanetClass": "Water world", "MassEM": 0.5, "TerraformState": "Terraformable"},
                                       True, False, True)
         self.assertEqual(cv["left"], expect)
         self.assertEqual(cv["now"], 0)
@@ -918,8 +918,8 @@ class LogTailRace(unittest.TestCase):
         line = lambda n: _j.dumps({"timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "FSDJump", "StarSystem": n}) + "\n"
         with open(p, "w") as f:
             f.write(line("S0"))
-        first = ed_log.read_log([d], days=1)
-        real = ed_log._load
+        first = outrider.log.read_log([d], days=1)
+        real = outrider.log._load
         calls = []
         def racing(path):
             e = real(path)
@@ -928,9 +928,9 @@ class LogTailRace(unittest.TestCase):
                 with open(p, "a") as f:
                     f.write(line("S1"))
             return e
-        with unittest.mock.patch.object(ed_log, "_load", racing):
-            t1 = ed_log.read_log([d], after=first["newest"])
-        t2 = ed_log.read_log([d], after=t1["newest"])
+        with unittest.mock.patch.object(outrider.log, "_load", racing):
+            t1 = outrider.log.read_log([d], after=first["newest"])
+        t2 = outrider.log.read_log([d], after=t1["newest"])
         self.assertEqual([r["system"] for r in t1["rows"] + t2["rows"]], ["S1"])
 
 
@@ -968,26 +968,26 @@ class LogFixes(unittest.TestCase):
             {"timestamp": now, "event": "FSDJump", "StarSystem": "Alpha", "StarPos": [0, 0, 0], "JumpDist": 5, "FuelUsed": 1},
             {"timestamp": now, "event": "Scan", "BodyName": "Alpha 1", "StarSystem": "Alpha", "PlanetClass": "Icy body",
              "WasMapped": False, "ScanType": "Detailed"}]})
-        self.assertEqual(len(ed_log.read_log([d], days=1, q="star")["rows"]), 0)     # only the StarSystem key has it
-        self.assertEqual(len(ed_log.read_log([d], days=1, q="alpha")["rows"]), 2)    # a value in both
-        self.assertEqual(len(ed_log.read_log([d], days=1, q="icy")["rows"]), 1)
+        self.assertEqual(len(outrider.log.read_log([d], days=1, q="star")["rows"]), 0)     # only the StarSystem key has it
+        self.assertEqual(len(outrider.log.read_log([d], days=1, q="alpha")["rows"]), 2)    # a value in both
+        self.assertEqual(len(outrider.log.read_log([d], days=1, q="icy")["rows"]), 1)
 
     def test_before_cursor_past_the_end(self):
         now = dt.datetime.now(dt.timezone.utc)
         name = now.strftime("Journal.%Y-%m-%dT%H%M%S.01.log")
         d = self.folder({name: [{"timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "Music"}]})
-        r = ed_log.read_log([d], days=1, before=f"{name}|999999", noise=True)   # no IndexError
+        r = outrider.log.read_log([d], days=1, before=f"{name}|999999", noise=True)   # no IndexError
         self.assertEqual(len(r["rows"]), 1)
 
     def test_files_ordered_by_first_line_not_local_name(self):
         # DST fall-back: the newer session's local-time name sorts before the older one's
         d = self.folder({"Journal.2026-10-25T013000.01.log": [{"timestamp": "2026-10-25T00:30:00Z", "event": "Music"}],
                          "Journal.2026-10-25T011500.01.log": [{"timestamp": "2026-10-25T01:15:00Z", "event": "Music"}]})
-        order = [os.path.basename(p) for _, p in ed_log.journal_files([d])]
+        order = [os.path.basename(p) for _, p in outrider.log.journal_files([d])]
         self.assertEqual(order, ["Journal.2026-10-25T013000.01.log", "Journal.2026-10-25T011500.01.log"])
 
     def test_legacy_sale_counts_systems(self):
-        s = ed_log.summary({"event": "SellExplorationData", "Systems": ["A", "B", "C", "D", "E"], "Discovered": ["B"],
+        s = outrider.log.summary({"event": "SellExplorationData", "Systems": ["A", "B", "C", "D", "E"], "Discovered": ["B"],
                             "TotalEarnings": 1500, "Bonus": 500})
         self.assertTrue(s.startswith("Sold data from 5 systems (1 new)"), s)
 
@@ -998,7 +998,7 @@ class LogFixes(unittest.TestCase):
             {"timestamp": ts, "event": "Touchdown", "Body": "Sys 8 g", "BodyID": 29, "SystemAddress": 5, "StarSystem": "Sys"},
             {"timestamp": ts, "event": "ScanOrganic", "ScanType": "Sample", "Species_Localised": "Bacterium Aurasus",
              "SystemAddress": 5, "Body": 29}]})
-        rows = ed_log.read_log([d], days=1, cats={"bio"})["rows"]
+        rows = outrider.log.read_log([d], days=1, cats={"bio"})["rows"]
         self.assertEqual(rows[0]["summary"], "Sample: Bacterium Aurasus on 8 g")
 
 
@@ -1209,26 +1209,26 @@ class BioColours(unittest.TestCase):
         stratum = {"star": {"F": "Emerald", "K": "Lime", "M": "Green", "Ae": "Teal"}}
         b = lambda parents, mats=None: {"parents": parents, "materials": mats}
         s = lambda main, n=1, complete=True: {"main": {"type": main} if main else None, "stars": [{}] * n, "complete": complete}
-        self.assertFalse(ed_bio._colour_ok(stratum, b(["G"]), s("G")))         # never seen at a G star
-        self.assertTrue(ed_bio._colour_ok(stratum, b(["K_OrangeGiant"]), s("G")))   # giant variants count
-        self.assertTrue(ed_bio._colour_ok(stratum, b(["G"]), s("M")))          # the main star counts too
-        self.assertTrue(ed_bio._colour_ok(stratum, b(["AeBe"]), s("AeBe")))    # Ae is the journal's AeBe
-        self.assertTrue(ed_bio._colour_ok(stratum, b(None), s("G", 2)))        # parents unknown, 2 stars: no call
-        self.assertFalse(ed_bio._colour_ok(stratum, b(None), s("G", 1)))       # one star: it must be that one
-        self.assertTrue(ed_bio._colour_ok(stratum, b(None), s("G", 1, False)))  # one star known, others may be (F39)
-        self.assertTrue(ed_bio._colour_ok(stratum, b(["G"]), s("H")))          # black hole primary: no call
+        self.assertFalse(outrider.bio._colour_ok(stratum, b(["G"]), s("G")))         # never seen at a G star
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(["K_OrangeGiant"]), s("G")))   # giant variants count
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(["G"]), s("M")))          # the main star counts too
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(["AeBe"]), s("AeBe")))    # Ae is the journal's AeBe
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(None), s("G", 2)))        # parents unknown, 2 stars: no call
+        self.assertFalse(outrider.bio._colour_ok(stratum, b(None), s("G", 1)))       # one star: it must be that one
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(None), s("G", 1, False)))  # one star known, others may be (F39)
+        self.assertTrue(outrider.bio._colour_ok(stratum, b(["G"]), s("H")))          # black hole primary: no call
         fung = {"element": {"polonium": "Yellow", "tin": "Grey"}}
-        self.assertTrue(ed_bio._colour_ok(fung, b(["G"], None), s("G")))       # materials unknown: no call
-        self.assertFalse(ed_bio._colour_ok(fung, b(["G"], {"iron", "nickel"}), s("G")))
-        self.assertTrue(ed_bio._colour_ok(fung, b(["G"], {"iron", "tin"}), s("G")))
-        self.assertTrue(ed_bio._colour_ok(None, b(["G"]), s("G")))            # no colour table: no check
+        self.assertTrue(outrider.bio._colour_ok(fung, b(["G"], None), s("G")))       # materials unknown: no call
+        self.assertFalse(outrider.bio._colour_ok(fung, b(["G"], {"iron", "nickel"}), s("G")))
+        self.assertTrue(outrider.bio._colour_ok(fung, b(["G"], {"iron", "tin"}), s("G")))
+        self.assertTrue(outrider.bio._colour_ok(None, b(["G"]), s("G")))            # no colour table: no check
 
     def test_variant_names(self):   # P11: the colour variant, a candidate set that is [] whenever unsure
         aur = {"name": "Bacterium Aurasus", "colors": {"star": {"K": "Teal", "M": "Green", "F": "Lime", "Y": "Mauve"}}}
         b = lambda parents, mats=None: {"parents": parents, "materials": mats}
         s = lambda *types, complete=True: {"main": {"type": types[0]} if types else None, "complete": complete,
                                            "stars": [{"type": t} for t in types]}
-        v = ed_bio.variant_names
+        v = outrider.bio.variant_names
         self.assertEqual(v(aur, b(["K"]), s("K")), ["Bacterium Aurasus - Teal"])           # K parent
         self.assertEqual(v(aur, b(["K_OrangeGiant"]), s("K_OrangeGiant")), ["Bacterium Aurasus - Teal"])
         self.assertEqual(v(aur, b([None]), s("K")), [])                  # nearest parent not a known star
@@ -1250,9 +1250,9 @@ class BioColours(unittest.TestCase):
 
     def test_variant_names_real_rules(self):
         # the colour spellings come from ExploData's tables; they match the journal's (e.g. "Ocher", "Grey")
-        if not ed_bio.load_rules():
+        if not outrider.bio.load_rules():
             self.skipTest("no bio_rules.json")
-        cols = {c for sp in ed_bio.load_rules()["species"] for t in (sp.get("colors") or {}).values() for c in t.values()}
+        cols = {c for sp in outrider.bio.load_rules()["species"] for t in (sp.get("colors") or {}).values() for c in t.values()}
         self.assertIn("Ocher", cols)
         self.assertIn("Grey", cols)
         self.assertNotIn("Ochre", cols)
@@ -1280,14 +1280,14 @@ class BioColours(unittest.TestCase):
     def test_by_genus_carries_variants(self):
         cands = [{"name": "Bacterium Aurasus", "genus": "Bacterium", "value": 1000000, "variants": ["Bacterium Aurasus - Teal"]},
                  {"name": "Bacterium Vesicula", "genus": "Bacterium", "value": 500000, "variants": []}]
-        [g] = ed_bio.by_genus(cands)
+        [g] = outrider.bio.by_genus(cands)
         self.assertEqual((g["variants"], g["variant"]), (["Bacterium Aurasus - Teal"], "Bacterium Aurasus - Teal"))
-        self.assertEqual(ed_bio.by_genus(cands, ["Stratum"])[0]["variants"], [])   # unruled genus
+        self.assertEqual(outrider.bio.by_genus(cands, ["Stratum"])[0]["variants"], [])   # unruled genus
 
     def test_options(self):
         cands = [{"name": "Stratum Tectonicas", "genus": "Stratum", "value": 19010800},
                  {"name": "Bacterium Aurasus", "genus": "Bacterium", "value": 1000000}]
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=cands):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=cands):
             r = {"type": "Planet", "bio": 1}
             o = ed_outrider.bio_options(r)
             self.assertEqual((o["low"], o["high"], [g["genus"] for g in o["genera"]]),
@@ -1307,8 +1307,8 @@ class HonkBinding(unittest.TestCase):
 
     def test_reads_preset(self):
         import tempfile
-        import ed_honk
-        self.assertEqual([ed_honk.elite_key(k) for k in ("Key_K", "Key_Numpad_0", "Key_LeftAlt", "Key_RightControl", "Joy_1")],
+        import outrider.honk
+        self.assertEqual([outrider.honk.elite_key(k) for k in ("Key_K", "Key_Numpad_0", "Key_LeftAlt", "Key_RightControl", "Joy_1")],
                          ["KEY_K", "KEY_KP0", "KEY_LEFTALT", "KEY_RIGHTCTRL", None])
         with tempfile.TemporaryDirectory() as root:
             journals = os.path.join(root, "steamuser", "Saved Games", "Frontier Developments", "Elite Dangerous")
@@ -1325,14 +1325,14 @@ class HonkBinding(unittest.TestCase):
                         <Primary Device="SaitekX56Joystick" Key="Joy_1" />{secondary}</PrimaryFire></Root>""")
             preset('<Secondary Device="Keyboard" Key="Key_K"><Modifier Device="Keyboard" Key="Key_LeftAlt" />'
                    '<Modifier Device="Keyboard" Key="Key_RightAlt" /></Secondary>')
-            keys, what = ed_honk.primary_fire_binding([journals])
+            keys, what = outrider.honk.primary_fire_binding([journals])
             self.assertEqual(keys, ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_K"])
             self.assertIn("Left Alt + Right Alt + K", what)
             preset('<Secondary Device="{NoDevice}" Key="" />')
-            keys, what = ed_honk.primary_fire_binding([journals])
+            keys, what = outrider.honk.primary_fire_binding([journals])
             self.assertIsNone(keys)
             self.assertIn("no keyboard binding", what)
-        self.assertEqual(ed_honk.parse_combo("alt+k"), ["KEY_LEFTALT", "KEY_K"])
+        self.assertEqual(outrider.honk.parse_combo("alt+k"), ["KEY_LEFTALT", "KEY_K"])
 
 
 class Speech(unittest.TestCase):
@@ -1496,7 +1496,7 @@ class Speech(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "speech.json")
-            sl = ed_speech.SpeechLines(path)
+            sl = outrider.speech.SpeechLines(path)
             self.assertIsNone(sl.info()["version"])
             doc = {"styles": {"business": "Business"}, "lines": {"hull": {"business": ["Hull {pct} percent."]}}}
             with open(path, "w") as f:
@@ -1510,7 +1510,7 @@ class Speech(unittest.TestCase):
             self.assertIn("last good copy", info["error"])
             self.assertEqual(sl.lines()["lines"]["hull"]["business"], ["Hull {pct} percent."])
         bad = {"styles": {"business": 1}, "lines": {"hull": {"business": ["{body} is hot"], "pirate": ["arr"]}, "nope": {}}}
-        probs = " ".join(ed_speech.check(bad))
+        probs = " ".join(outrider.speech.check(bad))
         self.assertIn("{body}", probs)
         self.assertIn('"pirate"', probs)
         self.assertIn('"nope"', probs)
@@ -1518,23 +1518,23 @@ class Speech(unittest.TestCase):
     def test_fill_and_spoken_text(self):
         import random
         rng = random.Random(3)
-        got = {ed_speech.fill("{name}", {}, "Boss, Hefay, Sir", rng) for _ in range(60)}
+        got = {outrider.speech.fill("{name}", {}, "Boss, Hefay, Sir", rng) for _ in range(60)}
         self.assertEqual(got, {"Boss", "Hefay", "Sir"})   # each {name} is its own random pick
-        self.assertEqual(ed_speech.fill("{name}, hull {pct}. {missing}", {"pct": 40}, " , "), "Commander, hull 40. ")
-        self.assertEqual(ed_speech.spoken_text("⚠ Sold 12.6M cr · 3k left <b>now</b>"),
+        self.assertEqual(outrider.speech.fill("{name}, hull {pct}. {missing}", {"pct": 40}, " , "), "Commander, hull 40. ")
+        self.assertEqual(outrider.speech.spoken_text("⚠ Sold 12.6M cr · 3k left <b>now</b>"),
                          "Sold 12.6 million credits, 3 thousand left now")
-        self.assertEqual(ed_speech.spoken_text("52.0M unsold, 12.64B banked, 1.96M left, 0.04M, 7.25 ly, 1.4M to map"),
+        self.assertEqual(outrider.speech.spoken_text("52.0M unsold, 12.64B banked, 1.96M left, 0.04M, 7.25 ly, 1.4M to map"),
                          "52 million unsold, 12.6 billion banked, 2 million left, 0 million, 7.2 ly, 1.4 million to map")
-        for key in ed_speech.KEYS:   # the voice lab's sample values fill every placeholder an alert has
-            self.assertLessEqual(ed_speech.fills(key) - set(ed_speech.ALWAYS), set(ed_speech.SAMPLES.get(key, {})), key)
+        for key in outrider.speech.KEYS:   # the voice lab's sample values fill every placeholder an alert has
+            self.assertLessEqual(outrider.speech.fills(key) - set(outrider.speech.ALWAYS), set(outrider.speech.SAMPLES.get(key, {})), key)
 
     def test_shipped_lines(self):
         # speech.json covers every alert in every personality, and the page asks for exactly those alerts
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(here, "speech.json"), encoding="utf-8") as f:
+        with open(os.path.join(here, "resources", "speech.json"), encoding="utf-8") as f:
             doc = json.load(f)
-        self.assertEqual(ed_speech.check(doc), [])
-        for key in ed_speech.KEYS:
+        self.assertEqual(outrider.speech.check(doc), [])
+        for key in outrider.speech.KEYS:
             for style in list(doc["styles"]) + [s + "_profane" for s in ("sarcastic", "sweet")]:
                 self.assertGreaterEqual(len(doc["lines"][key].get(style, [])), 10, f"{key}/{style}")
         # the voice calls you by your chosen names ({name}): commander names are often unpronounceable
@@ -1545,11 +1545,11 @@ class Speech(unittest.TestCase):
         import re
         used = set(re.findall(r'line\("(\w+)"', js)) | set(re.findall(r'"(unsold_\w+)"', js))
         # every key is spoken by the page (RESERVED would list any with lines written ahead of their trigger)
-        self.assertEqual(used, set(ed_speech.KEYS) - set(ed_speech.RESERVED))
-        self.assertLessEqual(set(ed_speech.RESERVED), set(ed_speech.KEYS))
+        self.assertEqual(used, set(outrider.speech.KEYS) - set(outrider.speech.RESERVED))
+        self.assertLessEqual(set(outrider.speech.RESERVED), set(outrider.speech.KEYS))
         samples = js[js.index("const LINE_SAMPLES = {"):]
         samples = samples[:samples.index("\n};")]
-        for key in ed_speech.KEYS:   # the ▶ try button has sample values for every alert
+        for key in outrider.speech.KEYS:   # the ▶ try button has sample values for every alert
             self.assertRegex(samples, r"\b%s: \{" % key, key)
 
 
@@ -1735,18 +1735,18 @@ class Batch0Security(unittest.TestCase):
 
     def test_voice_names(self):
         import tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             for ext in (".onnx", ".onnx.json"):   # installed = both files
                 open(os.path.join(d, "my-odd.voice" + ext), "w").close()
-            sp = ed_tts.Speaker(voices_dir=d)
+            sp = outrider.tts.Speaker(voices_dir=d)
             ok = ("en_GB-southern_english_female-low", "zh_CN-huayan-x_low", "en_US-l2arctic-medium", "my-odd.voice")
             bad = ("../x_y-z-low", "/home/u/x_Y-z-low", "en_GB-a/b-low", "en_GB-x-huge", "", "en_GB-x-low\n")
             self.assertEqual([sp.valid_name(v) for v in ok], [True] * len(ok))
             self.assertEqual([sp.valid_name(v) for v in bad], [False] * len(bad))
             started = []
             sp.PiperVoice = object   # "installed", without starting any real work
-            with unittest.mock.patch.object(ed_tts.threading, "Thread", lambda **kw: started.append(kw) or unittest.mock.Mock()):
+            with unittest.mock.patch.object(outrider.tts.threading, "Thread", lambda **kw: started.append(kw) or unittest.mock.Mock()):
                 self.assertFalse(sp.use("../../etc/x_y-z-low"))
                 self.assertTrue(sp.use("en_US-lessac-medium"))
                 self.assertTrue(sp.use("en_US-amy-medium"))   # while the first switch runs: queued, no second thread
@@ -1838,7 +1838,7 @@ class Batch0Security(unittest.TestCase):
         # F86: close() while press() holds the key: the hold ends early, keys are let go, then the device closes
         import threading
         import types
-        import ed_honk
+        import outrider.honk
         writes = []
 
         class FakeUI:
@@ -1854,7 +1854,7 @@ class Batch0Security(unittest.TestCase):
 
             def close(self):
                 self.closed = True
-        h = ed_honk.Honker("KEY_K", hold=5)
+        h = outrider.honk.Honker("KEY_K", hold=5)
         h.evdev = types.SimpleNamespace(ecodes=types.SimpleNamespace(EV_KEY=1, ecodes={"KEY_K": 37}))
         h.ui = ui = FakeUI()
         out = []
@@ -2059,11 +2059,11 @@ class Batch2Values(unittest.TestCase):
                                            "BodyName": "Sys 4", "ProbesUsed": 5, "EfficiencyTarget": 6})
         ev = [scan("2026-01-01T00:05:00Z", "Sys", 1, 4, "Sys 4"), sale("2026-01-02T00:00:00Z", ["Sys"]),
               scan("2026-01-03T00:00:00Z", "Sys", 1, 4, "Sys 4")]           # an AutoScan on the way back
-        self.assertEqual(ed_unsold.analyse(ev, ARGS)["exploration"]["rows"], [])
-        rows = ed_unsold.analyse(ev + [mapped("2026-01-03T00:05:00Z")], ARGS)["exploration"]["rows"]
+        self.assertEqual(outrider.unsold.analyse(ev, ARGS)["exploration"]["rows"], [])
+        rows = outrider.unsold.analyse(ev + [mapped("2026-01-03T00:05:00Z")], ARGS)["exploration"]["rows"]
         body = {"PlanetClass": "High metal content body", "MassEM": 1.0, "TerraformState": "", "first_mapped": True}
         self.assertEqual([(r["map_only"], r["value"]) for r in rows],
-                         [(True, ed_unsold.body_value(body, True, False, True) - ed_unsold.body_value(body, False, False, True))])
+                         [(True, outrider.unsold.body_value(body, True, False, True) - outrider.unsold.body_value(body, False, False, True))])
         # Here agrees: the rescanned body is sold data, not something on board
         for e in ev:
             self.j.handle(e[2])
@@ -2074,11 +2074,11 @@ class Batch2Values(unittest.TestCase):
     def test_small_body_floor_matches_eddiscovery(self):   # F35: checked, left as the reference has it
         # EDDiscovery's EstimatedValues.cs floors the base value at 500 before the mapping multiplier
         icy = {"PlanetClass": "Icy body", "MassEM": 0.01, "TerraformState": "", "first_discovered": True, "first_mapped": True}
-        self.assertEqual(ed_unsold.planet_base_value(300.0, 0.01), 500.0)
-        self.assertEqual(ed_unsold.body_value(icy, True, False, True), int((500 * 3.699622554 + 555) * 2.6))
+        self.assertEqual(outrider.unsold.planet_base_value(300.0, 0.01), 500.0)
+        self.assertEqual(outrider.unsold.body_value(icy, True, False, True), int((500 * 3.699622554 + 555) * 2.6))
 
     def test_sold_bio_is_not_on_board(self):   # F3
-        if not ed_outrider.ed_bio:
+        if not outrider.bio:
             self.skipTest("no rules")
         s = scan("2026-01-01T00:01:00Z", "Sys", 1, 5, "Sys 5")[2]; s["WasFootfalled"] = False
         self.j.handle(s)
@@ -2086,7 +2086,7 @@ class Batch2Values(unittest.TestCase):
                        "BodyName": "Sys 5", "Signals": [{"Type": "$SAA_SignalType_Biological;", "Count": 1}]})
         for i, k in enumerate(("Log", "Sample", "Analyse")):
             self.j.handle(org(f"2026-01-01T00:0{2 + i}:00Z", 1, 5, "Bacterial_01", k))
-        value = ed_bio.species_value("Bacterium Aurasus")
+        value = outrider.bio.species_value("Bacterium Aurasus")
         self.assertEqual(self.body("5")["value_parts"]["bio_now"], value * 5)
         recs = lambda: ed_outrider.merge_records([], *ed_outrider.own_data(self.db, 1, "Sys")[:2])
         self.assertEqual(self.state.system_value(1, "Sys", recs(), None)["value_parts"]["bio_now"], value * 5)
@@ -2103,7 +2103,7 @@ class Batch2Values(unittest.TestCase):
 
     def test_nearby_uses_your_dss_genera(self):   # F2
         recs = [{"name": "4", "type": "Planet", "subtype": "Rocky body", "bio": 2, "full": True}]
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             self.assertEqual(ed_outrider.summarise(recs, 1)["bio_potential"], 19_010_800 + 16_777_215)
             s = ed_outrider.summarise(recs, 1, genera={"4": ["Bacterium", "Fungoida"]})
         self.assertEqual(s["bio_potential"], 4_703_200)
@@ -2112,7 +2112,7 @@ class Batch2Values(unittest.TestCase):
         self.db.execute("INSERT INTO own_organic (system, body_id, species, genus_name, species_name, samples, done_ts, ts) "
                         "VALUES (9, 2, 'x', 'Bacterium', 'Bacterium Aurasus', 3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
         recs = [{"name": "2", "type": "Planet", "subtype": "Rocky body", "body_id": 2, "bio": 2}]
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             hits = ed_outrider.bio_hits(self.db, 9, "Sys", 0, 0, 0, recs, 0)
             self.assertEqual(hits[0]["t"], "2 · 1 of 2 unscanned · up to 19.0M")
             self.assertEqual(ed_outrider.bio_hits(self.db, 9, "Sys", 0, 0, 0, recs, 20_000_000), [])
@@ -2139,32 +2139,32 @@ class Batch2Values(unittest.TestCase):
         self.assertEqual(r["volcanism"], "")                                     # the journal says: none
         del ev["Volcanism"]
         self.assertIsNone(ed_outrider.record_from_scan(ev)["volcanism"])         # not said: unknown
-        facts = lambda v: ed_bio._body_facts({"class": "Rocky body", "volcanism": v})
-        self.assertIs(ed_bio._check("volcanism", "None", facts(None), {}), ed_bio.SKIP)
-        self.assertIs(ed_bio._check("volcanism", ["silicate"], facts(None), {}), ed_bio.SKIP)
-        self.assertTrue(ed_bio._check("volcanism", "None", facts(""), {}))
-        self.assertFalse(ed_bio._check("volcanism", "Any", facts("No volcanism"), {}))
+        facts = lambda v: outrider.bio._body_facts({"class": "Rocky body", "volcanism": v})
+        self.assertIs(outrider.bio._check("volcanism", "None", facts(None), {}), outrider.bio.SKIP)
+        self.assertIs(outrider.bio._check("volcanism", ["silicate"], facts(None), {}), outrider.bio.SKIP)
+        self.assertTrue(outrider.bio._check("volcanism", "None", facts(""), {}))
+        self.assertFalse(outrider.bio._check("volcanism", "Any", facts("No volcanism"), {}))
 
     def test_incomplete_system_rules_nothing_out(self):   # F37, F39
         recs = [{"type": "Star", "subtype": "M", "main": True, "body_id": 0},
                 {"type": "Planet", "subtype": "Rocky body", "body_id": 3, "parents": [2]}]
         ctx = ed_outrider.bio_context("Sys", recs, body_count=4)
         self.assertEqual((ctx["planet_types"], ctx["complete"]), (None, False))   # a water giant may be unscanned
-        self.assertIs(ed_bio._check("bodies", {"Water giant"}, {}, ed_bio._system_facts(ctx, {})), ed_bio.SKIP)
+        self.assertIs(outrider.bio._check("bodies", {"Water giant"}, {}, outrider.bio._system_facts(ctx, {})), outrider.bio.SKIP)
         done = ed_outrider.bio_context("Sys", recs, body_count=2)
         self.assertEqual((done["planet_types"], done["complete"]), (["Rocky body"], True))
         # the planet orbits star 2, not scanned yet: its parents are unknown, not "the arrival M star"
         self.assertIsNone(ed_outrider._bio_body(recs[1], None, ctx)["parents"])
         self.assertEqual(ed_outrider._bio_body(recs[1], None, dict(ctx, star_types={0: "M", 2: "B"}))["parents"], ["B"])
         stratum = {"star": {"F": "Emerald", "K": "Lime", "M": "Green"}}
-        b = ed_bio._body_facts({"class": "Rocky body", "parents": None})
-        self.assertTrue(ed_bio._colour_ok(stratum, b, ed_bio._system_facts(dict(ctx, stars=[{"type": "G", "main": True}]), {})))
+        b = outrider.bio._body_facts({"class": "Rocky body", "parents": None})
+        self.assertTrue(outrider.bio._colour_ok(stratum, b, outrider.bio._system_facts(dict(ctx, stars=[{"type": "G", "main": True}]), {})))
 
     def test_obelisk_data_caps_at_150(self):   # G3.2
-        self.assertEqual(ed_materials.MATERIALS["ancientculturaldata"][2], 4)
-        st = ed_materials.new_state()
-        ed_materials._add(st, "AncientCulturalData", 149)
-        ed_materials._add(st, "AncientCulturalData", 3)
+        self.assertEqual(outrider.materials.MATERIALS["ancientculturaldata"][2], 4)
+        st = outrider.materials.new_state()
+        outrider.materials._add(st, "AncientCulturalData", 149)
+        outrider.materials._add(st, "AncientCulturalData", 3)
         self.assertEqual(st["counts"]["ancientculturaldata"], 150)
 
 
@@ -2180,7 +2180,7 @@ class RulesDownload(unittest.TestCase):
         self.log = []
 
     def tearDown(self):
-        ed_bio.load_rules(ed_bio.RULES_FILE, force=True)   # back to the shipped copy for the other tests
+        outrider.bio.load_rules(outrider.bio.RULES_FILE, force=True)   # back to the shipped copy for the other tests
         self.tmp.cleanup()
 
     def fake_get(self, fail=()):
@@ -2197,42 +2197,42 @@ class RulesDownload(unittest.TestCase):
         return get
 
     def test_a_failed_part_is_saved_without_a_version(self):   # F38
-        with unittest.mock.patch.object(ed_bio, "_get", self.fake_get(fail=("contents/", "genus.py"))):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
+        with unittest.mock.patch.object(outrider.bio, "_get", self.fake_get(fail=("contents/", "genus.py"))):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
         with open(self.path) as fh:
             saved = json.load(fh)["versions"]
         self.assertEqual(saved, {"bioscan": "", "regionmap": "r1", "explodata": ""})   # retried at the next start
-        with unittest.mock.patch.object(ed_bio, "_get", self.fake_get()):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
+        with unittest.mock.patch.object(outrider.bio, "_get", self.fake_get()):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
         with open(self.path) as fh:
             self.assertEqual(json.load(fh)["versions"], self.V)
         # and the next start sees the gap and fetches again
-        with unittest.mock.patch.object(ed_bio, "_get", self.fake_get(fail=("genus.py",))):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
-        with unittest.mock.patch.object(ed_bio, "remote_versions", return_value=dict(self.V)), \
-                unittest.mock.patch.object(ed_bio, "update_rules") as upd:
-            self.assertTrue(ed_bio.update_if_newer(self.path, log=self.log.append))
+        with unittest.mock.patch.object(outrider.bio, "_get", self.fake_get(fail=("genus.py",))):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
+        with unittest.mock.patch.object(outrider.bio, "remote_versions", return_value=dict(self.V)), \
+                unittest.mock.patch.object(outrider.bio, "update_rules") as upd:
+            self.assertTrue(outrider.bio.update_if_newer(self.path, log=self.log.append))
             upd.assert_called_once()
 
     def test_failed_update_keeps_the_old_copy(self):   # F80
-        with unittest.mock.patch.object(ed_bio, "_get", self.fake_get()):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
+        with unittest.mock.patch.object(outrider.bio, "_get", self.fake_get()):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
         with open(self.path) as fh:
             before = fh.read()
         newer = dict(self.V, bioscan="b2")
-        with unittest.mock.patch.object(ed_bio, "remote_versions", return_value=newer), \
-                unittest.mock.patch.object(ed_bio, "_get", self.fake_get(fail=("reference_stars.py",))):
-            self.assertIsNone(ed_bio.update_if_newer(self.path, log=self.log.append))
+        with unittest.mock.patch.object(outrider.bio, "remote_versions", return_value=newer), \
+                unittest.mock.patch.object(outrider.bio, "_get", self.fake_get(fail=("reference_stars.py",))):
+            self.assertIsNone(outrider.bio.update_if_newer(self.path, log=self.log.append))
         self.assertIn("update failed", self.log[-1])
         with open(self.path) as fh:
             self.assertEqual(fh.read(), before)
-        with unittest.mock.patch.object(ed_bio, "remote_versions", return_value=dict(self.V)):
-            self.assertIs(ed_bio.update_if_newer(self.path, log=self.log.append), False)   # current
+        with unittest.mock.patch.object(outrider.bio, "remote_versions", return_value=dict(self.V)):
+            self.assertIs(outrider.bio.update_if_newer(self.path, log=self.log.append), False)   # current
         missing = os.path.join(self.tmp.name, "none.json")
-        with unittest.mock.patch.object(ed_bio, "remote_versions", return_value=newer), \
-                unittest.mock.patch.object(ed_bio, "_get", self.fake_get(fail=("reference_stars.py",))):
+        with unittest.mock.patch.object(outrider.bio, "remote_versions", return_value=newer), \
+                unittest.mock.patch.object(outrider.bio, "_get", self.fake_get(fail=("reference_stars.py",))):
             with self.assertRaises(OSError):
-                ed_bio.update_if_newer(missing, log=self.log.append)       # nothing to fall back on
+                outrider.bio.update_if_newer(missing, log=self.log.append)       # nothing to fall back on
 
     def test_failed_colour_fetch_keeps_the_colours_there(self):   # F66
         catalog = ('catalog = {"$Codex_Ent_Bacterial_Genus_Name;": {"$Codex_Ent_Bacterial_01_Name;": '
@@ -2254,11 +2254,11 @@ class RulesDownload(unittest.TestCase):
         def colours():
             with open(self.path) as fh:
                 return [sp["colors"] for sp in json.load(fh)["species"]]
-        with unittest.mock.patch.object(ed_bio, "_get", get_with()):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
+        with unittest.mock.patch.object(outrider.bio, "_get", get_with()):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V))
         self.assertEqual(colours(), [{"star": {"F": "Teal"}}])
-        with unittest.mock.patch.object(ed_bio, "_get", get_with(fail=("genus.py",))):
-            ed_bio.update_rules(self.path, log=self.log.append, versions=dict(self.V, bioscan="b2"))
+        with unittest.mock.patch.object(outrider.bio, "_get", get_with(fail=("genus.py",))):
+            outrider.bio.update_rules(self.path, log=self.log.append, versions=dict(self.V, bioscan="b2"))
         self.assertEqual(colours(), [{"star": {"F": "Teal"}}])      # the colour check stays on
         with open(self.path) as fh:
             self.assertEqual(json.load(fh)["versions"]["explodata"], "")   # and ExploData is fetched again next start
@@ -2354,7 +2354,7 @@ class Batch3Journal(unittest.TestCase):
         self.j.handle({"timestamp": "2026-01-01T00:03:00Z", "event": "Synthesis", "Name": "Repair Basic",
                        "Materials": [{"Name": "iron", "Count": 2}, {"Name": "nickel", "Count": 1}]})
         self.assertEqual(self.j.hull["pct"], 70)   # the SRV's repair: the ship's hull stays known, no second alert
-        self.assertIn("SRV repair basic", ed_materials.SYNTH)
+        self.assertIn("SRV repair basic", outrider.materials.SYNTH)
 
     def test_same_journal_in_two_folders_counts_once(self):   # F51
         name = "Journal.2026-01-01T000000.01.log"
@@ -2591,12 +2591,12 @@ class Batch3Server(unittest.TestCase):
 
     def test_startup_voice_load_does_not_replace_the_chosen_one(self):   # F21
         import io, tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             for v in ("en_GB-a-low", "en_GB-b-low"):
                 for ext in (".onnx", ".onnx.json"):
                     open(os.path.join(d, v + ext), "w").close()
-            sp = ed_tts.Speaker("en_GB-a-low", None, voices_dir=d)
+            sp = outrider.tts.Speaker("en_GB-a-low", None, voices_dir=d)
             sp.PiperVoice = unittest.mock.Mock()
             sp.PiperVoice.load = lambda path: os.path.basename(path)
             sp.wanted = "en_GB-b-low"
@@ -2625,7 +2625,7 @@ class Batch3Server(unittest.TestCase):
             self.j.handle(org(f"2026-01-01T00:0{2 + i}:00Z", 1, 2, "Bacterial_01", k))
         self.db.commit()
         cands = Batch2Values.CANDS
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=cands):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=cands):
             b = next(b for b in self.state.system_detail(1)["bodies"] if b["name"] == "2")
             self.assertEqual(b["value_parts"]["bio_left"], 0)        # the one signal is done
             recs = ed_outrider.merge_records([], *ed_outrider.own_data(self.db, 1, "S1")[:2])
@@ -2722,15 +2722,15 @@ class Batch4Page(unittest.TestCase):
         b = now.strftime("Journal.%Y-%m-%dT%H%M%S.01.log")
         d = self.folder({a: [{"timestamp": ts, "event": "FSDJump", "StarSystem": f"S{i}"} for i in range(4)]})
         open(os.path.join(d, b), "w").close()                 # the game just created it: no complete line yet
-        first = ed_log.read_log([d], days=1)
+        first = outrider.log.read_log([d], days=1)
         self.assertEqual(first["newest"], f"{a}|3")             # not None: the tail can start
-        t1 = ed_log.read_log([d], after=f"{a}|1")
+        t1 = outrider.log.read_log([d], after=f"{a}|1")
         self.assertEqual([r["system"] for r in t1["rows"]], ["S3", "S2"])
         self.assertEqual(t1["newest"], f"{a}|3")                # not back to a|1
-        self.assertEqual(ed_log.read_log([d], after=t1["newest"])["rows"], [])   # nothing twice
+        self.assertEqual(outrider.log.read_log([d], after=t1["newest"])["rows"], [])   # nothing twice
         with open(os.path.join(d, b), "a") as f:
             f.write(json.dumps({"timestamp": ts, "event": "FSDJump", "StarSystem": "S9"}) + "\n")
-        t2 = ed_log.read_log([d], after=t1["newest"])
+        t2 = outrider.log.read_log([d], after=t1["newest"])
         self.assertEqual([r["system"] for r in t2["rows"]], ["S9"])
         self.assertEqual(t2["newest"], f"{b}|0")
 
@@ -2745,14 +2745,14 @@ class Batch4Page(unittest.TestCase):
                 raise PermissionError(13, "Permission denied")
             return real_open(path, *a, **k)
         with unittest.mock.patch("builtins.open", failing):
-            r = ed_log.read_log([d], days=1)
+            r = outrider.log.read_log([d], days=1)
         self.assertEqual(r["rows"], [])
 
     def test_cache_is_thread_safe(self):   # F83
         import tempfile, threading
         d = tempfile.mkdtemp()
         paths = []
-        for i in range(ed_log._CACHE_MAX * 2):
+        for i in range(outrider.log._CACHE_MAX * 2):
             p = os.path.join(d, f"Journal.2026-09-{1 + i // 10:02d}T{10 + i % 10:02d}0000.01.log")
             with open(p, "w") as f:
                 f.write('{"timestamp":"2026-09-01T00:00:00Z","event":"Music"}\n')
@@ -2762,7 +2762,7 @@ class Batch4Page(unittest.TestCase):
         def work(k):
             for n in range(600):
                 try:
-                    ed_log._load(paths[(n * 7 + k) % len(paths)])
+                    outrider.log._load(paths[(n * 7 + k) % len(paths)])
                 except Exception as e:     # without the lock: "OrderedDict mutated during iteration"
                     errors.append(e)
         old = sys.getswitchinterval()
@@ -2884,44 +2884,44 @@ class Batch5ConfigCli(unittest.TestCase):
 
     def test_ship_line_of_the_start_preset(self):   # F42
         import tempfile
-        import ed_honk
+        import outrider.honk
         with tempfile.TemporaryDirectory() as root:
             journals, binds = self.controls(root, "General One\nShip Two\nSRV Three\nFoot Four")
             self.binds_file(binds, "General One", "Key_G")
             self.binds_file(binds, "Ship Two", "Key_S")
-            keys, what = ed_honk.primary_fire_binding([journals])
+            keys, what = outrider.honk.primary_fire_binding([journals])
             self.assertEqual(keys, ["KEY_S"])
             self.assertIn("Ship Two", what)
         with tempfile.TemporaryDirectory() as root:   # an older single-line file
             journals, binds = self.controls(root, "General One\n")
             self.binds_file(binds, "General One", "Key_G")
-            self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_G"])
+            self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_G"])
 
     def test_built_in_preset_does_not_borrow_a_custom_file(self):   # F43
         import tempfile
-        import ed_honk
+        import outrider.honk
         with tempfile.TemporaryDirectory() as root:
             journals, binds = self.controls(root, "KeyboardMouseOnly\n" * 4)
             self.binds_file(binds, "Custom", "Key_C")
-            keys, what = ed_honk.primary_fire_binding([journals])
+            keys, what = outrider.honk.primary_fire_binding([journals])
             self.assertIsNone(keys)
             self.assertIn("built-in", what)
             self.assertIn("KeyboardMouseOnly", what)
         with tempfile.TemporaryDirectory() as root:   # no preset named at all: the newest Custom file
             journals, binds = self.controls(root, None)
             self.binds_file(binds, "Custom", "Key_C")
-            self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_C"])
+            self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_C"])
 
     def test_auto_binding_checked_against_evdev(self):   # F41
         import tempfile, types
-        import ed_honk
-        self.assertEqual([ed_honk.elite_key(k) for k in ("Key_Apps", "Key_Numpad_Equals", "Key_OEM_102", "Key_Hash",
+        import outrider.honk
+        self.assertEqual([outrider.honk.elite_key(k) for k in ("Key_Apps", "Key_Numpad_Equals", "Key_OEM_102", "Key_Hash",
                                                         "Key_PrintScreen", "Key_Numpad_Comma")],
                          ["KEY_COMPOSE", "KEY_KPEQUAL", "KEY_102ND", "KEY_BACKSLASH", "KEY_SYSRQ", "KEY_KPCOMMA"])
         fake = types.SimpleNamespace(ecodes=types.SimpleNamespace(ecodes={"KEY_COMPOSE": 127, "KEY_LEFTALT": 56}))
         with tempfile.TemporaryDirectory() as root:
             journals, binds = self.controls(root)
-            h = ed_honk.Honker("auto", journal_dirs=[journals])
+            h = outrider.honk.Honker("auto", journal_dirs=[journals])
             h.evdev = fake
             self.binds_file(binds, "My X56", "Key_Apps", ["Key_LeftAlt"])
             self.assertEqual(h.combo()[0], ["KEY_LEFTALT", "KEY_COMPOSE"])
@@ -2934,43 +2934,43 @@ class Batch5ConfigCli(unittest.TestCase):
 
     def test_binding_read_errors_and_cache(self):   # F59
         import tempfile
-        import ed_honk
+        import outrider.honk
         with tempfile.TemporaryDirectory() as root:
             journals, binds = self.controls(root)
             self.binds_file(binds, "My X56", "Key_K")
-            real = ed_honk.ET.parse
+            real = outrider.honk.ET.parse
             calls = []
-            with unittest.mock.patch.object(ed_honk.ET, "parse", lambda p: calls.append(p) or real(p)):
-                self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_K"])
-                self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_K"])
+            with unittest.mock.patch.object(outrider.honk.ET, "parse", lambda p: calls.append(p) or real(p)):
+                self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_K"])
+                self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_K"])
                 self.assertEqual(len(calls), 1)            # unchanged files: not parsed again
                 self.binds_file(binds, "My X56", "Key_L")
                 os.utime(os.path.join(binds, "My X56.4.2.binds"), (time.time() + 5, time.time() + 5))
-                self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_L"])   # a rebind is picked up
+                self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_L"])   # a rebind is picked up
                 self.assertEqual(len(calls), 2)
             os.utime(os.path.join(binds, "StartPreset.4.start"), (time.time() + 9, time.time() + 9))
-            with unittest.mock.patch.object(ed_honk.ET, "parse", side_effect=FileNotFoundError(2, "gone")):
-                keys, what = ed_honk.primary_fire_binding([journals])   # Elite rewriting the file right now
+            with unittest.mock.patch.object(outrider.honk.ET, "parse", side_effect=FileNotFoundError(2, "gone")):
+                keys, what = outrider.honk.primary_fire_binding([journals])   # Elite rewriting the file right now
             self.assertIsNone(keys)
             self.assertIn("could not be read", what)
 
     def test_honk_cli_uses_config_and_detection(self):   # F85
         import contextlib, io, tempfile
-        import ed_honk
+        import outrider.honk
         with tempfile.TemporaryDirectory() as root:
             journals, binds = self.controls(root)
             self.binds_file(binds, "My X56", "Key_K")
             here = os.path.join(root, "app")
             os.makedirs(here)
             out = io.StringIO()
-            with unittest.mock.patch.object(ed_honk, "HERE", here), \
-                    unittest.mock.patch.object(ed_unsold, "find_journal_dirs", return_value=([journals], [])), \
+            with unittest.mock.patch.object(outrider.honk, "ROOT", here), \
+                    unittest.mock.patch.object(outrider.unsold, "find_journal_dirs", return_value=([journals], [])), \
                     contextlib.redirect_stdout(out):
-                self.assertEqual(ed_honk.main(["--show"]), 0)         # no config: auto-detected folders
+                self.assertEqual(outrider.honk.main(["--show"]), 0)         # no config: auto-detected folders
                 with open(os.path.join(here, "ed_outrider.toml"), "w") as f:
                     f.write('[autohonk]\nkey = "KEY_KP0"\n')
-                self.assertEqual(ed_honk.main(["--show"]), 0)         # the configured key
-                self.assertEqual(ed_honk.main(["--show", "--key", "auto"]), 0)
+                self.assertEqual(outrider.honk.main(["--show"]), 0)         # the configured key
+                self.assertEqual(outrider.honk.main(["--show", "--key", "auto"]), 0)
             lines = out.getvalue().splitlines()
             self.assertIn("K (primary binding of Primary Fire in My X56)", lines[0])
             self.assertEqual(lines[1], "Primary Fire: Numpad 0")
@@ -2979,13 +2979,13 @@ class Batch5ConfigCli(unittest.TestCase):
     # ---- Piper ----
     def test_speaker_reports_every_status_and_falls_back(self):   # G2.2, F40
         import contextlib, io, tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             for v in ("en_GB-a-low", "en_GB-b-low"):
                 for ext in (".onnx", ".onnx.json"):
                     open(os.path.join(d, v + ext), "w").close()
             seen = []
-            sp = ed_tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, on_change=lambda: seen.append(sp.status))
+            sp = outrider.tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, on_change=lambda: seen.append(sp.status))
             sp.PiperVoice = unittest.mock.Mock()
 
             def load(path):
@@ -2999,7 +2999,7 @@ class Batch5ConfigCli(unittest.TestCase):
             self.assertEqual(seen, ["loading en_GB-a-low", "loading en_GB-b-low", "ready"])
             # a voice that fails to download and one that fails to load both reach the page
             seen.clear()
-            with unittest.mock.patch.object(ed_tts, "download_voice_files", side_effect=OSError("offline")), \
+            with unittest.mock.patch.object(outrider.tts, "download_voice_files", side_effect=OSError("offline")), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 sp._prepare("en_GB-c-low")
             self.assertEqual(seen, ["downloading en_GB-c-low (about 63 MB)",   # F36: the loaded voice keeps speaking
@@ -3012,39 +3012,39 @@ class Batch5ConfigCli(unittest.TestCase):
 
     def test_installed_needs_both_files(self):   # F40
         import tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "en_GB-a-low.onnx"), "w").close()
             open(os.path.join(d, "en_GB-b-low.onnx"), "w").close()
             open(os.path.join(d, "en_GB-b-low.onnx.json"), "w").close()
             open(os.path.join(d, "en_GB-c-low.onnx.part"), "w").close()
-            self.assertEqual(ed_tts.installed_voices(d), ["en_GB-b-low"])
+            self.assertEqual(outrider.tts.installed_voices(d), ["en_GB-b-low"])
 
     def test_voice_paths_match_the_catalogue(self):   # F40: Outrider now downloads itself, like Piper's own tool
-        import ed_tts
-        self.assertEqual(ed_tts.voice_paths("en_GB-jenny_dioco-medium"),
+        import outrider.tts
+        self.assertEqual(outrider.tts.voice_paths("en_GB-jenny_dioco-medium"),
                          ["en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx.json",
                           "en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx"])
         with self.assertRaises(ValueError):
-            ed_tts.voice_paths("../x-y-low")
-        cat = os.path.join(ed_tts.VOICES_DIR, "voices.json")
+            outrider.tts.voice_paths("../x-y-low")
+        cat = os.path.join(outrider.tts.VOICES_DIR, "voices.json")
         if os.path.exists(cat):   # the voice lab's cached catalogue, when there is one
             with open(cat, encoding="utf-8") as f:
                 doc = json.load(f)
             for name, v in doc.items():
-                if ed_tts.VOICE_NAME.fullmatch(name):
+                if outrider.tts.VOICE_NAME.fullmatch(name):
                     want = sorted(p for p in v["files"] if p.endswith((".onnx", ".onnx.json")))
-                    self.assertEqual(sorted(ed_tts.voice_paths(name)), want, name)
+                    self.assertEqual(sorted(outrider.tts.voice_paths(name)), want, name)
 
     def test_download_moves_files_in_only_when_complete(self):   # F40, F88
         import hashlib, tempfile
-        import ed_tts
+        import outrider.tts
         files = [("en/en_GB/x/low/en_GB-x-low.onnx.json", {}), ("en/en_GB/x/low/en_GB-x-low.onnx", {})]
         with tempfile.TemporaryDirectory() as d:
             def run(responses, files=files):
                 it = iter(responses)
-                with unittest.mock.patch.object(ed_tts.urllib.request, "urlopen", lambda url, timeout: next(it)):
-                    ed_tts.download_voice_files(files, d)
+                with unittest.mock.patch.object(outrider.tts.urllib.request, "urlopen", lambda url, timeout: next(it)):
+                    outrider.tts.download_voice_files(files, d)
             # the connection drops 3 bytes into the model: nothing is left, not even the finished config
             with self.assertRaises(ConnectionResetError):
                 run([_FakeResponse(b"{}"), _FakeResponse(b"abc", ConnectionResetError("reset"))])
@@ -3060,7 +3060,7 @@ class Batch5ConfigCli(unittest.TestCase):
             run([_FakeResponse(b"{}"), _FakeResponse(b"model")],
                 [files[0], (files[1][0], {"md5_digest": hashlib.md5(b"model").hexdigest()})])
             self.assertEqual(sorted(os.listdir(d)), ["en_GB-x-low.onnx", "en_GB-x-low.onnx.json"])
-            self.assertEqual(ed_tts.installed_voices(d), ["en_GB-x-low"])
+            self.assertEqual(outrider.tts.installed_voices(d), ["en_GB-x-low"])
 
     def test_voice_lab_download_and_pump(self):   # F88, F44
         import tempfile, types, queue
@@ -3073,7 +3073,7 @@ class Batch5ConfigCli(unittest.TestCase):
                                "en/en_GB/x/low/en_GB-x-low.onnx.json": {"size_bytes": 2},
                                "en/en_GB/x/low/MODEL_CARD": {}}}
             it = iter([_FakeResponse(b"{}"), _FakeResponse(b"abc", OSError("Wi-Fi dropped"))])
-            with unittest.mock.patch.object(voice_lab.ed_tts.urllib.request, "urlopen", lambda url, timeout: next(it)):
+            with unittest.mock.patch.object(voice_lab.outrider.tts.urllib.request, "urlopen", lambda url, timeout: next(it)):
                 with self.assertRaises(OSError):
                     voice_lab.download(entry, lambda done, total: None)
             self.assertEqual(os.listdir(d), [])
@@ -3088,8 +3088,8 @@ class Batch5ConfigCli(unittest.TestCase):
         self.assertIn("FileNotFoundError", status[0][0])
 
     def test_spoken_numbers_stay_fixed_point(self):   # F82
-        self.assertEqual(ed_speech.spoken_text("Carried 1234567.89 cr"), "Carried 1234567.9 credits")
-        self.assertEqual(ed_speech.spoken_text("123456.78 and 52.0M and 0.96"), "123456.8 and 52 million and 1")
+        self.assertEqual(outrider.speech.spoken_text("Carried 1234567.89 cr"), "Carried 1234567.9 credits")
+        self.assertEqual(outrider.speech.spoken_text("123456.78 and 52.0M and 0.96"), "123456.8 and 52 million and 1")
 
 
 class Batch6Voice(unittest.TestCase):
@@ -3206,7 +3206,7 @@ class Batch6Voice(unittest.TestCase):
         self.assertEqual(len(done), 1)
         self.assertEqual((done[0]["species"], done[0]["body"], done[0]["partial"]), ("Stratum Tectonicas", "A 4", {}))
         self.assertEqual([u["genus"] for u in done[0]["untouched"]], ["Bacterium"])
-        self.assertEqual(done[0]["value"], ed_bio.species_value("Stratum Tectonicas") * 5)   # first footfall x5
+        self.assertEqual(done[0]["value"], outrider.bio.species_value("Stratum Tectonicas") * 5)   # first footfall x5
         self.j.handle({"event": "Touchdown", "timestamp": "2026-01-01T00:08:00Z", "SystemAddress": 1, "Body": "S1 A 4", "BodyID": 4,
                        "PlayerControlled": True, "OnPlanet": True})
         self.assertIn((1, 4), self.j.body_touched)
@@ -3320,17 +3320,17 @@ class Batch6Voice(unittest.TestCase):
     def test_style_voice(self):   # P10(b): a personality may name its own Piper voice and pace
         doc = {"styles": {"business": "Business", "sarcastic": {"label": "Sarcastic", "voice": "en_US-ryan-high", "speed": 1.1},
                           "sweet": {"label": "Sweet", "voice": "../../etc/passwd", "speed": 9}}, "lines": {}}
-        probs = " ".join(ed_speech.check(doc))
+        probs = " ".join(outrider.speech.check(doc))
         self.assertIn('"sweet": "voice"', probs)
         self.assertIn('"sweet": "speed"', probs)
         self.assertNotIn("sarcastic", probs)
-        self.assertEqual(ed_speech.style_voice(doc["styles"], "sarcastic_profane"), ("en_US-ryan-high", 1.1))
-        self.assertEqual(ed_speech.style_voice(doc["styles"], "business"), (None, None))
-        self.assertEqual(ed_speech.style_voice(doc["styles"], "sweet"), (None, None))   # never a path
+        self.assertEqual(outrider.speech.style_voice(doc["styles"], "sarcastic_profane"), ("en_US-ryan-high", 1.1))
+        self.assertEqual(outrider.speech.style_voice(doc["styles"], "business"), (None, None))
+        self.assertEqual(outrider.speech.style_voice(doc["styles"], "sweet"), (None, None))   # never a path
 
     def test_voice_pool(self):   # P10(b): installed personality voices load on first use, at most EXTRA_VOICES kept
         import io, tempfile, contextlib, wave as _wave
-        import ed_tts
+        import outrider.tts
         loads = []
 
         class FakeVoice:
@@ -3344,7 +3344,7 @@ class Batch6Voice(unittest.TestCase):
             for v in ("en_GB-main-low", "en_US-a-low", "en_US-b-low", "en_US-c-low"):
                 for ext in (".onnx", ".onnx.json"):
                     open(os.path.join(d, v + ext), "w").close()
-            sp = ed_tts.Speaker("en_GB-main-low", None, voices_dir=d)
+            sp = outrider.tts.Speaker("en_GB-main-low", None, voices_dir=d)
             sp.PiperVoice = unittest.mock.Mock()
             sp.PiperVoice.load = lambda path: loads.append(os.path.basename(path)) or FakeVoice(os.path.basename(path))
             with contextlib.redirect_stdout(io.StringIO()):
@@ -3516,7 +3516,7 @@ class Batch7Data(unittest.TestCase):
     def test_losses_count_exobiology(self):   # P18
         run = lambda ts, system, body, sp: [self.j.handle(org(ts[:-3] + f"{i}Z", system, body, sp, k))
                                             for i, k in enumerate(("Log", "Sample", "Analyse"))]
-        value = ed_bio.species_value("Bacterium Aurasus")
+        value = outrider.bio.species_value("Bacterium Aurasus")
         self.assertTrue(value)
         self.jump("2026-01-01T00:00:00Z", 1, 0)
         run("2026-01-01T01:00:00Z", 1, 3, "A")                       # sold before any death
@@ -3814,7 +3814,7 @@ class BatchAIntegrity(unittest.TestCase):
         body = dict(rec["ed"], first_discovered=True, first_mapped=True)
         second = self.state.ship_losses()[1]
         self.assertEqual(second["bodies"], 1)
-        self.assertEqual(second["value"], ed_unsold.body_value(body, False, False, True))   # not as mapped
+        self.assertEqual(second["value"], outrider.unsold.body_value(body, False, False, True))   # not as mapped
 
     # ---- F46 / F19 / F50: sessions ----
     def test_rescan_of_own_unsold_discovery_is_not_a_new_first(self):   # F46
@@ -3990,8 +3990,8 @@ class BatchAIntegrity(unittest.TestCase):
             {"timestamp": "2026-01-01T00:00:00Z", "event": "FSDJump", "StarSystem": "S1", "SystemAddress": 1, "StarPos": [0, 0, 0]}])
         self.assertEqual(self.j.scan_dir(d), 1)
         self.assertEqual(self.j.pos["id64"], 1)
-        self.assertEqual(len(ed_log.journal_files([d])), 1)
-        self.assertEqual(len(ed_unsold.journal_files([d])), 1)
+        self.assertEqual(len(outrider.log.journal_files([d])), 1)
+        self.assertEqual(len(outrider.unsold.journal_files([d])), 1)
 
     def test_one_file_two_paths_read_once(self):   # F11
         a = os.path.join(self.tmp, "a")
@@ -4229,15 +4229,15 @@ class BatchBState(unittest.TestCase):
         self.sampling_body = Batch6Voice.sampling_body.__get__(self)
         self.sampling_body()                              # A 4: DSS'd (so mapped), Stratum + Bacterium
         self.organic("2026-01-01T00:04:00Z", "Analyse", "Bacterium Aurasus", "Bacterium")
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             f = self.state.arrival_facts(1)
         self.assertEqual(f["bio"], {"body": "A 4", "value": 19_010_800})   # Stratum left, Bacterium done
         self.organic("2026-01-01T00:05:00Z", "Analyse", "Stratum Tectonicas", "Stratum")
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             self.assertIsNone(self.state.arrival_facts(1)["bio"])
 
     def test_codex_new_per_variant_in_the_summaries(self):   # P11
-        region = ed_bio.region_name(0, 0, 0)
+        region = outrider.bio.region_name(0, 0, 0)
         if not region:
             self.skipTest("no bio_rules.json")
         Batch6Voice.sampling_body(self)
@@ -4246,7 +4246,7 @@ class BatchBState(unittest.TestCase):
         self.db.commit()
         cands = lambda colour: [dict(self.CANDS[0], variants=[f"Stratum Tectonicas - {colour}"]), dict(self.CANDS[1], variants=[])]
         new_of = lambda: {p["body"]: p["codex_new"] for p in self.state.leaving_summary(1)["bio_pending"]}
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=cands("Teal")):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=cands("Teal")):
             self.assertEqual(new_of(), {"A 4": True})                  # Teal Stratum is new here, Green is logged
             g = {x["genus"]: x for x in next(b for b in self.state.system_detail(1)["bodies"] if b["name"] == "A 4")["bio_guess"]}
             self.assertEqual((g["Stratum"]["variant"], g["Stratum"]["codex_new"]), ("Stratum Tectonicas - Teal", True))
@@ -4258,7 +4258,7 @@ class BatchBState(unittest.TestCase):
                            "Variant": "$Codex_Ent_Stratum_07_M_Name;", "Variant_Localised": "Stratum Tectonicas - Green"})
             self.db.commit()
             self.assertEqual(new_of(), {"A 4": False})
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=cands("Green")):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=cands("Green")):
             self.assertEqual(new_of(), {"A 4": False})
 
     def test_leaving_skips_a_finished_body_without_dss(self):   # F2
@@ -4267,7 +4267,7 @@ class BatchBState(unittest.TestCase):
                        "BodyID": 4, "Signals": [{"Type": ed_outrider.BIO, "Count": 2}]})
         self.organic("2026-01-01T00:04:00Z", "Analyse", "Bacterium Aurasus", "Bacterium")
         self.db.commit()
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             pend = self.state.leaving_summary(1)["bio_pending"]
             self.assertEqual([(p["body"], p["signals"], p["potential"]) for p in pend], [("A 4", 1, 19_010_800)])
             self.organic("2026-01-01T00:05:00Z", "Analyse", "Stratum Tectonicas", "Stratum")
@@ -4282,25 +4282,25 @@ class BatchBState(unittest.TestCase):
 
     # ---- G1.2 / F36: speech ----
     def test_long_lines_are_cut_at_a_boundary(self):   # G1.2
-        import ed_tts
+        import outrider.tts
         line = "Leaving with unfinished work: bio on C 2 (Osseus, Tussock), up to 3.1M. " * 20
-        cut = ed_tts.clip_text(line)
-        self.assertLessEqual(len(cut), ed_tts.SAY_MAX)
+        cut = outrider.tts.clip_text(line)
+        self.assertLessEqual(len(cut), outrider.tts.SAY_MAX)
         self.assertTrue(cut.endswith("up to 3.1M."))
-        self.assertEqual(ed_tts.clip_text("short   line "), "short line")
-        words = ed_tts.clip_text("word " * 400, 50)
+        self.assertEqual(outrider.tts.clip_text("short   line "), "short line")
+        words = outrider.tts.clip_text("word " * 400, 50)
         self.assertTrue(words.endswith("word") and len(words) <= 50)
-        self.assertEqual(ed_tts.clip_text("one, two " * 10, 30)[-1], ".")
+        self.assertEqual(outrider.tts.clip_text("one, two " * 10, 30)[-1], ".")
 
     def test_failed_switch_keeps_the_old_voice_and_is_not_saved(self):   # F36
         import contextlib, io, tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             for v in ("en_GB-a-low", "en_GB-b-low"):
                 for ext in (".onnx", ".onnx.json"):
                     open(os.path.join(d, v + ext), "w").close()
             switched = []
-            sp = ed_tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, on_switched=switched.append)
+            sp = outrider.tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, on_switched=switched.append)
             sp.PiperVoice = unittest.mock.Mock()
             sp.PiperVoice.load = lambda path: (_ for _ in ()).throw(RuntimeError("damaged")) if "b-low" in path else path
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -4315,19 +4315,19 @@ class BatchBState(unittest.TestCase):
         self.db.rollback()
         self.assertEqual(ed_outrider.meta_get(self.db, "voice_choice"), "en_GB-a-low")
 
-    # ---- F20 / F67 / F68: ed_bio ----
-    @unittest.skipUnless(ed_bio.available(), "bio_rules.json not downloaded")
+    # ---- F20 / F67 / F68: outrider.bio ----
+    @unittest.skipUnless(outrider.bio.available(), "bio_rules.json not downloaded")
     def test_star_rule_waits_for_every_star(self):   # F20
         body = {"class": "Rocky body", "atmosphere": "Hot thin Sulphur dioxide", "gravity": 0.3, "temperature": 420}
         system = dict(BioRules.M_SYSTEM)
-        names = lambda s: [x["name"] for x in ed_bio.predict(body, s)]
+        names = lambda s: [x["name"] for x in outrider.bio.predict(body, s)]
         self.assertIn("Prasinum Bioluminescent Anemone", names(dict(system, complete=False)))   # a companion may be the one
         self.assertNotIn("Prasinum Bioluminescent Anemone", names(dict(system, complete=True)))
 
     def test_species_value_of_nothing(self):   # F67
-        self.assertIsNone(ed_bio.species_value(None))
+        self.assertIsNone(outrider.bio.species_value(None))
 
-    @unittest.skipUnless(ed_bio.available(), "bio_rules.json not downloaded")
+    @unittest.skipUnless(outrider.bio.available(), "bio_rules.json not downloaded")
     def test_backtest_skips_a_corrupt_line(self):   # F68
         import contextlib, io, tempfile
         with tempfile.TemporaryDirectory() as d:
@@ -4335,25 +4335,25 @@ class BatchBState(unittest.TestCase):
                 f.write('{"timestamp":"2026-01-01T00:00:00Z","event":"Scan","BodyName":"X 1","Planet\n')
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                ed_bio.backtest([d])
+                outrider.bio.backtest([d])
         self.assertNotIn("Traceback", out.getvalue())
 
-    # ---- F37: ed_honk ----
+    # ---- F37: outrider.honk ----
     def test_joystick_modifier_slot_is_skipped(self):   # F37
         import tempfile
-        import ed_honk
+        import outrider.honk
         with tempfile.TemporaryDirectory() as root:
             journals, binds = Batch5ConfigCli.controls(self, root)
             with open(os.path.join(binds, "My X56.4.2.binds"), "w") as f:
                 f.write('<?xml version="1.0" encoding="UTF-8" ?><Root PresetName="My X56"><PrimaryFire>'
                         '<Primary Device="Keyboard" Key="Key_K"><Modifier Device="231D0200" Key="Joy_3" /></Primary>'
                         '<Secondary Device="Keyboard" Key="Key_Space" /></PrimaryFire></Root>')
-            self.assertEqual(ed_honk.primary_fire_binding([journals])[0], ["KEY_SPACE"])
+            self.assertEqual(outrider.honk.primary_fire_binding([journals])[0], ["KEY_SPACE"])
             with open(os.path.join(binds, "My X56.4.2.binds"), "w") as f:
                 f.write('<?xml version="1.0" encoding="UTF-8" ?><Root PresetName="My X56"><PrimaryFire>'
                         '<Primary Device="Keyboard" Key="Key_K"><Modifier Device="231D0200" Key="Joy_3" /></Primary>'
                         '</PrimaryFire></Root>')
-            keys, what = ed_honk.primary_fire_binding([journals])
+            keys, what = outrider.honk.primary_fire_binding([journals])
         self.assertIsNone(keys)
         self.assertIn("joystick modifier", what)
 
@@ -4392,7 +4392,7 @@ class BatchS1(unittest.TestCase):
         for bid, name in ((4, "A 4"), (5, "A 5"), (6, "A 6")):
             self.signals("2026-01-01T00:02:00Z", 1, bid, name, 1)
         self.db.commit()
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             pend = {p["body"]: p for p in self.state.leaving_summary(1)["bio_pending"]}
         self.assertEqual({b: p["factor"] for b, p in pend.items()}, {"A 4": 5, "A 5": 1, "A 6": 1})
         self.assertEqual(pend["A 4"]["potential"], 19_010_800)                      # still bonus-free
@@ -4414,7 +4414,7 @@ class BatchS1(unittest.TestCase):
                        "Genuses": [{"Genus": "$Codex_Ent_Stratum_Genus_Name;", "Genus_Localised": "Stratum"}]})
         self.jump("2026-01-01T00:04:00Z", 1, 0)
         self.db.commit()
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             left = self.state.left_behind(100)["systems"]
         self.assertEqual([r["name"] for r in left], ["S2"])
         bio = {b["body"]: b for b in left[0]["bio"]}
@@ -4583,7 +4583,7 @@ class PlausibleFixes(unittest.TestCase):
 
     def test_two_downloads_of_one_voice_do_not_collide(self):   # F69
         import hashlib, io, tempfile, threading
-        import ed_tts
+        import outrider.tts
         payload = os.urandom(300_000)
 
         class Slow(io.BytesIO):
@@ -4602,10 +4602,10 @@ class PlausibleFixes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             def dl():
                 try:
-                    ed_tts.download_voice_files(files, d)
+                    outrider.tts.download_voice_files(files, d)
                 except Exception as e:   # noqa: BLE001 -- collected for the assertion
                     errs.append(f"{type(e).__name__}: {e}")
-            with unittest.mock.patch.object(ed_tts.urllib.request, "urlopen",
+            with unittest.mock.patch.object(outrider.tts.urllib.request, "urlopen",
                                             lambda url, timeout: Slow(b"{}" if url.split("?")[0].endswith(".json") else payload)):
                 threads = [threading.Thread(target=dl) for _ in range(2)]
                 for t in threads:
@@ -4619,7 +4619,7 @@ class PlausibleFixes(unittest.TestCase):
 
     def test_three_personality_voices_stay_loaded(self):   # F72
         import tempfile
-        import ed_tts
+        import outrider.tts
         loads = []
 
         class FakeVoice:
@@ -4636,22 +4636,22 @@ class PlausibleFixes(unittest.TestCase):
         names = ("en_GB-a-low", "en_GB-b-low", "en_GB-c-low")
         styles = {"business": "Down to business", "sweet": {"label": "Sweet", "voice": names[0]},
                   "sarcastic": {"label": "Sarcastic", "voice": names[1], "speed": 1.3}, "dry": {"label": "Dry", "voice": names[2]}}
-        self.assertEqual(ed_speech.style_voices(styles), set(names))
+        self.assertEqual(outrider.speech.style_voices(styles), set(names))
         with tempfile.TemporaryDirectory() as d:
             for n in names + ("en_GB-main-low",):
                 for ext in (".onnx", ".onnx.json"):
                     with open(os.path.join(d, n + ext), "w") as f:
                         f.write("{}")
-            sp = ed_tts.Speaker("en_GB-main-low", "en_GB-main-low", voices_dir=d)
+            sp = outrider.tts.Speaker("en_GB-main-low", "en_GB-main-low", voices_dir=d)
             sp.PiperVoice, sp._voice, sp.voice_name = FakeVoice, FakeVoice(), "en_GB-main-low"
             if sp.SynthesisConfig is None:
                 sp.SynthesisConfig = lambda **kw: None
-            sp.size_extra(ed_speech.style_voices(styles))
+            sp.size_extra(outrider.speech.style_voices(styles))
             for i in range(9):
                 sp.say(f"line {i}", voice=names[i % 3])
         self.assertEqual(sorted(loads), [n + ".onnx" for n in names])   # each loaded once
         sp.size_extra(["x"] * 9 + [f"en_GB-v{i}-low" for i in range(9)])
-        self.assertEqual(sp._extra_slots, ed_tts.EXTRA_VOICES_MAX)   # bounded
+        self.assertEqual(sp._extra_slots, outrider.tts.EXTRA_VOICES_MAX)   # bounded
         # the server sizes the cache from speech.json's personalities when a line asks for one of their voices
         import asyncio, types
         from aiohttp.test_utils import TestClient, TestServer
@@ -4769,7 +4769,7 @@ class FableServer(unittest.TestCase):
                        "Materials": [{"Name": "iron", "Count": 2}, {"Name": "nickel", "Count": 1}]})
         self.assertEqual(self.j.hull["pct"], 62)
         self.assertNotIn("repairs", self.state.materials_summary())    # no "basic repairs can be synthesised"
-        self.assertNotIn("Repair basic", ed_materials.SYNTH)
+        self.assertNotIn("Repair basic", outrider.materials.SYNTH)
 
     # ---- F6: an Apex shuttle or another commander's ship ----
     def test_taxi_and_multicrew_are_not_your_ship(self):   # F6
@@ -4840,7 +4840,7 @@ class FableServer(unittest.TestCase):
         self.organic("2026-01-01T00:02:30Z", "Analyse", "Stratum Tectonicas", "Stratum")
         self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T01:00:00Z", "Commander": "X"})   # a later session
         self.j.handle({"event": "ApproachBody", "timestamp": "2026-01-01T01:05:00Z", "SystemAddress": 1, "Body": "S1 A 4", "BodyID": 4})
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             a = self.moments("approach")[-1]
         self.assertEqual((a["genera"], a["signals"], a["bio_value"]), (["Bacterium"], 1, 1_000_000))
 
@@ -4850,7 +4850,7 @@ class FableServer(unittest.TestCase):
                        "BodyID": 4, "Signals": [{"Type": ed_outrider.BIO, "Count": 2}]})
         self.organic("2026-01-01T00:03:00Z", "Log", "Stratum Tectonicas", "Stratum")
         self.j.handle({"event": "ApproachBody", "timestamp": "2026-01-01T00:05:00Z", "SystemAddress": 1, "Body": "S1 A 4", "BodyID": 4})
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             a = self.moments("approach")[-1]
         self.assertNotIn("Stratum", a["bio_options"]["genera"])
 
@@ -4861,7 +4861,7 @@ class FableServer(unittest.TestCase):
                        "BodyID": 4, "Signals": [{"Type": ed_outrider.BIO, "Count": 3}]})
         self.organic("2026-01-01T00:03:00Z", "Log", "Stratum Tectonicas", "Stratum")
         self.db.commit()
-        with unittest.mock.patch.object(ed_bio, "predict", return_value=self.CANDS):
+        with unittest.mock.patch.object(outrider.bio, "predict", return_value=self.CANDS):
             p = self.state.leaving_summary(1)["bio_pending"]
         self.assertEqual([(b["genera"], b["signals"], b["partial"]) for b in p], [(None, 2, {"Stratum": 1})])
         self.assertEqual(p[0]["potential"], 19_010_800 + 16_777_215 + 3_703_200)   # the run plus the two best left
@@ -5059,9 +5059,9 @@ class Batch4Review(unittest.TestCase):
     """PLAN-review-2026-09-30b Batch 4: exobiology, unsold and the helper modules."""
 
     def test_bark_mounds_are_priced(self):   # F50
-        self.assertEqual(ed_bio.species_value("Bark Mounds"), 1471900)
-        self.assertEqual(ed_bio.species_value("Bark Mound"), 1471900)
-        self.assertEqual(ed_bio.species_value("Bacterium Aurasus"), ed_unsold.species_value("$Codex_Ent_Bacterial_01")[0])
+        self.assertEqual(outrider.bio.species_value("Bark Mounds"), 1471900)
+        self.assertEqual(outrider.bio.species_value("Bark Mound"), 1471900)
+        self.assertEqual(outrider.bio.species_value("Bacterium Aurasus"), outrider.unsold.species_value("$Codex_Ent_Bacterial_01")[0])
 
     def test_pressure_keeps_its_fine_digits(self):   # F53
         ev = {"event": "Scan", "BodyName": "S 1", "BodyID": 1, "PlanetClass": "Rocky body", "MassEM": 0.1,
@@ -5075,10 +5075,10 @@ class Batch4Review(unittest.TestCase):
         self.assertEqual((d["pressure"], d["pressure_raw"]), (0.0029, 0.002862))
         self.assertIsNone(ed_outrider.record_from_scan(dict(ev, SurfacePressure=0))["pressure_raw"])
 
-    @unittest.skipUnless(ed_bio.available(), "bio_rules.json not downloaded")
+    @unittest.skipUnless(outrider.bio.available(), "bio_rules.json not downloaded")
     def test_rules_file_missing_a_key_counts_as_absent(self):   # F54
         import tempfile
-        good = ed_bio._rules_path or ed_bio.RULES_FILE
+        good = outrider.bio._rules_path or outrider.bio.RULES_FILE
         with open(good, encoding="utf-8") as f:
             data = json.load(f)
         try:
@@ -5087,81 +5087,81 @@ class Batch4Review(unittest.TestCase):
                     path = os.path.join(d, f"no-{drop}.json")
                     with open(path, "w", encoding="utf-8") as f:
                         json.dump({k: v for k, v in data.items() if k != drop}, f)
-                    self.assertIsNone(ed_bio.load_rules(path, force=True))
-                    self.assertIsNone(ed_bio.load_rules(path))               # no KeyError on the next call either
+                    self.assertIsNone(outrider.bio.load_rules(path, force=True))
+                    self.assertIsNone(outrider.bio.load_rules(path))               # no KeyError on the next call either
                 path = os.path.join(d, "list.json")
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump([1, 2], f)
-                self.assertIsNone(ed_bio.load_rules(path, force=True))
+                self.assertIsNone(outrider.bio.load_rules(path, force=True))
         finally:
-            self.assertIsNotNone(ed_bio.load_rules(good, force=True))
+            self.assertIsNotNone(outrider.bio.load_rules(good, force=True))
 
     def test_unknown_luminosity_does_not_rule_out_anemone(self):   # F52
         want = [["B", "IV"], ["B", "V"]]
         facts = lambda lum, complete=True: {"stars": [{"type": "B", "luminosity": lum, "main": True}],
                                             "main": {"type": "B", "luminosity": lum, "main": True}, "complete": complete}
-        self.assertIs(ed_bio._check("star", want, {}, facts(None)), ed_bio.SKIP)
-        self.assertIs(ed_bio._check("star", want, {}, facts("Va")), True)
-        self.assertIs(ed_bio._check("star", want, {}, facts("III")), False)     # known and wrong: still out
-        self.assertIs(ed_bio._check("main_star", want, {}, facts(None)), ed_bio.SKIP)
-        self.assertIs(ed_bio._check("main_star", want, {}, facts("III")), False)
-        self.assertIs(ed_bio._check("star", ["O"], {}, facts(None)), False)       # wrong class: out
+        self.assertIs(outrider.bio._check("star", want, {}, facts(None)), outrider.bio.SKIP)
+        self.assertIs(outrider.bio._check("star", want, {}, facts("Va")), True)
+        self.assertIs(outrider.bio._check("star", want, {}, facts("III")), False)     # known and wrong: still out
+        self.assertIs(outrider.bio._check("main_star", want, {}, facts(None)), outrider.bio.SKIP)
+        self.assertIs(outrider.bio._check("main_star", want, {}, facts("III")), False)
+        self.assertIs(outrider.bio._check("star", ["O"], {}, facts(None)), False)       # wrong class: out
 
     def test_remap_after_the_map_was_sold_adds_nothing(self):   # F55
         mapped = lambda ts: (T(ts), None, {"event": "SAAScanComplete", "timestamp": ts, "SystemAddress": 1, "BodyID": 4,
                                            "BodyName": "Sys 4", "ProbesUsed": 5, "EfficiencyTarget": 6})
         ev = [scan("2026-01-01T00:05:00Z", "Sys", 1, 4, "Sys 4"), mapped("2026-01-01T00:06:00Z"),
               sale("2026-01-02T00:00:00Z", ["Sys"]), mapped("2026-01-03T00:00:00Z")]
-        self.assertEqual(ed_unsold.analyse(ev, ARGS)["exploration"]["rows"], [])
+        self.assertEqual(outrider.unsold.analyse(ev, ARGS)["exploration"]["rows"], [])
         # a first mapping after the scan alone was sold is still worth the map (F36)
         ev = [scan("2026-01-01T00:05:00Z", "Sys", 1, 4, "Sys 4"), sale("2026-01-02T00:00:00Z", ["Sys"]),
               mapped("2026-01-03T00:00:00Z")]
-        self.assertEqual([r["map_only"] for r in ed_unsold.analyse(ev, ARGS)["exploration"]["rows"]], [True])
+        self.assertEqual([r["map_only"] for r in outrider.unsold.analyse(ev, ARGS)["exploration"]["rows"]], [True])
 
     # ---- Piper ----
     def _speaker(self, d, **kw):
-        import ed_tts
+        import outrider.tts
         open(os.path.join(d, "en_GB-b-low.onnx"), "w").close()
         open(os.path.join(d, "en_GB-b-low.onnx.json"), "w").close()
-        sp = ed_tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, **kw)
+        sp = outrider.tts.Speaker("en_GB-a-low", "en_GB-b-low", voices_dir=d, **kw)
         sp.PiperVoice = unittest.mock.Mock()
         sp.PiperVoice.load = lambda path: os.path.basename(path)
         return sp
 
     def test_missing_preferred_voice_is_fetched_behind_the_fallback(self):   # G3.2
         import contextlib, io, tempfile
-        import ed_tts
+        import outrider.tts
         with tempfile.TemporaryDirectory() as d:
             seen, switched, threads = [], [], []
             sp = self._speaker(d, on_switched=switched.append)
             sp.on_change = lambda: seen.append(sp.status)
-            with unittest.mock.patch.object(ed_tts.threading, "Thread",
+            with unittest.mock.patch.object(outrider.tts.threading, "Thread",
                                             lambda **kw: threads.append(kw) or unittest.mock.Mock()), \
                     contextlib.redirect_stdout(io.StringIO()):
                 sp._prepare(None)
             self.assertEqual(sp.voice_name, "en_GB-b-low")                # the installed one speaks at once
             self.assertEqual([t["args"] for t in threads], [("en_GB-a-low", "en_GB-b-low")])
             it = iter([_FakeResponse(b"{}"), _FakeResponse(b"model")])
-            with unittest.mock.patch.object(ed_tts.urllib.request, "urlopen", lambda url, timeout: next(it)), \
+            with unittest.mock.patch.object(outrider.tts.urllib.request, "urlopen", lambda url, timeout: next(it)), \
                     contextlib.redirect_stdout(io.StringIO()):
                 threads[0]["target"](*threads[0]["args"])
             self.assertEqual(sp.voice_name, "en_GB-a-low")                # switched once it arrived
             self.assertEqual(seen[2:], ["using en_GB-b-low; downloading en_GB-a-low (about 63 MB), switching to it "
                                         "when it is ready", "loading en_GB-a-low", "ready"])
             self.assertEqual(switched, [])                                # the config's voice, not a dialog choice
-            self.assertIn("en_GB-a-low", ed_tts.installed_voices(d))
+            self.assertIn("en_GB-a-low", outrider.tts.installed_voices(d))
         # a failed download keeps the fallback and says so; a dialog pick made meanwhile wins
         with tempfile.TemporaryDirectory() as d:
             sp = self._speaker(d)
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
-                    unittest.mock.patch.object(ed_tts.threading, "Thread", lambda **kw: unittest.mock.Mock()):
+                    unittest.mock.patch.object(outrider.tts.threading, "Thread", lambda **kw: unittest.mock.Mock()):
                 sp._prepare(None)
-                with unittest.mock.patch.object(ed_tts, "download_voice_files", side_effect=OSError("offline")):
+                with unittest.mock.patch.object(outrider.tts, "download_voice_files", side_effect=OSError("offline")):
                     sp._fetch_preferred("en_GB-a-low", "en_GB-b-low")
             self.assertEqual((sp.voice_name, sp.status), ("en_GB-b-low", "using en_GB-b-low; could not download en_GB-a-low"))
             sp.wanted = "en_GB-c-low"
             with contextlib.redirect_stdout(io.StringIO()), \
-                    unittest.mock.patch.object(ed_tts, "download_voice_files", lambda files, d: None):
+                    unittest.mock.patch.object(outrider.tts, "download_voice_files", lambda files, d: None):
                 sp._fetch_preferred("en_GB-a-low", "en_GB-b-low")
             self.assertEqual(sp.voice_name, "en_GB-b-low")
         # an installed preferred voice starts no download
@@ -5169,7 +5169,7 @@ class Batch4Review(unittest.TestCase):
             sp = self._speaker(d)
             sp.preferred = "en_GB-b-low"
             threads = []
-            with unittest.mock.patch.object(ed_tts.threading, "Thread",
+            with unittest.mock.patch.object(outrider.tts.threading, "Thread",
                                             lambda **kw: threads.append(kw) or unittest.mock.Mock()), \
                     contextlib.redirect_stdout(io.StringIO()):
                 sp._prepare(None)
@@ -5198,7 +5198,7 @@ class Batch4Review(unittest.TestCase):
         with unittest.mock.patch.object(voice_lab, "_config", lambda: {"server": {"speech_file": "~/my_lines.json"}}):
             self.assertEqual(voice_lab.configured_speech_file(), os.path.expanduser("~/my_lines.json"))
         with unittest.mock.patch.object(voice_lab, "_config", lambda: {"server": {"speech_file": "mine.json"}}):
-            self.assertEqual(voice_lab.configured_speech_file(), os.path.join(voice_lab.ed_tts.HERE, "mine.json"))
+            self.assertEqual(voice_lab.configured_speech_file(), os.path.join(voice_lab.outrider.ROOT, "mine.json"))
         with unittest.mock.patch.object(voice_lab, "_config", lambda: {}):
             self.assertEqual(voice_lab.configured_speech_file(), voice_lab.SPEECH_FILE)
 
@@ -5234,8 +5234,8 @@ class Batch4Review(unittest.TestCase):
             self.assertEqual(os.listdir(d), ["voices.json"])              # no .part left behind
 
     def test_numpad_operator_labels(self):   # F57
-        import ed_honk
-        self.assertEqual([ed_honk.key_label(k) for k in ("KEY_KPPLUS", "KEY_KPENTER", "KEY_KPDOT", "KEY_SYSRQ",
+        import outrider.honk
+        self.assertEqual([outrider.honk.key_label(k) for k in ("KEY_KPPLUS", "KEY_KPENTER", "KEY_KPDOT", "KEY_SYSRQ",
                                                          "KEY_102ND", "KEY_KP5", "KEY_LEFTALT", "KEY_K")],
                          ["Numpad +", "Numpad Enter", "Numpad .", "Print Screen", "OEM 102", "Numpad 5", "Left Alt", "K"])
 
@@ -5253,7 +5253,7 @@ class BatchS2Voice(unittest.TestCase):
         self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})
 
     def test_procedural_names_spoken(self):   # P4
-        st = ed_speech.spoken_text
+        st = outrider.speech.spoken_text
         self.assertEqual(st("Drojau LL-O b26-3 is undiscovered."), "Drojau L L O, b 26 3 is undiscovered.")
         self.assertEqual(st("Syreadiae JX-F c0, 42 ly"), "Syreadiae J X F, c 0, 42 ly")
         self.assertEqual(st("Lost 212.4M near Smojooe AR-E b25-8."), "Lost 212.4 million near Smojooe A R E, b 25 8.")
@@ -5325,10 +5325,10 @@ class BatchS2Voice(unittest.TestCase):
         self.assertEqual(len([x for x in self.j.moments if x["kind"] == "loss"]), 1)   # only the live one above
 
     def test_audition_alerts_exist(self):   # P19
-        self.assertEqual(len(ed_speech.AUDITION), 8)
-        self.assertLessEqual(set(ed_speech.AUDITION), set(ed_speech.KEYS))
-        for key in ed_speech.AUDITION:   # every one has sample values for its placeholders
-            self.assertLessEqual(ed_speech.fills(key) - set(ed_speech.ALWAYS), set(ed_speech.SAMPLES.get(key, {})), key)
+        self.assertEqual(len(outrider.speech.AUDITION), 8)
+        self.assertLessEqual(set(outrider.speech.AUDITION), set(outrider.speech.KEYS))
+        for key in outrider.speech.AUDITION:   # every one has sample values for its placeholders
+            self.assertLessEqual(outrider.speech.fills(key) - set(outrider.speech.ALWAYS), set(outrider.speech.SAMPLES.get(key, {})), key)
 
 
 class FindSystem(unittest.TestCase):
@@ -5442,13 +5442,13 @@ class BatchAAudio(unittest.TestCase):
     def fake(self, seconds=0.0, rc=0, stdin=True):
         """A LinePlayer whose player is a Python script: it appends what it was given to self.log (the WAV on
         stdin, or the file it was handed and whether it existed), sleeps, and exits with `rc`."""
-        import ed_tts
+        import outrider.tts
         code = ("import os, sys, time\n"
                 "data = sys.stdin.buffer.read() if len(sys.argv) < 2 else open(sys.argv[1], 'rb').read()\n"
                 f"open({self.log!r}, 'a').write(data.hex() + '|' + (sys.argv[1] if len(sys.argv) > 1 else '-') + '\\n')\n"
                 f"time.sleep({seconds}); sys.exit({rc})\n")
         cmd = [sys.executable, "-c", code]
-        pl = ed_tts.LinePlayer("auto", which=lambda n: None)
+        pl = outrider.tts.LinePlayer("auto", which=lambda n: None)
         pl.player = ("fake", cmd, cmd if stdin else None)
         return pl
 
@@ -5470,24 +5470,24 @@ class BatchAAudio(unittest.TestCase):
         return asyncio.run(run())
 
     def test_player_choice(self):
-        import ed_tts
+        import outrider.tts
         have = lambda *names: (lambda n: f"/usr/bin/{n}" if n in names else None)
-        self.assertEqual(ed_tts.find_player("auto", have("paplay", "aplay"))[0], "paplay")   # the first in order
-        self.assertEqual(ed_tts.find_player("auto", have("pw-play", "aplay"))[0], "pw-play")
-        self.assertEqual(ed_tts.find_player("aplay", have("pw-play", "aplay"))[0], "aplay")   # named: that one
-        self.assertIsNone(ed_tts.find_player("ffplay", have("pw-play")))                       # named, missing
-        self.assertIsNone(ed_tts.find_player("auto", have()))
-        self.assertIsNone(ed_tts.find_player("off", have("pw-play")))
-        self.assertIsNone(ed_tts.find_player("vlc", have("vlc", "pw-play")))
-        self.assertIsNone(ed_tts.find_player("auto", have("pw-play"))[2])   # pw-play gets a file, not stdin
-        self.assertIsNone(ed_tts.LinePlayer("off", have("pw-play")).name)
-        self.assertEqual(ed_tts.LinePlayer("nonsense", have("aplay")).choice, "auto")
-        self.assertEqual(ed_tts.LinePlayer("auto", have("aplay")).name, "aplay")
+        self.assertEqual(outrider.tts.find_player("auto", have("paplay", "aplay"))[0], "paplay")   # the first in order
+        self.assertEqual(outrider.tts.find_player("auto", have("pw-play", "aplay"))[0], "pw-play")
+        self.assertEqual(outrider.tts.find_player("aplay", have("pw-play", "aplay"))[0], "aplay")   # named: that one
+        self.assertIsNone(outrider.tts.find_player("ffplay", have("pw-play")))                       # named, missing
+        self.assertIsNone(outrider.tts.find_player("auto", have()))
+        self.assertIsNone(outrider.tts.find_player("off", have("pw-play")))
+        self.assertIsNone(outrider.tts.find_player("vlc", have("vlc", "pw-play")))
+        self.assertIsNone(outrider.tts.find_player("auto", have("pw-play"))[2])   # pw-play gets a file, not stdin
+        self.assertIsNone(outrider.tts.LinePlayer("off", have("pw-play")).name)
+        self.assertEqual(outrider.tts.LinePlayer("nonsense", have("aplay")).choice, "auto")
+        self.assertEqual(outrider.tts.LinePlayer("auto", have("aplay")).name, "aplay")
         try:   # the voice lab uses the same detection
             import voice_lab
         except (ImportError, SystemExit):
             return
-        with unittest.mock.patch.object(ed_tts.shutil, "which", have("aplay")), \
+        with unittest.mock.patch.object(outrider.tts.shutil, "which", have("aplay")), \
                 unittest.mock.patch.object(voice_lab.platform, "system", lambda: "Linux"):
             self.assertEqual(voice_lab.Player().cmd, ["aplay", "-q"])
 
@@ -5549,13 +5549,13 @@ class BatchAAudio(unittest.TestCase):
         self.assertEqual([x[0] for x in self.played()], [b"RIFFlong"])
 
     def test_503_and_file_players(self):
-        import ed_tts
+        import outrider.tts
 
         async def go(c):
             out = []
             self.state.player = None                                  # tests / no LinePlayer
             out.append((await c.post("/api/say/play", json={"text": "x"})).status)
-            self.state.player = ed_tts.LinePlayer("off")              # server_player = "off"
+            self.state.player = outrider.tts.LinePlayer("off")              # server_player = "off"
             r = await c.post("/api/say/play", json={"text": "x"})
             out.append((r.status, (await r.json())["error"]))
             out.append((await c.post("/api/sound/play", json={"name": "chime"})).status)
@@ -5606,14 +5606,14 @@ class BatchAAudio(unittest.TestCase):
         """R11/R21: the time limit is the line's own length plus some slack (the fixed cap only a floor), so a line
         longer than the cap is heard to its end; a player that hangs past it is cut and the page is told so."""
         import asyncio
-        import ed_tts
-        self.assertAlmostEqual(ed_tts.wav_seconds(self.wav(1.5)), 1.5, places=3)
-        self.assertIsNone(ed_tts.wav_seconds(b"RIFFnot a wav"))
+        import outrider.tts
+        self.assertAlmostEqual(outrider.tts.wav_seconds(self.wav(1.5)), 1.5, places=3)
+        self.assertIsNone(outrider.tts.wav_seconds(b"RIFFnot a wav"))
         pl = self.fake(seconds=1.2)
         pl.cap = 0.4                                     # a floor shorter than the line (as 20 s is for a long one)
-        self.assertAlmostEqual(pl.line_cap(self.wav(1.0)), 1.0 + ed_tts.PLAY_SLACK)
+        self.assertAlmostEqual(pl.line_cap(self.wav(1.0)), 1.0 + outrider.tts.PLAY_SLACK)
         self.assertEqual(pl.line_cap(b"RIFF"), 0.4)      # its length unknown: the cap
-        self.assertEqual(pl.line_cap(self.wav(0.1)), max(0.4, 0.1 + ed_tts.PLAY_SLACK))
+        self.assertEqual(pl.line_cap(self.wav(0.1)), max(0.4, 0.1 + outrider.tts.PLAY_SLACK))
         line = pl.claim()
         self.assertEqual(asyncio.run(pl.play_line(line, self.wav(1.0))), "done")   # played on past the 0.4 s floor
         pl.release(line)
@@ -5649,12 +5649,12 @@ class BatchAAudio(unittest.TestCase):
     def test_render_sound(self):
         import io
         import wave
-        import ed_tts
-        doc = ed_tts.load_sounds()
+        import outrider.tts
+        doc = outrider.tts.load_sounds()
         for name, spec in doc["sounds"].items():
-            wav = ed_tts.render_sound(spec, doc["gain"])
+            wav = outrider.tts.render_sound(spec, doc["gain"])
             with wave.open(io.BytesIO(wav)) as w:
-                self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()), (1, 2, ed_tts.SOUND_RATE), name)
+                self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()), (1, 2, outrider.tts.SOUND_RATE), name)
                 frames = w.readframes(w.getnframes())
                 length = w.getnframes() / w.getframerate()
             end = max(t.get("start", 0) + t["dur"] for t in spec["tones"])
@@ -5664,14 +5664,14 @@ class BatchAAudio(unittest.TestCase):
             self.assertLessEqual(peak, 32767, name)
         # the lowpass does something, and a dry tone is left out of it
         fan = doc["sounds"]["fanfare"]
-        self.assertNotEqual(ed_tts.render_sound(fan), ed_tts.render_sound(dict(fan, lowpass=None)))
-        bank = ed_tts.SoundBank()
+        self.assertNotEqual(outrider.tts.render_sound(fan), outrider.tts.render_sound(dict(fan, lowpass=None)))
+        bank = outrider.tts.SoundBank()
         self.assertIsNone(bank.wav("nope"))
         self.assertIs(bank.wav("chime"), bank.wav("chime"))   # rendered once
 
     def test_sound_names_match_the_page(self):
         import re
-        import ed_tts
+        import outrider.tts
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "static", "page.js"), encoding="utf-8") as f:
             js = f.read()
@@ -5679,7 +5679,7 @@ class BatchAAudio(unittest.TestCase):
             html = f.read()
         with open(os.path.join(root, "ed_outrider.py"), encoding="utf-8") as f:
             py = f.read()
-        names = set(ed_tts.load_sounds()["sounds"])
+        names = set(outrider.tts.load_sounds()["sounds"])
         alerts = js[js.index("const ALERTS = "):js.index("const UNSPOKEN")]
         used = set(re.findall(r', "(\w+)"\]', alerts))                    # the alerts table's sound column
         used |= set(re.findall(r'\bsound: "(\w+)"', js))                     # alertOut(..., {sound: "upbeat"})
@@ -5731,8 +5731,8 @@ class BatchBVoiceControl(unittest.TestCase):
 
     # ---- the gesture classifier: a pure function ----
     def test_gestures(self):
-        import ed_button
-        c = lambda ev, end=None: ed_button.classify(ev, 600, 350, end)
+        import outrider.button
+        c = lambda ev, end=None: outrider.button.classify(ev, 600, 350, end)
         self.assertEqual(c([(0, 1), (100, 0)]), ["status"])                                  # a tap
         self.assertEqual(c([(0, 1), (100, 0)], end=400), [])                                 # still waiting for a second
         self.assertEqual(c([(0, 1), (100, 0)], end=451), ["status"])
@@ -5744,7 +5744,7 @@ class BatchBVoiceControl(unittest.TestCase):
         self.assertEqual(c([(0, 1), (100, 0), (200, 1), (900, 0)]), ["hush"])                # a hold swallows the tap before
         self.assertEqual(c([(0, 0), (50, 2)]), [])                                           # a release with no press
         self.assertEqual(c([(0, 1), (100, 0), (300, 1), (380, 0), (500, 1), (560, 0)]), ["again", "status"])
-        g = ed_button.Gestures(600, 350)
+        g = outrider.button.Gestures(600, 350)
         self.assertEqual(g.feed(0, 1) + g.feed(50, 0), [])
         self.assertEqual(g.due(300), [])
         self.assertEqual(g.due(401), ["status"])
@@ -5793,35 +5793,35 @@ class BatchBVoiceControl(unittest.TestCase):
                                      list_devices=lambda: ["/dev/input/event3", "/dev/input/event5", "/dev/input/event9"]), Dev
 
     def test_button_code_and_find_device(self):
-        import ed_button
+        import outrider.button
         ev, Dev = self.fake_evdev([])
-        self.assertEqual(ed_button.button_code(ev, "btn_trigger_happy5"), 300)
-        self.assertEqual(ed_button.button_code(ev, "183"), 183)
-        self.assertEqual(ed_button.button_code(ev, 300), 300)
-        self.assertIsNone(ed_button.button_code(ev, "BTN_NOPE"))
-        self.assertIsNone(ed_button.button_code(ev, ""))
-        dev, why = ed_button.find_device(ev, "x-56")
+        self.assertEqual(outrider.button.button_code(ev, "btn_trigger_happy5"), 300)
+        self.assertEqual(outrider.button.button_code(ev, "183"), 183)
+        self.assertEqual(outrider.button.button_code(ev, 300), 300)
+        self.assertIsNone(outrider.button.button_code(ev, "BTN_NOPE"))
+        self.assertIsNone(outrider.button.button_code(ev, ""))
+        dev, why = outrider.button.find_device(ev, "x-56")
         self.assertEqual((dev.path, why), ("/dev/input/event5", None))
         self.assertTrue(all(d.closed for d in Dev.opened if d is not dev))   # the others are let go
-        dev, why = ed_button.find_device(ev, "Rhino")
+        dev, why = outrider.button.find_device(ev, "Rhino")
         self.assertIsNone(dev)
         self.assertIn("1 could not be opened", why)                           # the unreadable one is counted
-        self.assertEqual(ed_button.find_device(ev, "/dev/input/event5")[0].path, "/dev/input/event5")
-        self.assertIn("Permission denied", ed_button.find_device(ev, "/dev/input/event9")[1])
-        self.assertIsNone(ed_button.find_device(ev, "")[0])
+        self.assertEqual(outrider.button.find_device(ev, "/dev/input/event5")[0].path, "/dev/input/event5")
+        self.assertIn("Permission denied", outrider.button.find_device(ev, "/dev/input/event9")[1])
+        self.assertIsNone(outrider.button.find_device(ev, "")[0])
 
     def test_button_watch(self):
         import asyncio
-        import ed_button
+        import outrider.button
         # a tap, then a double tap, then a hold, then the device goes away
         ev, Dev = self.fake_evdev([(0, 1), (0.02, 0), (0.25, 1), (0.02, 0), (0.03, 1), (0.02, 0),
                                    (0.25, 1), (0.2, 0), (0.05, 2)])
         got = []
 
         async def go():
-            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", got.append, hold_ms=150, double_ms=100, evdev=ev)
+            w = outrider.button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", got.append, hold_ms=150, double_ms=100, evdev=ev)
             seen = set()
-            with unittest.mock.patch.object(ed_button, "RETRY", 0.05):
+            with unittest.mock.patch.object(outrider.button, "RETRY", 0.05):
                 t = asyncio.ensure_future(w.run())
                 for _ in range(130):   # every status it shows on the way
                     seen.add(w.status)
@@ -5838,7 +5838,7 @@ class BatchBVoiceControl(unittest.TestCase):
         self.assertGreater(len([d for d in Dev.opened if d.path.endswith("5")]), 1)   # and it looked again
 
         async def bad(button):
-            w = ed_button.ButtonWatch("X-56", button, got.append, evdev=ev)
+            w = outrider.button.ButtonWatch("X-56", button, got.append, evdev=ev)
             await w.run()   # returns at once: nothing to listen for
             return w.status
         self.assertIn("is not a button name or number", asyncio.run(bad("BTN_NOPE")))
@@ -5878,12 +5878,12 @@ class BatchBVoiceControl(unittest.TestCase):
 
     def watch(self, ev, on_gesture, seconds):
         import asyncio
-        import ed_button
+        import outrider.button
 
         async def go():
-            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", on_gesture, hold_ms=300, double_ms=150, evdev=ev)
+            w = outrider.button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", on_gesture, hold_ms=300, double_ms=150, evdev=ev)
             seen = []
-            with unittest.mock.patch.object(ed_button, "RETRY", 30):
+            with unittest.mock.patch.object(outrider.button, "RETRY", 30):
                 t = asyncio.ensure_future(w.run())
                 for _ in range(int(seconds / 0.01)):
                     if w.status not in seen:
@@ -6007,36 +6007,36 @@ class BatchBVoiceControl(unittest.TestCase):
     # ---- banned lines ----
     def test_ban_validation(self):
         path = self.speech_file()
-        sl = ed_speech.SpeechLines(path)
+        sl = outrider.speech.SpeechLines(path)
         v0 = sl.version()
         self.assertEqual(sl.set_ban("fuel_low", "Hull {pct}.")[0], 400)             # not an alert in the file
         self.assertEqual(sl.set_ban("hull", "Hull {pct} percent!")[0], 400)         # not a line in the file
         self.assertEqual(sl.set_ban("hull", 5)[0], 400)
-        self.assertFalse(os.path.exists(ed_speech.banned_path(path)))               # nothing written for a refusal
+        self.assertFalse(os.path.exists(outrider.speech.banned_path(path)))               # nothing written for a refusal
         status, out = sl.set_ban("hull", "Hull {pct}.")
         self.assertEqual((status, out), (200, {"ok": True, "banned": 1}))
-        self.assertEqual(os.path.dirname(ed_speech.banned_path(path)), self.tmp)    # next to the speech file
+        self.assertEqual(os.path.dirname(outrider.speech.banned_path(path)), self.tmp)    # next to the speech file
         got = sl.lines()
         self.assertEqual(got["lines"]["hull"]["business"], ["Hull at {pct} percent.", "Hull damage."])
         self.assertEqual(got["banned"], {"hull": ["Hull {pct}."]})
         self.assertNotEqual(sl.version(), v0)                                        # pages fetch the trimmed lines
         self.assertEqual(sl.set_ban("hull", "Hull {pct}.")[1]["banned"], 1)         # twice is once
         # a second reader (the voice lab, another process) sees the same bans
-        self.assertEqual(ed_speech.SpeechLines(path).lines()["lines"]["hull"]["business"], ["Hull at {pct} percent.", "Hull damage."])
+        self.assertEqual(outrider.speech.SpeechLines(path).lines()["lines"]["hull"]["business"], ["Hull at {pct} percent.", "Hull damage."])
         self.assertEqual(sl.set_ban("hull", "Hull {pct}.", ban=False), (200, {"ok": True, "banned": 0}))
         self.assertEqual(len(sl.lines()["lines"]["hull"]["business"]), 3)
         # a broken or odd file bans nothing, and never stops the lines loading
         for text in ("{not json", "[1, 2]", '{"hull": "Hull {pct}."}'):
-            with open(ed_speech.banned_path(path), "w") as f:
+            with open(outrider.speech.banned_path(path), "w") as f:
                 f.write(text)
-            fresh = ed_speech.SpeechLines(path)
+            fresh = outrider.speech.SpeechLines(path)
             self.assertEqual(len(fresh.lines()["lines"]["hull"]["business"]), 3, text)
             self.assertIsNone(fresh.lines()["error"])
-        self.assertEqual(ed_speech.read_bans(os.path.join(self.tmp, "missing.json")), {})
+        self.assertEqual(outrider.speech.read_bans(os.path.join(self.tmp, "missing.json")), {})
 
     def test_ban_never_empties_a_list(self):
         path = self.speech_file()
-        sl = ed_speech.SpeechLines(path)
+        sl = outrider.speech.SpeechLines(path)
         self.assertEqual(sl.set_ban("heat", "Heat damage.")[0], 200)
         status, out = sl.set_ban("heat", "Hot.")                                    # the last line left in the list
         self.assertEqual(status, 409)
@@ -6044,18 +6044,18 @@ class BatchBVoiceControl(unittest.TestCase):
         self.assertEqual(sl.lines()["lines"]["heat"]["business"], ["Hot."])
         self.assertEqual(sl.set_ban("hull", "Ouch, {pct}.")[0], 409)               # a list of one
         # a hand-edited file that bans a whole list: the list is used whole, and the review says so
-        with open(ed_speech.banned_path(path), "w") as f:
+        with open(outrider.speech.banned_path(path), "w") as f:
             json.dump({"heat": ["Heat damage.", "Hot."]}, f)
-        got = ed_speech.SpeechLines(path).lines()
+        got = outrider.speech.SpeechLines(path).lines()
         self.assertEqual(got["lines"]["heat"]["business"], ["Heat damage.", "Hot."])
         self.assertEqual(got["banned_whole"], ["heat/business"])
-        lines, whole = ed_speech.apply_bans({"hull": {"business": ["a", "b"], "_note": "x", "when": ["a"]}}, {"hull": ["a"]})
+        lines, whole = outrider.speech.apply_bans({"hull": {"business": ["a", "b"], "_note": "x", "when": ["a"]}}, {"hull": ["a"]})
         self.assertEqual((lines["hull"], whole), ({"business": ["b"], "_note": "x", "when": ["a"]}, []))
 
     def test_ban_endpoints_and_backup(self):
         import zipfile
         path = self.speech_file()
-        self.state.speech = ed_speech.SpeechLines(path)
+        self.state.speech = outrider.speech.SpeechLines(path)
 
         async def go(c):
             out = []
@@ -6091,7 +6091,7 @@ class BatchBVoiceControl(unittest.TestCase):
         except (ImportError, SystemExit):
             self.skipTest("voice_lab needs tkinter")
         path = self.speech_file()
-        self.assertEqual(ed_speech.ban_line(path, "hull", "Hull damage.")[0], 200)
+        self.assertEqual(outrider.speech.ban_line(path, "hull", "Hull damage.")[0], 200)
         styles, lines = voice_lab.load_lines(path)
         self.assertEqual(lines["hull"]["business"], ["Hull {pct}.", "Hull at {pct} percent."])
         self.assertIn("sarcastic", styles)
@@ -6099,7 +6099,7 @@ class BatchBVoiceControl(unittest.TestCase):
     def test_gitignored(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, ".gitignore"), encoding="utf-8") as f:
-            self.assertIn("speech_banned.json", f.read().split())
+            self.assertIn("data/", f.read().split())   # speech_banned.json lives in data/, ignored as a whole
 
 
 def types_ns(**kw):
@@ -6485,19 +6485,19 @@ class BatchEExobio(unittest.TestCase):
     # ---- P8: per-run pricing ----
     def test_per_run_pricing(self):
         ev = lambda e: (T(e["timestamp"]), None, e)
-        v, _ = ed_unsold.species_value(self.STRATUM)
+        v, _ = outrider.unsold.species_value(self.STRATUM)
         sold = {"event": "SellOrganicData", "timestamp": "2026-01-01T00:00:00Z",   # 1 of 4 sold entries earned x5: 25%
                 "BioData": [{"Species": self.TUSSOCK, "Value": 10, "Bonus": 40}] + [{"Species": self.TUSSOCK, "Value": 10, "Bonus": 0}] * 3}
         events = [ev(sold)] + [ev(self.body_scan("2026-01-02T00:00:00Z", b, f)) for b, f in ((1, False), (2, True), (3, None))] + \
                  [ev(self.organic(f"2026-01-03T00:0{b}:00Z", b, "Analyse", self.STRATUM, "Stratum Tectonicas")) for b in (1, 2, 3)]
-        bio = ed_unsold.analyse(events, ARGS)["exobiology"]
+        bio = outrider.unsold.analyse(events, ARGS)["exobiology"]
         self.assertEqual((bio["x5_runs"], bio["x1_runs"], bio["unknown_runs"]), (1, 1, 1))
         self.assertEqual(bio["estimated_value"], int(v * 5 + v + v * (1 + 4 * 0.25)))
         self.assertEqual((bio["base_value"], bio["max_value"]), (3 * v, 15 * v))   # unchanged
         self.assertEqual({k: bio["rows"][0][k] for k in ("x5", "x1", "unknown")}, {"x5": 1, "x1": 1, "unknown": 1})
         # a rescan after your own landing says footfalled: the first scan decides
         events.insert(4, ev(self.body_scan("2026-01-02T01:00:00Z", 1, True)))
-        self.assertEqual(ed_unsold.analyse(events, ARGS)["exobiology"]["x5_runs"], 1)
+        self.assertEqual(outrider.unsold.analyse(events, ARGS)["exobiology"]["x5_runs"], 1)
 
     # ---- P8: the sale check ----
     def sale_journal(self):
@@ -6589,7 +6589,7 @@ class BatchEExobio(unittest.TestCase):
                               "body": "Sys 5", "lat": 0.0, "lon": 0.0, "planet_radius": 1_000_000}
         e = self.state.sampling_summary()["elsewhere"]
         self.assertEqual((e["species"], e["samples"], e["body"], e["system"]), ("Tussock Pennata", 2, "4", None))
-        self.assertEqual(e["value"], ed_bio.species_value("Tussock Pennata") * 5)
+        self.assertEqual(e["value"], outrider.bio.species_value("Tussock Pennata") * 5)
         # an old Log (a re-read) discards it silently; a live one leaves a card
         seq = self.j.moment_seq
         now = ed_outrider.iso_ts(time.time())
@@ -6610,7 +6610,7 @@ class BatchEExobio(unittest.TestCase):
         return [(m["region"], m["spoken"], m["count"]) for m in self.j.moments if m["kind"] == "region" and m["seq"] > seq]
 
     def test_region_crossing_once(self):
-        if not ed_bio.available():
+        if not outrider.bio.available():
             self.skipTest("no bio rules")
         for i, (name, region) in enumerate((("Stratum Tectonicas - Green", "Inner Orion Spur"), ("Aleoida Spica - Yellow", "Inner Orion Spur"),
                                             ("Aleoida Laminiae - Teal", "Inner Orion Spur"), ("Tussock Pennata - Red", "Inner Orion Spur"),
@@ -6638,12 +6638,12 @@ class BatchEExobio(unittest.TestCase):
 
     # ---- P17: jumponium ----
     def test_jumponium_limits(self):
-        short = ed_materials.jumponium_short
+        short = outrider.materials.jumponium_short
         c = {"carbon": 10, "germanium": 10, "arsenic": 2, "niobium": 2, "yttrium": 2, "polonium": 10, "vanadium": 10, "cadmium": 10}
         self.assertEqual(short(c), {"arsenic": 2, "yttrium": 2})    # the tie set, niobium (not scarce) left out
         self.assertEqual(short(dict(c, arsenic=3, niobium=3, yttrium=3)), {})   # 3 premium boosts: not short
         self.assertEqual(short(dict(c, cadmium=1)), {"arsenic": 2, "yttrium": 2, "cadmium": 1})   # standard at 1 too
-        pick = ed_materials.jumponium_pick
+        pick = outrider.materials.jumponium_pick
         self.assertIsNone(pick([{"Name": "yttrium", "Percent": 0.8}, {"Name": "iron", "Percent": 20}], {"yttrium": 2}))   # under the floor
         self.assertEqual(pick([{"Name": "arsenic", "Percent": 1.6}, {"Name": "yttrium", "Percent": 1.3}], {"arsenic": 2, "yttrium": 1}),
                          {"material": "yttrium", "pct": 1.3})      # the scarcest held wins over a richer share
@@ -7767,7 +7767,7 @@ class SalesAndBioValue(unittest.TestCase):
         return d
 
     def unsold(self, events):
-        return ed_unsold.analyse(ed_unsold.read_events([self.journal(events)]), ARGS)
+        return outrider.unsold.analyse(outrider.unsold.read_events([self.journal(events)]), ARGS)
 
     @staticmethod
     def body(ts, body_id, footfalled, scan_type="Detailed", disc=True):
@@ -8074,16 +8074,16 @@ class SurfaceRigs(unittest.TestCase):
         """The co-pilot path end to end with the stand-in evdev (never a real device): the button's tap, double tap
         and hold reach State.copilot_gesture, which in the Rhino marks rigs with each."""
         import asyncio
-        import ed_button
+        import outrider.button
         ev, Dev = BatchBVoiceControl.fake_evdev(self, [(0, 1), (0.02, 0), (0.25, 1), (0.02, 0), (0.03, 1), (0.02, 0),
                                                         (0.25, 1), (0.2, 0), (0.05, 2)])
         self.launch()
         self.status(10, 0, 0, heading=180)
 
         async def go():
-            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", self.state.copilot_gesture, hold_ms=150,
+            w = outrider.button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", self.state.copilot_gesture, hold_ms=150,
                                       double_ms=100, evdev=ev)
-            with unittest.mock.patch.object(ed_button, "RETRY", 5):
+            with unittest.mock.patch.object(outrider.button, "RETRY", 5):
                 t = asyncio.ensure_future(w.run())
                 await asyncio.sleep(1.0)
                 t.cancel()
@@ -8357,12 +8357,12 @@ class SurfaceRigs(unittest.TestCase):
         self.assertEqual((abc["tons"], abc["rigs"], abc["saved"]), (6 + 3, 0, False))   # the mined history stays
 
     def test_rig_restock_recipe(self):
-        inv = ed_materials.inventory({"counts": {"iron": 10, "nickel": 5, "mechanicalequipment": 4}, "names": {}})
+        inv = outrider.materials.inventory({"counts": {"iron": 10, "nickel": 5, "mechanicalequipment": 4}, "names": {}})
         r = next(x for x in inv["synthesis"] if x["name"] == "Mining rig restock")
         self.assertEqual((r["craftable"], r["limit"]), (2, "Nickel"))
         self.assertEqual([(m["name"], m["need"]) for m in r["materials"]], [("Iron", 3), ("Nickel", 2), ("Mechanical Equipment", 1)])
-        self.assertEqual(ed_materials.MATERIALS["mechanicalequipment"], ("Mechanical Equipment", "Manufactured", 2))
-        self.assertEqual(ed_materials.craftable({"iron": 30, "nickel": 20}, r and ed_materials.SYNTH["Mining rig restock"]["materials"]),
+        self.assertEqual(outrider.materials.MATERIALS["mechanicalequipment"], ("Mechanical Equipment", "Manufactured", 2))
+        self.assertEqual(outrider.materials.craftable({"iron": 30, "nickel": 20}, r and outrider.materials.SYNTH["Mining rig restock"]["materials"]),
                          (0, "mechanicalequipment"))
 
     def test_endpoints(self):
@@ -8673,7 +8673,7 @@ class MappedCallout(unittest.TestCase):
         got = self.moments()
         self.assertEqual(len(got), 1)
         m = got[0]
-        want = ed_unsold.body_value({"PlanetClass": "High metal content body", "MassEM": 2.0, "TerraformState": "",
+        want = outrider.unsold.body_value({"PlanetClass": "High metal content body", "MassEM": 2.0, "TerraformState": "",
                                      "StarType": None, "StellarMass": None, "first_discovered": True, "first_mapped": True},
                                     True, False, True)
         self.assertEqual((m["body"], m["probes"], m["target"], m["value"], m["system"]), ("A 1", 8, 6, want, "1"))
@@ -9395,10 +9395,10 @@ class RescanChecklist(unittest.TestCase):
                                                                                   "maps_lost": 0, "maps_redone": 0, "todo_scan": ["A"],
                                                                               "todo_map": []}))
 
-    # values: what is still lost, with the bonuses earned, as ed_unsold.body_value prices it (no efficiency bonus)
+    # values: what is still lost, with the bonuses earned, as outrider.unsold.body_value prices it (no efficiency bonus)
     def worth(self, id64, body, mapped):
         rec = json.loads(self.db.execute("SELECT record FROM own_bodies WHERE system=? AND body_id=?", (id64, body)).fetchone()[0])
-        return ed_unsold.body_value(dict(rec["ed"], first_discovered=True, first_mapped=True), mapped, False, True)
+        return outrider.unsold.body_value(dict(rec["ed"], first_discovered=True, first_mapped=True), mapped, False, True)
 
     def test_values_of_what_is_still_lost(self):
         self.jump("2026-01-01T00:00:00Z", "Worth", 11)
@@ -9435,7 +9435,7 @@ class RescanChecklist(unittest.TestCase):
         self.assertEqual(self.values, {"lost_scan": 0, "lost_map": 0, "lost_total": 0})
 
     def test_values_match_the_unsold_estimate(self):
-        # scan + map of a body both lost add up to what ed_unsold's own estimate gave those bodies while aboard
+        # scan + map of a body both lost add up to what outrider.unsold's own estimate gave those bodies while aboard
         evs = [(T(t), None, e) for t, e in [
             ("2026-01-01T00:00:00Z", {"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Est",
                                       "SystemAddress": 12, "StarPos": [0, 0, 0]})]]
@@ -9443,7 +9443,7 @@ class RescanChecklist(unittest.TestCase):
         dss = {"event": "SAAScanComplete", "timestamp": "2026-01-01T00:02:00Z", "SystemAddress": 12, "BodyID": 2,
                "BodyName": "Est A 2", "ProbesUsed": 9, "EfficiencyTarget": 6}
         evs.append((T(dss["timestamp"]), None, dss))
-        aboard = [r for r in ed_unsold.analyse(evs, ARGS)["exploration"]["rows"] if r["system"] == "Est"]
+        aboard = [r for r in outrider.unsold.analyse(evs, ARGS)["exploration"]["rows"] if r["system"] == "Est"]
         self.assertEqual(len(aboard), 3)
         for _t, _c, e in evs:
             self.j.handle(e)

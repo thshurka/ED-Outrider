@@ -490,7 +490,7 @@ function samplingHtml() {
   if (sm && sm.elsewhere) { const t = elsewhereText(sm.elsewhere); return t ? `<div class="spacing elsewhere">${esc(t)}</div>` : ""; }
   if (!sm || !sm.samples || sm.samples >= 3) return "";
   const head = `<b>${esc(sm.genus || "")}</b> <span class="unk">${esc((sm.species || "").split(" ").slice(1).join(" "))}</span> · sample ${sm.samples}/3`;
-  // no colony distance for this genus (one ed_bio does not know): the positions may well be recorded
+  // no colony distance for this genus (one outrider.bio does not know): the positions may well be recorded
   if (sm.need == null && sm.points > 0) return `<div class="spacing unk">${head} · spacing unknown for this genus</div>`;
   if (sm.to_go == null) return `<div class="spacing unk">${head} · ${sm.need ? `need ${sm.need} m from the last sample` : "spacing unknown"}` +
     ` <span title="the position of your earlier samples was not recorded (they were taken before Outrider was running)">(position unknown)</span></div>`;
@@ -1187,7 +1187,7 @@ let speechItems = [], speechBusy = false, speechWake = null, speechNow = null, s
 const spokenNumber = m => String(Math.round(Number(m) * 10) / 10);
 // a procedural system name's sector suffix, letter by letter: "Drojau LL-O b26-3" is said "Drojau L L O, b 26 3"
 // (read as written, a voice mangles "LL-O b26-3"). It needs the space, mass code and number after the letters,
-// so a carrier id ("K7F-3XZ") and a hand-named system ("Jaques") are left alone. ed_speech.spoken_text has the twin.
+// so a carrier id ("K7F-3XZ") and a hand-named system ("Jaques") are left alone. outrider.speech.spoken_text has the twin.
 const PROC_NAME = /\b([A-Z])([A-Z])-([A-Z]) ([a-h])(\d+)(?:-(\d+))?\b/g;
 const procSpoken = (_, a, b, c, mass, n, m) => `${a} ${b} ${c}, ${mass} ${n}${m ? " " + m : ""}`;
 const spokenText = t => String(t).replace(/<[^>]+>/g, "").replace(/[⚠📖🚢💰🧬🏁🗺👣⛽🌋🪨✦★☆]/gu, "")
@@ -1367,7 +1367,7 @@ async function sayNow(item) {
     });
   } finally { if (speechNow === cur) speechNow = null; }
 }
-// ---- spoken lines: speech.json's versions of each alert, per personality (see ed_speech.py) ----
+// ---- spoken lines: speech.json's versions of each alert, per personality (see outrider/speech.py) ----
 let speechLib = {styles: {}, lines: {}, version: null}, speechLibWanted = null;
 const speechStyles = () => { const v = store.get("speechStyles", null) ?? (data && data.defaults && data.defaults.speech_styles);
   return Array.isArray(v) ? v.filter(x => typeof x === "string") : ["business"]; };   // store.get already drops a non-list
@@ -3948,7 +3948,7 @@ function hushTick() {
   if (hushState && hushState.end != null && !hushed()) { hushState = null; hushKey = null; hushNews("Voice back on."); }
   drawHush();
 }
-// ---- the co-pilot channel: the button (ed_button.py) and a tablet's Now bar ask the window that is speaking for a
+// ---- the co-pilot channel: the button (outrider/button.py) and a tablet's Now bar ask the window that is speaking for a
 // status report, the last line again or a replay; the first payload only takes the number, so opening a page does
 // nothing stale. "hush" is done by the server (the payload's hush then says so).
 let lastCopilotSeq = 0;
@@ -3974,7 +3974,7 @@ function onData() {
   const br = data.bio_rules, brEl = document.getElementById("bioRules");
   if (brEl) brEl.textContent = br
     ? `Species guesses use the BioScan spawn rules (${br.species} species, updated ${(br.generated || "").slice(0, 10)}); each start fetches newer rules from GitHub when there are any.`
-    : "Spawn rules missing (bio_rules.json) and could not be downloaded: bodies get no species guesses. Run python3 ed_bio.py --update-rules once online.";
+    : "Spawn rules missing (bio_rules.json) and could not be downloaded: bodies get no species guesses. Run python3 -m outrider.bio --update-rules once online.";
   // first payload, the server was restarted, or this window slept (see poll): no sounds for old state
   const firstNews = data.run_id !== runId || woke;
   onHush(firstNews); takeCopilot(data.copilot, firstNews); nowStakesTick();
@@ -4449,7 +4449,7 @@ function drawSpeechBtn() {
   speechBtn.classList.toggle("on", !!speechOn); speechBtn.style.opacity = speechOn && speakerHere() ? 1 : .45;
   const t = data && data.tts;
   speechBtn.title = (speechOn ? "spoken alerts on" : "spoken alerts off") + " — " +
-    (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see ed_tts.py)") +
+    (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see outrider/tts.py)") +
     (speakerHere() ? "" : speakMode() === "never" ? " — this browser never speaks (see the alerts dialog)" : " — another window is speaking");
 }
 // "This screen speaks": the setting, whether this window is the one, and a way to take over
@@ -4623,7 +4623,7 @@ function drawTts() {
   document.getElementById("ttsStatus").textContent = t && t.available ? t.status : "";
   document.getElementById("ttsHint").textContent = !t || !t.available
     ? "Piper is not installed, so the browser's own voice is used (robotic on Linux). For a natural voice: python3 -m venv --system-site-packages .venv && .venv/bin/pip install piper-tts, then restart Outrider."
-    : "Voices live in piper-voices/ next to the script; a configured voice that is missing is downloaded there on first use.";
+    : "Voices live in data/piper-voices/; a configured voice that is missing is downloaded there on first use.";
   const opts = (t && t.voices) || [];
   if (sel.dataset.opts !== opts.join(",")) {
     sel.innerHTML = opts.map(v => `<option>${esc(v)}</option>`).join("") || `<option value="">(none installed yet)</option>`;

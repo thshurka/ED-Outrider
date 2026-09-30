@@ -1,0 +1,191 @@
+# Working on ED Outrider (for contributors and their coding agents)
+
+Read this before changing anything. It covers the code map, how data moves, how to test safely, and the
+rules that keep the journal data, the page and the voice consistent. See also `JOURNAL_REFERENCE.md`
+(what the game writes and its traps), `DESIGN_NOTES.md` (decisions and known limits) and `CHANGELOG.md`.
+
+## What it is
+
+- A local web app for Elite Dangerous explorers. It reads the player's own journal files as they are written,
+  keeps what it learns in SQLite, asks Spansh (and EDSM as a fallback) about nearby systems, and serves one
+  page on `http://127.0.0.1:8025/` that updates live, with sounds and optional spoken alerts.
+- Python 3.11+, aiohttp, no framework. The page is plain HTML/CSS/JS, no build step.
+- Optional parts: Piper voices (`piper-tts`), and on Linux auto honk and the co-pilot button (`evdev`).
+- Licence GPL-2.0-or-later. Bundled data keeps its own licence (see the README footer).
+
+## Code map
+
+| File | What it holds |
+|---|---|
+| `outrider/__init__.py` | `ROOT` (the repository), `RESOURCES_DIR` (`resources/`), `DATA_DIR` (`data/`): every default path starts from these. Modules with a CLI run as `python3 -m outrider.<name>` from the repository root |
+| `ed_outrider.py` | Almost everything: config (`settings_from`, `config_text`), the schema (`SCHEMA`, `RESET_JOURNAL_DATA`, `open_db`), the journal reader (`class Journals`), Spansh/EDSM (`class Spansh`), the live state and every summary the page shows (`class State`), Search (`class Searcher`), backups, the web app (`make_app`, `request_guard`) and `run()`/`main()` |
+| `outrider/unsold.py` | The unsold cartographic + exobiology estimate (its own journal pass, run in a thread); also journal-folder auto-detection. Works alone from the command line |
+| `outrider/bio.py` | Exobiology predictor: spawn rules, colour variants, values; `--backtest`, `--update-rules` |
+| `outrider/log.py` | The Log view: one-line summaries, read straight from the journal files on request |
+| `outrider/materials.py` | Material names, grades, caps, synthesis recipes, and folding material events into an inventory |
+| `outrider/speech.py` | Loads and checks `speech.json`; `KEYS` (every alert and its placeholders), `SAMPLES`, bans (`banned_path`: `data/speech_banned.json` for the shipped file, beside a copy of your own) |
+| `outrider/tts.py` | Piper synthesis (`Speaker`), voice downloads (into `data/piper-voices/`), and playing lines/sounds on the PC (`LinePlayer`) |
+| `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding and presses it through a uinput virtual keyboard |
+| `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
+| `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
+| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue |
+| `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
+| `resources/speech.json` | Spoken lines per alert and personality (business, sarcastic, sweet, plus `_profane` lists) |
+| `resources/bio_rules.json` | Spawn rules and region map data fetched from upstream projects (refreshed at start when upstream changed) |
+| `resources/mining_odds.json` | Planetary mining survey odds per ground type (EDFM, CC BY-SA 4.0); read only, never edit by hand |
+| `ed_outrider.toml.example` | Every config key, commented. The real `ed_outrider.toml` is git-ignored |
+| `data/` | The player's own files, git-ignored as a whole: `ed_outrider.sqlite` (default `db`), `browser_defaults.json` (beside the database), `speech_banned.json`, `backups/` (default `backup_dir`), `piper-voices/`. Created on first start |
+| `docs/` | These notes; `docs/images/` the README screenshots |
+| `tests/test_units.py` | Unit tests (unittest, in-memory SQLite, fakes for devices, Spansh and Piper) |
+| `tests/page_smoke.js` | Loads the page in jsdom from a running server, opens every view, drives many page functions |
+| `tests/fixtures/journals/` | Synthetic sample journals, `Status.json` and `NavRoute.json` (made-up commander and systems) |
+| `scripts/verify.sh` | Runs everything below in one go against a throwaway server |
+
+## How data flows
+
+1. **Journals.** `State.tick()` runs every second. For each live folder `Journals.scan_dir()` reads new bytes
+   of every `Journal.*.log` from the stored offset (`journal_files`), complete lines only.
+2. **Prefilter.** A line is parsed only if it contains `"event":"<Name>"` for a name in `WANTED` (built from
+   the `*_EVENTS` tuples) or `Fixed_Event_Life`. `outrider/unsold.py` has its own filter (`INTERESTING`).
+3. **Handling.** `Journals.handle(ev)` dispatches by event group (`handle_scan`, `handle_ship`, `handle_cmdr`,
+   `handle_body`, `track_srv`...). It writes rows (visits, jumps, own_bodies, own_organic, sale_events...) and
+   JSON state in `meta` (position, ship, carrier, fuel history...), and appends **moments**
+   (`Journals.moment(kind, ts, ...)`) to a 16-entry deque with a growing `seq`.
+4. **Status.json / NavRoute.json** are read when their mtime changes (`read_status`, `read_navroute`).
+5. **Commit, then follow-up.** After the commit the tick runs the live checks: `watch_status` (scoop, FSS,
+   surface map, rig leash), `maybe_refresh` (Spansh sphere on arrival), `apply_own_changes`,
+   `maybe_classify_target`, `maybe_unsold`, `maybe_sale_left`, carrier, sellers, the quit backup.
+   `State.bump()` wakes every waiting page request.
+6. **Payload.** `GET /api/nearby?since=<run>:<version>` is a long poll (25 s, 204 when nothing changed) that
+   returns `State.payload()`: position, systems, target, moments (priced by `moments_summary`), fuel,
+   surface map, speech info and more. Other views fetch their own endpoints: `/api/system/{id64}`,
+   `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
+   `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/status` and `/api/status.txt`.
+7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
+   `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
+   spoken line from `line(key, vars, plain)`.
+8. **Speech.** `speak()` queues lines by priority (danger first; stale lines dropped; the queue clears when
+   the FSD charges). One window speaks (Web Locks). Audio is Piper via `/api/say`, the PC via
+   `/api/say/play`, or the browser's own voice.
+
+Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields, never the number.
+
+## Setup, run, test
+
+- `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt`
+  (piper-tts and evdev are optional: delete their lines if you don't want them).
+- `npm install` in the repo root (Node.js 22.22.2+ or 24.15+ for jsdom 30; jsdom runs the smoke test,
+  playwright is only for optional screenshots and downloads no browser by itself).
+- **One command:** `scripts/verify.sh`. It runs the unit tests, pyflakes (warnings shown, not fatal), `node
+  --check static/page.js`, then starts a scratch server on a free port with a fresh database built from
+  `tests/fixtures/journals`, a temporary config and no network, runs `tests/page_smoke.js`, and stops the
+  server by its PID. All of it happens in a `mktemp` folder that is deleted afterwards. `VERBOSE=1` prints
+  every smoke line and the server log.
+- By hand: `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [node_modules]`.
+- **The sample journals** (`tests/fixtures/journals`) are synthetic: commander "Sample Pilot", made-up systems
+  Hesperine (a station; a sale), Corvane (a Rhino mining run) and Talvik Reach (honk, scans, a mapped body, bio
+  signals, a completed and an in-progress sample run; the current system), a plotted route to Ossia, and a
+  `Status.json` in supercruise. Two sessions, the first ending in `Shutdown`. Extend them by hand (keep the
+  game's `{ "timestamp":"...", "event":"Name", ... }` spacing so the prefilter matches); never add real
+  commander names or copy real journals.
+- **A scratch server of your own** (to look at a change in a browser):
+  - copy a database (`--db /tmp/x/copy.sqlite`), or let it build a fresh one from journals;
+  - use a scratch config (`--config /tmp/x/scratch.toml`) with `[journals] live = [...]`,
+    `[server] backup_dir` (or `backup_every_days = 0`) and `speech_file` pointing into the scratch folder,
+    `[speech] server_player = "off"`, `[spansh] watch_firsts = false`, `[autohonk] enabled = false`,
+    `[copilot] enabled = false`;
+  - pick a spare port (`--port 8939 --host 127.0.0.1`) and stop the server by its PID, never with
+    `pkill -f` (which can match your own shell).
+- **Never** point tests or scratch servers at your own running Outrider (port 8025 by default) or at your real
+  `data/` (`ed_outrider.sqlite`, backups) / `ed_outrider.toml`. Use copies and a spare port.
+- A scratch server reads journals read-only. If you point it at your real journal folder while the game is
+  running, it reacts live: that is exactly why auto honk and the co-pilot must stay off.
+- After a change to `outrider/bio.py`, run `python3 -m outrider.bio --backtest` on real journals; recall must not drop.
+
+## Rules you must follow
+
+- **`PARSER_VERSION`** (ed_outrider.py): bump it when the journal handler learns something that must be
+  rebuilt from past journals (a new event, a new column filled from old lines). On the next start
+  `open_db` runs `RESET_JOURNAL_DATA` and re-reads every journal once. Add a comment line saying why.
+- **`CACHE_VERSION`**: bump it when the layout of cached Spansh records changes; cached systems in the old
+  layout are ignored and fetched again.
+- **Journal-derived vs live-only tables.** Journal-derived tables (visits, jumps, own_*, sales, codex,
+  sale_events...) and meta keys must be cleared in `RESET_JOURNAL_DATA`, or a re-read doubles them.
+  Live-only data (positions from Status.json, button presses, Spansh answers, estimates made at the time:
+  `sample_points`, `surface_rigs`, `surface_sites`, `mining_locations`, `arrival_verdicts`, `sale_estimates`,
+  `firsts_watch`, `bookmarks`, the Spansh cache) cannot be rebuilt and must **stay out** of it. Say which kind
+  a new table is in its schema comment.
+- **Out-of-order and replayed lines.** Legacy folders are imported late and a re-read replays everything:
+  guard current-state updates with `self.fresh(key, ts, ...)`, and anything that should only happen during
+  live play (spoken moments about losses, positions, sales in progress) with `live_event(ts)`.
+- **Failed ticks.** A tick that raises is rolled back and `Journals.reload()` restores memory from the
+  database; `checkpoint()`/`restore()` cover what lives only in memory (moments, sets of bodies touched,
+  the collection under way...). New in-memory state changed by handling lines must be added to both, or a
+  retry announces things twice. A journal line that lacks a field is skipped with a log line
+  (`KeyError`/`TypeError` are caught per line); database errors must propagate so the tick is retried.
+- **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
+  (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
+  screen speaks) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+- **Spoken lines.** Every alert key must agree across `speech.json`, `outrider.speech.KEYS` (with its placeholders),
+  `outrider.speech.SAMPLES` (a value for every placeholder), a `line("key", ...)` call in `page.js` and a
+  `LINE_SAMPLES` entry in `page.js`. The shipped lists hold 50 lines each for business, sarcastic, sweet and
+  the two `_profane` lists; unit tests check coverage, placeholders and at least 10 per list. Danger keys
+  (`DANGER` in page.js) are spoken only from business lines by default.
+- **Config keys.** A new key needs: parsing in `settings_from` (with a sane default and a warning on a bad
+  value), `config_text` (so `--write-config` writes it), `ed_outrider.toml.example`, and the README
+  Settings section. Server defaults for browser settings also go in `payload()["defaults"]` and `run()`.
+- **Endpoints.** Every request passes `request_guard`: unknown Host names are refused, and a request another
+  site's page sends is refused (Origin / `Sec-Fetch-Site`). Only `OPEN_GETS` (`/api/status`,
+  `/api/status.txt`) may be read cross-site. Anything that changes state must be a POST. Don't widen
+  `OPEN_GETS`; validate every input (ids with `parse_id64`, JSON with `json_object`).
+- **Devices.** Never exercise auto honk (uinput key presses: they go to whatever window has focus, including
+  a running game) or the co-pilot button (reads `/dev/input`) against a real game or device from tests or a
+  scratch server. Use the existing fakes (`FakeHonker`, `FakeUI`, stand-in `evdev` namespaces in
+  `tests/test_units.py`). Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
+- **No stray side effects.** Don't download Piper voices into the real `data/piper-voices/`, don't let a test
+  rewrite `resources/bio_rules.json`, and don't write the real `data/speech_banned.json` (use a speech file in a
+  temp folder: its bans go beside it).
+- **Every fix gets a test that fails without it.** Unit tests feed synthetic events to `Journals.handle()` on
+  `open_db(":memory:")`; page behaviour goes in `page_smoke.js`, injecting the data it needs through
+  `window.eval` rather than relying on anyone's real database.
+
+## Recipes
+
+**A new alert (moment).**
+1. In the handler, `self.moment("my_kind", ts, ...)` with plain JSON fields (ids as ints; `live_event(ts)` if
+   it must not fire on a re-read).
+2. If it needs pricing or names, add them in `State.moments_summary()` / `moment_extra()`.
+3. In `onData()` (page.js), a branch for `m.kind === "my_kind"` calling `alertOut(...)`; reuse an `ALERTS` row
+   or add one (its id is the per-alert sound/notify/speak switch).
+4. A spoken line: see below. Tests: a unit test for the moment, a smoke check for the page's reaction.
+
+**A new column.** Add it to the `CREATE TABLE` in `SCHEMA`; `open_db` adds missing columns to old databases.
+If it is filled from journals, write it in the handler and bump `PARSER_VERSION`; if from Spansh records,
+bump `CACHE_VERSION`. Old rows have NULL: code must cope.
+
+**A new setting.** Page-only: a `store.get(key, default)`/`store.set` pair, the key in `SETTINGS_KEYS` and
+`BROWSER_SETTINGS` (same position), a control in the alerts dialog. With a config default: the four config
+places above plus `data.defaults`.
+
+**A new spoken line.** `outrider.speech.KEYS["key"] = "when it is said: {placeholders}"`, `SAMPLES["key"]`, an entry
+in `speech.json` (`"when"` plus five lists), `line("key", vars, "plain fallback")` in page.js, and
+`LINE_SAMPLES.key`. Run the unit tests: they name what is missing.
+
+**A new journal event.** Add its name to the right `*_EVENTS` tuple (or `WANTED` never lets the line through),
+handle it, decide journal-derived vs live-only, bump `PARSER_VERSION` if past journals matter, add a
+summary in `outrider/log.py` if the Log should word it, and add the event to `tests/fixtures/journals` if the page
+should show it. Check `JOURNAL_REFERENCE.md` for the event's quirks.
+
+## Design principles
+
+- Everything comes from the player's own journals and public community data. Nothing is tuned to one ship,
+  one commander or one machine: the fuel model fits the player's own jumps, thresholds are settings.
+- Never present a guess as a fact. Predictions say "up to", "could be", "odds, not contents",
+  "probably full"; Outrider's own record (rig marks) is labelled as such, not as the game's.
+- Alerts are for the out of the ordinary. Routine systems stay quiet.
+- Nothing is uploaded. Outside calls are read-only lookups (Spansh, EDSM, GitHub for rules, Hugging Face
+  for voices).
+- The README stays tight: user-facing, short bullets. Implementation detail belongs in code comments.
+- Per-player defaults (names the voice uses, thresholds, voice) are only defaults; never hard-code a
+  player's preference.
+- Keep optional parts optional: the server must run without Piper, evdev, network or journals.

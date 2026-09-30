@@ -363,7 +363,8 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     w.speak = t => said.push(t); w.play = () => {};
     const got = JSON.parse(w.eval(`(() => {
       const saved = {systems: data.systems, sphere_cut: data.sphere_cut, status: data.status, radius: data.radius, position: data.position,
-                     arrival: data.arrival, streak: data.streak, backup: data.backup, last_session: data.last_session};
+                     arrival: data.arrival, streak: data.streak, backup: data.backup, last_session: data.last_session,
+                     this_session: data.this_session};
       const lib = speechLib, flags = [speechOn, isSpeaker, alertSpeak.arrival, lastArrival, lastPosId];
       speechLib = {styles: {}, lines: {}}; speechOn = true; isSpeaker = true; alertSpeak.arrival = true;
       data.position = Object.assign({}, data.position, {id64: 1}); data.status = "ok"; data.radius = 25;
@@ -421,6 +422,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       data.last_session = {start: "2026-01-01T01:00:00Z", end: "2026-01-01T03:00:00Z", jumps: 42, ly: 900.4, max_sol: 1200, firsts: 3, mapped: 2, samples: 1, codex_new: 0, footfalls: 0};
       renderLastSession();
       const card = document.getElementById("lastSession").textContent;
+      data.this_session = null;   // the game is not running: Now shows the last session (a live session hides it)
       renderNow();
       const now = document.getElementById("nowView").textContent;
       Object.assign(data, saved); [speechOn, isSpeaker, alertSpeak.arrival, lastArrival, lastPosId] = flags; speechLib = lib;
