@@ -45,6 +45,7 @@ around you, then layers your own scans on top — nothing is ever uploaded.
 | 🗣 **A voice with personality** | A natural neural voice, down to business, sarcastic or sweet, briefing you on arrival and warning before you leave something unfinished. |
 | 🎯 **Auto honk** | On Linux, Outrider can fire the Discovery Scanner for you on arrival. |
 | 🕹️ **Co-pilot button** | On Linux, one HOTAS button asks for a status report, the last line again, or quiet until the next jump. |
+| ⛏️ **Rhino mining** | A heading-up surface map on Now with your rigs, sample points and ship; the co-pilot button marks rigs, and every collection is kept per body. |
 
 ## 🚀 Getting started
 
@@ -126,8 +127,10 @@ search any text, click a row for the raw event.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<b>Materials</b> — materials against their caps, and how many FSD injections, limpets and SRV
-refuels and repairs you can make right now.
+<b>Materials</b> — materials against their caps, and how many FSD injections, limpets, SRV
+refuels and repairs, and Rhino mining rig restocks you can make right now. <b>Mining sites</b> lists each
+body your SRV mined: minerals and tons, rigs and unmarked sites, mining locations (L3), the last date and
+the distance. ⌖ opens it in Here; <b>forget</b> clears its saved spots (the tons stay: they come from the journals).
 <br><br><img src="docs/materials.png" alt="Materials">
 </td>
 <td width="50%" valign="top">
@@ -167,6 +170,7 @@ what to do next, the body you have targeted, and the nearest unvisited system.
 - **↗** beside the Now button opens Now in its own window, or open `http://127.0.0.1:8025/?mode=now`,
   which stays on Now even after a stray click or a reload.
 - It keeps the screen awake on localhost or HTTPS. On a tablet over plain http, set its screen timeout.
+- On a planet, the **surface map** appears under the lines (see below).
 
 The **header** shows the galactic region, ranks, fuel, hull damage, your carrier's jump countdown, the
 nearest places to sell, and when you were last backed up.
@@ -314,6 +318,42 @@ Play a random line from any alert and personality, or type your own; Save WAV ke
 bans it, like 👎. **▶ Audition** plays eight key alerts in a row. The lower half lists every Piper voice on
 Hugging Face: double-click one to download it for Outrider too.
 
+## 🗺️ The surface map
+
+On a planet, Now shows a map under its lines: on the ground, in the SRV, on foot, or flying below 1,000 m
+(it hides again 100 m higher). Hiding deletes nothing.
+
+- **Heading-up:** the way you face is the top, you are the arrow in the middle, N on the rim is north. It
+  zooms to fit everything within 3 km, never narrower than 500 m, with a scale bar.
+- **What is drawn:** your ship, the samples of unfinished bio runs with each species' colony ring (the
+  current run solid), your rigs 1–6 with a faint spacing ring, saved sites (U1… unmarked, S1… rigs picked
+  up) and mining locations (L3). Anything off the map is a chevron on the rim.
+- **The legend** names each tag, nearest first. Six rig slots mirror the game's HUD: mineral (or
+  "placed"), tons so far, distance and bearing. A solid rig is **probably full**: 8 minutes since it was
+  placed or last collected from.
+- **The leash:** the game destroys a rig 5 km from its Rhino. Past 3.5 km it turns red and the voice warns,
+  again at 4.5 km ("Rig 3 is 3.8 kilometres away; it is lost at 5."). It has its own alerts row.
+- **Strip copy:** a tick in the dialog adds a small copy to the on-body strip, with a one-line legend.
+
+**Marking rigs.** The game logs nothing when you deploy or pick up a rig, so you tell Outrider with the
+co-pilot button. In the Rhino on a planet:
+
+- **Tap away from your rigs:** the next rig (lowest free number, 1–6) is placed 7 m behind you, where the
+  game drops it. "Rig 3 placed."
+- **Tap within 5 m of a rig:** it is picked up and its number is free again.
+- The button does nothing else in the Rhino. Anywhere else it works as usual.
+
+**Automatic:** collections. Driving over a rig refines 1 t per journal line; the tons go to the rig under you
+(or an unmarked site if none is marked there) and are said once it stops ("Rig 3: 12 tons of Water.").
+Also automatic: your ship's landing spot, mining location markers (arriving at one you targeted from the
+ship) and rigs lost at 5 km or when you leave the body. **Not automatic:** placing and picking up rigs, and
+what a deposit holds. A rig that collected anything is kept as a saved site for your next visit and listed
+under Materials' **Mining sites**.
+
+**Settings** (🔔 alerts dialog, per browser; `[defaults]` for a new one): `surface_alt` (1,000 m),
+`surface_map_min` (500 m across), `rig_spacing` (78 m, an estimate; 0 = no ring), `rig_warn` (3,500 m; the
+spoken warning always uses the config file's) and `surface_map_strip`.
+
 ## 🎯 Auto honk
 
 On Linux, Outrider can fire the Discovery Scanner for you. On arriving by hyperspace it waits a moment,
@@ -345,6 +385,7 @@ On Linux, one button on your HOTAS (or a spare key) talks to the voice:
   nearest unvisited system. On a body mid-run it gives the sampling instead. A tap mid-line cuts it short.
 - **Double tap:** the last line again.
 - **Hold:** hush until the next jump; hold again to end it.
+- **In the Rhino** on a planet, any press marks rigs instead (see The surface map).
 
 Set it up under `[copilot]` in `ed_outrider.toml`: `enabled = true`, the `device` (part of its name, such
 as `"X-56 Rhino Throttle"`, or a `/dev/input/by-id/…` path) and the `button`. Run
@@ -391,7 +432,7 @@ effect. Switches take a bare `true` or `false`; a wrong value is reported at sta
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them |
 | `[server]` | `host`, `port`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
-| `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speech_speed`, `speech_names` |
+| `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC** |

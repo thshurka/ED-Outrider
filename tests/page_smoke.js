@@ -12,6 +12,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       w.fetch = (u, o) => fetch(new URL(u, base), o); w.addEventListener("error", e => errors.push(e.message));
       w.localStorage.clear();
       w.scrollBy = () => {};
+      w.HTMLCanvasElement.prototype.getContext = () => null;   // no canvas in jsdom: the page draws nothing and says nothing
     }});
   const d = dom.window.document;
   for (let i = 0; i < 60 && !d.querySelector("#sub") ; i++) await sleep(500);
@@ -1496,6 +1497,129 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const goodMB = want.every(Boolean) && errors.length === before;
     allOk = allOk && goodMB;
     console.log(goodMB ? "OK" : "FAIL", "| M4b mined previously |", goodMB ? "heading and tons under the odds, a body with no survey count too, pop-up and panel" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // M2 surface map: shows below the altitude and hides above it, heading-up, rings to scale, rig slots and states,
+  // an off-map chevron, the legend, the strip copy and the settings round trip (the canvas itself is not drawn here)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, v0 = view, s0 = data.surface, cfg0 = localStorage.getItem("surfaceCfg");
+      const R = 1500000, lat0 = -53.794, lon0 = -144.581, k = 180 / Math.PI / R;
+      const at = (n, e) => ({lat: lat0 + n * k, lon: lon0 + e * k / Math.cos(lat0 * Math.PI / 180)});
+      const surf = x => Object.assign({body: "ABC 3 d", system: "1", body_id: 19, ...at(0, 0), heading: 270, alt: 900, radius: R, show: true,
+        down: false, alt_avg: false, rhino: true, ship: {...at(-380, 150), dist: 409},
+        rigs: [{id: 1, n: 1, ...at(200, 0), minerals: {Water: 10}, tons: 10, full: false, dist: 200},
+               {id: 2, n: 2, ...at(-120, -30), minerals: {"Methanol Monohydrate Crystals": 14}, tons: 14, full: true, dist: 124},
+               {id: 3, n: 3, ...at(3700, 400), minerals: {}, tons: 0, full: false, dist: 3720}],
+        sites: [{id: 9, kind: "site", n: null, ...at(210, 260), minerals: {Gold: 11}, tons: 11, location: 3, dist: 334}],
+        locations: [{n: 3, ...at(150, 190), dist: 242}],
+        bio: [{species: "Stratum Tectonicas", genus: "Stratum", samples: 2, current: true, need: 500, clear: true,
+               points: [{n: 1, ...at(-600, 140), dist: 616}, {n: 2, ...at(590, -110), dist: 600}]},
+              {species: "Bacterium Aurasus", genus: "Bacterium", samples: 1, current: false, need: 500, clear: false,
+               points: [{n: 1, ...at(-300, -200), dist: 360}]}]}, x);
+      localStorage.removeItem("surfaceCfg");
+      view = "now";
+      const hidden = () => document.getElementById("nowMap").hidden;
+      data.surface = surf({alt: 900}); render(); o.below = !hidden();
+      data.surface = surf({alt: 1050}); render(); o.between = !hidden();          // unchanged between the two
+      data.surface = surf({alt: 1150}); render(); o.above = hidden();
+      data.surface = surf({alt: 30000, down: true}); render(); o.down = !hidden();   // on the ground: always
+      data.surface = surf({alt: 500, alt_avg: true}); render(); o.avg = hidden();
+      store.set("surfaceCfg", {alt: 2000}); data.surface = surf({alt: 1500}); render(); o.ownAlt = !hidden();   // this browser's altitude
+      localStorage.removeItem("surfaceCfg");
+      data.surface = surf({alt: 900}); render();
+      const L = surfaceLayout(data.surface, surfaceCfg(), 400), it = t => L.items.find(i => i.kind === "rig" && i.tag === t);
+      o.c = L.c; o.rig1 = {sx: it("1").sx, sy: it("1").sy, hollow: it("1").hollow};   // due north, heading 270: on the right
+      o.rig2 = {tag: it("2").tag, hollow: it("2").hollow};
+      o.rig3 = {off: it("3").off, r: Math.hypot(it("3").sx - L.c, it("3").sy - L.c), rimR: L.rimR, far: it("3").far};
+      const b = L.items.find(i => i.kind === "bio" && !i.faint), sp = L.items.find(i => i.kind === "rig" && i.ringPx);
+      o.ring = {px: b.ringPx, want: 500 * L.scale, bar: L.bar.px / L.bar.m, scale: L.scale, spacing: sp.ringPx / 78};
+      const lg = document.getElementById("nowMapLegend");
+      o.species = [...lg.querySelectorAll(".lg-bio")].map(e => e.textContent);
+      o.slot2 = lg.querySelector('[data-rig="2"]').textContent; o.slot3 = lg.querySelector('[data-rig="3"]').className;
+      o.slot5 = lg.querySelector('[data-rig="5"]').className;
+      o.ship = lg.querySelector(".lg-ship").textContent; o.site = (lg.querySelector('[data-tag="U1"]') || {}).textContent;
+      o.loc = (lg.querySelector('[data-tag="L3"]') || {}).textContent;
+      // the strip's copy: off Now, with the setting ticked
+      store.set("surfaceCfg", {strip: true}); view = "overview"; render();
+      o.strip = !document.getElementById("obMap").hidden && document.getElementById("obMapLine").textContent;
+      o.nowMapOffNow = document.getElementById("nowMap").hidden;
+      // settings: the dialog's inputs, export, import and reset
+      localStorage.removeItem("surfaceCfg"); showSurfCfg();
+      o.placeholder = document.getElementById("surfSpacing").placeholder;
+      const el = document.getElementById("surfAlt"); el.value = "1500"; el.dispatchEvent(new Event("change"));
+      document.getElementById("surfStrip").checked = true; document.getElementById("surfStrip").dispatchEvent(new Event("change"));
+      o.stored = store.get("surfaceCfg", null); o.exported = settingsDoc().settings.surfaceCfg;
+      o.shared = SETTINGS_KEYS.includes("surfaceCfg");
+      applySettings({version: 1, settings: {surfaceCfg: {alt: 800, warn: 2000}}}); showSurfCfg();
+      o.imported = {cfg: surfaceCfg(), input: document.getElementById("surfAlt").value, strip: document.getElementById("surfStrip").checked};
+      document.querySelector('[data-reset="surfaceCfg"]').click();
+      o.reset = store.get("surfaceCfg", null);
+      if (cfg0 === null) localStorage.removeItem("surfaceCfg"); else localStorage.setItem("surfaceCfg", cfg0);
+      showSurfCfg(); view = v0; data.surface = s0; render();
+      return JSON.stringify(o);
+    })()`));
+    const want = {show: got.below && got.between && got.above && got.down && got.avg && got.ownAlt,
+      rotation: got.rig1.sx > got.c + 20 && Math.abs(got.rig1.sy - got.c) < 1,
+      ring: Math.abs(got.ring.px - got.ring.want) < 1e-6 && Math.abs(got.ring.bar - got.ring.scale) < 1e-9 && Math.abs(got.ring.spacing - got.ring.scale) < 1e-9,
+      rigState: got.rig1.hollow === true && got.rig2.tag === "2" && got.rig2.hollow === false,
+      chevron: got.rig3.off && Math.abs(got.rig3.r - (got.rig3.rimR - 3)) < 0.5 && got.rig3.far === true,
+      species: got.species.length === 2 && /^Bacterium Aurasus 1\/3 · 500 m · 36\d of 500 m$/.test(got.species[0]) &&   // nearest first
+        /^Stratum Tectonicas 2\/3 · 500 m · ✓ clear$/.test(got.species[1]),
+      slots: /Methanol Monohydrate Crystals 14 t/.test(got.slot2) && /probably full/.test(got.slot2) && /far/.test(got.slot3) && /empty/.test(got.slot5),
+      ship: /Ship 409 m · 158°/.test(got.ship), site: /U1 Gold 11 t unmarked · L3/.test(got.site || ""), loc: /L3 242 m/.test(got.loc || ""),
+      strip: /1 Water 10 t/.test(got.strip || "") && /ship 409 m 158°/.test(got.strip || "") && got.nowMapOffNow,
+      settings: got.placeholder === "78" && got.stored && got.stored.alt === 1500 && got.stored.strip === true && got.exported && got.exported.alt === 1500 &&
+        got.shared && got.imported.cfg.alt === 800 && got.imported.cfg.warn === 2000 && got.imported.input === "800" && got.imported.strip === false &&
+        got.reset && Object.keys(got.reset).length === 0};
+    const goodM2 = Object.values(want).every(Boolean) && errors.length === before;
+    allOk = allOk && goodM2;
+    console.log(goodM2 ? "OK" : "FAIL", "| M2 surface map |", goodM2 ? "show/hide, heading-up, rings to scale, rig slots, chevron, legend, strip, settings" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // M3: Materials' Mining sites (one row per body, open in Here, forget after a confirm) and the rig restock recipe
+  {
+    const w = dom.window, before = errors.length;
+    const served = await fetch(base + "api/materials").then(r => r.json());
+    const realFetch = w.fetch, posted = [];   // forget is caught here; the refetch of the list goes to the server
+    w.fetch = (u, o) => String(u).startsWith("api/sites/forget") ? (posted.push([u, o && o.body]),
+      Promise.resolve(new Response('{"ok": true, "forgot": 3}', {headers: {"Content-Type": "application/json"}}))) : realFetch(u, o);
+    w.posted = posted;
+    const got = JSON.parse(await w.eval(`(async () => {
+      const o = {}, md = matData, cf = window.confirm, v0 = view;
+      matData = {rows: [], snapshot_ts: "2026-01-01T00:00:00Z", ts: "2026-01-01T00:00:00Z", sources: {},
+        synthesis: [{name: "Mining rig restock", craftable: 2, verified: false, materials: [{name: "Iron", have: 10, need: 3},
+          {name: "Nickel", have: 5, need: 2}, {name: "Mechanical Equipment", have: 4, need: 1}]}],
+        mining_sites: [{system: "Smojooe AR-E b25-8", id: "18207037532889", body_id: 19, body: "ABC 3 d", body_name: "Smojooe AR-E b25-8 ABC 3 d",
+          minerals: [{name: "Water", tons: 10}, {name: "Methanol Monohydrate Crystals", tons: 20}], tons: 30, rigs: 2, unmarked: 1,
+          locations: [3], last: "2026-09-30T12:00:00Z", saved: true, distance: 0},
+          {system: "LTT 4961", id: "5", body_id: 4, body: "4 d", body_name: "LTT 4961 4 d", minerals: [{name: "Gold", tons: 22}], tons: 22,
+          rigs: 0, unmarked: 0, locations: [], last: "2026-09-26T12:00:00Z", saved: false, distance: 41.2}]};
+      renderMat();
+      const el = document.getElementById("matSites"), rows = [...el.querySelectorAll("tr")];
+      o.head = /Mining sites/.test(el.textContent);
+      o.row1 = [...rows[0].cells].map(td => td.textContent.trim()).join(" | ");
+      o.row2 = [...rows[1].cells].map(td => td.textContent.trim()).join(" | ");
+      o.forgets = el.querySelectorAll("[data-forget]").length;
+      o.restock = document.getElementById("matSynth").textContent.replace(/\\s+/g, " ").trim();
+      window.confirm = () => false; el.querySelector("[data-forget]").click(); await new Promise(r => setTimeout(r, 50));
+      o.declined = posted.length;
+      window.confirm = () => true; el.querySelector("[data-forget]").click(); await new Promise(r => setTimeout(r, 400));
+      o.posted = posted[0] || null;
+      window.confirm = cf;
+      o.reloaded = !!matData && Array.isArray(matData.mining_sites) && (matData.rows || []).length > 0;   // forget refetched the list
+      matData = md; matKey = null; view = v0; if (md) renderMat();
+      return JSON.stringify(o);
+    })()`));
+    w.fetch = realFetch; delete w.posted;
+    const want = {served: Array.isArray(served.mining_sites) && served.synthesis.some(r => r.name === "Mining rig restock"),
+      head: got.head, row1: /^ABC 3 d 🔍Smojooe AR-E b25-8⌖ \| Water 10 t · Methanol Monohydrate Crystals 20 t2 rigs · 1 unmarked · L3 · (30 Sep|Sep 30) \| 0 ly \| forget$/.test(got.row1),
+      row2: /^4 d 🔍LTT 4961⌖ \| Gold 22 t(26 Sep|Sep 26) \| 41.2 ly \| $/.test(got.row2), forgets: got.forgets === 1,
+      restock: /×2 ?Mining rig restock Iron 10\/3 · Nickel 5\/2 · Mechanical Equipment 4\/1/.test(got.restock),
+      forget: got.declined === 0 && got.posted && got.posted[0] === "api/sites/forget" &&
+        got.posted[1] === JSON.stringify({system: "18207037532889", body: 19}) && got.reloaded};
+    const goodM3 = Object.values(want).every(Boolean) && errors.length === before;
+    allOk = allOk && goodM3;
+    console.log(goodM3 ? "OK" : "FAIL", "| M3 mining sites |", goodM3 ? "a row per body, forget after a confirm, rig restock row, served by /api/materials" : JSON.stringify({want, got}), errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

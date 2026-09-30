@@ -5,6 +5,9 @@
     double tap   say the last line again
     hold         hush the voice until the next jump (danger lines still speak); another hold ends it early
 
+In the Rhino on a body every gesture marks a mining rig instead and does nothing else: a press places the next
+rig (1-6) behind you, a press by a rig that is out picks it up (the game tells Outrider neither).
+
 Read-only: Outrider reads the device's events the way any program reads a joystick. It never grabs the device
 (the game still sees every press) and never creates a virtual one. So unbind the button in Elite's controls, or
 it does its game action as well. On the X-56, keep off the latching toggles and the mode wheel: they report as

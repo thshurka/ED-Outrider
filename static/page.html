@@ -31,12 +31,14 @@
   <div id="routeStrip"></div>
   <div id="leaving"></div>
   <div id="onbody"></div>
+  <div id="obMap" hidden><canvas id="obMapCanvas" aria-label="surface map"></canvas><div id="obMapLine" class="smap-line"></div></div>
   <div id="arrival"></div>
   <div id="sell"></div>
 </header>
 <section id="nowView" hidden>
   <div id="nowBar"><button type="button" id="nowSpeech" title="spoken alerts on or off (this browser, as 🗣 in the header)">🗣</button><button type="button" id="nowHush" title="hush the voice for 30 minutes (danger lines still speak), wherever it is speaking">hush 30 min</button><button type="button" id="nowStatus" title="the co-pilot's status report, said by the window that is speaking">status report</button><button type="button" id="nowBack" title="back to the page (or double-tap)">✕ back</button></div>
   <div id="nowBody"></div>
+  <div id="nowMap" hidden><div class="smap"><canvas id="nowMapCanvas" aria-label="surface map: heading up, you at the centre"></canvas></div><div id="nowMapLegend" class="smap-legend"></div></div>
 </section>
 <main>
 <section id="overView" hidden>
@@ -175,6 +177,7 @@
   </div>
   <div id="matSynth"></div>
   <div id="matSources"></div>
+  <div id="matSites"></div>
   <div id="matGrid"></div>
   <div class="hint">Counts come from the snapshot the game writes at every login, updated by what you collect, trade, discard,
     synthesise and spend at engineers since. The next login corrects any drift. Bars show how full each material's storage is.</div>
@@ -375,6 +378,15 @@
     <label class="mod">Fuel alerts: also warn under
       <input type="number" id="fuelJumps" min="0" max="99" step="1" style="width:4.5em"> jumps of fuel left<span class="reset" data-reset="fuelJumps">reset</span>
       <span class="hint">blank = off (the default). Once when the jumps left at your pace fall under it (said like the game's low fuel warning), and the low-fuel warnings for an unscoopable arrival star or target then count it as well as under 30%; it also becomes the level for the "top up here" warning, which otherwise asks for two of your usual gaps between scoopable stars (at least 4 jumps)</span></label>
+    <label class="mod">Surface map (Now): show it below
+      <input type="number" id="surfAlt" min="10" step="100" style="width:6em"> m, never narrower than
+      <input type="number" id="surfMin" min="50" step="100" style="width:6em"> m across, rig spacing ring
+      <input type="number" id="surfSpacing" min="0" step="1" style="width:5em"> m, a rig far away at
+      <input type="number" id="surfWarn" min="100" max="4900" step="100" style="width:6em"> m<span class="reset" data-reset="surfaceCfg">reset</span>
+      <span class="hint">the map shows while you are on the ground, or flying below the altitude (it hides again 100 m higher). The rig ring is an estimate
+        (rigs closer than about 78 m may not deploy; 0 = no ring). A rig past the far distance turns red on the map and in the legend; the spoken
+        warning for it uses the config file's <code>rig_warn</code>, since the server says it for every window. Blank = the config file's value.</span></label>
+    <label class="mod"><input type="checkbox" id="surfStrip"> Also a small copy of the surface map in the on-body strip (under the header), with a one-line legend</label>
     <label class="mod">Unsold data on board: amber "worth selling soon" at
       <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
       <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>

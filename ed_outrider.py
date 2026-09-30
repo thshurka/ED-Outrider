@@ -31,13 +31,16 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
   Log        every journal event with a one-line summary (ed_log.py), filtered by category, time and
              text, read straight from the journal files and updated live
   Materials  engineering materials against their caps, and how many FSD injections and other
-             syntheses you can make (ed_materials.py)
+             syntheses (limpets, SRV refuel and repair, Rhino rig restocks) you can make (ed_materials.py);
+             Mining sites: each body your SRV mined, with minerals and tons, saved rig spots, mining locations
   My firsts  unsold first discoveries, and visited systems nearby with work worth going back for
              (Left behind, including bio signals never probed); a daily Spansh check flags unsold
              firsts someone else has scanned since ([spansh] watch_firsts)
   Now        big text for a second monitor (also ?mode=now): the system, the target, fuel, what to do
              next here, the discovery count, the unreported horizon, the data at risk, the last lines
-             spoken and a button bar; ↗ opens it in its own window, which stays on Now
+             spoken and a button bar; ↗ opens it in its own window, which stays on Now. On a planet (below
+             surface_alt, or down) a heading-up surface map: you, the ship, bio sample rings, Rhino rigs (marked
+             by the co-pilot button; collections placed from Status.json), saved sites and mining locations
 
 The header shows the current system (coordinates, visit count), the commander (credits at login plus
 sales since, ship), fuel (jumps left simulated from your ship's mass and your own jumps, the laden range, how
@@ -239,7 +242,8 @@ BROWSER_SETTINGS = ("alerts", "alertSound", "alertSpeak", "speech", "speechStyle
                     "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
                     "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
                     "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-                    "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps")
+                    "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
+                    "surfaceCfg")
 BROWSER_DEFAULTS_MAX = 64 * 1024   # bytes
 BROWSER_DEFAULTS_FILE = "browser_defaults.json"   # next to the database
 # Spoken alerts' wording: the lines file, and the personalities a browser starts with (see ed_speech.py).
@@ -378,6 +382,32 @@ SERVER_PLAYER = "auto"
 COPILOT = {"enabled": False, "device": "", "button": "", "hold_ms": ed_button.HOLD_MS, "double_ms": ed_button.DOUBLE_MS}
 COPILOT_ACTIONS = ("status", "again", "hush", "replay")
 HUSH_MODES = {"10m": 600, "30m": 1800, "jump": None}   # s a timed hush lasts; "jump" lasts until you leave the system
+
+# The surface map and Rhino mining rigs (Batch M1). The game writes nothing when a rig is placed or picked up, so the
+# co-pilot button marks them (in the Rhino on a body every gesture does); collections are the journal's MiningRefined.
+SURFACE_ALT = 1000        # m: the surface map shows below this altitude...
+SURFACE_HIDE_PAD = 100    # ...and hides above SURFACE_ALT + this (nothing flickers in between)
+RIG_SPACING = 78          # m: the ring drawn round a rig (SrvSurvey's "too close to deploy"; an estimate)
+SURFACE_MAP_MIN = 500     # m across: the map never zooms in tighter than this
+SURFACE_MAP_STRIP = False  # a small copy of the map in the on-body strip too
+RIG_WARN = 3500           # m from the Rhino: the leash warning (a rig is lost at RIG_LOST_M)
+RIG_WARN_AGAIN = 4500     # m: said once more here
+RIG_LOST_M = 5000         # m: the game destroys a rig this far from its Rhino (the community guide, tested twice)
+RIG_BEHIND_M = 7          # m: a rig lands this far behind the cockpit, along the heading (SrvSurvey)
+RIG_TAP_M = 5             # m: a tap this close to a rig that is out picks it up (the game's pickup range is under 5 m)
+RIG_MATCH_M = 10          # m: a collection this close to a rig is that rig's (5 m pickup range plus GPS slack)
+RIG_SLOTS = 6             # rigs out at once, numbered 1-6 like the game's HUD
+RIG_FULL_S = 480          # s after placing or the last collection: "probably full" (a rig refills in 5.5-8 min)
+BURST_START_GAP = 60      # s with no MiningRefined before one starts a new collection...
+BURST_END_GAP = 30        # s: ...and a collection is over after this quiet (a later ton inside BURST_START_GAP joins it)
+LOCATION_NEAR_M = 2000    # m: a saved site this close to a mining location's marker belongs to that location
+SURFACE_BUMP_M, SURFACE_BUMP_DEG, SURFACE_BUMP_S = 5, 10, 0.5   # the map's position updates: a move, a turn, at most 2/s
+FLAG_LANDED = 1 << 1      # Status.json Flags: landed (the ship on the ground)
+FLAG_IN_SRV = 1 << 26
+FLAG_ALT_AVG = 1 << 29    # Altitude is from the average radius (high up: a rough reading)
+RHINO = "mev_rhino"
+# Status.json Destination.Name of a targeted planetary mining location: "...#type=$PlanetaryMiningLocation_Name;:#index=3;"
+MINING_LOCATION_RE = re.compile(r"#type=\$PlanetaryMiningLocation_Name;:#index=(\d+);")
 
 
 # --------------------------------------------------------------------------
@@ -545,6 +575,12 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "max_include_bonus": flag("defaults", df, "body_max_value_include_bonus", MAX_INCLUDE_BONUS),
         # at least 0.1 g: the page reads 0 (or less) as "not set" and uses 2 g, so 0 could not mean "every body"
         "high_gravity": max(0.1, num("defaults", df, "high_gravity", float, HIGH_GRAVITY)),
+        "surface_alt": max(10.0, num("defaults", df, "surface_alt", float, SURFACE_ALT)),
+        "rig_spacing": max(0.0, num("defaults", df, "rig_spacing", float, RIG_SPACING)),
+        "surface_map_min": max(50.0, num("defaults", df, "surface_map_min", float, SURFACE_MAP_MIN)),
+        "surface_map_strip": flag("defaults", df, "surface_map_strip", SURFACE_MAP_STRIP),
+        # under the 5 km at which the game destroys a rig, or the warning would come too late
+        "rig_warn": min(RIG_LOST_M - 100.0, max(100.0, num("defaults", df, "rig_warn", float, RIG_WARN))),
         "voice": str(df.get("voice") or VOICE), "voice_fallback": str(df.get("voice_fallback") or VOICE_FALLBACK),
         "speech_styles": [str(x) for x in (styles if styles is not None else SPEECH_STYLES)],
         "speech_profanity": flag("defaults", df, "speech_profanity", SPEECH_PROFANITY),
@@ -613,6 +649,11 @@ body_highlight_level = {st["body_highlight"]}     # Here: a body's row turns gre
 biology_highlight_value = {st["bio_highlight"]}  # Here: a body's bio turns violet if it could pay this, no x5 bonus
 body_max_value_include_bonus = {"true" if st["max_include_bonus"] else "false"}  # Here: Max counts first-discovery/mapped/footfall bonuses
 high_gravity = {st["high_gravity"]:g}   # g: the approach briefing warns about landing here or higher with a lot of data aboard
+surface_alt = {st["surface_alt"]:g}   # m: the surface map on Now shows below this altitude (hides 100 m higher)
+rig_spacing = {st["rig_spacing"]:g}   # m: the ring round a Rhino mining rig (an estimate: rigs closer than this may not deploy; 0 = no ring)
+surface_map_min = {st["surface_map_min"]:g}   # m: the surface map never shows less than this across
+surface_map_strip = {"true" if st["surface_map_strip"] else "false"}   # also a small copy of the map in the on-body strip
+rig_warn = {st["rig_warn"]:g}   # m: say so when a mining rig is this far from the Rhino (again at 4,500; the game destroys it at 5,000)
 voice = {q(st["voice"])}          # spoken alerts: Piper voice (downloaded into piper-voices/ on first use; one picked on the page wins)
 voice_fallback = {q(st["voice_fallback"])}  # used while the voice above is missing
 speech_styles = [{", ".join(q(x) for x in st["speech_styles"])}]   # spoken alerts' personalities: any of the styles in the speech file
@@ -683,7 +724,8 @@ RANK_NAMES = {   # the two ranks an explorer cares about
 BODY_EVENTS = ("ApproachBody", "LeaveBody", "Touchdown")
 # The SRV on a body, and what its refinery collects (1 t per MiningRefined): "Mined previously" per body (own_mined).
 # These are read for that alone; the body comes from SRV_TRACKED (see Journals.track_srv).
-SRV_EVENTS = ("LaunchSRV", "DockSRV", "SRVDestroyed", "MiningRefined", "SupercruiseExit", "SupercruiseEntry")
+# Liftoff: only for the surface map's ship marker (a Liftoff while aboard takes it away).
+SRV_EVENTS = ("LaunchSRV", "DockSRV", "SRVDestroyed", "MiningRefined", "SupercruiseExit", "SupercruiseEntry", "Liftoff")
 SRV_TRACKED = frozenset(SRV_EVENTS) | {"ApproachBody", "LeaveBody", "Touchdown", "Location", "LoadGame",
                                        "FSDJump", "CarrierJump", "Died"}
 MATERIAL_EVENTS = ("Materials", "MaterialCollected", "MaterialDiscarded", "Synthesis", "EngineerCraft",
@@ -861,6 +903,26 @@ CREATE TABLE IF NOT EXISTS own_ring_signals (
 CREATE TABLE IF NOT EXISTS sample_points (
     system INTEGER, body_id INTEGER, species TEXT, genus TEXT, n INTEGER, lat REAL, lon REAL, ts TEXT,
     PRIMARY KEY (system, body_id, species, n));
+-- The surface map's mining records (Batch M1). Live only, like sample_points: the positions come from Status.json
+-- and a rig from a co-pilot press, none of which a journal holds, so a journal re-read keeps them (not in
+-- RESET_JOURNAL_DATA) and the backup zip carries them with the rest of the database.
+-- surface_rigs: Rhino mining rigs. n = its slot (1-6) while out; lat/lon = RIG_BEHIND_M behind the cockpit at the
+-- press; site_lat/site_lon = where its first collection was refined (you drive over the rig for it). minerals =
+-- JSON {name: tons} over every collection, tons their sum, last_ts the latest collection. picked_ts = picked up (a
+-- tap by it) or lost (lost = 1: the 5 km leash, leaving the body); a rig that ends with tons is a saved site.
+CREATE TABLE IF NOT EXISTS surface_rigs (
+    id INTEGER PRIMARY KEY, system INTEGER, body_id INTEGER, body TEXT, n INTEGER, lat REAL, lon REAL,
+    placed_ts TEXT, picked_ts TEXT, lost INTEGER, site_lat REAL, site_lon REAL, minerals TEXT,
+    tons INTEGER NOT NULL DEFAULT 0, last_ts TEXT);
+-- surface_sites: a collection with no rig marked near it (an unmarked site), kept so a good spot is not lost.
+CREATE TABLE IF NOT EXISTS surface_sites (
+    id INTEGER PRIMARY KEY, system INTEGER, body_id INTEGER, body TEXT, lat REAL, lon REAL, minerals TEXT,
+    tons INTEGER NOT NULL DEFAULT 0, first_ts TEXT, last_ts TEXT);
+-- mining_locations: where you arrived at a targeted Planetary Mining Location (Status.json Destination #index=N),
+-- the map's marker LN; saved sites are grouped by the nearest within LOCATION_NEAR_M.
+CREATE TABLE IF NOT EXISTS mining_locations (
+    system INTEGER, body_id INTEGER, idx INTEGER, body TEXT, lat REAL, lon REAL, ts TEXT,
+    PRIMARY KEY (system, body_id, idx));
 -- Every sale, with what it actually paid (the trip ledger). One row per sale event: 'Sell all' writes one
 -- MultiSellExplorationData per page, often in the same second, so source (journal file name:byte offset of
 -- the line) tells the pages apart while a line handled twice still hits the same key. x5_check (bio sales): JSON
@@ -897,7 +959,7 @@ DELETE FROM own_systems; DELETE FROM own_bodies; DELETE FROM own_signals; DELETE
 DELETE FROM own_firsts; DELETE FROM own_mapped; DELETE FROM own_footfall; DELETE FROM sales; DELETE FROM deaths;
 DELETE FROM own_genera; DELETE FROM own_organic; DELETE FROM codex; DELETE FROM bio_sales;
 DELETE FROM own_barycentres; DELETE FROM phenomena; DELETE FROM sale_events; DELETE FROM logins;
-DELETE FROM own_mined; DELETE FROM meta WHERE key = 'srv_state';
+DELETE FROM own_mined; DELETE FROM meta WHERE key IN ('srv_state', 'vehicle', 'ship_marker', 'body_here');
 DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials', 'last_session', 'cargo');
 DELETE FROM meta WHERE key LIKE 'legacy:%' OR key IN ('pos', 'prev', 'jump_range', 'state_ts');
 """
@@ -1476,6 +1538,31 @@ def carrier_seen(c, system, id64, ts, jumped=False):
     c.update(ts=ts, assumed=False)
 
 
+def surface_m(lat1, lon1, lat2, lon2, radius):
+    """Great-circle metres between two latitude/longitude points on a body of `radius` m."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+def surface_offset(lat, lon, bearing, dist, radius):
+    """The point `dist` m from lat/lon along `bearing` (degrees from north) on a body of `radius` m."""
+    p1, l1, b, d = math.radians(lat), math.radians(lon), math.radians(bearing), dist / radius
+    p2 = math.asin(math.sin(p1) * math.cos(d) + math.cos(p1) * math.sin(d) * math.cos(b))
+    l2 = l1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(p1), math.cos(d) - math.sin(p1) * math.sin(p2))
+    return math.degrees(p2), (math.degrees(l2) + 540) % 360 - 180
+
+
+def lose_rigs(db, ts, where, args=()):
+    """Rigs out that the game has taken away (left behind on a body, or past the 5 km leash): picked up as lost.
+    One that collected nothing is forgotten; one with tons stays as a saved site. The ids lost."""
+    ids = [r[0] for r in db.execute(f"SELECT id FROM surface_rigs WHERE picked_ts IS NULL AND {where}", args)]
+    for i in ids:
+        db.execute("UPDATE surface_rigs SET picked_ts=?, lost=1 WHERE id=?", (ts, i))
+    db.execute("DELETE FROM surface_rigs WHERE picked_ts IS NOT NULL AND tons = 0")
+    return ids
+
+
 class Journals:
     """Incremental reader: each file is read from where the last pass stopped."""
 
@@ -1513,6 +1600,9 @@ class Journals:
         # a live sale still coming in (a 'Sell all' writes a page every few seconds): State.maybe_sale_left says
         # what it left aboard once the pages stop. {carto, systems, bio, species, read_at (wall clock)}
         self.sale_run = None
+        # the Rhino collection under way (live lines only, see note_burst): {system, body_id, body, start, last,
+        # lat, lon, target: ("rig" | "site", id), n, minerals {name: tons}, tons, said}
+        self.burst = None
         self.reload()
 
     def moment(self, kind, ts, **kw):
@@ -1570,11 +1660,12 @@ class Journals:
         rollback and reload(), or the retry would announce its moments twice."""
         return (self.moment_seq, list(self.moments), self.last_heat,
                 set(self.body_touched), set(self.approached), self.brief_key,
-                set(self.regions_said), self.region_entered, self.jumponium, dict(self.sale_run or {}) or None)
+                set(self.regions_said), self.region_entered, self.jumponium, dict(self.sale_run or {}) or None,
+                json.loads(json.dumps(self.burst)))
 
     def restore(self, cp):
         (self.moment_seq, moments, self.last_heat, touched, approached, self.brief_key,
-         regions, self.region_entered, self.jumponium, self.sale_run) = cp
+         regions, self.region_entered, self.jumponium, self.sale_run, self.burst) = cp
         self.body_touched, self.approached, self.regions_said = set(touched), set(approached), set(regions)
         self.moments = collections.deque(moments, maxlen=self.moments.maxlen)
 
@@ -1618,6 +1709,12 @@ class Journals:
         self.last_sale = meta_get(db, "last_sale")  # {ts, carto, bio, systems, species} of the latest sale
         # per game session (see session_key): {"at": the body you are at, "srv": the body your SRV is out on}
         self.srv_state = meta_get(db, "srv_state", {})
+        # the SRV you are in ({srv_type, ts}: mev_rhino is the Rhino; srv_type None after a login in an SRV whose
+        # launch the journals never showed), the body you are at ({system, body_id, name, ts}), and your ship's
+        # landing spot ({system, body_id, lat, lon, ts}): the surface map and the co-pilot's rig marking
+        self.vehicle = meta_get(db, "vehicle")
+        self.body_here = meta_get(db, "body_here")
+        self.ship_marker = meta_get(db, "ship_marker")
 
     def import_legacy(self):
         for d in LEGACY_DIRS:
@@ -1999,6 +2096,8 @@ class Journals:
                 self.approached.add(key)
                 self.moment("approach", ts, system=system, body_id=body, body_name=ev.get("Body") or "")
         else:   # LeaveBody: untouched genera only nag when you were down on this body this visit
+            # the Rhino's rigs stay behind and are gone (not rigs placed after this line: a journal re-read)
+            lose_rigs(self.db, ts, "system=? AND body_id=? AND placed_ts <= ?", (system, body, ts))
             self.moment("left_body", ts, system=system, body_id=body, body_name=ev.get("Body") or "",
                         touched=key in self.body_touched)
             self.body_touched.discard(key)
@@ -2022,6 +2121,9 @@ class Journals:
         if name == "MiningRefined":
             self.mining_refined(srv, ev, ts)
             return
+        self.track_vehicle(name, ev, ts)
+        if name == "Liftoff":
+            return
         if name in ("ApproachBody", "Touchdown"):
             at = here or at
         elif name in ("SupercruiseExit", "Location"):
@@ -2034,12 +2136,56 @@ class Journals:
             srv = None
         else:   # LeaveBody, FSDJump, CarrierJump, LoadGame, Died
             at = srv = None
+        if ts >= (self.body_here or {}).get("ts", "") and name != "SupercruiseEntry" and \
+                (at or {}) != {k: v for k, v in (self.body_here or {}).items() if k in ("system", "body_id")}:
+            self.body_here = dict(at, name=ev.get("Body") or ev.get("BodyName") or "", ts=ts) if at else None
+            meta_set(self.db, "body_here", self.body_here)
         if st != {"at": at, "srv": srv}:
             self.srv_state[key] = {"at": at, "srv": srv}
             # this session and the latest few others only (journals read out of order)
             for old in [k for k in sorted(self.srv_state) if k != key][:-3]:
                 del self.srv_state[old]
             meta_set(self.db, "srv_state", self.srv_state)
+
+    def track_vehicle(self, name, ev, ts):
+        """The SRV you are in and your ship's landing spot, for the surface map and the co-pilot's rig marking.
+        LaunchSRV names the SRV (mev_rhino is the Rhino); DockSRV, SRVDestroyed, a death or a Location outside an
+        SRV end it. A login in an SRV (Location InSRV; LoadGame names the ship, not the SRV) keeps the type of the
+        last SRV launched and never docked, else the type is unknown and the button keeps its usual gestures.
+        The ship marker is your own ship's last Touchdown (not an Apex shuttle's, nor multicrew); a Liftoff clears it
+        only when you are aboard (PlayerControlled): a ship dismissed from the ground is still recalled to you."""
+        own = not (ev.get("Taxi") or ev.get("Multicrew"))
+        if ts >= (self.vehicle or {}).get("ts", ""):
+            v = self.vehicle
+            if name == "LaunchSRV" and ev.get("PlayerControlled", True):
+                v = {"srv_type": (ev.get("SRVType") or "").lower() or None, "ts": ts}
+            elif name in ("DockSRV", "SRVDestroyed", "Died"):
+                v = None
+            elif name == "Location":
+                v = {"srv_type": (self.vehicle or {}).get("srv_type"), "ts": ts} if ev.get("InSRV") else None
+            if v != self.vehicle:
+                self.vehicle = v
+                meta_set(self.db, "vehicle", v)
+        m = self.ship_marker
+        if ts < (m or {}).get("ts", ""):
+            return
+        if name == "Touchdown" and own and ev.get("Latitude") is not None and ev.get("SystemAddress") is not None:
+            m = {"system": ev["SystemAddress"], "body_id": ev.get("BodyID"), "lat": ev["Latitude"],
+                 "lon": ev["Longitude"], "ts": ts}
+        elif name == "Liftoff" and own and ev.get("PlayerControlled", True):
+            m = None
+        elif name == "LaunchSRV" and live_event(ts):
+            # an SRV leaves from the ship on the ground: its spot when no Touchdown on this body was seen (the
+            # journals began after it, or the game wrote none)
+            st, here = self.status_json or {}, self.body_here
+            if here and st.get("live") and st.get("lat") is not None and st.get("body") == here.get("name") and \
+                    not (m and (m["system"], m["body_id"]) == (here["system"], here["body_id"])):
+                m = {"system": here["system"], "body_id": here["body_id"], "lat": st["lat"], "lon": st["lon"], "ts": ts}
+        elif name in ("LeaveBody", "FSDJump", "CarrierJump", "Died"):
+            m = None
+        if m != self.ship_marker:
+            self.ship_marker = m
+            meta_set(self.db, "ship_marker", m)
 
     def mining_refined(self, srv, ev, ts):
         """1 t of a commodity refined by the SRV on the body it is out on; nothing when that body is unknown
@@ -2048,7 +2194,7 @@ class Journals:
         if not srv or not commodity or ts < srv.get("ts", ""):
             return
         src = self.line_source
-        self.db.execute(
+        cur = self.db.execute(
             """INSERT INTO own_mined VALUES (?, ?, ?, ?, 1, ?, ?, ?)
                ON CONFLICT (system, body_id, commodity) DO UPDATE SET tons = tons + 1, name = excluded.name,
                    first_ts = min(first_ts, excluded.first_ts), last_ts = max(last_ts, excluded.last_ts),
@@ -2056,6 +2202,104 @@ class Journals:
                WHERE excluded.source = '' OR own_mined.source IS NOT excluded.source""",
             (srv["system"], srv["body_id"], commodity, ev.get("Type_Localised") or commodity.title(), ts, ts, src))
         self.dirty.add(srv["system"])
+        if cur.rowcount and live_event(ts):   # the same ton, placed on the surface map (live play only)
+            self.note_burst(srv, ev.get("Type_Localised") or commodity.title(), ts)
+
+    def note_burst(self, srv, mineral, ts):
+        """One refined ton of a Rhino collection, counted where it was collected (the tons themselves are own_mined's,
+        this only says where they came from). A ton after BURST_START_GAP s of quiet, or away from the collection
+        under way (another rig), starts a collection, placed at the Status.json position of that moment and kept
+        up to date while it runs (the Rhino settles over the rig as its refinery works): the nearest rig out on this
+        body within RIG_MATCH_M is its rig, else it is an unmarked site (one within RIG_MATCH_M is reused), so good
+        spots are kept without a press. Its tons add to that rig or site; State.watch_surface says them once
+        BURST_END_GAP s pass with no more."""
+        t = ts_seconds(ts)
+        here, st = self.body_here or {}, self.status_json or {}
+        name = here.get("name") if (here.get("system"), here.get("body_id")) == (srv["system"], srv["body_id"]) else None
+        fix = None
+        try:
+            if st.get("live") and st.get("lat") is not None and st.get("planet_radius") and \
+                    (not name or st.get("body") == name) and abs(t - ts_seconds(st["ts"])) <= 90:
+                fix = (st["lat"], st["lon"], st["planet_radius"])
+        except (TypeError, ValueError):
+            fix = None
+        b = self.burst
+        same = b and (b["system"], b["body_id"]) == (srv["system"], srv["body_id"]) and 0 <= t - b["last"] <= BURST_START_GAP
+        if same and fix and b["lat"] is not None and surface_m(fix[0], fix[1], b["lat"], b["lon"], fix[2]) > RIG_MATCH_M:
+            same = False   # moved on to another rig within the minute
+        if not same:
+            if b and not b["said"]:
+                self.end_burst(t, force=True)
+            b = self.burst = {"system": srv["system"], "body_id": srv["body_id"], "body": name or st.get("body"),
+                              "start": t, "last": t, "lat": fix and fix[0], "lon": fix and fix[1], "target": None,
+                              "n": None, "minerals": {}, "tons": 0, "said": False, "placed": False}
+            if fix:
+                b["target"], b["n"], b["placed"] = self.burst_target(b, fix[2], ts)
+        elif fix:
+            b["lat"], b["lon"] = fix[0], fix[1]
+            if not b["target"]:   # no position when it began: placed now, with the tons so far
+                b["target"], b["n"], b["placed"] = self.burst_target(b, fix[2], ts)
+                table, rid = b["target"]
+                row = self.db.execute(f"SELECT minerals FROM {table} WHERE id=?", (rid,)).fetchone()
+                got = json.loads(row["minerals"] or "{}")
+                for m, n in b["minerals"].items():
+                    got[m] = got.get(m, 0) + n
+                self.db.execute(f"UPDATE {table} SET minerals=?, tons=tons+? WHERE id=?", (json.dumps(got), b["tons"], rid))
+        b["last"] = t
+        b["minerals"][mineral] = b["minerals"].get(mineral, 0) + 1
+        b["tons"] += 1
+        if b["target"]:
+            table, rid = b["target"]
+            row = self.db.execute(f"SELECT minerals FROM {table} WHERE id=?", (rid,)).fetchone()
+            if row:
+                got = json.loads(row["minerals"] or "{}")
+                got[mineral] = got.get(mineral, 0) + 1
+                self.db.execute(f"UPDATE {table} SET minerals=?, tons=tons+1, last_ts=? WHERE id=?",
+                                (json.dumps(got), ts, rid))
+                if b["placed"]:   # this collection placed it: where the Rhino settled
+                    cols = "site_lat=?, site_lon=?" if table == "surface_rigs" else "lat=?, lon=?"
+                    self.db.execute(f"UPDATE {table} SET {cols} WHERE id=?", (b["lat"], b["lon"], rid))
+
+    def burst_target(self, b, radius, ts):
+        """The rig (or unmarked site) a collection at b's position belongs to: (table, id), the rig's number, and
+        whether this collection places it (a rig's first collection, a new site)."""
+        near = lambda rows: min(((min(surface_m(b["lat"], b["lon"], r[la], r[lo], radius)
+                                      for la, lo in (("lat", "lon"), ("site_lat", "site_lon")) if r[la] is not None), r)
+                                 for r in rows), key=lambda x: x[0], default=(None, None))
+        rigs = self.db.execute("SELECT id, n, lat, lon, site_lat, site_lon FROM surface_rigs "
+                               "WHERE system=? AND body_id=? AND picked_ts IS NULL", (b["system"], b["body_id"])).fetchall()
+        d, rig = near(rigs)
+        if rig is not None and d <= RIG_MATCH_M:
+            return ("surface_rigs", rig["id"]), rig["n"], rig["site_lat"] is None
+        d, site = near(self.db.execute("SELECT id, lat, lon, NULL AS site_lat, NULL AS site_lon FROM surface_sites "
+                                       "WHERE system=? AND body_id=?", (b["system"], b["body_id"])).fetchall())
+        if site is not None and d <= RIG_MATCH_M:
+            return ("surface_sites", site["id"]), None, False
+        cur = self.db.execute("INSERT INTO surface_sites (system, body_id, body, lat, lon, minerals, tons, first_ts, last_ts) "
+                              "VALUES (?, ?, ?, ?, ?, '{}', 0, ?, ?)", (b["system"], b["body_id"], b["body"], b["lat"], b["lon"], ts, ts))
+        return ("surface_sites", cur.lastrowid), None, True
+
+    def end_burst(self, now, force=False):
+        """A collection quiet for BURST_END_GAP s (or cut short by the next): said once ("Rig 3: 12 tons of Water.").
+        True when that happened."""
+        b = self.burst
+        if not b or (now - b["last"] <= BURST_END_GAP and not force):
+            return False
+        if now - b["last"] > BURST_START_GAP:
+            self.burst = None
+        if b["said"]:
+            return False
+        b["said"] = True
+        what = " and ".join(f"{t} {'ton' if t == 1 else 'tons'} of {m}" for m, t in b["minerals"].items())
+        if b["n"]:
+            text = f"Rig {b['n']}: {what}."
+        elif b["target"]:
+            text = f"{what[0].upper()}{what[1:]}. No rig marked here; site saved."
+        else:
+            text = f"{what[0].upper()}{what[1:]}."
+        self.moment("rig", iso_ts(now), what="collected", n=b["n"], tons=b["tons"], minerals=dict(b["minerals"]),
+                    lat=b["lat"], lon=b["lon"], text=text)
+        return True
 
     def note_sample_point(self, system, body, species, genus, kind, n, ts):
         """Remember where a sample was taken, from the live Status.json reading (at most a second old at
@@ -2464,6 +2708,7 @@ class Journals:
                                 # where you are on a body (the on-body strip, sample spacing) and the target
                                 "body": st.get("BodyName"), "lat": st.get("Latitude"), "lon": st.get("Longitude"),
                                 "alt": st.get("Altitude"), "planet_radius": st.get("PlanetRadius"),
+                                "heading": st.get("Heading"),   # degrees (the surface map is heading-up)
                                 "cargo": st.get("Cargo"),   # tonnes aboard (the fuel model's mass)
                                 "destination": st.get("Destination"), "gui_focus": st.get("GuiFocus"),
                                 "fire_group": st.get("FireGroup"), "live": True}
@@ -3647,6 +3892,13 @@ class State:
         self._shutdown_seen = journals.last_shutdown   # read before we started: not a quit to back up now
         self._last_session = (None, None)   # (key, numbers) for the Last session card
         self._streak = (None, None)         # (key, strip) for the discovery streak
+        # the surface map (Batch M1): show/hide with hysteresis, the last position the page was sent (the 5 m / 10°
+        # bump), each rig's leash warning level said (1 at RIG_WARN, 2 at RIG_WARN_AGAIN), the last landing a
+        # mining location marker was taken from
+        self._surface_show = False
+        self._surface_sent = None
+        self._rig_leash = {}
+        self._location_landing = None
 
     def bump(self):
         self.version += 1
@@ -3670,6 +3922,7 @@ class State:
             "boost": (self.journals.boost or {}).get("value"),
             "on_body": self.on_body(),
             "sampling": self.sampling_summary(),
+            "surface": self.surface_summary(),
             "since_sale": self.since_sale(),
             "sellers": self.sellers_summary(),
             "next_stop": self.next_stop_summary(),
@@ -3709,7 +3962,9 @@ class State:
                          "speech_styles": list(SPEECH_STYLES), "speech_profanity": SPEECH_PROFANITY,
                          "speech_profanity_pct": SPEECH_PROFANITY_PCT, "speech_danger_business": SPEECH_DANGER_BUSINESS,
                          "speech_names": SPEECH_NAMES, "speech_speed": SPEECH_SPEED,
-                         "speak_bio_signals": SPEAK_BIO_SIGNALS, "speak_geo_signals": SPEAK_GEO_SIGNALS},
+                         "speak_bio_signals": SPEAK_BIO_SIGNALS, "speak_geo_signals": SPEAK_GEO_SIGNALS,
+                         "surface_alt": SURFACE_ALT, "rig_spacing": RIG_SPACING, "surface_map_min": SURFACE_MAP_MIN,
+                         "surface_map_strip": SURFACE_MAP_STRIP, "rig_warn": RIG_WARN},
             "bio_rules": ed_bio.rules_info() if ed_bio else None,
             "fuel": self.fuel_summary(),
             "ship": self.journals.ship,
@@ -3754,6 +4009,329 @@ class State:
             self.set_hush("off" if self.hush_info() else "jump")
         self.copilot = {"seq": self.copilot["seq"] + 1, "action": action, "words": words}
         self.bump()
+
+    def copilot_gesture(self, gesture):
+        """A gesture of the co-pilot button. In the Rhino on a body every gesture marks a mining rig and does nothing
+        else (no status report, say again or hush there); anywhere else it is the usual co-pilot request."""
+        if self.in_rhino():
+            self.mark_rig(time.time())
+            return
+        self.copilot_action(gesture)
+
+    # ---- the surface map and Rhino mining rigs (Batch M1) ----
+
+    def surface_here(self):
+        """Where you are over a body, from the live Status.json: {system, body_id, name, lat, lon, heading, alt,
+        radius, flags, flags2}; None with no body under you, or when which body it is is unknown."""
+        st, pos = self.journals.status_json or {}, self.journals.pos
+        if not st.get("live") or not st.get("body") or st.get("lat") is None or not st.get("planet_radius") or not pos:
+            return None
+        here = self.journals.body_here
+        if here and here.get("system") == pos["id64"] and here.get("name") == st["body"]:
+            bid = here["body_id"]
+        else:
+            row = self.db.execute("SELECT body_id FROM own_bodies WHERE system=? AND name=?", (pos["id64"], st["body"])).fetchone()
+            bid = row["body_id"] if row else None
+        if bid is None:
+            return None
+        return {"system": pos["id64"], "body_id": bid, "name": st["body"], "lat": st["lat"], "lon": st["lon"],
+                "heading": st.get("heading"), "alt": st.get("alt"), "radius": st["planet_radius"],
+                "flags": st.get("flags") or 0, "flags2": st.get("flags2") or 0}
+
+    def in_rhino(self, h=None):
+        """In the Rhino (the SRV the journal's LaunchSRV named mev_rhino) on a body, with a position."""
+        h = h or self.surface_here()
+        v = self.journals.vehicle or {}
+        return bool(h and h["flags"] & FLAG_IN_SRV and v.get("srv_type") == RHINO)
+
+    def surface_show(self, h):
+        """Whether the surface map shows: below SURFACE_ALT, hidden above SURFACE_ALT + SURFACE_HIDE_PAD, unchanged in
+        between (no flicker); always in the SRV, on foot or landed, never while the altitude is from the average
+        radius (high up)."""
+        if h is None:
+            show = False
+        elif h["flags"] & FLAG_ALT_AVG:
+            show = False
+        elif h["flags"] & (FLAG_IN_SRV | FLAG_LANDED) or h["flags2"] & 1:
+            show = True
+        elif h["alt"] is None:
+            show = False
+        elif h["alt"] < SURFACE_ALT:
+            show = True
+        elif h["alt"] > SURFACE_ALT + SURFACE_HIDE_PAD:
+            show = False
+        else:
+            show = self._surface_show
+        self._surface_show = show
+        return show
+
+    def rigs_out(self, system, body_id):
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM surface_rigs WHERE system=? AND body_id=? AND picked_ts IS NULL ORDER BY n", (system, body_id))]
+
+    def mark_rig(self, now):
+        """The co-pilot's press in the Rhino: a tap within RIG_TAP_M of a rig that is out picks it up (its number is
+        free again); anywhere else it places the next rig, RIG_BEHIND_M behind the cockpit along your heading, at the
+        lowest free number (1-6), or says six are out. Spoken as a moment. Returns what it did, or None."""
+        h = self.surface_here()
+        if not self.in_rhino(h):
+            return None
+        ts, r = iso_ts(now), h["radius"]
+        spot = (surface_offset(h["lat"], h["lon"], (h["heading"] + 180) % 360, RIG_BEHIND_M, r)
+                if h["heading"] is not None else (h["lat"], h["lon"]))
+        rigs = self.rigs_out(h["system"], h["body_id"])
+
+        def gap(rig):   # from you or the new rig's spot to the rig (as marked, or where it was collected from)
+            pts = [(rig["lat"], rig["lon"])] + ([(rig["site_lat"], rig["site_lon"])] if rig["site_lat"] is not None else [])
+            return min(surface_m(a, b, la, lo, r) for a, b in ((h["lat"], h["lon"]), spot) for la, lo in pts)
+        near = min(rigs, key=gap, default=None)
+        if near and gap(near) <= RIG_TAP_M:
+            self.db.execute("UPDATE surface_rigs SET picked_ts=?, lost=0 WHERE id=?", (ts, near["id"]))
+            self.db.execute("DELETE FROM surface_rigs WHERE id=? AND tons = 0", (near["id"],))
+            self._rig_leash.pop(near["id"], None)
+            out = {"what": "picked", "n": near["n"], "id": near["id"], "text": f"Rig {near['n']} picked up."}
+        elif len(rigs) >= RIG_SLOTS:
+            out = {"what": "full", "n": None, "text": "Six rigs out."}
+        else:
+            n = min(set(range(1, RIG_SLOTS + 1)) - {x["n"] for x in rigs})
+            cur = self.db.execute("INSERT INTO surface_rigs (system, body_id, body, n, lat, lon, placed_ts, minerals, tons) "
+                                  "VALUES (?, ?, ?, ?, ?, ?, ?, '{}', 0)", (h["system"], h["body_id"], h["name"], n, spot[0], spot[1], ts))
+            out = {"what": "placed", "n": n, "id": cur.lastrowid, "lat": spot[0], "lon": spot[1], "text": f"Rig {n} placed."}
+        self.db.commit()
+        self.journals.moment("rig", ts, **out)
+        self.bump()
+        return out
+
+    def watch_surface(self, now):
+        """Each tick, from the live Status.json: the SRV left (its in-SRV flag gone), a Rhino collection gone quiet
+        (said), the rigs' leash (a warning past RIG_WARN, again past RIG_WARN_AGAIN, lost past RIG_LOST_M), and a
+        targeted mining location reached (its marker). True when anything was said or changed."""
+        j = self.journals
+        st, said = j.status_json or {}, j.moment_seq
+        wrote = False
+        # written after the launch (the journal line can be read a tick before Status.json catches up with it)
+        if st.get("live") and st.get("flags") is not None and not st["flags"] & FLAG_IN_SRV and j.vehicle and \
+                (st.get("ts") or "") > (j.vehicle.get("ts") or ""):
+            j.vehicle = None
+            meta_set(self.db, "vehicle", None)
+            wrote = True
+        j.end_burst(now)
+        h = self.surface_here()
+        if self.in_rhino(h):
+            for rig in self.rigs_out(h["system"], h["body_id"]):
+                d = surface_m(h["lat"], h["lon"], rig["lat"], rig["lon"], h["radius"])
+                level = self._rig_leash.get(rig["id"], 0)
+                if d > RIG_LOST_M:
+                    lose_rigs(self.db, iso_ts(now), "id=?", (rig["id"],))
+                    self._rig_leash.pop(rig["id"], None)
+                    j.moment("rig_leash", iso_ts(now), n=rig["n"], dist=round(d), lost=True,
+                             text=f"Rig {rig['n']} lost: over {RIG_LOST_M / 1000:g} kilometres from the Rhino.")
+                    wrote = True
+                elif (d > RIG_WARN_AGAIN and level < 2 and RIG_WARN < RIG_WARN_AGAIN) or (d > RIG_WARN and level < 1):
+                    self._rig_leash[rig["id"]] = 2 if d > RIG_WARN_AGAIN else 1
+                    j.moment("rig_leash", iso_ts(now), n=rig["n"], dist=round(d), lost=False,
+                             text=f"Rig {rig['n']} is {d / 1000:.1f} kilometres away; it is lost at {RIG_LOST_M / 1000:g}.")
+                elif d < RIG_WARN - 200 and level:
+                    self._rig_leash[rig["id"]] = 0   # back in range: warn again next time
+        wrote |= self.note_location(h)
+        if wrote:
+            self.db.commit()
+        return wrote or j.moment_seq != said
+
+    def note_location(self, h):
+        """Arrived at a targeted planetary mining location (Status.json Destination #index=N, in this system): your
+        position becomes its marker LN on this body, the first time you are down there with it targeted, and again
+        at each landing of your ship with it targeted (where the ship set down is the location). True when stored."""
+        st = self.journals.status_json or {}
+        d = st.get("destination") if st.get("live") else None
+        m = MINING_LOCATION_RE.search((d or {}).get("Name") or "")
+        landed = bool(h and h["flags"] & FLAG_LANDED and not h["flags"] & FLAG_IN_SRV)
+        if not landed:
+            self._location_landing = None
+        if not (m and h and d.get("System") == h["system"]):
+            return False
+        if d.get("Body") not in (None, h["body_id"]) and self.db.execute(
+                "SELECT 1 FROM own_bodies WHERE system=? AND body_id=?", (h["system"], d["Body"])).fetchone():
+            return False   # a location on another body of this system
+        if not (landed or h["flags"] & FLAG_IN_SRV or h["flags2"] & 1):
+            return False
+        idx = int(m.group(1))
+        key = (h["system"], h["body_id"], idx)
+        have = self.db.execute("SELECT 1 FROM mining_locations WHERE system=? AND body_id=? AND idx=?", key).fetchone()
+        if have and not (landed and self._location_landing != key):
+            return False
+        if landed:
+            self._location_landing = key
+        self.db.execute("INSERT OR REPLACE INTO mining_locations VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (*key, h["name"], h["lat"], h["lon"], st.get("ts")))
+        return True
+
+    def remove_rig(self, rid):
+        """Forget one rig (the page's remove). False when there is no such rig."""
+        gone = self.db.execute("DELETE FROM surface_rigs WHERE id=?", (rid,)).rowcount
+        self.db.commit()
+        self._rig_leash.pop(rid, None)
+        if gone:
+            self.bump()
+        return bool(gone)
+
+    def forget_sites(self, system, body_id):
+        """Forget a body's saved sites (rigs picked up or lost, unmarked sites) and its location markers; rigs still
+        out stay. How many rows went."""
+        n = sum(self.db.execute(q, (system, body_id)).rowcount for q in (
+            "DELETE FROM surface_rigs WHERE system=? AND body_id=? AND picked_ts IS NOT NULL",
+            "DELETE FROM surface_sites WHERE system=? AND body_id=?",
+            "DELETE FROM mining_locations WHERE system=? AND body_id=?"))
+        self.db.commit()
+        self.bump()
+        return n
+
+    def surface_moved(self, now):
+        """True when the page should hear of your new position on the surface map: a move of SURFACE_BUMP_M or a turn
+        of SURFACE_BUMP_DEG since the last one it was sent, at most every SURFACE_BUMP_S, and only while it shows."""
+        h = self.surface_here()
+        if not self.surface_show(h):
+            self._surface_sent = None
+            return False
+        last = self._surface_sent
+        if last:
+            if now - last[3] < SURFACE_BUMP_S:
+                return False
+            turn = abs(((h["heading"] or 0) - (last[2] or 0) + 180) % 360 - 180)
+            if surface_m(h["lat"], h["lon"], last[0], last[1], h["radius"]) < SURFACE_BUMP_M and turn < SURFACE_BUMP_DEG:
+                return False
+        self._surface_sent = (h["lat"], h["lon"], h["heading"], now)
+        return True
+
+    def surface_sites(self, system, body_id, h=None):
+        """The saved mining sites on a body: rigs picked up (or lost) with tons, and unmarked sites, each with its
+        mining location (the nearest marker within LOCATION_NEAR_M) and, given where you are, its distance."""
+        locs = [dict(r) for r in self.db.execute("SELECT idx, lat, lon FROM mining_locations WHERE system=? AND body_id=?",
+                                                   (system, body_id))]
+        radius = h["radius"] if h else None
+        out = []
+        rows = [dict(r, kind="rig") for r in self.db.execute(
+            "SELECT id, n, coalesce(site_lat, lat) AS lat, coalesce(site_lon, lon) AS lon, minerals, tons, "
+            "coalesce(last_ts, picked_ts) AS last_ts FROM surface_rigs WHERE system=? AND body_id=? AND picked_ts IS NOT NULL",
+            (system, body_id))]
+        rows += [dict(r, kind="site", n=None) for r in self.db.execute(
+            "SELECT id, lat, lon, minerals, tons, last_ts FROM surface_sites WHERE system=? AND body_id=?", (system, body_id))]
+        for r in rows:
+            loc = None
+            if radius and locs:
+                dl, near = min((surface_m(r["lat"], r["lon"], x["lat"], x["lon"], radius), x["idx"]) for x in locs)
+                loc = near if dl <= LOCATION_NEAR_M else None
+            out.append({"id": r["id"], "kind": r["kind"], "n": r["n"], "lat": r["lat"], "lon": r["lon"],
+                        "minerals": json.loads(r["minerals"] or "{}"), "tons": r["tons"], "last_ts": r["last_ts"],
+                        "location": loc,
+                        "dist": round(surface_m(h["lat"], h["lon"], r["lat"], r["lon"], radius)) if h else None})
+        return sorted(out, key=lambda x: (x["location"] is None, x["location"] or 0, x["last_ts"] or ""))
+
+    def mining_sites(self):
+        """The Materials view's Mining sites: one entry per body with saved sites (rigs with tons, out or picked up,
+        and unmarked sites) or tons in own_mined, nearest first. Tons per mineral are the larger of own_mined's
+        (journal-derived: every ton the SRV refined there) and the saved sites' sum (live, the same tons placed), so
+        a ton is never counted twice; `saved` says whether forget has anything to remove."""
+        bodies = {}
+
+        def entry(system, body_id):
+            return bodies.setdefault((system, body_id), {"mined": {}, "placed": {}, "rigs": 0, "unmarked": 0,
+                                                          "locations": [], "last": "", "name": None})
+        for r in self.db.execute("SELECT system, body_id, name, tons, last_ts FROM own_mined WHERE tons > 0"):
+            e = entry(r["system"], r["body_id"])
+            e["mined"][r["name"]] = e["mined"].get(r["name"], 0) + r["tons"]
+            e["last"] = max(e["last"], r["last_ts"] or "")
+        for table, kind in (("surface_rigs", "rigs"), ("surface_sites", "unmarked")):
+            for r in self.db.execute(f"SELECT system, body_id, body, minerals, last_ts FROM {table} WHERE tons > 0"):
+                e = entry(r["system"], r["body_id"])
+                e[kind] += 1
+                e["name"] = e["name"] or r["body"]
+                e["last"] = max(e["last"], r["last_ts"] or "")
+                for m, n in json.loads(r["minerals"] or "{}").items():
+                    e["placed"][m] = e["placed"].get(m, 0) + n
+        for r in self.db.execute("SELECT system, body_id, idx, body FROM mining_locations ORDER BY idx"):
+            if (r["system"], r["body_id"]) in bodies:   # a location marker alone (nothing mined there) is not a site
+                e = bodies[(r["system"], r["body_id"])]
+                e["locations"].append(r["idx"])
+                e["name"] = e["name"] or r["body"]
+        if not bodies:
+            return []
+        systems = sorted({s for s, _ in bodies})
+        marks = ",".join("?" * len(systems))
+        where = {r["id64"]: r for r in self.db.execute(f"SELECT id64, name, x, y, z FROM visits WHERE id64 IN ({marks})", systems)}
+        names = {(r["system"], r["body_id"]): r["name"] for r in self.db.execute(
+            f"SELECT system, body_id, name FROM own_bodies WHERE system IN ({marks})", systems)}
+        pos = self.journals.pos
+        out = []
+        for (system, body_id), e in bodies.items():
+            v = where.get(system)
+            sname = v["name"] if v else None
+            full = names.get((system, body_id)) or e["name"]
+            minerals = {m: max(e["mined"].get(m, 0), e["placed"].get(m, 0)) for m in set(e["mined"]) | set(e["placed"])}
+            d = dist(pos, v) if pos and v and v["x"] is not None and pos.get("x") is not None else None
+            out.append({"system": sname, "id": str(system), "body_id": body_id,
+                        "body": short_name(sname, full) if full else f"body {body_id}", "body_name": full,
+                        "minerals": [{"name": m, "tons": t} for m, t in sorted(minerals.items(), key=lambda x: (-x[1], x[0]))],
+                        "tons": sum(minerals.values()), "rigs": e["rigs"], "unmarked": e["unmarked"],
+                        "locations": e["locations"], "last": e["last"] or None,
+                        "saved": bool(e["rigs"] or e["unmarked"] or e["locations"]),
+                        "distance": round(d, 1) if d is not None else None})
+        return sorted(out, key=lambda x: (x["distance"] is None, x["distance"] or 0, x["system"] or "", x["body"]))
+
+    def surface_bio(self, h):
+        """The sample points of unfinished runs on this body, per species, with the colony distance: the run in
+        progress is `current`, other species sampled here are drawn faint."""
+        run = self.db.execute("SELECT system, body_id, species FROM own_organic WHERE done_ts IS NULL ORDER BY ts DESC LIMIT 1").fetchone()
+        cur = (run["system"], run["body_id"], run["species"]) if run else None
+        out = {}
+        for p in self.db.execute(
+                "SELECT sp.species, sp.genus, sp.n, sp.lat, sp.lon, o.species_name, o.genus_name, o.samples FROM sample_points sp "
+                "LEFT JOIN own_organic o ON o.system = sp.system AND o.body_id = sp.body_id AND o.species = sp.species "
+                "WHERE sp.system=? AND sp.body_id=? AND o.done_ts IS NULL ORDER BY sp.species, sp.n", (h["system"], h["body_id"])):
+            s = out.get(p["species"])
+            if not s:
+                s = out[p["species"]] = {"species": p["species_name"] or p["species"], "genus": p["genus_name"],
+                                         "samples": p["samples"], "current": cur == (h["system"], h["body_id"], p["species"]),
+                                         "need": ed_bio.colony_distance(p["genus"], p["genus_name"]) if ed_bio else None,
+                                         "points": []}
+            d = surface_m(h["lat"], h["lon"], p["lat"], p["lon"], h["radius"])
+            s["points"].append({"n": p["n"], "lat": p["lat"], "lon": p["lon"], "dist": round(d)})
+        for s in out.values():
+            near = min((p["dist"] for p in s["points"]), default=None)
+            s["clear"] = bool(s["need"] and near is not None and near >= s["need"])
+        return sorted(out.values(), key=lambda s: not s["current"])
+
+    def surface_summary(self, now=None):
+        """The surface map's block of the payload while you are over a body (None otherwise): where you are, whether
+        the map shows, the ship, the rigs out, the saved sites, the mining locations and the bio sample points."""
+        h = self.surface_here()
+        if not h:
+            self._surface_show = False
+            return None
+        now = time.time() if now is None else now
+        dist = lambda lat, lon: round(surface_m(h["lat"], h["lon"], lat, lon, h["radius"]))
+        m = self.journals.ship_marker
+        ship = ({"lat": m["lat"], "lon": m["lon"], "dist": dist(m["lat"], m["lon"])}
+                if m and (m["system"], m["body_id"]) == (h["system"], h["body_id"]) else None)
+        rigs = []
+        for r in self.rigs_out(h["system"], h["body_id"]):
+            since = r["last_ts"] or r["placed_ts"]
+            try:
+                full = now - ts_seconds(since) >= RIG_FULL_S
+            except (TypeError, ValueError):
+                full = False
+            rigs.append({"id": r["id"], "n": r["n"], "lat": r["lat"], "lon": r["lon"], "placed_ts": r["placed_ts"],
+                         "last_ts": r["last_ts"], "minerals": json.loads(r["minerals"] or "{}"), "tons": r["tons"],
+                         "dist": dist(r["lat"], r["lon"]), "full": full})
+        locs = [{"n": r["idx"], "lat": r["lat"], "lon": r["lon"], "dist": dist(r["lat"], r["lon"])} for r in self.db.execute(
+            "SELECT idx, lat, lon FROM mining_locations WHERE system=? AND body_id=? ORDER BY idx", (h["system"], h["body_id"]))]
+        return {"body": short_name(self.journals.pos["name"], h["name"]), "system": str(h["system"]), "body_id": h["body_id"],
+                "lat": h["lat"], "lon": h["lon"], "heading": h["heading"], "alt": h["alt"], "radius": h["radius"],
+                "show": self.surface_show(h), "rhino": self.in_rhino(h), "ship": ship, "rigs": rigs,
+                # for a browser's own show/hide altitude (the page's surface_alt setting): down on the ground (landed,
+                # SRV, on foot: always shows) and an altitude from the average radius (never shows)
+                "down": bool(h["flags"] & (FLAG_IN_SRV | FLAG_LANDED) or h["flags2"] & 1), "alt_avg": bool(h["flags"] & FLAG_ALT_AVG),
+                "sites": self.surface_sites(h["system"], h["body_id"], h), "locations": locs, "bio": self.surface_bio(h)}
 
     # ---- commander, materials, fuel, carrier, current system ----
 
@@ -6099,6 +6677,8 @@ class State:
             j.moment("scoop_end", st.get("ts") or iso_ts(now), jumps=jumps, **end)
             self.bump()
         self.watch_fss(now)
+        if self.watch_surface(now):
+            self.bump()
 
     def watch_fss(self, now):
         """GuiFocus 9 (the FSS) closing: FSS_SETTLE s later (the journal's last Scan lines may lag the status
@@ -6671,6 +7251,8 @@ class State:
                     skey = sm and (sm.get("clear"), (sm.get("to_go") or 0) // 10, sm.get("samples"), bool(sm.get("elsewhere")))
                     if skey != self._sampling_key:   # walking away from a sample: keep the countdown moving
                         self._sampling_key = skey
+                        self.bump()
+                    if self.surface_moved(time.monotonic()):   # the surface map follows you (5 m, 10°, 2/s at most)
                         self.bump()
             if self.journals.settle_carrier(time.time()):
                 self.bump()
@@ -7338,6 +7920,25 @@ def make_app(state, hosts=None):
             return web.json_response({"error": "unknown system"}, status=404)
         return web.json_response({"ok": True})
 
+    async def rigs_remove_view(request):
+        """{id}: forget a mining rig (one still out frees its number; a saved rig site goes)."""
+        body = await json_object(request)
+        rid = body.get("id") if body else None
+        if not isinstance(rid, int) or isinstance(rid, bool):
+            return web.json_response({"error": "expected {id: a rig's id}"}, status=400)
+        if not state.remove_rig(rid):
+            return web.json_response({"error": "no such rig"}, status=404)
+        return web.json_response({"ok": True})
+
+    async def sites_forget_view(request):
+        """{system, body}: forget a body's saved mining sites and location markers (rigs still out stay)."""
+        body = await json_object(request)
+        try:
+            system, body_id = parse_id64((body or {})["system"]), int(body["body"])
+        except (ValueError, KeyError, TypeError):
+            return web.json_response({"error": "expected {system: id64, body: body id}"}, status=400)
+        return web.json_response({"ok": True, "forgot": state.forget_sites(system, body_id)})
+
     async def search_start(request):
         try:
             params = await request.json()
@@ -7641,6 +8242,7 @@ def make_app(state, hosts=None):
         inv = ed_materials.inventory(state.journals.materials)
         inv["stale"] = bool((state.materials_summary() or {}).get("stale"))
         inv["sources"] = state.material_sources()
+        inv["mining_sites"] = state.mining_sites()
         return web.json_response(inv)
 
     async def log_view(request):
@@ -7714,6 +8316,8 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/search", search_start)
     app.router.add_get("/api/search", search_get)
     app.router.add_post("/api/bookmark", bookmark)
+    app.router.add_post("/api/rigs/remove", rigs_remove_view)
+    app.router.add_post("/api/sites/forget", sites_forget_view)
     return app
 
 
@@ -7841,6 +8445,7 @@ async def run(args, st):
     global SPEECH_STYLES, SPEECH_PROFANITY, SPEECH_NAMES, SPEECH_SPEED, SPEAK_BIO_SIGNALS, SPEAK_GEO_SIGNALS, SPEECH_PROFANITY_PCT
     global SPEECH_DANGER_BUSINESS, HIGH_GRAVITY, BACKUP_KEEP, BACKUP_EVERY_DAYS
     global SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES
+    global SURFACE_ALT, RIG_SPACING, SURFACE_MAP_MIN, SURFACE_MAP_STRIP, RIG_WARN
     LIVE_DIRS = unique_dirs(d for d in st["live"] if os.path.isdir(d))
     LEGACY_DIRS = [d for d in st["legacy"] if os.path.isdir(d)]
     for d in st["live"] + st["legacy"]:
@@ -7849,6 +8454,8 @@ async def run(args, st):
     UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT = st["unsold_warn"], st["unsold_urgent"], st["bio_min"], st["sounds"]
     BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS = st["body_highlight"], st["bio_highlight"], st["max_include_bonus"]
     HIGH_GRAVITY = st["high_gravity"]
+    SURFACE_ALT, RIG_SPACING, SURFACE_MAP_MIN = st["surface_alt"], st["rig_spacing"], st["surface_map_min"]
+    SURFACE_MAP_STRIP, RIG_WARN = st["surface_map_strip"], st["rig_warn"]
     RADIUS_CHOICES = tuple(st["radius_choices"])
     VOICE, VOICE_FALLBACK = st["voice"], st["voice_fallback"]
     SPEECH_STYLES, SPEECH_PROFANITY, SPEECH_NAMES = tuple(st["speech_styles"]), st["speech_profanity"], st["speech_names"]
@@ -7934,7 +8541,7 @@ async def run(args, st):
     button_task = None
     if st["copilot"]["enabled"]:   # read-only: never grabs the device, never presses anything
         cp = st["copilot"]
-        state.button = ed_button.ButtonWatch(cp["device"], cp["button"], lambda g: state.copilot_action(g),
+        state.button = ed_button.ButtonWatch(cp["device"], cp["button"], lambda g: state.copilot_gesture(g),
                                              cp["hold_ms"], cp["double_ms"])
         button_task = asyncio.create_task(state.button.run())
     print("co-pilot button: " + (f"{st['copilot']['button'] or '?'} on {st['copilot']['device'] or '?'}"

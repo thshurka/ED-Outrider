@@ -526,6 +526,7 @@ button.mini { background: var(--panel); color: var(--info); border: 1px solid va
 .nb.cur { color: #d6b3ff; border-color: currentColor; } td.name .cur { cursor: help; font-size: 12px; }
 
 .srcTable { font-size: 13px; width: auto; } .srcTable td { padding: 3px 10px; white-space: normal; } #matSources .name { cursor: copy; }
+#matSites .name { cursor: copy; } .sitesTable td.num { white-space: nowrap; }
 
 tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font-size: 11px; }
 
@@ -596,3 +597,28 @@ details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: poin
 #refLn .regionnew { color: var(--good); font-weight: 600; }
 #tripRows tr.hasnote td { border-bottom: none; padding-bottom: 1px; }
 #tripRows tr.tripnote td { font-size: 12px; padding-top: 0; padding-left: 24px; white-space: normal; }
+/* the surface map (Batch M2): Now's canvas beside its legend (below it on a narrow screen), and the strip's small copy */
+#nowMap { display: flex; gap: 2vw; align-items: flex-start; margin-top: 2vh; border-top: 1px solid var(--line); padding-top: 1.5vh; clear: both; }
+#nowMap .smap { flex: 0 0 auto; } #nowMap canvas, #obMap canvas { display: block; touch-action: manipulation; }
+.smap-legend { flex: 1 1 240px; min-width: 0; font-size: clamp(15px, 1.7vw, 22px); line-height: 1.35; }
+.smap-legend .lg-title { font-weight: 600; margin-bottom: .4em; }
+.smap-legend .lg-h { color: var(--muted); font-size: .8em; text-transform: uppercase; letter-spacing: .04em; margin: .7em 0 .2em; }
+.smap-legend .lg-h .unk { text-transform: none; letter-spacing: 0; }
+.smap-legend .lg-row { margin: .15em 0; }
+.smap-legend .lg-bio.faint { opacity: .6; }
+.smap-legend .sw { display: inline-block; width: .8em; height: .8em; border-radius: 50%; margin-right: .4em; vertical-align: -.05em; }
+.smap-legend .tg { display: inline-block; min-width: 2em; font-weight: 600; color: var(--muted); }
+.smap-legend .tg.loc { color: var(--warn); } .smap-legend .tg.ship { color: var(--panel); background: var(--info); border-radius: 3px; padding: 0 3px; font-weight: bold; }
+.smap-legend .lg-slots { display: grid; grid-template-columns: 1fr; gap: .15em; }
+.smap-legend .lg-slot { display: grid; grid-template-columns: 1.6em 1fr; column-gap: .4em; align-items: baseline; align-content: start; padding: .1em .3em; border-radius: 6px; border: 1px solid var(--line); }
+.smap-legend .lg-slot .rn { grid-row: span 2; font-weight: 700; color: var(--accent); text-align: center; align-self: center; }
+.smap-legend .lg-slot .rw { font-size: .82em; color: var(--muted); }
+.smap-legend .lg-slot.empty { border-style: dashed; opacity: .55; } .smap-legend .lg-slot.empty .rn { color: var(--muted); }
+.smap-legend .lg-slot.full { border-color: var(--good); }
+.smap-legend .lg-slot.far { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); } .smap-legend .lg-slot.far .rn { color: var(--bad); }
+.smap-legend .bad, .smap-line .bad { color: var(--bad); }
+.relarr { display: inline-block; font-weight: 700; color: var(--accent); }
+@media (min-width: 1100px) { .smap-legend .lg-slots { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 699px) { #nowMap { flex-direction: column; align-items: center; } .smap-legend { width: 100%; } }
+#obMap { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+.smap-line { font-size: 13px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

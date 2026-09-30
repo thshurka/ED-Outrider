@@ -7,14 +7,15 @@ const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechSt
   "speechProfanity", "speechProfanityPct", "speechDangerBusiness", "speechShift", "sayBio", "sayGeo", "sayHazard",
   "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
   "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
-  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps"];
+  "log", "lbRadius", "fShowLost", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
+  "surfaceCfg"];
 const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
   return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
 // The shape a shared setting must have to be used: a hand-edited import or server copy with, say, a string for
 // the personalities would otherwise throw in every spoken alert. A value of the wrong type reads as unset.
 const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const SETTING_SHAPES = {alerts: isObj, alertSound: isObj, alertSpeak: isObj, speechStyles: Array.isArray, unsoldCfg: isObj,
-  highlightCfg: isObj, streakCfg: isObj, sorts: isObj, map: isObj, log: isObj, bioSort: isObj};
+  highlightCfg: isObj, streakCfg: isObj, sorts: isObj, map: isObj, log: isObj, bioSort: isObj, surfaceCfg: isObj};
 // null is a fine value for a plain setting (a reset stores it: "follow the default"), but a key with a shape is
 // read as an object or list at start-up, so a null there reads as unset too (else `lSaved.days` stops the script)
 const settingOk = (k, v) => !SETTING_SHAPES[k] || SETTING_SHAPES[k](v);
@@ -511,7 +512,7 @@ function renderRoute() {
 function renderNow() {
   drawNowBar();
   const el = document.getElementById("nowBody"), p = data.position, f = data.fuel, t = data.target, a = data.arrival;
-  if (!p) { el.innerHTML = `<div class="now-sys">waiting for your first jump…</div>`; return; }
+  if (!p) { el.innerHTML = `<div class="now-sys">waiting for your first jump…</div>`; renderSurface(); return; }
   const lines = [`<div class="now-sys">${esc(p.name)}</div>`];
   // the arrival verdict, for twenty seconds after a jump
   if (a && a.id64 === posId() && Date.now() - Date.parse(a.ts) < 20000)
@@ -564,6 +565,7 @@ function renderNow() {
   if (nowHintUntil && Date.now() < nowHintUntil)
     lines.push(`<div class="now-line now-small now-hint">screen may sleep: set the tablet's screen timeout, or open over localhost/HTTPS</div>`);
   el.innerHTML = lines.join("");
+  renderSurface();
 }
 // Now's at-risk line, under fuel: what the data aboard stands to lose, shown only once it matters (your amber level
 // or rebuy multiple). Docked where it sells, what selling here pays; on a high-g approach, that approach's stakes
@@ -587,6 +589,224 @@ function nowStakesTick() {
   if (posId() !== s.sys) nowStakes = null;
   else if (data.on_body) s.landed = true;
   else if (s.landed) nowStakes = null;
+}
+// ---- the surface map (Batch M2): heading-up, you at the centre, below your surface altitude ----
+// Local flat metres around you (fine for a few km): east = Δlon·cos(lat)·R, north = Δlat·R, R = the planet's radius.
+// Markers carry tags only (rig numbers, U1 unmarked sites, S1 saved rig sites, L3 mining locations, a ship glyph,
+// species by colour); the legend says what each is.
+const SURF_NEAR = 3000;   // m: markers within this are fitted into the map; farther ones only if they matter (rigs, ship, the run)
+const surfaceCfg = () => {
+  const c = store.get("surfaceCfg", {}) || {}, d = (data && data.defaults) || {};
+  const num = (k, dk, def, lo, hi) => { const raw = c[k] ?? d[dk] ?? def, v = Number(raw);
+    return raw !== null && raw !== "" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def; };
+  return {alt: num("alt", "surface_alt", 1000, 10, 100000), spacing: num("spacing", "rig_spacing", 78, 0, 1000),
+          min: num("min", "surface_map_min", 500, 50, 6000), warn: num("warn", "rig_warn", 3500, 100, 4900),
+          strip: typeof c.strip === "boolean" ? c.strip : !!d.surface_map_strip};
+};
+// shown below your surface altitude, hidden 100 m above it, unchanged between (no flicker); always on the ground,
+// never on an altitude from the average radius. A server without `down` decides with its own altitude.
+let surfShown = false;
+function surfaceShows(s) {
+  if (!s) return (surfShown = false);
+  if (s.down === undefined) return (surfShown = !!s.show);
+  if (s.alt_avg) return (surfShown = false);
+  if (s.down) return (surfShown = true);
+  if (s.alt == null) return (surfShown = false);
+  const a = surfaceCfg().alt;
+  return (surfShown = s.alt < a ? true : s.alt > a + 100 ? false : surfShown);
+}
+const SPECIES_COLOURS = ["#5cc98a", "#6aa8ff", "#d9a8ff", "#e3b341", "#ff7bb0", "#5ce1e6", "#ff9a5c", "#b9e06a"];
+const speciesColour = name => { let h = 0; for (const ch of String(name || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return SPECIES_COLOURS[h % SPECIES_COLOURS.length]; };
+const surfDist = m => m == null ? "" : m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+const surfTons = r => { const ms = Object.entries(r.minerals || {}).sort((a, b) => b[1] - a[1]);
+  return {mineral: ms.map(x => x[0]).join(", "), tons: r.tons || 0}; };
+// {east, north, dist, brg} of a point from you
+function surfLocal(s, lat, lon) {
+  const k = Math.PI / 180, dLon = ((lon - s.lon + 540) % 360) - 180;
+  const east = dLon * k * Math.cos(s.lat * k) * s.radius, north = (lat - s.lat) * k * s.radius;
+  return {east, north, dist: Math.hypot(east, north), brg: (Math.atan2(east, north) / k + 360) % 360};
+}
+// Everything the map and legend draw, sized for a square canvas of side S (px): pure, so the tests can check it.
+function surfaceLayout(s, cfg, S) {
+  const hd = s.heading == null ? 0 : s.heading, rad = hd * Math.PI / 180, ch = Math.cos(rad), sh = Math.sin(rad);
+  const items = [], add = (it, lat, lon) => { if (lat == null || lon == null) return; items.push(Object.assign(it, surfLocal(s, lat, lon))); };
+  if (s.ship) add({kind: "ship", tag: "ship", keep: true}, s.ship.lat, s.ship.lon);
+  for (const r of s.rigs || []) { const t = surfTons(r);
+    add({kind: "rig", tag: String(r.n), n: r.n, id: r.id, mineral: t.mineral, tons: t.tons, full: !!r.full, hollow: !r.full, keep: true,
+         ringM: cfg.spacing > 0 ? cfg.spacing : 0}, r.lat, r.lon); }
+  let ui = 0, si = 0;
+  for (const x of s.sites || []) { const t = surfTons(x), tag = x.kind === "rig" ? `S${++si}` : `U${++ui}`;
+    add({kind: "site", tag, site: x.kind, mineral: t.mineral, tons: t.tons, location: x.location}, x.lat, x.lon); }
+  for (const l of s.locations || []) add({kind: "loc", tag: `L${l.n}`, n: l.n}, l.lat, l.lon);
+  for (const b of s.bio || []) {
+    const colour = speciesColour(b.species);
+    for (const p of b.points || []) add({kind: "bio", tag: "", species: b.species, colour, faint: !b.current, keep: !!b.current,
+                                          ringM: b.need || 0}, p.lat, p.lon);
+  }
+  for (const it of items) it.far = it.kind === "rig" && it.dist > cfg.warn;
+  const shown = items.filter(it => it.keep || it.dist <= SURF_NEAR);
+  // auto-zoom: every marker within SURF_NEAR (a run's rings with it), never tighter than surface_map_min across
+  let reach = 0;
+  for (const it of shown) if (it.dist <= SURF_NEAR) reach = Math.max(reach, Math.min(SURF_NEAR, it.dist + (it.kind === "bio" && !it.faint ? it.ringM : 0)));
+  const span = Math.max(cfg.min, reach * 2 * 1.12), rimR = S / 2 - 14, scale = rimR / (span / 2), c = S / 2;
+  for (const it of shown) {
+    // rotated by -heading: your heading is up. rx to the right, ry up the screen.
+    const rx = it.east * ch - it.north * sh, ry = it.east * sh + it.north * ch;
+    it.rel = (((it.brg - hd) % 360) + 360) % 360;
+    it.off = it.dist * scale > rimR - 4;
+    const k = it.off ? (rimR - 3) / Math.max(1e-9, it.dist) : scale;
+    it.sx = c + rx * k; it.sy = c - ry * k; it.ang = Math.atan2(rx, ry);   // screen angle from up, clockwise
+    it.ringPx = it.ringM ? it.ringM * scale : 0;
+  }
+  const nice = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000].filter(v => v <= span / 3).pop() || 10;
+  return {S, c, rimR, span, scale, heading: hd, headingKnown: s.heading != null, north: -rad, items: shown,
+          bar: {m: nice, px: nice * scale}};
+}
+const surfColours = () => { const cs = getComputedStyle(document.documentElement), v = k => cs.getPropertyValue(k).trim();
+  return {line: v("--line") || "#262c35", muted: v("--muted") || "#7d8794", text: v("--text") || "#d8dde4", accent: v("--accent") || "#ff8c1a",
+          info: v("--info") || "#6aa8ff", bad: v("--bad") || "#e05d5d", good: v("--good") || "#5cc98a", panel: v("--panel") || "#161a20",
+          warn: v("--warn") || "#e3b341"}; };
+function drawSurface(canvas, L, small) {
+  const dpr = window.devicePixelRatio || 1, S = L.S;
+  canvas.style.width = canvas.style.height = S + "px";
+  if (canvas.width !== Math.round(S * dpr)) { canvas.width = canvas.height = Math.round(S * dpr); }
+  const g = canvas.getContext && canvas.getContext("2d");
+  if (!g) return;   // no canvas (a test page): the layout is what is checked
+  const C = surfColours(), c = L.c, R = L.rimR, font = small ? 10 : Math.max(11, Math.round(S / 40));
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, S, S);
+  g.fillStyle = C.panel; g.strokeStyle = C.line; g.lineWidth = 1;
+  g.beginPath(); g.arc(c, c, R, 0, 2 * Math.PI); g.fill(); g.stroke();
+  g.setLineDash([2, 4]); g.beginPath(); g.arc(c, c, R / 2, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]);
+  g.save(); g.beginPath(); g.arc(c, c, R, 0, 2 * Math.PI); g.clip();
+  // rings first: bio colony distance (the run solid, others faint), rig spacing (faint, an estimate)
+  for (const it of L.items) if (it.ringPx && !it.off) {
+    g.beginPath(); g.arc(it.sx, it.sy, it.ringPx, 0, 2 * Math.PI);
+    if (it.kind === "bio") { g.strokeStyle = it.colour; g.globalAlpha = it.faint ? 0.3 : 0.85; g.lineWidth = it.faint ? 1 : 2; g.setLineDash(it.faint ? [3, 4] : []); }
+    else { g.strokeStyle = C.muted; g.globalAlpha = 0.35; g.lineWidth = 1; g.setLineDash([4, 5]); }
+    g.stroke(); g.globalAlpha = 1; g.setLineDash([]);
+  }
+  const mr = small ? 5 : Math.max(7, Math.round(S / 45));
+  g.textAlign = "center"; g.textBaseline = "middle";
+  for (const it of L.items) {
+    if (it.off) continue;
+    const x = it.sx, y = it.sy;
+    if (it.kind === "bio") { g.fillStyle = it.colour; g.globalAlpha = it.faint ? 0.45 : 1; g.beginPath(); g.arc(x, y, mr * 0.55, 0, 2 * Math.PI); g.fill(); g.globalAlpha = 1; }
+    else if (it.kind === "rig") {
+      const col = it.far ? C.bad : C.accent;
+      g.beginPath(); g.arc(x, y, mr + 2, 0, 2 * Math.PI); g.lineWidth = 2; g.strokeStyle = col;
+      if (!it.hollow) { g.fillStyle = col; g.fill(); } else { g.fillStyle = C.panel; g.fill(); }
+      g.stroke();
+      g.fillStyle = it.hollow ? col : C.panel; g.font = `bold ${font}px system-ui, sans-serif`; g.fillText(it.tag, x, y + 0.5);
+    } else if (it.kind === "ship") {
+      // where the ship is parked: a landing-pad square with an H (an arrow would read as a second "you")
+      const s = mr + 1, r = s * 0.35;
+      g.fillStyle = C.info; g.beginPath();
+      g.moveTo(x - s + r, y - s); g.arcTo(x + s, y - s, x + s, y + s, r); g.arcTo(x + s, y + s, x - s, y + s, r);
+      g.arcTo(x - s, y + s, x - s, y - s, r); g.arcTo(x - s, y - s, x + s, y - s, r); g.closePath(); g.fill();
+      g.fillStyle = C.panel; g.font = `bold ${font}px system-ui, sans-serif`; g.fillText("H", x, y + 0.5);
+    } else {
+      const col = it.kind === "loc" ? C.warn : C.muted;
+      g.fillStyle = col; g.beginPath();
+      if (it.kind === "loc") { g.moveTo(x, y - mr * 0.7); g.lineTo(x + mr * 0.7, y); g.lineTo(x, y + mr * 0.7); g.lineTo(x - mr * 0.7, y); g.closePath(); }
+      else g.arc(x, y, mr * 0.45, 0, 2 * Math.PI);
+      g.fill();
+      if (!small) { g.font = `${font}px system-ui, sans-serif`; g.textAlign = "left"; g.fillText(it.tag, x + mr * 0.8, y - mr * 0.6); g.textAlign = "center"; }
+    }
+  }
+  g.restore();
+  // off the map: a chevron on the rim pointing out, with the tag
+  for (const it of L.items) if (it.off) {
+    const col = it.kind === "rig" ? (it.far ? C.bad : C.accent) : it.kind === "ship" ? C.info : it.kind === "bio" ? it.colour : it.kind === "loc" ? C.warn : C.muted;
+    g.save(); g.translate(it.sx, it.sy); g.rotate(it.ang);
+    g.fillStyle = col; g.beginPath(); g.moveTo(0, -7); g.lineTo(6, 2); g.lineTo(0, -1); g.lineTo(-6, 2); g.closePath(); g.fill();
+    g.restore();
+    if (it.tag && it.kind !== "ship" && !small) {   // the tag inside the rim, nudged aside where the N would be
+      const dn = Math.atan2(Math.sin(it.ang - L.north), Math.cos(it.ang - L.north)), a = Math.abs(dn) < 0.3 ? L.north + (dn < 0 ? -0.3 : 0.3) : it.ang;
+      g.fillStyle = col; g.font = `${font - 1}px system-ui, sans-serif`;
+      g.fillText(it.tag, c + Math.sin(a) * (R - 16), c - Math.cos(a) * (R - 16)); }
+  }
+  // you: an arrow pointing up (your heading)
+  g.fillStyle = C.text; g.strokeStyle = C.panel; g.lineWidth = 1.5; g.beginPath();
+  g.moveTo(c, c - mr * 1.2); g.lineTo(c + mr * 0.8, c + mr * 0.8); g.lineTo(c, c + mr * 0.3); g.lineTo(c - mr * 0.8, c + mr * 0.8); g.closePath(); g.fill(); g.stroke();
+  // north on the rim
+  const nx = c + Math.sin(L.north) * R, ny = c - Math.cos(L.north) * R;
+  g.save(); g.translate(nx, ny); g.rotate(L.north);
+  g.fillStyle = C.bad; g.beginPath(); g.moveTo(0, -8); g.lineTo(5, 3); g.lineTo(-5, 3); g.closePath(); g.fill(); g.restore();
+  g.fillStyle = C.text; g.font = `bold ${font}px system-ui, sans-serif`;
+  g.fillText("N", c + Math.sin(L.north) * (R - 15), c - Math.cos(L.north) * (R - 15));
+  // the scale bar, bottom left
+  {
+    const bx = 6, by = S - 6, w = L.bar.px;
+    g.strokeStyle = C.text; g.lineWidth = 2; g.beginPath(); g.moveTo(bx, by - 4); g.lineTo(bx, by); g.lineTo(bx + w, by); g.lineTo(bx + w, by - 4); g.stroke();
+    g.fillStyle = C.muted; g.font = `${font - 1}px system-ui, sans-serif`; g.textAlign = "left"; g.textBaseline = "bottom";
+    g.fillText(surfDist(L.bar.m), bx + 2, by - 5);
+    if (!small) { g.textAlign = "right"; g.fillText(`${surfDist(L.span)} across${L.headingKnown ? "" : " · north up"}`, S - 4, by); }
+  }
+}
+// distance and bearing from you, with an arrow turned to where it is from your heading
+const surfWhere = it => `${surfDist(it.dist)} · ${String(Math.round(it.brg) % 360).padStart(3, "0")}°` +
+  ` <span class="relarr" style="transform:rotate(${Math.round(it.rel)}deg)" title="where it is from your heading">↑</span>`;
+// the legend: species, the six rig slots (as the game's HUD shows them), sites, locations, the ship; nearest first
+function surfaceLegend(s, L, cfg) {
+  const by = k => L.items.filter(it => it.kind === k).sort((a, b) => a.dist - b.dist), rows = [];
+  const bio = new Map();
+  for (const it of by("bio")) if (!bio.has(it.species)) bio.set(it.species, it);
+  const species = (s.bio || []).filter(b => b.points && b.points.length).map(b => ({b, it: bio.get(b.species)}))
+    .sort((x, y) => (x.it ? x.it.dist : 1e9) - (y.it ? y.it.dist : 1e9));
+  if (species.length) rows.push(`<div class="lg-h">Samples</div>` + species.map(({b, it}) =>
+    `<div class="lg-row lg-bio${b.current ? " cur" : " faint"}" data-species="${esc(b.species)}"><i class="sw" style="background:${speciesColour(b.species)}"></i>` +
+    `<b>${esc(b.species)}</b> ${b.samples ?? "?"}/3${b.need ? ` · ${b.need} m` : ""}` +
+    (b.clear ? ` · <span class="ok">✓ clear</span>` : it && b.need ? ` · <span class="unk">${Math.round(it.dist)} of ${b.need} m</span>` : "") + `</div>`).join(""));
+  const rigs = by("rig"), slot = n => rigs.find(r => r.n === n);
+  if (rigs.length || s.rhino) rows.push(`<div class="lg-h">Rigs <span class="unk">(○ filling · ● probably full${cfg.spacing ? ` · ring ~${cfg.spacing} m, an estimate` : ""})</span></div>` +
+    `<div class="lg-slots">` + [1, 2, 3, 4, 5, 6].map(n => { const r = slot(n);
+      if (!r) return `<div class="lg-slot empty" data-rig="${n}"><span class="rn">${n}</span><span class="unk">—</span></div>`;
+      return `<div class="lg-slot${r.full ? " full" : ""}${r.far ? " far" : ""}" data-rig="${n}"><span class="rn">${n}</span>` +
+        `<span class="rm">${r.mineral ? esc(r.mineral) : `<span class="unk">placed</span>`}${r.tons ? ` <b>${r.tons} t</b>` : ""}</span>` +
+        `<span class="rw">${surfWhere(r)}${r.far ? ` <b class="bad">far: lost at 5 km</b>` : ""}${r.full ? ` <span class="ok">probably full</span>` : ""}</span></div>`; }).join("") + `</div>`);
+  const sites = by("site");
+  if (sites.length) rows.push(`<div class="lg-h">Sites</div>` + sites.map(it =>
+    `<div class="lg-row" data-tag="${it.tag}"><span class="tg">${it.tag}</span> ${it.mineral ? esc(it.mineral) : `<span class="unk">?</span>`} <b>${it.tons} t</b>` +
+    ` <span class="unk">${it.site === "rig" ? "rig picked up" : "unmarked"}${it.location ? ` · L${it.location}` : ""} · ${surfDist(it.dist)}</span></div>`).join(""));
+  const locs = by("loc");
+  if (locs.length) rows.push(`<div class="lg-h">Mining locations</div>` + locs.map(it =>
+    `<div class="lg-row" data-tag="${it.tag}"><span class="tg loc">${it.tag}</span> ${surfWhere(it)}</div>`).join(""));
+  const ship = by("ship")[0];
+  if (ship) rows.push(`<div class="lg-row lg-ship"><span class="tg ship">H</span> Ship ${surfWhere(ship)}</div>`);
+  return rows.join("") || `<div class="unk">nothing marked on this body yet</div>`;
+}
+// the strip's one line: rigs, sites and the ship, short
+function surfaceLine(L) {
+  const by = k => L.items.filter(it => it.kind === k).sort((a, b) => a.dist - b.dist);
+  const bits = by("rig").sort((a, b) => a.n - b.n).map(r => `<span class="${r.far ? "bad" : ""}">${r.n} ${r.mineral ? esc(r.mineral.split(",")[0]) : "placed"}${r.tons ? ` ${r.tons} t` : ""}${r.full ? " ●" : ""} ${surfDist(r.dist)}</span>`);
+  const sites = by("site"); if (sites.length) bits.push(`${sites.length} site${sites.length === 1 ? "" : "s"}`);
+  const ship = by("ship")[0]; if (ship) bits.push(`ship ${surfDist(ship.dist)} ${String(Math.round(ship.brg) % 360).padStart(3, "0")}°`);
+  return bits.join(" · ") || `<span class="unk">nothing marked</span>`;
+}
+// Now's map (beside its legend, below on a narrow screen) and the strip's small copy
+let surfLegendKey = null;
+function renderSurface() {
+  const s = data && data.surface, show = surfaceShows(s), cfg = surfaceCfg();
+  const box = document.getElementById("nowMap"), strip = document.getElementById("obMap");
+  const onNow = show && view === "now";
+  box.hidden = !onNow;
+  if (onNow) {
+    // beside the legend (the canvas takes what the legend leaves), or above it on a narrow screen (the CSS decides)
+    const w = box.clientWidth || 600, wide = getComputedStyle(box).flexDirection !== "column";
+    const S = Math.round(Math.max(200, Math.min(wide ? Math.min(w * 0.6, w - 280) : w, wide ? Math.max(320, innerHeight * 0.7) : 560)));
+    const L = surfaceLayout(s, cfg, S);
+    drawSurface(document.getElementById("nowMapCanvas"), L, false);
+    const html = `<div class="lg-title">${esc(s.body || "")}${s.alt != null && !s.down ? ` <span class="unk">${Math.round(s.alt)} m up</span>` : ""}</div>` + surfaceLegend(s, L, cfg);
+    if (html !== surfLegendKey) { surfLegendKey = html; document.getElementById("nowMapLegend").innerHTML = html; }
+  }
+  const onStrip = show && cfg.strip && view !== "now";
+  strip.hidden = !onStrip;
+  if (onStrip) {
+    const L = surfaceLayout(s, cfg, 120);
+    drawSurface(document.getElementById("obMapCanvas"), L, true);
+    document.getElementById("obMapLine").innerHTML = surfaceLine(L);
+  }
 }
 // Now's caption strip: the last three lines said, in every window (a window that is not speaking shows the plain
 // wording of what the speaking one says). A tap asks the window that is speaking to say it again.
@@ -740,12 +960,14 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
   ["saleleft", "a sale left data aboard: Universal Cartographics sells 50 systems a page, so a sale that stops after one page leaves the rest unsold (said once the pages stop and the estimate has caught up); likewise completed samples still unsold after a Vista Genomics sale", "alert"],
   ["unsold", "unsold data crosses a threshold", "cash"], ["hull", "hull damage, heat damage, interdiction", "danger"],
   ["carrier", "your carrier arrives somewhere", "chime"], ["codex", "a new codex entry", "chime"],
-  ["loss", "your ship was destroyed with data aboard (or samples died with you): what was lost, and the nearest system to rescan", "danger"]];
+  ["loss", "your ship was destroyed with data aboard (or samples died with you): what was lost, and the nearest system to rescan", "danger"],
+  ["rigs", "Rhino mining rigs: the co-pilot button's confirmation (rig placed, picked up, six out) and what a rig collected", null],
+  ["rigleash", "a Rhino mining rig too far from you (over the rig warning distance, again at 4.5 km; the game destroys it at 5 km)", "danger"]];
 const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is what gets spoken
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
   // a notification on every jump (or scoop, or FSS) would be noise: these are spoken by default, not notified
   {jump: false, honk: false, brief: false, fss: false, scoop: false, scoopstop: false, supercharge: false,
-   sampling: false, approach: false, bodybrief: false, jumponium: false},
+   sampling: false, approach: false, bodybrief: false, jumponium: false, rigs: false},
   store.get("alerts", {}));
 // off until you tick them (the whole row): the jumponium call-out
 const OFF_KINDS = {jumponium: false};
@@ -837,7 +1059,7 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
   lastAlert = {kind, title, body, at: Date.now()};
   const entry = logSpeech({kind, tag, words: title});
   const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
-  const loud = speakerHere(), hush = hushed() && speechPrio(kind, tag) !== 0;   // hushed: danger still speaks
+  const loud = speakerHere(), hush = hushed() && speechPrio(kind, tag) > 1;   // hushed: danger (and a rig press's answer) still speaks
   const plays = !!(loud && snd && soundOn && alertSound[kind] && !hush);   // no sound, no wait before the words
   if (plays) setTimeout(() => play(snd), delay);
   const notified = notify(kind, title, body);
@@ -871,7 +1093,8 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
 const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "approach", "bodybrief", "jumponium"]);
-const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" ? 1
+// a rig confirmation answers your own press, like a line asked for
+const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" || kind === "rigs" ? 1
   : ["find", "signals", "codex", "bodybrief", "supercharge", "jumponium"].includes(kind) ? 3 : 2;
 // the queue without what went stale by `now` with the ship at `pos`
 const speechExpire = (items, now, pos) => items.filter(it => now - it.notBefore <= SPEECH_MAX_AGE
@@ -940,7 +1163,7 @@ let lastSaid = null;   // the last line actually said (the words, not the queue 
 // a hush began: what is queued or playing below danger goes (lines asked for in this window stay)
 function cutForHush() {
   const before = speechItems;
-  speechItems = speechItems.filter(it => it.prio === 0 || it.kind === "manual");
+  speechItems = speechItems.filter(it => it.prio <= 1 || it.kind === "manual");
   dropFates(before, speechItems, "dropped: hushed");
   if (speechNow && speechNow.prio !== 0 && speechNow.kind !== "manual") { setFate(speechPlaying, "cut short: hushed"); speechNow.stop(); }
 }
@@ -964,7 +1187,7 @@ async function speechWorker() {
       }
       if (hushed()) {   // only danger, and what you asked for
         const before = speechItems;
-        speechItems = speechItems.filter(it => it.prio === 0 || it.kind === "manual");
+        speechItems = speechItems.filter(it => it.prio <= 1 || it.kind === "manual");
         dropFates(before, speechItems, "dropped: hushed");
       }
       // speechExpire stays pure (the smoke test calls it): what it took out is told apart here
@@ -1090,7 +1313,7 @@ const allFilled = (text, all) => [...text.matchAll(/\{(\w+)\}/g)].every(m => all
 // Danger lines: a joke at 20% hull costs clarity, so with "Danger alerts always down to business" ticked (the
 // default) these come only from the business lists and never swear, whatever personalities are ticked.
 // (ship_lost too: a debrief after a rebuy is no time for a joke; it also jumps the queue like the others)
-const DANGER = new Set(["hull", "heat", "interdicted", "fuel_low", "fuel_star", "fuel_target", "fuel_topup", "carrier_departs", "ship_lost"]);
+const DANGER = new Set(["hull", "heat", "interdicted", "fuel_low", "fuel_star", "fuel_target", "fuel_topup", "carrier_departs", "ship_lost", "rig_leash"]);
 const speechDangerBusiness = () => !!(store.get("speechDangerBusiness", null) ?? (data && data.defaults && data.defaults.speech_danger_business) ?? true);
 // "One personality per system": the personality is drawn at game start and at each arrival and says every line
 // until the next one, so a character (and its own voice) holds through a system. In memory only: a reload draws
@@ -1597,7 +1820,7 @@ function render() {
   document.getElementById("mapView").hidden = view !== "map";
   document.body.classList.toggle("nowmode", view === "now");
   document.getElementById("nowView").hidden = view !== "now";
-  if (view === "now") renderNow();
+  if (view === "now") renderNow(); else renderSurface();   // Now's map, or the on-body strip's copy
   nowWake();
   if (view === "map") { loadMap(); drawMap(); }
   refreshPop();
@@ -2388,6 +2611,7 @@ function renderMat() {
         `<td class="num">${h.count ?? 0}${h.cap ? " / " + h.cap : ""}</td><td>` +
         (list.map(x => `<span class="name" data-name="${esc(x.system)}" title="click to copy the system">${esc(x.body)}</span> <span class="unk">${x.pct}% · ${x.distance} ly</span>`).join(" · ") || `<span class="unk">none scanned nearby</span>`) + `</td></tr>`; }).join("") +
     `</tbody></table>` : "";
+  document.getElementById("matSites").innerHTML = matSitesHtml(m.mining_sites || []);
   if (matScroll && Object.keys(src).length) { matScroll = false; document.getElementById("matSources").scrollIntoView({block: "start"}); }
   const f = mFilter.value.trim().toLowerCase();
   const rows = m.rows.filter(r => (!mHeld.checked || r.count) && (!f || r.name.toLowerCase().includes(f)));
@@ -2404,6 +2628,36 @@ function renderMat() {
       }).join("")).join("") + `</div>`;
   }).join("") || `<div class="unk">No materials match.</div>`;
 }
+
+// Mining sites: one row per body you mined in the SRV (saved rig spots and unmarked sites, or tons in the journals)
+function matSitesHtml(list) {
+  if (!list.length) return "";
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  return `<h3 class="subhead">Mining sites <span class="unk">· bodies you mined in the SRV, nearest first</span></h3><table class="srcTable sitesTable"><tbody>` +
+    list.map(s => {
+      const spots = [s.rigs ? plural(s.rigs, "rig") : "", s.unmarked ? `${s.unmarked} unmarked` : ""].filter(Boolean).join(" · ");
+      const detail = [spots, s.locations.map(n => "L" + n).join(" "), s.last ? shortDay(s.last) : ""].filter(Boolean).join(" · ");
+      return `<tr><td><b>${esc(s.body)}</b>${s.body_name ? ` <span class="goto" data-body="${esc(s.body_name)}" data-bsys="${esc(s.id)}" title="open ${esc(s.body)} in Here">🔍</span>` : ""}` +
+        `<div>${s.system ? `<span class="name" data-name="${esc(s.system)}" title="click to copy">${esc(s.system)}</span><span class="goto" data-goto="${esc(s.id)}" title="open in Here">⌖</span>` : `<span class="unk">unknown system</span>`}</div></td>` +
+        `<td>${s.minerals.map(x => `${esc(x.name)} ${x.tons} t`).join(" · ")}${detail ? `<div class="unk">${esc(detail)}</div>` : ""}</td>` +
+        `<td class="num">${s.distance != null ? s.distance + " ly" : ""}</td>` +
+        `<td>${s.saved ? `<button type="button" class="mini" data-forget="${esc(s.id)}" data-fbody="${s.body_id}" data-fname="${esc(s.body)}" title="forget the saved rig spots, unmarked sites and location markers on this body (the tons mined stay: they come from the journals)">forget</button>` : ""}</td></tr>`;
+    }).join("") + `</tbody></table>`;
+}
+document.getElementById("matSites").addEventListener("click", async e => {
+  const f = e.target.closest("[data-forget]");
+  if (f) {
+    if (!confirm(`Forget the saved mining sites on ${f.dataset.fname}? Rigs still out stay.`)) return;
+    let r;
+    try { r = await apiJson("api/sites/forget", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({system: f.dataset.forget, body: Number(f.dataset.fbody)})}); }
+    catch (err) { r = {error: err.message}; }
+    if (r.error) return toast(`could not forget the sites: ${r.error}`);
+    matKey = null; return loadMat();
+  }
+  const b = e.target.closest("[data-body]"); if (b) return openBodyIn(b.dataset.bsys, b.dataset.body);
+  const g = e.target.closest("[data-goto]"); if (g) return showInHere(g.dataset.goto);
+  const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);
+});
 
 // ---- Log: every journal event ----
 // gen: bumped by every fresh load, so an answer to an older request (a tail or "more" still on its way when the
@@ -3743,6 +3997,10 @@ function onData() {
         else alertOut("sell", `Undocked with ${credits(u.total)} cr still aboard`, `Still to sell: ${leftToSell(u)}.`,   // part of it was sold here
                       {sound: "alert", say: () => line("unsold_urgent", {value: credits(u.total)})});
       }
+      else if (m.kind === "rig" && m.text)   // the co-pilot's rig marking and a rig's collection: plain words, no personality
+        alertOut("rigs", m.text.replace(/\.$/, ""), "", {tag: m.what === "collected" ? "rig_collected" : "rig", say: m.text});
+      else if (m.kind === "rig_leash" && m.text)   // a rig past the leash warning, or lost at 5 km: danger
+        alertOut("rigleash", m.text.replace(/\.$/, ""), "", {tag: "rig_leash", say: m.text});
       else if (m.kind === "game_exit") {   // a session of three jumps or more gets its recap in place of the plain goodbye
         const recap = recapText(m.session);
         alertOut("game", "Game closed", recap, {say: () => recap ? line("session_recap", {text: recap}, `Session over: ${recap}.`)
@@ -4256,6 +4514,24 @@ highGEl.onchange = () => {
   store.set("highG", highGEl.value.trim() === "" || !isFinite(v) || v <= 0 ? null : v); showHighG(); renderHere();   // Here reds gravity at it
 };
 showHighG();
+// the surface map's settings (one object, surfaceCfg; blank = the config file's [defaults])
+const surfEls = {alt: document.getElementById("surfAlt"), spacing: document.getElementById("surfSpacing"),
+                 min: document.getElementById("surfMin"), warn: document.getElementById("surfWarn")};
+const surfStripEl = document.getElementById("surfStrip");
+const showSurfCfg = () => { const c = store.get("surfaceCfg", {}) || {}, now = surfaceCfg();
+  for (const [k, el] of Object.entries(surfEls)) { el.value = c[k] ?? ""; el.placeholder = now[k]; }
+  surfStripEl.checked = now.strip; };
+for (const [k, el] of Object.entries(surfEls)) {
+  el.onfocus = showSurfCfg;
+  el.onchange = () => {
+    const c = {...(store.get("surfaceCfg", {}) || {})}, v = Number(el.value);
+    if (el.value.trim() === "" || !isFinite(v) || v < 0) delete c[k]; else c[k] = Math.round(v);
+    store.set("surfaceCfg", c); showSurfCfg(); if (data) render();
+  };
+}
+surfStripEl.onchange = () => { store.set("surfaceCfg", {...(store.get("surfaceCfg", {}) || {}), strip: surfStripEl.checked}); if (data) render(); };
+showSurfCfg();
+window.addEventListener("resize", () => { if (data) renderSurface(); });
 // the discovery streak's spoken thresholds and the suggested order's "skip?" floor (blank = the default)
 const streakEls = {known: document.getElementById("streakKnown"), new: document.getElementById("streakNew")};
 const showStreak = () => { const c = store.get("streakCfg", {}) || {}, now = streakCfg();
@@ -4363,6 +4639,7 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   else if (id === "highG") { store.set("highG", null); showHighG(); renderHere(); }
   else if (id === "fuelJumps") { store.set("fuelJumps", null); showFuelJumps(); if (data) render(); }
   else if (id === "streak") { store.set("streakCfg", {}); showStreak(); }
+  else if (id === "surfaceCfg") { store.set("surfaceCfg", {}); showSurfCfg(); }
   else if (id === "skipFloor") { store.set("skipFloor", null); showSkip(); renderHere(); }
   else if (id === "speechSpeed") { store.set("speechSpeed", null); drawSpeechStyles(); }
   else { unsoldCfg[id === "unsoldWarn" ? "warn" : "urgent"] = null; store.set("unsoldCfg", unsoldCfg); thresholdEls[id].dispatchEvent(new Event("focus")); }

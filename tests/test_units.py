@@ -9,6 +9,7 @@ losses, re-scans, abandoned bio runs, crew cuts, ring naming and bio spawn rules
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sys
 import time
@@ -7419,3 +7420,604 @@ class SaleLeft(unittest.TestCase):
         self.page(2, 50, 1000)
         self.j.restore(cp)
         self.assertEqual(self.j.sale_run["systems"], 50)
+
+
+class SurfaceRigs(unittest.TestCase):
+    """Batch M1: the surface map's server side: rigs marked by the co-pilot button in the Rhino, collections placed
+    from Status.json, the ship marker, the vehicle, mining location markers, the leash and the payload block."""
+
+    SYS, BODY, NAME, R = 18207037532889, 19, "Smojooe AR-E b25-8 ABC 3 d", 1_000_000.0
+    SRV = 1 << 26
+
+    def setUp(self):
+        import tempfile
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.dir, ignore_errors=True))
+        self.base = time.time()
+        self.line = 0
+        self.ev(0, {"event": "Location", "StarSystem": "Smojooe AR-E b25-8", "SystemAddress": self.SYS, "StarPos": [0, 0, 0],
+                    "Docked": True, "StationType": "FleetCarrier"})
+        self.ev(1, {"event": "SupercruiseExit", "StarSystem": "Smojooe AR-E b25-8", "SystemAddress": self.SYS,
+                    "Body": self.NAME, "BodyID": self.BODY, "BodyType": "Planet"})
+
+    def ts(self, s):
+        return ed_outrider.iso_ts(self.base + s)
+
+    def ev(self, s, ev):
+        """A journal line read s seconds into the test (its timestamp then too), as a live line."""
+        self.line += 1
+        self.j.line_source = f"Journal.2026-09-30T030000.01.log:{self.line}"
+        with unittest.mock.patch.object(ed_outrider.time, "time", lambda: self.base + s):
+            self.j.handle(dict(ev, timestamp=self.ts(s)))
+        self.j.line_source = ""
+
+    def status(self, s, north=0.0, east=0.0, heading=0, flags=None, alt=0, flags2=0, **kw):
+        """Status.json at s seconds, `north`/`east` metres from lat 0, lon 0 (read the way the tick reads it)."""
+        k = 180 / math.pi / self.R
+        st = {"timestamp": self.ts(s), "event": "Status", "Flags": self.SRV if flags is None else flags, "Flags2": flags2,
+              "Latitude": north * k, "Longitude": east * k, "Heading": heading, "Altitude": alt,
+              "BodyName": self.NAME, "PlanetRadius": self.R, **kw}
+        with open(os.path.join(self.dir, "Status.json"), "w") as f:
+            json.dump(st, f)
+        self.j.read_status(self.dir)
+
+    def launch(self, s=2, srv="mev_rhino"):
+        self.ev(s, {"event": "LaunchSRV", "SRVType": srv, "ID": 51, "PlayerControlled": True})
+
+    def texts(self, kinds=("rig", "rig_leash")):
+        return [m["text"] for m in self.j.moments if m["kind"] in kinds]
+
+    def refine(self, s, what="Water", n=1):
+        for i in range(n):
+            self.ev(s + i, {"event": "MiningRefined", "Type": f"${what.lower()}_name;", "Type_Localised": what})
+
+    def out(self):
+        return {r["n"]: r for r in self.state.rigs_out(self.SYS, self.BODY)}
+
+    def test_presses_place_1_2_3_and_a_tap_by_one_picks_it_up(self):
+        self.launch()
+        self.status(10, 0, 0, heading=0)
+        self.assertEqual(self.state.mark_rig(self.base + 10)["n"], 1)
+        rig = self.out()[1]   # 7 m behind the cockpit: heading north, so 7 m south
+        self.assertAlmostEqual(ed_outrider.surface_m(0, 0, rig["lat"], rig["lon"], self.R), 7.0, places=2)
+        self.assertLess(rig["lat"], 0)
+        self.status(20, 100, 0, heading=90)
+        self.state.mark_rig(self.base + 20)
+        self.status(30, 200, 0, heading=90)
+        self.state.mark_rig(self.base + 30)
+        self.assertEqual(sorted(self.out()), [1, 2, 3])
+        self.state.mark_rig(self.base + 35)          # the same spot again: rig 3 is within 5 m, so it is picked up
+        self.assertEqual(sorted(self.out()), [1, 2])
+        self.assertEqual(self.texts(), ["Rig 1 placed.", "Rig 2 placed.", "Rig 3 placed.", "Rig 3 picked up."])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM surface_rigs").fetchone()[0], 2)   # an empty rig is forgotten
+
+    def test_the_lowest_free_number_after_a_pickup(self):
+        self.launch()
+        for i, north in enumerate((0, 100, 200)):
+            self.status(10 + i, north, 0, heading=0)
+            self.state.mark_rig(self.base + 10 + i)
+        self.status(20, 100 - 5, 0, heading=90)      # drive over rig 2 (7 m south of where you pressed): 2 m off
+        self.assertEqual(self.state.mark_rig(self.base + 20)["what"], "picked")
+        self.status(30, 400, 0, heading=0)
+        self.assertEqual(self.state.mark_rig(self.base + 30)["n"], 2)
+        self.status(40, 600, 0, heading=0)
+        self.assertEqual(self.state.mark_rig(self.base + 40)["n"], 4)
+
+    def test_six_out_refuses(self):
+        self.launch()
+        for i in range(7):
+            self.status(10 + i, 100 * i, 0)
+            self.state.mark_rig(self.base + 10 + i)
+        self.assertEqual(sorted(self.out()), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(self.texts()[-1], "Six rigs out.")
+
+    def test_the_button_does_nothing_else_in_the_rhino(self):
+        self.launch()
+        self.status(10)
+        for g in ("status", "again", "hush"):
+            self.state.copilot_gesture(g)
+        self.assertEqual(self.state.copilot["seq"], 0)       # no status report, say again...
+        self.assertIsNone(self.state.hush)                    # ...or hush
+        self.assertEqual(self.texts(), ["Rig 1 placed.", "Rig 1 picked up.", "Rig 1 placed."])
+        # outside the Rhino (on foot, in the ship, in a Scarab) the button works as before
+        self.status(20, flags=1 << 3)                         # landed, in the ship: the in-SRV flag gone
+        self.state.watch_surface(self.base + 20)
+        self.assertIsNone(self.j.vehicle)
+        self.state.copilot_gesture("status")
+        self.state.copilot_gesture("hush")
+        self.assertEqual((self.state.copilot["seq"], self.state.copilot["action"]), (2, "hush"))
+        self.assertIsNotNone(self.state.hush)
+        self.launch(30, "testbuggy")
+        self.status(31)
+        self.state.copilot_gesture("again")
+        self.assertEqual(self.state.copilot["action"], "again")
+        self.assertEqual(len(self.texts()), 3)
+        # the page's own requests (the Now bar) never mark rigs, even in the Rhino
+        self.launch(40)
+        self.status(41, 300)
+        self.state.copilot_action("status")
+        self.assertEqual(self.state.copilot["action"], "status")
+        self.assertEqual(len(self.texts()), 3)
+
+    def test_the_button_watch_marks_rigs_through_a_stand_in_device(self):
+        """The co-pilot path end to end with the stand-in evdev (never a real device): the button's tap, double tap
+        and hold reach State.copilot_gesture, which in the Rhino marks rigs with each."""
+        import asyncio
+        import ed_button
+        ev, Dev = BatchBVoiceControl.fake_evdev(self, [(0, 1), (0.02, 0), (0.25, 1), (0.02, 0), (0.03, 1), (0.02, 0),
+                                                        (0.25, 1), (0.2, 0), (0.05, 2)])
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+
+        async def go():
+            w = ed_button.ButtonWatch("X-56", "BTN_TRIGGER_HAPPY5", self.state.copilot_gesture, hold_ms=150,
+                                      double_ms=100, evdev=ev)
+            with unittest.mock.patch.object(ed_button, "RETRY", 5):
+                t = asyncio.ensure_future(w.run())
+                await asyncio.sleep(1.0)
+                t.cancel()
+                await asyncio.gather(t, return_exceptions=True)
+        asyncio.run(go())
+        self.assertEqual(self.texts(), ["Rig 1 placed.", "Rig 1 picked up.", "Rig 1 placed."])
+        self.assertEqual(self.state.copilot["seq"], 0)
+        self.assertIsNone(self.state.hush)
+
+    def test_collections_add_up_on_a_rig_and_a_far_one_is_an_unmarked_site(self):
+        self.launch()
+        self.status(10, 0, 0, heading=180)                    # facing south: the rig lands 7 m north
+        self.state.mark_rig(self.base + 10)
+        self.status(100, 9, 0, heading=0)                     # over the rig, 2 m off
+        self.refine(101, "Water", 11)
+        self.state.watch_surface(self.base + 120)             # still going: not said yet
+        self.assertEqual(self.texts()[-1], "Rig 1 placed.")
+        self.state.watch_surface(self.base + 145)
+        self.assertEqual(self.texts()[-1], "Rig 1: 11 tons of Water.")
+        self.status(300, 7, 1)                                # a second collection three minutes later
+        self.refine(301, "Water", 3)
+        self.state.watch_surface(self.base + 340)
+        rig = self.out()[1]
+        self.assertEqual((json.loads(rig["minerals"]), rig["tons"]), ({"Water": 14}, 14))
+        self.assertIsNone(rig["picked_ts"])                   # the rig stays out
+        self.status(500, 0, 400)                              # 400 m away, no rig marked there
+        self.refine(501, "Gold", 1)
+        self.state.watch_surface(self.base + 540)
+        self.assertEqual(self.texts()[-1], "1 ton of Gold. No rig marked here; site saved.")
+        site = self.db.execute("SELECT * FROM surface_sites").fetchone()
+        self.assertEqual((site["tons"], json.loads(site["minerals"])), (1, {"Gold": 1}))
+        # own_mined counted the same tons once each (the map only says where they came from)
+        self.assertEqual({r["name"]: r["tons"] for r in self.db.execute("SELECT * FROM own_mined")}, {"Water": 14, "Gold": 1})
+        # a replayed (old) line places nothing
+        self.j.handle({"event": "MiningRefined", "timestamp": "2026-01-01T00:00:00Z", "Type": "$water_name;", "Type_Localised": "Water"})
+        self.assertEqual(self.out()[1]["tons"], 14)
+
+    def test_a_late_ton_joins_the_collection_and_a_failed_tick_does_not_double_it(self):
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        self.status(20, 7, 0)
+        self.refine(21, "Water", 2)
+        self.state.watch_surface(self.base + 60)
+        self.db.commit()                                     # the tick commits before a later one fails
+        cp = self.j.checkpoint()
+        self.refine(70, "Water", 1)                          # 48 s later: the refinery's last bin, same rig, unsaid
+        self.j.restore(cp)
+        self.db.rollback()
+        self.refine(70, "Water", 1)
+        self.state.watch_surface(self.base + 110)
+        self.assertEqual(self.out()[1]["tons"], 3)
+        self.assertEqual(self.texts(), ["Rig 1 placed.", "Rig 1: 2 tons of Water."])
+
+    def test_two_rigs_collected_within_the_minute_are_two_collections(self):
+        self.launch()
+        for s, north in ((10, 0), (20, 80)):
+            self.status(s, north, 0, heading=180)
+            self.state.mark_rig(self.base + s)
+        self.status(100, 7, 0)
+        self.refine(101, "Water", 10)
+        self.status(130, 87, 0)                               # 80 m on, 20 s after the last ton
+        self.refine(131, "Water", 2)
+        self.state.watch_surface(self.base + 170)
+        self.assertEqual(self.texts()[-2:], ["Rig 1: 10 tons of Water.", "Rig 2: 2 tons of Water."])
+        self.assertEqual({n: r["tons"] for n, r in self.out().items()}, {1: 10, 2: 2})
+
+    def test_tables_survive_a_journal_reread(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.sqlite")
+            db = ed_outrider.open_db(path)
+            db.execute("INSERT INTO surface_rigs (system, body_id, n, lat, lon, placed_ts, minerals, tons) VALUES (1, 2, 1, 0, 0, 'x', '{}', 0)")
+            db.execute("INSERT INTO surface_sites (system, body_id, lat, lon, minerals, tons) VALUES (1, 2, 0, 0, '{}', 3)")
+            db.execute("INSERT INTO mining_locations VALUES (1, 2, 3, 'B', 0, 0, 'x')")
+            ed_outrider.meta_set(db, "vehicle", {"srv_type": "mev_rhino", "ts": "x"})
+            db.commit(); db.close()
+            db = ed_outrider.open_db(path, rescan=True)
+            self.addCleanup(db.close)
+            for t in ("surface_rigs", "surface_sites", "mining_locations"):
+                self.assertEqual(db.execute(f"SELECT count(*) FROM {t}").fetchone()[0], 1, t)
+            self.assertIsNone(ed_outrider.meta_get(db, "vehicle"))   # journal-derived: rebuilt by the re-read
+        self.assertNotIn("surface_", ed_outrider.RESET_JOURNAL_DATA)
+        self.assertNotIn("mining_locations", ed_outrider.RESET_JOURNAL_DATA)
+
+    def test_show_hide_hysteresis(self):
+        show = lambda s, **kw: (self.status(s, **kw), self.state.surface_summary()["show"])[1]
+        self.assertTrue(show(1, flags=0, alt=900))
+        self.assertTrue(show(2, flags=0, alt=1050))           # between the two: unchanged
+        self.assertFalse(show(3, flags=0, alt=1150))
+        self.assertFalse(show(4, flags=0, alt=1050))          # still unchanged, from the other side
+        self.assertTrue(show(5, flags=0, alt=999))
+        self.assertFalse(show(6, flags=ed_outrider.FLAG_ALT_AVG, alt=500))   # altitude from the average radius
+        self.assertTrue(show(7, alt=None))                    # in the SRV, no altitude
+        self.assertTrue(show(8, flags=0, flags2=1, alt=None))  # on foot
+        self.assertFalse(show(9, flags=0, alt=None))          # flying with no altitude
+        sf = self.state.surface_summary()
+        self.assertEqual((sf["down"], sf["alt_avg"]), (False, False))   # the page's own show/hide altitude reads these
+        self.status(9, flags=ed_outrider.FLAG_ALT_AVG, alt=500)
+        self.assertEqual((self.state.surface_summary()["down"], self.state.surface_summary()["alt_avg"]), (False, True))
+        self.status(9, flags=ed_outrider.FLAG_LANDED, alt=0)
+        self.assertTrue(self.state.surface_summary()["down"])
+        self.status(9, flags=0, flags2=1, alt=None)
+        self.assertTrue(self.state.surface_summary()["down"])
+        self.status(10, flags=0, alt=500, BodyName=None)
+        self.assertIsNone(self.state.surface_summary())       # no body under you: no block at all
+
+    def test_the_map_bumps_on_5_m_or_10_degrees_twice_a_second_at_most(self):
+        self.status(1, 0, 0, heading=10)
+        self.assertTrue(self.state.surface_moved(100.0))
+        self.status(2, 3, 0, heading=15)
+        self.assertFalse(self.state.surface_moved(101.0))     # 3 m and 5 degrees
+        self.status(3, 6, 0, heading=15)
+        self.assertTrue(self.state.surface_moved(101.6))
+        self.status(4, 12, 0, heading=15)
+        self.assertFalse(self.state.surface_moved(101.9))     # 6 m more, but too soon
+        self.status(4, 6, 0, heading=359)
+        self.assertTrue(self.state.surface_moved(102.5))      # a 16 degree turn across north
+        self.status(5, 6, 0, heading=359, flags=0, alt=5000)
+        self.assertFalse(self.state.surface_moved(104.0))     # the map is hidden: no bumps
+
+    def test_ship_marker_survives_an_srv_or_on_foot_liftoff(self):
+        td = {"event": "Touchdown", "StarSystem": "S", "SystemAddress": self.SYS, "Body": self.NAME, "BodyID": self.BODY,
+              "Latitude": 1.5, "Longitude": 2.5, "PlayerControlled": True}
+        self.ev(10, td)
+        self.assertEqual((self.j.ship_marker["lat"], self.j.ship_marker["lon"]), (1.5, 2.5))
+        self.ev(20, {"event": "Liftoff", "SystemAddress": self.SYS, "BodyID": self.BODY, "Latitude": 1.5, "Longitude": 2.5,
+                     "PlayerControlled": False})       # dismissed with you on foot or in the SRV
+        self.assertIsNotNone(self.j.ship_marker)
+        self.ev(25, dict(td, Latitude=9.0, Taxi=True))         # an Apex shuttle is not your ship
+        self.assertEqual(self.j.ship_marker["lat"], 1.5)
+        self.status(26, 0, 0)
+        self.assertEqual(self.state.surface_summary()["ship"]["lat"], 1.5)
+        self.ev(30, {"event": "Liftoff", "SystemAddress": self.SYS, "BodyID": self.BODY, "PlayerControlled": True})
+        self.assertIsNone(self.j.ship_marker)
+        # no Touchdown seen on this body (the 30 Sep run): the SRV's launch spot is the ship's
+        self.status(40, 50, 60, flags=1 << 1)
+        self.launch(41)
+        self.assertAlmostEqual(self.j.ship_marker["lat"], 50 * 180 / math.pi / self.R)
+
+    def test_vehicle_and_a_relog_in_the_srv(self):
+        self.launch()
+        self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino")
+        self.ev(10, {"event": "LoadGame", "Commander": "X", "Ship": "Explorer_NX"})
+        self.ev(11, {"event": "Location", "InSRV": True, "StarSystem": "S", "SystemAddress": self.SYS, "StarPos": [0, 0, 0],
+                     "Body": self.NAME, "BodyID": self.BODY, "BodyType": "Planet"})
+        self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino")   # the SRV launched and never docked
+        self.status(12)
+        self.assertTrue(self.state.in_rhino())
+        self.launch(13)                                       # a relaunch read before Status.json catches up:
+        self.status(13, flags=1 << 1)                         # the in-SRV flag not set yet, same second
+        self.state.watch_surface(self.base + 13)
+        self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino")   # not taken for leaving the SRV
+        self.ev(20, {"event": "DockSRV", "SRVType": "mev_rhino", "ID": 51})
+        self.assertIsNone(self.j.vehicle)
+        self.ev(30, {"event": "Location", "InSRV": True, "StarSystem": "S", "SystemAddress": self.SYS, "StarPos": [0, 0, 0],
+                     "Body": self.NAME, "BodyID": self.BODY, "BodyType": "Planet"})
+        self.assertIsNone(self.j.vehicle["srv_type"])               # an SRV of unknown type: the button is unchanged
+        self.assertFalse(self.state.in_rhino())
+
+    def test_the_leash(self):
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        for s, north in ((20, 3000), (30, 3600), (40, 3700), (50, 4600), (60, 4700)):
+            self.status(s, north, 0)
+            self.state.watch_surface(self.base + s)
+        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away; it is lost at 5.",
+                                                   "Rig 1 is 4.6 kilometres away; it is lost at 5."])
+        self.status(70, 2000, 0)
+        self.state.watch_surface(self.base + 70)              # back in range: it may warn again
+        self.status(80, 5100, 0)
+        self.state.watch_surface(self.base + 80)
+        self.assertEqual(self.texts(("rig_leash",))[-1], "Rig 1 lost: over 5 kilometres from the Rhino.")
+        self.assertEqual(self.out(), {})
+        # leaving the body loses the rigs too; one that collected keeps its site
+        self.status(90, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 90)
+        self.status(100, 7, 0)
+        self.refine(101, "Gold", 2)
+        self.ev(200, {"event": "LeaveBody", "StarSystem": "S", "SystemAddress": self.SYS, "Body": self.NAME, "BodyID": self.BODY})
+        self.assertEqual(self.out(), {})
+        self.assertEqual([(s["kind"], s["tons"]) for s in self.state.surface_sites(self.SYS, self.BODY)], [("rig", 2)])
+
+    def test_mining_location_marker_and_sites_grouped_by_it(self):
+        dest = {"System": self.SYS, "Body": self.BODY, "Name": "$SAA_Unknown_Signal:#type=$PlanetaryMiningLocation_Name;:#index=3;"}
+        self.status(10, 500, 0, flags=0, alt=300, Destination=dest)
+        self.state.watch_surface(self.base + 10)              # flying: not arrived
+        self.assertEqual(self.db.execute("SELECT count(*) FROM mining_locations").fetchone()[0], 0)
+        self.status(20, 1000, 0, flags=1 << 1, Destination=dest)   # landed with it targeted
+        self.state.watch_surface(self.base + 20)
+        self.launch(30)
+        self.status(31, 1010, 0, heading=180, Destination=dest)
+        self.state.watch_surface(self.base + 31)              # in the SRV: the landing's marker stays
+        loc = self.state.surface_summary()["locations"]
+        self.assertEqual([(l["n"], round(l["dist"])) for l in loc], [(3, 10)])
+        self.state.mark_rig(self.base + 32)
+        self.status(40, 1017, 0)
+        self.refine(41, "Water", 2)
+        self.state.watch_surface(self.base + 80)
+        self.status(90, 1017, 0, heading=0)
+        self.state.mark_rig(self.base + 90)                   # pick it up: now a saved site
+        self.status(200, 9000, 0)
+        self.refine(201, "Gold", 1)                           # far from L3: an unmarked site of no location
+        sites = self.state.surface_sites(self.SYS, self.BODY, self.state.surface_here())
+        self.assertEqual([(s["kind"], s["location"], s["tons"]) for s in sites], [("rig", 3, 2), ("site", None, 1)])
+        # a location on another body is not this body's
+        self.db.execute("INSERT INTO own_bodies (system, body_id, name) VALUES (?, 12, 'other')", (self.SYS,))
+        self.status(110, 9000, 0, flags=1 << 1, Destination=dict(dest, Body=12, Name=dest["Name"].replace("=3", "=5")))
+        self.state.watch_surface(self.base + 110)
+        self.assertEqual([r[0] for r in self.db.execute("SELECT idx FROM mining_locations")], [3])
+
+    def test_payload_block(self):
+        self.ev(3, {"event": "Touchdown", "SystemAddress": self.SYS, "Body": self.NAME, "BodyID": self.BODY,
+                    "Latitude": 0.0, "Longitude": 0.0, "PlayerControlled": True})
+        self.launch(4)
+        self.db.execute("INSERT INTO own_organic (system, body_id, species, genus_name, species_name, samples, ts) "
+                        "VALUES (?, ?, 'sp_a', 'Bacterium', 'Bacterium Aurasus', 1, ?)", (self.SYS, self.BODY, self.ts(5)))
+        self.db.execute("INSERT INTO own_organic (system, body_id, species, genus_name, species_name, samples, ts) "
+                        "VALUES (?, ?, 'sp_b', 'Stratum', 'Stratum Tectonicas', 2, ?)", (self.SYS, self.BODY, self.ts(4)))
+        k = 180 / math.pi / self.R
+        self.db.execute("INSERT INTO sample_points VALUES (?, ?, 'sp_a', '$Codex_Ent_Bacterial_Genus_Name;', 1, ?, 0, ?)",
+                        (self.SYS, self.BODY, 600 * k, self.ts(5)))
+        self.db.execute("INSERT INTO sample_points VALUES (?, ?, 'sp_b', '$Codex_Ent_Stratum_Genus_Name;', 1, ?, 0, ?)",
+                        (self.SYS, self.BODY, 100 * k, self.ts(4)))
+        self.status(10, 0, 0, heading=180)
+        self.state.mark_rig(self.base + 10)
+        p = self.state.payload()
+        sf = p["surface"]
+        self.assertEqual((sf["body"], sf["body_id"], sf["heading"], sf["show"], sf["rhino"]), ("ABC 3 d", 19, 180, True, True))
+        self.assertEqual(sf["ship"]["dist"], 0)
+        self.assertEqual([(r["n"], r["dist"], r["tons"], r["full"]) for r in sf["rigs"]], [(1, 7, 0, False)])
+        self.assertEqual([(b["species"], b["current"], b["need"], b["clear"]) for b in sf["bio"]],
+                         [("Bacterium Aurasus", True, 500, True), ("Stratum Tectonicas", False, 500, False)])
+        self.assertEqual(p["defaults"]["rig_spacing"], 78)
+        self.assertTrue(self.state.surface_summary(now=self.base + 10 + 481)["rigs"][0]["full"])   # 8 min: probably full
+
+    def test_mining_sites_list(self):
+        """Batch M3: Materials' Mining sites, one entry per body: a rig and two unmarked sites on ABC 3 d (Water twice,
+        combined), own_mined on another body only, tons never counted twice, and forget keeping the mined history."""
+        self.launch()
+        self.status(10, 0, 0, heading=0)
+        self.state.mark_rig(self.base + 10)                       # rig 1, 7 m south
+        self.status(20, -7, 0, heading=0)
+        self.refine(20, "Water", 4)
+        self.status(200, 500, 0)
+        self.refine(200, "Methanol Monohydrate Crystals", 3)      # far from the rig: an unmarked site
+        self.status(400, 1000, 0)
+        self.refine(400, "Water", 2)                              # another unmarked site
+        self.state.journals.end_burst(self.base + 1000, force=True)
+        self.db.execute("INSERT INTO mining_locations VALUES (?, ?, 3, ?, 0, 0, 'x')", (self.SYS, self.BODY, self.NAME))
+        self.db.execute("INSERT INTO mining_locations VALUES (?, 5, 1, 'elsewhere', 0, 0, 'x')", (self.SYS,))  # nothing mined
+        self.db.execute("INSERT INTO own_mined VALUES (?, 7, 'gold', 'Gold', 5, ?, ?, '')", (self.SYS, self.ts(1), self.ts(1)))
+        sites = {s["body_id"]: s for s in self.state.mining_sites()}
+        self.assertEqual(sorted(sites), [7, self.BODY])
+        abc = sites[self.BODY]
+        self.assertEqual((abc["system"], abc["id"], abc["body"], abc["distance"]), ("Smojooe AR-E b25-8", str(self.SYS), "ABC 3 d", 0.0))
+        self.assertEqual(abc["minerals"], [{"name": "Water", "tons": 6}, {"name": "Methanol Monohydrate Crystals", "tons": 3}])
+        self.assertEqual((abc["tons"], abc["rigs"], abc["unmarked"], abc["locations"], abc["saved"]), (9, 1, 2, [3], True))
+        self.assertEqual(abc["last"], self.ts(401))
+        self.assertEqual((sites[7]["body"], sites[7]["minerals"], sites[7]["saved"]), ("body 7", [{"name": "Gold", "tons": 5}], False))
+        self.state.forget_sites(self.SYS, self.BODY)             # the rig is still out, so it stays
+        abc = {s["body_id"]: s for s in self.state.mining_sites()}[self.BODY]
+        self.assertEqual((abc["tons"], abc["rigs"], abc["unmarked"], abc["locations"]), (9, 1, 0, []))
+        self.state.mark_rig(self.base + 1100)                    # not by the rig: a new one (empty rigs are not sites)
+        self.status(1110, -7, 0, heading=0)
+        self.state.mark_rig(self.base + 1110)                    # by rig 1: picked up, kept as a saved site
+        self.state.forget_sites(self.SYS, self.BODY)
+        abc = {s["body_id"]: s for s in self.state.mining_sites()}[self.BODY]
+        self.assertEqual((abc["tons"], abc["rigs"], abc["saved"]), (6 + 3, 0, False))   # the mined history stays
+
+    def test_rig_restock_recipe(self):
+        inv = ed_materials.inventory({"counts": {"iron": 10, "nickel": 5, "mechanicalequipment": 4}, "names": {}})
+        r = next(x for x in inv["synthesis"] if x["name"] == "Mining rig restock")
+        self.assertEqual((r["craftable"], r["limit"]), (2, "Nickel"))
+        self.assertEqual([(m["name"], m["need"]) for m in r["materials"]], [("Iron", 3), ("Nickel", 2), ("Mechanical Equipment", 1)])
+        self.assertEqual(ed_materials.MATERIALS["mechanicalequipment"], ("Mechanical Equipment", "Manufactured", 2))
+        self.assertEqual(ed_materials.craftable({"iron": 30, "nickel": 20}, r and ed_materials.SYNTH["Mining rig restock"]["materials"]),
+                         (0, "mechanicalequipment"))
+
+    def test_endpoints(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        self.launch()
+        self.status(10, 0, 0, heading=180)
+        rid = self.state.mark_rig(self.base + 10)["id"]
+        self.db.execute("INSERT INTO surface_sites (system, body_id, lat, lon, minerals, tons) VALUES (?, ?, 0, 0, '{}', 3)",
+                        (self.SYS, self.BODY))
+        self.db.execute("INSERT INTO mining_locations VALUES (?, ?, 1, 'B', 0, 0, 'x')", (self.SYS, self.BODY))
+
+        async def go():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                mat = await (await c.get("/api/materials")).json()
+                self.assertEqual([x["unmarked"] for x in mat["mining_sites"]], [1])
+                r1 = await c.post("/api/rigs/remove", json={"id": rid}, headers={"Origin": "http://evil.example"})
+                r2 = await c.post("/api/rigs/remove", json={"id": "x"})
+                r3 = await c.post("/api/rigs/remove", json={"id": rid})
+                r4 = await c.post("/api/rigs/remove", json={"id": rid})
+                r5 = await c.post("/api/sites/forget", json={"system": str(self.SYS), "body": self.BODY})
+                r6 = await c.post("/api/sites/forget", json={"system": "nope"})
+                return [r.status for r in (r1, r2, r3, r4, r5, r6)], await r5.json()
+        statuses, forgot = asyncio.run(go())
+        self.assertEqual(statuses, [403, 400, 200, 404, 200, 400])
+        self.assertEqual(forgot["forgot"], 2)
+        for t in ("surface_rigs", "surface_sites", "mining_locations"):
+            self.assertEqual(self.db.execute(f"SELECT count(*) FROM {t}").fetchone()[0], 0, t)
+
+    def test_config_keys(self):
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = ed_outrider.settings_from({}, args, None, ([], []))
+        self.assertEqual((st["surface_alt"], st["rig_spacing"], st["surface_map_min"], st["surface_map_strip"], st["rig_warn"]),
+                         (1000, 78, 500, False, 3500))
+        back = tomllib.loads(ed_outrider.config_text(st))["defaults"]
+        self.assertEqual((back["surface_alt"], back["rig_spacing"], back["surface_map_min"], back["surface_map_strip"], back["rig_warn"]),
+                         (1000, 78, 500, False, 3500))
+        st = ed_outrider.settings_from({"defaults": {"rig_warn": 9000, "rig_spacing": -1}}, args, None, ([], []))
+        self.assertEqual((st["rig_warn"], st["rig_spacing"]), (4900, 0))
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ed_outrider.toml.example")) as f:
+            example = f.read()
+        for key in ("surface_alt", "rig_spacing", "surface_map_min", "surface_map_strip", "rig_warn"):
+            self.assertIn(f"# {key} = ", example)
+
+    def test_replay_of_the_rhino_session(self):
+        """The author's 30 Sep Rhino run on ABC 3 d (journal and Status.json as recorded), with the presses where the
+        recording shows the rigs were placed: rig 1 at 03:10:13, rig 2 at 03:22:59, and at 03:35:21 (rig 2 still out,
+        so that press is rig 3). Water 10 from rig 1; Methanol 11 + 3 + 6 from rig 2."""
+        presses = {"2026-09-30T03:10:13Z", "2026-09-30T03:22:59Z", "2026-09-30T03:35:21Z"}
+        t0 = ed_outrider.ts_seconds("2026-09-30T03:06:00Z")
+        db = ed_outrider.open_db(":memory:")
+        self.addCleanup(db.close)
+        j = ed_outrider.Journals(db)
+        import types
+        state = ed_outrider.State(db, j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        clock = [t0]
+        with unittest.mock.patch.object(ed_outrider.time, "time", lambda: clock[0]):
+            for i, line in enumerate(RHINO_SESSION):
+                kind, doc = line[0], json.loads(line[2:])
+                t = ed_outrider.ts_seconds(doc["timestamp"])
+                while clock[0] < t:              # the watch loop's ticks in between
+                    clock[0] += 1
+                    state.watch_surface(clock[0])
+                if kind == "S":
+                    with open(os.path.join(self.dir, "Status.json"), "w") as f:
+                        json.dump(doc, f)
+                    j.read_status(self.dir)
+                    if doc["timestamp"] in presses:
+                        state.mark_rig(t)
+                else:
+                    j.line_source = f"Journal.2026-09-29T223726.01.log:{i}"
+                    j.handle(doc)
+                    j.line_source = ""
+            for _ in range(90):
+                clock[0] += 1
+                state.watch_surface(clock[0])
+        said = [m["text"] for m in j.moments if m["kind"] in ("rig", "rig_leash")]
+        self.assertEqual(said, ["Rig 1 placed.", "Rig 1: 10 tons of Water.", "Rig 2 placed.",
+                                "Rig 2: 11 tons of Methanol Monohydrate Crystals.",
+                                "Rig 2: 3 tons of Methanol Monohydrate Crystals.", "Rig 3 placed.",
+                                "Rig 2: 6 tons of Methanol Monohydrate Crystals."])
+        water = [m for m in j.moments if m.get("what") == "collected"][0]
+        self.assertEqual((water["lat"], water["lon"]), (-53.794037, -144.581116))   # where the Water was refined
+        rigs = {r["n"]: r for r in db.execute("SELECT * FROM surface_rigs")}
+        self.assertEqual({n: (json.loads(r["minerals"]), r["tons"]) for n, r in rigs.items()},
+                         {1: ({"Water": 10}, 10), 2: ({"Methanol Monohydrate Crystals": 20}, 20), 3: ({}, 0)})
+        self.assertEqual((rigs[1]["site_lat"], rigs[1]["site_lon"]), (-53.794037, -144.581116))
+        r = 1204549.875
+        self.assertLess(ed_outrider.surface_m(rigs[1]["lat"], rigs[1]["lon"], -53.794037, -144.581116, r), 10)
+        self.assertLess(ed_outrider.surface_m(rigs[2]["lat"], rigs[2]["lon"], -53.868797, -144.483139, r), 1)   # 7 m behind: spot on
+        self.assertEqual(db.execute("SELECT count(*) FROM surface_sites").fetchone()[0], 0)   # every collection had its rig
+        # the journal's own count agrees, ton for ton
+        self.assertEqual({x["name"]: x["tons"] for x in db.execute("SELECT * FROM own_mined")},
+                         {"Water": 10, "Methanol Monohydrate Crystals": 20})
+        self.assertIsNone(j.vehicle)                     # docked
+        self.assertFalse(state.in_rhino())
+
+
+# The author's Rhino run of 2026-09-30 on Smojooe AR-E b25-8 ABC 3 d: the journal lines (Journal.2026-09-29T223726.01.log)
+# and the Status.json changes recorded during it (Pips, Fuel, FireGroup, LegalState and Balance left out), trimmed to the
+# presses and the collections. "S " = Status.json, "J " = a journal line.
+RHINO_SESSION = [
+    'J {"timestamp":"2026-09-30T02:53:30Z", "event":"Location", "Docked":true, "StationName":"G0X-85Z", "StationType":"FleetCarrier", "StarSystem":"Smojooe AR-E b25-8", "SystemAddress":18207037532889, "StarPos":[-4177.09375, -1.0, 3324.53125]}',
+    'J { "timestamp":"2026-09-30T03:06:20Z", "event":"SupercruiseExit", "Taxi":false, "Multicrew":false, "StarSystem":"Smojooe AR-E b25-8", "SystemAddress":18207037532889, "Body":"Smojooe AR-E b25-8 ABC 3 d", "BodyID":19, "BodyType":"Planet" }',
+    'J { "timestamp":"2026-09-30T03:07:25Z", "event":"LaunchSRV", "SRVType":"mev_rhino", "SRVType_Localised":"SRV Rhino", "Loadout":"base", "ID":51, "PlayerControlled":true }',
+    'S {"timestamp":"2026-09-30T03:10:13Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":0.0, "Latitude":-53.79417, "Longitude":-144.581131, "Heading":177, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:16:46Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":4, "Cargo":0.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:16:48Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":3, "Cargo":0.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:16:49Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":1, "Cargo":0.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:16:56Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'J { "timestamp":"2026-09-30T03:16:56Z", "event":"MaterialCollected", "Category":"Raw", "Name":"nickel", "Count":1 }',
+    'S {"timestamp":"2026-09-30T03:16:57Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":1, "Cargo":2.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:16:57Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'J { "timestamp":"2026-09-30T03:16:58Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:16:59Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":1, "Cargo":4.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:16:59Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:00Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":4.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:17:00Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:01Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":5.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:17:02Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:02Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":6.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:17:03Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:03Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":7.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:17:04Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":8.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:17:04Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'J { "timestamp":"2026-09-30T03:17:05Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:06Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":9.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:17:07Z", "event":"MiningRefined", "Type":"$water_name;", "Type_Localised":"Water" }',
+    'S {"timestamp":"2026-09-30T03:17:07Z", "event":"Status", "Flags":203456584, "Flags2":0, "GuiFocus":0, "Cargo":10.0, "Latitude":-53.794037, "Longitude":-144.581116, "Heading":176, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:22:59Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":10.0, "Latitude":-53.869118, "Longitude":-144.48291, "Heading":158, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:29:46Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":10.0, "Latitude":-53.868958, "Longitude":-144.482742, "Heading":302, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:50Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:51Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":11.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:51Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:52Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":12.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:53Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:53Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":13.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:54Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:55Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":14.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:55Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:56Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":15.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:57Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:57Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":16.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:58Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:29:59Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":17.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:29:59Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:30:00Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":18.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:30:01Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:30:02Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":19.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:30:03Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:30:03Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":20.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:30:04Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:30:05Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":21.0, "Latitude":-53.868797, "Longitude":-144.483139, "Heading":303, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:33:17Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":21.0, "Latitude":-53.868618, "Longitude":-144.483551, "Heading":310, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:33:18Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:33:19Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":22.0, "Latitude":-53.868687, "Longitude":-144.483444, "Heading":309, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:33:20Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:33:20Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":23.0, "Latitude":-53.868687, "Longitude":-144.483444, "Heading":309, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:33:21Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":24.0, "Latitude":-53.868687, "Longitude":-144.483444, "Heading":309, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:33:21Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:33:23Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":2, "Cargo":24.0, "Latitude":-53.868687, "Longitude":-144.483444, "Heading":309, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:33:28Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":24.0, "Latitude":-53.868687, "Longitude":-144.483444, "Heading":309, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:35:21Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":24.0, "Latitude":-53.869404, "Longitude":-144.481781, "Heading":323, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:29Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":24.0, "Latitude":-53.869209, "Longitude":-144.482346, "Heading":310, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:30Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":24.0, "Latitude":-53.8689, "Longitude":-144.48291, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:31Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":25.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:38:31Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'J { "timestamp":"2026-09-30T03:38:32Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:38:33Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":26.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:38:34Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:38:34Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":27.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:35Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":28.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:38:35Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'J { "timestamp":"2026-09-30T03:38:36Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:38:37Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":29.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:38:37Z", "event":"MiningRefined", "Type":"$methanolmonohydratecrystals_name;", "Type_Localised":"Methanol Monohydrate Crystals" }',
+    'S {"timestamp":"2026-09-30T03:38:38Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:41Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":2, "Cargo":30.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:38:45Z", "event":"Status", "Flags":471892040, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.86887, "Longitude":-144.482971, "Heading":308, "Altitude":1, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:41:17Z", "event":"Status", "Flags":471908424, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.864246, "Longitude":-144.48613, "Heading":346, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'J { "timestamp":"2026-09-30T03:41:31Z", "event":"DockSRV", "SRVType":"mev_rhino", "SRVType_Localised":"SRV Rhino", "ID":51 }',
+    'S {"timestamp":"2026-09-30T03:41:31Z", "event":"Status", "Flags":471875656, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.864037, "Longitude":-144.486206, "Heading":341, "Altitude":0, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+    'S {"timestamp":"2026-09-30T03:41:33Z", "event":"Status", "Flags":153092104, "Flags2":0, "GuiFocus":0, "Cargo":30.0, "Latitude":-53.861923, "Longitude":-144.487473, "Heading":341, "Altitude":30, "BodyName":"Smojooe AR-E b25-8 ABC 3 d", "PlanetRadius":1204549.875}',
+]

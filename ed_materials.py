@@ -134,6 +134,8 @@ SYNTH = {
     "SRV refuel basic": {"materials": {"phosphorus": 1, "sulphur": 1}, "verified": True},
     "SRV repair basic": {"materials": {"iron": 2, "nickel": 1}, "verified": True},
     "Limpet basic": {"materials": {"iron": 10, "nickel": 10}, "verified": True},
+    # the Rhino's mining rigs (CMDR Dunn Actual's Rhino Planetary Mining guide, v0.6)
+    "Mining rig restock": {"materials": {"iron": 3, "nickel": 2, "mechanicalequipment": 1}, "verified": False},
 }
 BOOSTS = ("basic", "standard", "premium")
 # The jumponium call-out: the scarce FSD-injection materials worth a landing, with the least share of a body's
