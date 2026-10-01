@@ -17,7 +17,8 @@
     <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
       <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button></span>
   </div>
-  <div class="tiles">
+  <div class="tilewrap">
+  <div class="tiles" id="tiles">
     <div class="tile" id="tWhere"><div class="lbl">Where I Am Currently:</div><div class="val" id="here">loading…</div><div class="ln" id="refLn" title="distance from Sol and from Colonia (Eol Prou RS-T d3-94)"></div>
       <div class="ln" id="sub"><b id="subKnown">…</b> known within <select id="radiusSel" title="how far around you Nearby lists systems (a bigger sphere takes longer to fill in the first time)"></select> ly · <b id="subUnvisited">…</b> not visited<span id="subCut"></span></div>
       <div class="ln" id="subJump"></div><div class="ln" id="whereLn"></div><div class="ln" id="streakLn"></div><div class="ln" id="horizonLn"></div><div class="ln" id="nextStopLn"></div></div>
@@ -26,6 +27,9 @@
     <div class="tile" id="tCarrier"><div class="lbl">Carrier</div><div id="carrierLine"></div></div>
     <div class="tile" id="tUnsold" data-unsold><div class="lbl">Unsold</div><div id="unsold"></div><div class="ln" id="firstsLine"></div></div>
     <div class="tile" id="tData"><div class="lbl">Data</div><div id="freshLine"></div><div class="ln" id="statusLine"></div><div class="ln" id="backupLine"></div></div>
+  </div>
+  <div id="tilesLine" class="tilesline" hidden></div>
+  <button type="button" id="tilesBtn" class="tilesbtn" aria-controls="tiles" aria-expanded="true" title="fold the six tiles into one line">▴</button>
   </div>
   <div id="target"></div>
   <div id="routeStrip"></div>
@@ -66,21 +70,23 @@
     <label><input type="checkbox" id="oneJump"> one jump only</label>
     <span class="unk">click a column heading to sort</span>
   </div>
+<div class="pane" id="nearPane">
 <table id="nearTable">
   <thead><tr>
-    <th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="num hide-sm" title="jumps at your max range">Jumps</th><th>Status</th><th>Main star</th>
-    <th>Bodies</th><th>Notable</th><th class="num hide-sm" data-sort="value" title="what selling now would pay for data you hold from this system / the most it could pay once fully scanned, mapped and sampled">Value now / max</th><th class="num hide-sm">Known</th>
+    <th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="num hide-sm c2hide" title="jumps at your max range">Jumps</th><th class="c2hide">Status</th><th>Main star</th>
+    <th>Bodies</th><th class="c2hide">Notable</th><th class="num hide-sm" data-sort="value" title="what selling now would pay for data you hold from this system / the most it could pay once fully scanned, mapped and sampled">Value now / max</th><th class="num hide-sm c2hide">Known</th>
   </tr></thead>
   <tbody id="rows"></tbody>
 </table>
 </div>
+</div>
 <section id="hereView" hidden>
   <div id="hereHead"></div>
   <div id="hereLeaving"></div>
-  <div id="hereMain">
+  <div id="hereMain" class="pane">
   <table id="hereTable">
-    <thead><tr><th>Body</th><th>Class</th><th class="num">Dist ls</th><th class="num" title="surface gravity in g">Grav</th><th class="hide-sm">Atmosphere</th>
-      <th title="biological and geological signals">Bio / Geo</th><th class="num" title="planetary mining locations (hover or tap a count for the likely minerals)">⛏</th><th>Rings</th><th>Firsts</th><th class="num" title="what this body's data would pay if sold now">Now</th><th class="num" id="hereMaxTh" title="the most it could pay once scanned, mapped and sampled">Max</th></tr></thead>
+    <thead><tr><th>Body</th><th>Class</th><th class="num c2hide">Dist ls</th><th class="num" title="surface gravity in g">Grav</th><th class="hide-sm c2hide">Atmosphere</th>
+      <th title="biological and geological signals">Bio / Geo</th><th class="num c2hide" title="planetary mining locations (hover or tap a count for the likely minerals)">⛏</th><th class="c2hide">Rings</th><th class="c2hide">Firsts</th><th class="num c2hide" title="what this body's data would pay if sold now">Now</th><th class="num" id="hereMaxTh" title="the most it could pay once scanned, mapped and sampled">Max</th></tr></thead>
     <tbody id="hereRows"></tbody>
   </table>
   <div id="hereSchematic" hidden></div>
@@ -88,7 +94,7 @@
     pay today; <b>Max</b> adds what is still there to scan, map and sample. Bio pays ×5 where nobody had set foot when you scanned
     (×1 for bodies you have not scanned). 3/3 ✓ means a species is analysed.</div>
   </div>
-  <div id="bodyPanel" hidden></div>
+  <div id="bodyPanel" class="pane" hidden></div>
   <div id="ovMap" hidden><div class="smap"><canvas id="ovMapCanvas" aria-label="surface map: heading up, you at the centre"></canvas></div><div id="ovMapLegend" class="smap-legend"></div></div>
 </section>
 <section id="firstsView" hidden>
@@ -96,9 +102,10 @@
     <label><input type="checkbox" id="fShowLost"> show lost</label>
     <label title="with show lost: only the systems with lost data to rescan within this many ly of you, nearest first (empty: no limit)">within <input type="number" id="fWithin" min="1" step="any" placeholder="any" inputmode="decimal"> ly</label><span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=firsts&format=csv" download>CSV</a> · <a href="api/export?what=firsts&format=json" download>JSON</a></span></div>
+  <div class="pane" id="firstsPane">
   <table id="firstsTable">
-    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="f-unsold">System tag</th><th class="f-by">Bodies</th><th class="f-by">Mapped</th><th class="f-unsold" title="the firsts watch: someone else has scanned this since you (their scans reached Spansh)">Seen by others</th>
-      <th class="num f-lost" title="what the bodies still to scan pay (FSS; with the first discovery bonus)"><span class="hide-sm">Lost: </span>scan (FSS)</th><th class="num f-lost" title="what the maps still to redo add on top of the scans (DSS; with the first mapped bonus)"><span class="hide-sm">Lost: </span>map (DSS)</th><th class="num f-lost" data-sort="lost" title="scan + map: what rescanning and remapping everything still lost would get back (click to sort)">Lost <span class="hide-sm">total</span></th><th class="num" data-sort="value">Unsold <span class="hide-sm">value</span></th></tr></thead>
+    <thead><tr><th></th><th data-sort="name">System</th><th class="num" data-sort="distance">Dist</th><th class="f-unsold">System tag</th><th class="f-by">Bodies</th><th class="f-by c2hide">Mapped</th><th class="f-unsold c2hide" title="the firsts watch: someone else has scanned this since you (their scans reached Spansh)">Seen by others</th>
+      <th class="num f-lost c2hide" title="what the bodies still to scan pay (FSS; with the first discovery bonus)"><span class="hide-sm">Lost: </span>scan (FSS)</th><th class="num f-lost c2hide" title="what the maps still to redo add on top of the scans (DSS; with the first mapped bonus)"><span class="hide-sm">Lost: </span>map (DSS)</th><th class="num f-lost" data-sort="lost" title="scan + map: what rescanning and remapping everything still lost would get back (click to sort)">Lost <span class="hide-sm">total</span></th><th class="num" data-sort="value">Unsold <span class="hide-sm">value</span></th></tr></thead>
     <tbody id="firstsRows"></tbody>
   </table>
   <div class="hint">Every visited system that still holds first-discovery or first-mapping data you have not sold (or lost). Unsold value is
@@ -117,6 +124,7 @@
   </table>
   <div class="hint">Mapping counts when it would add at least your green-row level; exobiology when a genus the DSS found could pay over your
     bio threshold (its best species; plain prices). ⌖ opens the system in Here.</div>
+  </div>
 </section>
 <section id="histView" hidden>
   <div id="lastSession" class="lastsession" hidden></div>
@@ -130,24 +138,26 @@
       <a href="api/export?what=trips&format=csv" download>trips</a> · <a href="api/export?what=route&format=csv" download>route</a> ·
       <a href="api/export?what=unsold&format=csv" download>unsold data</a> <span class="unk">(CSV; add &amp;format=json for JSON)</span></span>
   </div>
+  <div class="pane" id="histPane">
   <table id="histTable">
-    <thead><tr><th>Session</th><th class="num">Jumps</th><th class="num">ly</th><th class="num hide-sm">Max from Sol</th>
-      <th class="num">🏁 systems</th><th class="num hide-sm">bodies</th><th class="num">mapped</th><th class="num hide-sm">👣</th><th class="num">🧬</th><th class="num hide-sm">📖</th></tr></thead>
+    <thead><tr><th>Session</th><th class="num">Jumps</th><th class="num">ly</th><th class="num hide-sm c2hide">Max from Sol</th>
+      <th class="num">🏁 systems</th><th class="num hide-sm c2hide">bodies</th><th class="num">mapped</th><th class="num hide-sm">👣</th><th class="num">🧬</th><th class="num hide-sm c2hide">📖</th></tr></thead>
     <tbody id="histAll"></tbody>
     <tbody id="histRows"></tbody>
   </table>
   <h3 class="subhead">Trips <span class="unk">· sale to sale, with what Universal Cartographics and Vista Genomics actually paid</span></h3>
   <table id="tripTable">
     <thead><tr><th>Trip</th><th class="num">days</th><th class="num">jumps</th><th class="num hide-sm">ly</th><th class="num">🏁</th>
-      <th class="num">paid</th><th class="num hide-sm" title="Outrider's estimate just before the sale (recorded from now on)">estimate</th>
-      <th class="num hide-sm" title="per hour of jump-to-jump play">cr/h</th><th class="num hide-sm">cr/jump</th><th class="num hide-sm" title="systems first discovered per jump">% new</th><th>ship losses</th></tr></thead>
+      <th class="num">paid</th><th class="num hide-sm c2hide" title="Outrider's estimate just before the sale (recorded from now on)">estimate</th>
+      <th class="num hide-sm c2hide" title="per hour of jump-to-jump play">cr/h</th><th class="num hide-sm c2hide">cr/jump</th><th class="num hide-sm c2hide" title="systems first discovered per jump">% new</th><th>ship losses</th></tr></thead>
     <tbody id="tripRows"></tbody>
   </table>
   <h3 class="subhead">Most valuable finds <span class="unk">· cartographics, with the bonuses you earned</span></h3>
   <table id="topTable">
-    <thead><tr><th>Body</th><th>Type</th><th class="num">Value</th><th>State</th><th class="hide-sm">Scanned</th></tr></thead>
+    <thead><tr><th>Body</th><th>Type</th><th class="num">Value</th><th>State</th><th class="hide-sm c2hide">Scanned</th></tr></thead>
     <tbody id="topRows"></tbody>
   </table>
+  </div>
 </section>
 <section id="logView" hidden>
   <div class="srow">
@@ -166,14 +176,16 @@
     <input type="search" id="lFilter" placeholder="search events" class="filter">
     <span id="lStatus" class="unk"></span>
   </div>
+  <div class="pane" id="logPane">
   <table id="logTable">
-    <thead><tr><th>Time</th><th></th><th class="hide-sm">Event</th><th>What happened</th><th>System</th></tr></thead>
+    <thead><tr><th>Time</th><th></th><th class="hide-sm c2hide">Event</th><th>What happened</th><th>System</th></tr></thead>
     <tbody id="logRows"></tbody>
   </table>
   <div class="btns"><button type="button" id="lMore" hidden>More</button></div>
   <div class="hint">Every journal event, newest first, read straight from your journal files; new events appear as they happen.
     Click a row for the raw event. <b>Noise</b> is chatter, music, inventory snapshots and signal-source pings.
     Click a system to copy it, ⌖ to open it in Here, 🔍 to open that body.</div>
+  </div>
 </section>
 <section id="matView" hidden>
   <div class="srow">
@@ -181,12 +193,14 @@
     <label><input type="checkbox" id="mHeld"> held only</label>
     <span id="matStatus" class="unk"></span>
   </div>
+  <div class="pane" id="matPane">
   <div id="matSynth"></div>
   <div id="matSources"></div>
   <div id="matSites"></div>
   <div id="matGrid"></div>
   <div class="hint">Counts come from the snapshot the game writes at every login, updated by what you collect, trade, discard,
     synthesise and spend at engineers since. The next login corrects any drift. Bars show how full each material's storage is.</div>
+  </div>
 </section>
 <section id="bioView" hidden>
   <div class="srow">
@@ -199,27 +213,33 @@
     <span class="exports">Export: <a href="api/export?what=organics&format=csv" download>CSV</a> · <a href="api/export?what=organics&format=json" download>JSON</a></span>
   </div>
   <div id="bStatus" class="status"></div>
+  <div class="pane" id="bioPane">
   <table id="bioTable">
     <thead><tr><th data-bsort="ts">When</th><th data-bsort="system">System</th><th data-bsort="body">Body</th><th data-bsort="genus">Genus</th>
-      <th data-bsort="species">Species</th><th class="hide-sm" data-bsort="variant">Variant</th><th class="num" data-bsort="samples">Samples</th>
+      <th class="c2hide" data-bsort="species">Species</th><th class="hide-sm c2hide" data-bsort="variant">Variant</th><th class="num c2hide" data-bsort="samples">Samples</th>
       <th data-bsort="state">State</th><th class="num" data-bsort="value" title="Vista Genomics payout, ×5 where nobody had set foot when you scanned the body">Value</th></tr></thead>
     <tbody id="bioRows"></tbody>
   </table>
   <h3 class="subhead">Codex entries <span id="cStatus" class="unk"></span></h3>
   <table id="codexTable">
-    <thead><tr><th>When</th><th>Entry</th><th class="hide-sm">Category</th><th class="hide-sm">Region</th><th>System</th><th></th></tr></thead>
+    <thead><tr><th>When</th><th>Entry</th><th class="hide-sm c2hide">Category</th><th class="hide-sm c2hide">Region</th><th>System</th><th></th></tr></thead>
     <tbody id="codexRows"></tbody>
   </table>
   <div class="hint">Click a system name to copy it; click ⌖ to open that system in Here. A sample is <b>aboard</b> until a Vista Genomics
     sale banks it and <b>lost</b> if your ship was destroyed first. Codex vouchers are paid on the spot.</div>
+  </div>
 </section>
+<section id="bmView" hidden>
 <div id="bmTools" hidden class="srow"><span class="grow"></span><span class="exports">Export: <a href="api/export?what=bookmarks&format=csv" download>CSV</a> · <a href="api/export?what=bookmarks&format=json" download>JSON</a></span></div>
+<div class="pane" id="bmPane">
 <table id="bmTable" hidden>
   <thead><tr>
-    <th></th><th data-sort="name">Bookmarked system</th><th class="num" data-sort="distance">Dist</th><th>Note</th><th class="hide-sm">Saved</th>
+    <th></th><th data-sort="name">Bookmarked system</th><th class="num" data-sort="distance">Dist</th><th>Note</th><th class="hide-sm c2hide">Saved</th>
   </tr></thead>
   <tbody id="bmRows"></tbody>
 </table>
+</div>
+</section>
 <section id="mapView" hidden>
   <div class="mapbar">
     <label>Radius <select id="mRadius"><option>50</option><option>100</option><option>150</option>
@@ -242,6 +262,7 @@
     The grid is the galactic plane through your position; stalks drop each system onto it.</div>
 </section>
 <section id="searchView" hidden>
+  <div class="pane" id="searchPane">
   <form id="findForm" class="srow">
     <label>Find a system by name <input type="search" id="findName" maxlength="100" placeholder="e.g. Synuefe XR-H d11-102"
       autocomplete="off" spellcheck="false"></label>
@@ -294,6 +315,7 @@
   </table>
   </div>
   <div id="sBodyPanel" class="bodypanel" hidden></div>
+  </div>
   </div>
 </section>
 </main>

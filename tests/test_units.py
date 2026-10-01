@@ -9215,6 +9215,13 @@ class ReviewBatchF(unittest.TestCase):
         with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
             self.assertIn("module_warn = 80", f.read())
 
+    def test_tiles_collapsed_is_a_shared_setting(self):
+        # the header tiles folded into one line: per browser, exported, and accepted as a server copy for new browsers
+        self.assertIn("tilesCollapsed", ed_outrider.BROWSER_SETTINGS)
+        doc, err = ed_outrider.check_browser_defaults({"version": 1, "settings": {"tilesCollapsed": True}})
+        self.assertIsNone(err)
+        self.assertTrue(doc["settings"]["tilesCollapsed"])
+
     # ---- S10: This session ----
     def jump(self, ts, id64, x):
         self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}", "SystemAddress": id64, "StarPos": [x, 0, 0]})

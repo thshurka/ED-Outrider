@@ -166,6 +166,14 @@ notes and your <b>next stop</b>.
 
 The **Overview** at the top shows Here and Nearby together: drag the divider, swap sides or stack them.
 
+On a window at least about 900 × 600 the page fits the window: the header stays put and each view's lists
+scroll in their own boxes, with their column headings kept in view (Page Up/Down and the wheel scroll the box
+under focus or the pointer). Smaller windows and phones scroll the page as before. **▴** beside the tiles
+folds them into one line ("Talvik Reach · ⛽ 64% · 12.79B cr · unsold 92k · carrier 6.4 ly", in the tiles'
+amber and red); **▾** unfolds them. It is remembered per browser.
+A table too wide for its box (a small screen, the Overview's split) switches to short forms ("HMC", "G star", ✓ for
+fully scanned; hover for the full text) rather than scroll sideways.
+
 **Now** is the cockpit view for a second monitor or a tablet, in big text: the system, the target, fuel,
 what to do next, the body you have targeted, and the nearest unvisited system.
 

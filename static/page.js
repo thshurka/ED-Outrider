@@ -8,7 +8,7 @@ const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechSt
   "sayMapped", "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
   "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
   "log", "lbRadius", "fShowLost", "fWithin", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
-  "surfaceCfg", "moduleWarn"];
+  "surfaceCfg", "moduleWarn", "tilesCollapsed"];
 const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
   return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
 // The shape a shared setting must have to be used: a hand-edited import or server copy with, say, a string for
@@ -50,6 +50,76 @@ async function apiJson(url, opts) {
   return {error: r.ok ? "unexpected non-JSON response" : `HTTP ${r.status} — see the terminal`};
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// ---- Compact forms for the screen tables (never for speech or notifications) ----
+// A table that does not fit its box gets the class compact (and, if that is not enough, compact2 too: see fitTable).
+// Its cells hold both forms, so switching costs no redraw: .lf the full form (shown while the table fits), .sf the
+// short one (compact and compact2), .sf1 / .sf2 a form for one level only; .c1hide / .c2hide drop a column from that
+// level on. The short form's title carries the full text. shortForm(kind, text) is the one place abbreviations live.
+const SHORT_FORMS = {
+  // Spansh's planet classes (what the page shows; journal_planet maps the journal's to them) and the journal's own
+  planet: {"High metal content world": "HMC", "High metal content body": "HMC", "Metal-rich body": "Metal-rich", "Metal rich body": "Metal-rich",
+    "Rocky body": "Rocky", "Rocky Ice world": "Rocky ice", "Rocky ice body": "Rocky ice", "Icy body": "Icy",
+    "Earth-like world": "ELW", "Earthlike body": "ELW", "Water world": "WW", "Ammonia world": "AW", "Water giant": "Water giant",
+    "Gas giant with water-based life": "GG water life", "Gas giant with ammonia-based life": "GG ammonia life",
+    "Class I gas giant": "GG I", "Class II gas giant": "GG II", "Class III gas giant": "GG III", "Class IV gas giant": "GG IV",
+    "Class V gas giant": "GG V", "Helium-rich gas giant": "He-rich GG", "Helium gas giant": "He GG"},
+  star: {"Neutron Star": "Neutron", "Black Hole": "BH", "Supermassive Black Hole": "SMBH", "T Tauri Star": "T Tauri",
+    "Herbig Ae/Be Star": "Ae/Be", "Wolf-Rayet Star": "WR", "Wolf-Rayet N Star": "WN", "Wolf-Rayet NC Star": "WNC",
+    "Wolf-Rayet C Star": "WC", "Wolf-Rayet O Star": "WO", "MS-type Star": "MS star", "S-type Star": "S star"},
+  // Nearby's status badges: the words become marks, the meaning stays in the title
+  status: {"no scan data": "—", "fully scanned": "✓", "unreported": "?", "partly scanned": "part", "yours only": "own"},
+  // headings
+  head: {"Main star": "Star", "Value now / max": "Value", "Dist ls": "ls", "Atmosphere": "Atm", "Bio / Geo": "Bio",
+    "System tag": "Tag", "Seen by others": "Seen", "Lost: scan (FSS)": "FSS", "Lost: map (DSS)": "DSS", "Lost total": "Lost",
+    "Unsold value": "Unsold", "Max from Sol": "Sol", "🏁 systems": "🏁", "ship losses": "losses", "Samples": "Samp",
+    "Bookmarked system": "System"},
+  state: {"in progress": "in prog"},
+};
+// the planet classes inside a longer text ("map 2 Water world T"), longest first so "Rocky Ice world" is not "Rocky"
+const PLANET_RE = new RegExp(Object.keys(SHORT_FORMS.planet).sort((a, b) => b.length - a.length)
+  .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+function shortForm(kind, text) {
+  const t = String(text ?? ""), table = SHORT_FORMS[kind] || {};
+  if (t in table) return table[t];
+  if (kind === "body") return shortForm(/Star$|Black Hole$/.test(t) ? "star" : "planet", t);
+  if (kind === "star") {
+    // "G (White-Yellow) Star" -> "G star", "K (Yellow-Orange giant) Star" -> "K giant", "White Dwarf (DA) Star" -> "WD DA"
+    let m = /^([OBAFGKMLTY]) \(([^)]*)\) Star$/.exec(t);
+    if (m) return `${m[1]} ${/super ?giant/i.test(m[2]) ? "supergiant" : /giant/i.test(m[2]) ? "giant" : "star"}`;
+    m = /^White Dwarf \((\w+)\) Star$/.exec(t);
+    if (m) return `WD ${m[1]}`;
+    return t;
+  }
+  if (kind === "atmosphere") {
+    // the journal's AtmosphereType ("CarbonDioxide", "NeonRich") or Spansh's ("Thin Carbon dioxide", "Hot thin Sulphur dioxide")
+    if (/^(no atmosphere|none)$/i.test(t.trim())) return "none";
+    let s = t.replace(/\s*atmosphere$/i, "");
+    if (!/\s/.test(s)) s = s.replace(/Rich$/, "-rich").replace(/([a-z])([A-Z])/g, "$1 $2");
+    s = s.replace(/carbon dioxide/i, "CO₂").replace(/sulphur dioxide/i, "SO₂").replace(/silicate vapour/i, "silicate")
+      .replace(/metallic vapour/i, "metallic").replace(/^Earth Like$/i, "Earth-like");
+    return s;
+  }
+  if (kind === "text") return t.replace(PLANET_RE, m => SHORT_FORMS.planet[m]);
+  if (kind === "when") return t.length >= 16 ? t.slice(5) : t;            // "2026-09-19 18:02" -> "09-19 18:02"
+  if (kind === "day") return /^\d{4}-\d\d-\d\d$/.test(t) ? t.slice(5) : t;  // "2026-09-19" -> "09-19"
+  return t;
+}
+// Both forms of a cell, the compact one titled with the full text (plus a note, e.g. what a badge means). Already-escaped
+// HTML in, HTML out; nothing extra when the forms are the same. s2: a third form for compact2 only.
+function dual(fullHtml, shortHtml, {title = null, titleHtml = null, s2 = null} = {}) {
+  if (shortHtml === fullHtml && s2 == null) return fullHtml;
+  // title false: the element around it already says it all (its own title shows instead); titleHtml: already escaped
+  const tt = title === false ? "" : ` title="${titleHtml ?? (title == null ? fullHtml.replace(/<[^>]+>/g, "") : esc(title))}"`;
+  return `<span class="lf">${fullHtml}</span>` + (s2 == null ? `<span class="sf"${tt}>${shortHtml}</span>`
+    : `<span class="sf1"${tt}>${shortHtml}</span><span class="sf2"${tt}>${s2}</span>`);
+}
+// a system name whose words never break inside ("Synuefe BH-D d11-101" wraps at its spaces, not after a hyphen,
+// when a compact2 table lets names wrap)
+// (compact2 only: the split copy renders a hair differently, so a table that fits keeps the name in one piece)
+const nameWords = n => { const split = esc(n).split(" ").map(w => /-/.test(w) ? `<span class="nw">${w}</span>` : w).join(" ");
+  return split === esc(n) ? split : `<span class="c2hide">${esc(n)}</span><span class="sf2">${split}</span>`; };
+// a plain text in both forms
+const sfText = (kind, text, opts) => dual(esc(text), esc(shortForm(kind, text)), Object.assign({title: text}, opts));
 // Lists are redrawn on every payload, which replaces the element that had keyboard focus. focusKey(id) notes
 // which one it was (by tag and data attributes) before the redraw, refocus(id, key) finds its new copy after.
 function focusKey(id) {
@@ -60,7 +130,9 @@ function focusKey(id) {
 }
 function refocus(id, key) {
   if (!key) return;
-  const el = document.getElementById(id).querySelector(key); if (!el) return;
+  // a compact table holds some marks twice (one copy hidden at each level): the shown copy
+  const all = [...document.getElementById(id).querySelectorAll(key)], el = all.find(e => e.getClientRects().length) || all[0];
+  if (!el) return;
   markKeyable();   // the new copy gets its tabindex now, not at the next animation frame
   el.focus({preventScroll: true});
 }
@@ -93,7 +165,9 @@ function oldDataTitle(o) {
     ((o.genera_top || []).length ? `&#10;The rules allow: ${o.genera_top.map(esc).join(", ")}` : "") +
     (o.up_to ? `&#10;One genus per body at the median: about ${credits(o.up_to)} cr` : "");
 }
-const oldDataTag = o => o && o.bodies ? `<span class="nb old" title="${oldDataTitle(o)}">old data: ${o.bodies} bod${o.bodies === 1 ? "y" : "ies"}</span>` : "";
+const oldDataTag = o => { if (!o || !o.bodies) return "";
+  const full = `old data: ${o.bodies} bod${o.bodies === 1 ? "y" : "ies"}`;
+  return `<span class="nb old" title="${oldDataTitle(o)}">${dual(full, `old ${o.bodies}`, {titleHtml: `${full}. ${oldDataTitle(o)}`})}</span>`; };
 // 🌀 notable stellar phenomena your FSS found in a system (life clouds, rings); dimmed once you have been to it
 function phenomenaTag(list) {
   if (!list || !list.length) return "";
@@ -202,7 +276,7 @@ function renderCarrier() {
     ln(`${c.has_uc ? "UC ✓" : "no UC"} · ${c.has_vista ? "Vista ✓" : "no Vista"}${c.fuel != null ? ` · ${c.fuel} t tritium` : ""}`);
 }
 // the countdown ticks without new data
-setInterval(() => { if (data && data.carrier && data.carrier.planned) renderCarrier(); }, 1000);
+setInterval(() => { if (data && data.carrier && data.carrier.planned) { renderCarrier(); if (tilesFolded) renderTilesLine(); } }, 1000);
 document.addEventListener("click", async e => {
   if (!e.target.closest || !e.target.closest("#backupBtn")) return;
   let r;
@@ -327,6 +401,9 @@ function renderStrip() {
                     failed && esc(data.status)].filter(Boolean);
   if (problems.length) { dot = disconnected || data.tail_error || pageError ? "bad" : "warn"; tcls = dot === "bad" ? "urgent" : "warn"; }
   td.className = "tile " + tcls; td.title = data.tail_error || data.status || "";
+  // the folded tiles' line names it, in a few words, when the tile is coloured (the tile has the detail)
+  dataBit = disconnected ? `not connected since ${disconnected}` : data.tail_error ? "journal tailing error" : pageError ? "page error"
+    : failed ? (/spansh/i.test(data.status || "") ? "Spansh failed" : "server error") : text;
   fl.innerHTML = val(`<span class="dot ${dot}"></span>${text}`);
   sl.innerHTML = problems.length ? problems.join(" · ") : /^asking|^fetching/.test(data.status || "") ? esc(data.status) : "Spansh ok";
   document.getElementById("backupLine").innerHTML = backupHtml(data.backup || {});
@@ -357,6 +434,49 @@ function renderStrip() {
   document.title = (disconnected ? "⚠ " : "") + (p ? p.name : "ED Outrider") +
     (f && f.live && f.pct != null && f.pct < 30 ? ` · ⛽${f.pct}%` : "") +
     (unsoldLevel(data.unsold) === "urgent" ? " · 💰 sell!" : "");
+  renderTilesLine();
+}
+// ---- the header tiles folded into one line (▴/▾ beside them; per browser, tilesCollapsed) ----
+// "Smojooe AR-E b25-7 · ⛽ 64% · 12.79B cr · unsold 92k · carrier 6 ly": where you are, then each tile's headline, in
+// the colour its tile has (fuel and unsold amber or red, the Data tile when the journal is stale or the link is down)
+let tilesFolded = store.get("tilesCollapsed", false) === true, dataBit = "";
+function drawTilesFold() {
+  document.getElementById("tiles").hidden = tilesFolded;
+  document.getElementById("tilesLine").hidden = !tilesFolded;
+  const b = document.getElementById("tilesBtn");
+  b.textContent = tilesFolded ? "▾" : "▴";
+  b.setAttribute("aria-expanded", String(!tilesFolded));
+  b.title = tilesFolded ? "show the six tiles again" : "fold the six tiles into one line";
+}
+document.getElementById("tilesBtn").onclick = () => {
+  tilesFolded = !tilesFolded; store.set("tilesCollapsed", tilesFolded); drawTilesFold();
+  if (data) render();   // the header's height changed: app mode and what is sized to the window follow
+};
+drawTilesFold();
+function tileLevel(id) { const c = document.getElementById(id).classList; return c.contains("urgent") ? "urgent" : c.contains("warn") ? "warn" : ""; }
+function tilesLineHtml() {
+  const p = data.position, f = data.fuel, cm = data.commander, u = data.unsold, c = data.carrier;
+  const bit = (html, lvl, title) => `<span class="tl${lvl ? " tl-" + lvl : ""}"${title ? ` title="${esc(title)}"` : ""}>${html}</span>`;
+  const ly = d => `${d.toLocaleString("en-US", {maximumFractionDigits: d < 10 ? 1 : 0})} ly`;
+  const out = [p ? `<span class="copy tl-sys" data-name="${esc(p.name)}" title="click to copy">${esc(p.name)}</span>` : `<span class="unk">waiting for your first jump…</span>`];
+  if (f && f.live && f.main != null) out.push(bit(`⛽ ${f.pct != null ? f.pct + "%" : f.main.toFixed(1) + " t"}`, tileLevel("tFuel"), "fuel in the main tank"));
+  if (cm && cm.credits != null) out.push(bit(`${credits(cm.credits)} cr`, "", "credits at login plus exploration and exobiology sales since"));
+  if (u && !u.error && u.total != null) out.push(bit(`unsold ${credits(u.total)}`, tileLevel("tUnsold"), "unsold data on board (estimate): hover the tiles for the detail"));
+  if (c) {
+    const pl = c.planned, left = pl && pl.departure ? (Date.parse(pl.departure) - Date.now()) / 1000 : null;
+    const where = c.aboard ? "aboard" : c.here ? "here" : c.distance != null ? ly(c.distance) : esc(c.system || "");
+    const dep = left != null && left > 0 ? ` · departs in ${left >= 3600 ? `${Math.floor(left / 3600)} h ${Math.floor(left % 3600 / 60)} min` : `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}`}` : "";
+    out.push(bit(`carrier ${where}${dep}`, dep && left < 300 && !c.aboard ? "urgent" : "", c.name || "your fleet carrier"));
+  }
+  const dl = tileLevel("tData");
+  if (dl) out.push(bit(dataBit, dl, "the Data tile: unfold the tiles for the detail"));
+  return out.join(`<span class="tl-sep"> · </span>`);
+}
+function renderTilesLine() {
+  if (!data) return;
+  const el = document.getElementById("tilesLine"), fk = focusKey("tilesLine");
+  el.innerHTML = tilesLineHtml();
+  refocus("tilesLine", fk);
 }
 // Per-browser override of the bio threshold; null follows bio_min in ed_outrider.toml (reset = null).
 let bioMinCfg = store.get("bioMinCfg", store.get("bioMin", null));
@@ -703,6 +823,7 @@ function drawSurface(canvas, L, small) {
   if (!g) return;   // no canvas (a test page): the layout is what is checked
   const C = surfColours(), c = L.c, R = L.rimR, font = small ? 10 : Math.max(11, Math.round(S / 40));
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, S, S);
+  if (!(R > 4)) return;   // a box too small to draw in (a squeezed pane): nothing, rather than a negative radius
   g.fillStyle = C.panel; g.strokeStyle = C.line; g.lineWidth = 1;
   g.beginPath(); g.arc(c, c, R, 0, 2 * Math.PI); g.fill(); g.stroke();
   g.setLineDash([2, 4]); g.beginPath(); g.arc(c, c, R / 2, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]);
@@ -850,14 +971,14 @@ function nowMapFit({vw, vh, width, top, gap = 24, bottom = 16}) {
   return {split, beside, S: Math.max(NOW_MAP_MIN, Math.min(width, beside ? side : under)), legendW: null, H};
 }
 // How Overview fits the map in the box under the system table (pure): width, height: the box inside its padding.
-// The legend beside the map when a legend column of OV_LEGEND_MIN still leaves the map OV_MAP_MIN; otherwise the map
-// on top (sized to leave the legend a few lines) and the legend under it, scrolling. The map is never wider than the
-// box or taller than it.
+// The legend beside the map when a legend column of OV_LEGEND_MIN still leaves the map OV_MAP_MIN, or when the box's
+// height is what limits the map (a short wide box: stacking would only shrink it); otherwise the map on top (sized to
+// leave the legend a few lines) and the legend under it, scrolling. The map is never wider than the box or taller than it.
 const OV_MAP_MIN = 160, OV_LEGEND_MIN = 220;
 function ovMapFit({width, height, gap = 12}) {
   width = Math.max(0, Math.floor(width)); height = Math.max(0, Math.floor(height));
   const side = Math.min(height, width - OV_LEGEND_MIN - gap);
-  if (side >= OV_MAP_MIN) return {beside: true, S: side, legendW: width - side - gap};
+  if (side >= OV_MAP_MIN || (side > 0 && side === height)) return {beside: true, S: side, legendW: width - side - gap};
   return {beside: false, S: Math.max(Math.min(120, width, height), Math.min(width, height - 90)), legendW: null};
 }
 function renderSurface() {
@@ -888,8 +1009,9 @@ function renderSurface() {
   hv.classList.toggle("mapon", onOv);
   document.getElementById("ovHere").classList.toggle("hasMap", onOv);
   // the pane ends at the bottom of the window (not the body panel's 78vh, which runs under it on a tall header), so
-  // the whole map is in view without scrolling; never under 420 px (then the page scrolls, as it did before)
-  hv.style.height = onOv ? Math.round(Math.max(420, Math.min(innerHeight * 0.78, innerHeight - hv.getBoundingClientRect().top - (window.scrollY || 0) - 12))) + "px" : "";
+  // the whole map is in view without scrolling; never under 420 px (then the page scrolls, as it did before). In app
+  // mode the pane is the window's height left already (CSS), and the map is fitted to the box it is given.
+  hv.style.height = onOv && !appOn() ? Math.round(Math.max(420, Math.min(innerHeight * 0.78, innerHeight - hv.getBoundingClientRect().top - (window.scrollY || 0) - 12))) + "px" : "";
   if (onOv) {
     const cs = getComputedStyle(ovBox), px = v => parseFloat(v) || 0, legend = document.getElementById("ovMapLegend");
     const F = ovMapFit({width: ovBox.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight),
@@ -1011,15 +1133,19 @@ function renderLeaving(l) {
   document.getElementById("leaving").innerHTML = t ? "⚠ " + t : "";
 }
 function statusPill(s) {
-  let label = s.status, title = "";
+  let label = s.status, title = "", short = null;
   if (s.status === "no bodies") { label = "no scan data"; title = "known to exist, but nobody has reported scanning anything"; }
   else if (s.status === "explored") label = "fully scanned";
   else if (s.status === "partial") {
     label = s.body_count ? `${Math.floor(100 * s.bodies_known / s.body_count)}% scanned` : "partly scanned";
+    if (s.body_count) short = `${Math.floor(100 * s.bodies_known / s.body_count)}%`;
     title = s.body_count ? `${s.bodies_known} of ${s.body_count} bodies known` : "body count unknown (no FSS honk reported)";
   }
-  return `<span class="badge s-${s.status.replace(" ", "")}" title="${title}">${label}</span>`;
+  const full = title ? `${label}: ${title}` : label;
+  return `<span class="badge s-${s.status.replace(" ", "")}" title="${title}">${dual(label, short ?? shortForm("status", label), {title: full})}</span>`;
 }
+// the other Nearby badges, each with its compact mark: "3 mapped" -> "🗺3", "yours only" -> "own"
+const statusBadge = (cls, label, title, short) => `<span class="badge ${cls}" title="${title}">${dual(label, short ?? shortForm("status", label), {title: `${label}: ${title}`})}</span>`;
 function bodies(s) {
   if (s.source === "route" || (!s.bodies_known)) return `<span class="unk">—</span>`;
   const plain = s.ringed === null ? null : s.planets - s.ringed;
@@ -1047,6 +1173,135 @@ let viewBeforeNow = view === "now" ? "overview" : view;
 // the only URL parameter the page reads: a window opened at ?mode=now (the ↗ beside Now) shows Now and nothing else
 const nowWindow = new URLSearchParams(location.search).get("mode") === "now";
 if (nowWindow) view = "now";
+// ---- app mode: on a window at least APP_MIN_W x APP_MIN_H the page fits the window (body.app): the header stays, the
+// view fills the rest and each of its panes (.pane: a bordered box) scrolls on its own, its table headings sticky.
+// Smaller windows (phones, narrow or short ones) scroll the page as before, and Now keeps its own fit-to-screen layout.
+// A header that leaves the view too little room (a short window with many strips under the tiles) falls back to page
+// scrolling too, with a margin either way so it does not flicker. Scroll code goes through paneOf/revealIn/scrollMark:
+// in app mode the window never scrolls.
+const APP_MIN_W = 900, APP_MIN_H = 600, APP_ROOM_OFF = 220, APP_ROOM_ON = 260;
+const appWanted = (vw, vh, headH, on) => vw >= APP_MIN_W && vh >= APP_MIN_H && vh - headH >= (on ? APP_ROOM_OFF : APP_ROOM_ON);
+const appOn = () => document.body.classList.contains("app");
+// true when the mode changed (then what is sized to its box must be redrawn)
+function applyAppMode() {
+  const head = document.querySelector("header"), was = appOn();
+  const on = view !== "now" && !nowWindow && appWanted(innerWidth, innerHeight, head.offsetHeight, was);
+  document.documentElement.style.setProperty("--head-h", head.offsetHeight + "px");
+  if (on === was) return false;
+  document.body.classList.toggle("app", on);
+  // a pane takes focus (a click in it, or Tab), so Page Up/Down and the arrow keys scroll it
+  document.querySelectorAll(".pane").forEach(p => { if (on) p.tabIndex = 0; else p.removeAttribute("tabindex"); });
+  return true;
+}
+// the pane an element scrolls in (app mode), or null for the window
+const paneOf = el => appOn() && el && el.closest ? el.closest(".pane") : null;
+// Bring an element into view: in app mode inside its pane, under the pane's sticky table heading, never by scrolling
+// the window; otherwise the window, as before. block: "nearest" (only if it is out of view) or "start".
+function revealIn(el, block = "nearest") {
+  if (!el) return;
+  const p = paneOf(el);
+  if (!p) { if (el.scrollIntoView) el.scrollIntoView({block}); return; }
+  const table = el.closest("tbody") && el.closest("table"), head = table && table.tHead ? table.tHead.offsetHeight : 0;
+  const pr = p.getBoundingClientRect(), er = el.getBoundingClientRect();
+  const top = pr.top + p.clientTop + head, bottom = pr.top + p.clientTop + p.clientHeight;
+  if (block === "start" || er.top < top) p.scrollTop += er.top - top;
+  else if (er.bottom > bottom) p.scrollTop += Math.min(er.bottom - bottom, er.top - top);
+}
+// Keep the reader's place while rows are added above (the Log's new events): scrollMark before, keepPlace after.
+// At the very top it stays at the top, so the new rows show.
+function scrollMark(el) {
+  const p = paneOf(el);
+  return p ? {p, y: p.scrollTop, h: p.scrollHeight} : {p: null, y: window.scrollY, h: document.documentElement.scrollHeight};
+}
+function keepPlace(m) {
+  if (!(m.y > 0)) return;
+  if (m.p) m.p.scrollTop = m.y + m.p.scrollHeight - m.h;
+  else window.scrollBy(0, document.documentElement.scrollHeight - m.h);
+}
+// A pane that is hidden or moved (the Overview moves Nearby and Here into its own panes) can lose its scroll position:
+// keepPanes notes where each shown pane was, runs the change, and puts back what was lost
+const paneScroll = {};
+function keepPanes(fn) {
+  document.querySelectorAll(".pane").forEach(p => { if (p.id && p.getClientRects().length) paneScroll[p.id] = p.scrollTop; });
+  fn();
+  document.querySelectorAll(".pane").forEach(p => {
+    if (p.id && paneScroll[p.id] > 0 && !p.scrollTop && p.getClientRects().length) p.scrollTop = paneScroll[p.id];
+  });
+}
+// a pane back at its top (Here showing another system)
+function paneTop(...ids) { for (const id of ids) { const p = document.getElementById(id); if (p) p.scrollTop = 0; delete paneScroll[id]; } }
+// each view's main pane: Page Up/Down and Home/End scroll it while nothing that scrolls or types has the focus
+const VIEW_PANE = {overview: "nearPane", near: "nearPane", here: "hereMain", bio: "bioPane", bm: "bmPane", search: "searchPane",
+                   hist: "histPane", log: "logPane", mat: "matPane", firsts: "firstsPane"};
+// ---- Compact tables: a table wider than its box (its pane, the Overview's split, a phone) switches to its short forms
+// (compact: level 1), then to tighter ones that also drop or merge low-value columns (compact2: level 2), and back once
+// there is room again. Decided by fit, not by screen size, so a wide pane looks exactly as it always did.
+// The width compared is the table's min-content width (what it needs at the least, wrapping cells wrapped), measured
+// with each level's forms in turn; going back to a longer form needs COMPACT_SLACK px to spare, so a scrollbar that
+// comes and goes with the row heights cannot make it flap.
+const FIT_TABLES = ["nearTable", "hereTable", "firstsTable", "leftTable", "bioTable", "codexTable", "histTable", "tripTable",
+                    "topTable", "logTable", "sTable", "bmTable"];
+const COMPACT_SLACK = 24;
+// widths[l]: the table's width with level l's forms (measured in order; later ones may be missing); current: its level now
+function compactLevel(widths, avail, current) {
+  for (let l = 0; l < 3 && widths[l] != null; l++) if (widths[l] <= avail - (l < current ? COMPACT_SLACK : 0)) return l;
+  return widths.length >= 3 ? 2 : -1;   // -1: measure the next level
+}
+const tableLevel = t => t.classList.contains("compact2") ? 2 : t.classList.contains("compact") ? 1 : 0;
+const setTableLevel = (t, l) => { t.classList.toggle("compact", l >= 1); t.classList.toggle("compact2", l >= 2); };
+// the room a table has: its parent's content box (the pane in app mode, the page or the Overview's split otherwise)
+function tableRoom(t) {
+  const p = t.parentElement; if (!p) return 0;
+  const cs = getComputedStyle(p);
+  return p.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+}
+function fitTable(t) {
+  if (!t || t.hidden || !t.getClientRects().length) return;
+  const avail = tableRoom(t);
+  if (!(avail > 0)) return;
+  // nothing to do unless the room, the table's size, its contents or its own classes (lostcols) changed
+  const sig = [avail, t.offsetWidth, t.rows.length, t.textContent.length, t.className.replace(/\s*\bcompact2?\b/g, "")].join("|");
+  if (t._fitSig === sig) return;
+  const cur = tableLevel(t), pane = t.closest(".pane"), keep = [pane && pane.scrollTop, pane && pane.scrollLeft, t.scrollLeft, window.scrollY];
+  const widths = [];
+  let lvl = -1;
+  t.style.width = "min-content";
+  for (let l = 0; l < 3 && lvl < 0; l++) {
+    setTableLevel(t, l);
+    widths.push(Math.ceil(Math.max(t.scrollWidth, t.offsetWidth)));
+    lvl = compactLevel(widths, avail, cur);
+  }
+  t.style.width = "";
+  setTableLevel(t, lvl);
+  // the trial layouts may have clamped a scroll position: put it back
+  if (pane) { if (pane.scrollTop !== keep[0]) pane.scrollTop = keep[0]; if (pane.scrollLeft !== keep[1]) pane.scrollLeft = keep[1]; }
+  if (t.scrollLeft !== keep[2]) t.scrollLeft = keep[2];
+  if (!pane && window.scrollY !== keep[3] && window.scrollTo) window.scrollTo(window.scrollX, keep[3]);
+  t._fitSig = [tableRoom(t), t.offsetWidth, t.rows.length, t.textContent.length, t.className.replace(/\s*\bcompact2?\b/g, "")].join("|");
+}
+let fitQueued = false;
+function fitTables() { fitQueued = false; FIT_TABLES.forEach(id => fitTable(document.getElementById(id))); }
+// after a redraw or a resize, once per frame (outside the ResizeObserver's callback, whose own changes would loop)
+function fitSoon() {
+  if (fitQueued) return;
+  fitQueued = true;
+  (window.requestAnimationFrame || (f => setTimeout(f, 16)))(fitTables);
+}
+{
+  // the headings' short forms, from SHORT_FORMS.head (matched on the heading's text; markup inside stays in the full form)
+  for (const id of FIT_TABLES) document.querySelectorAll(`#${id} thead th`).forEach(th => {
+    const short = SHORT_FORMS.head[th.textContent.trim().replace(/\s+/g, " ")];
+    if (short != null && !th.querySelector(".lf")) th.innerHTML = dual(th.innerHTML, esc(short), {title: th.title ? false : null});
+  });
+  const ro = typeof ResizeObserver === "function" ? new ResizeObserver(fitSoon) : null;
+  const mo = typeof MutationObserver === "function" ? new MutationObserver(fitSoon) : null;
+  for (const id of FIT_TABLES) {
+    const t = document.getElementById(id); if (!t) continue;
+    if (ro) { ro.observe(t); if (t.parentElement) ro.observe(t.parentElement); }
+    if (mo) mo.observe(t, {childList: true, subtree: true, characterData: true});
+  }
+  if (!ro) window.addEventListener("resize", fitSoon);
+}
 // Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
 // per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
 const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has reported it (upbeat or thud if it is known)", "fanfare"],
@@ -1993,9 +2248,11 @@ function render() {
     (known ? ` data-pop data-id="${esc(here.id)}"` : "") + `>${esc(p.name)}</span>` + (here ? firstsIcon(here.firsts) : "") +
     (here ? bmIcon(here.id, here.name, bms) : "");
   refocus("here", fkHere);
+  applyAppMode();
   placeOverview();
   document.getElementById("nearWrap").hidden = !(view === "near" || view === "overview");
   document.getElementById("overView").hidden = view !== "overview";
+  document.getElementById("bmView").hidden = view !== "bm";
   document.getElementById("bmTable").hidden = view !== "bm";
   document.getElementById("bmTools").hidden = view !== "bm";
   const nearPinned = view === "near" && !!pinnedSystem;
@@ -2103,19 +2360,24 @@ function render() {
                  data.target && s.id64 === data.target.id64 && "target"]
       .filter(Boolean).join(" ");
     const known = s.body_count ? `${s.bodies_known}/${s.body_count}` : (s.bodies_known || "");
+    // compact2 merges: the status badges go under the name, the notable tags under the bodies
+    const status = statusPill(s) + (s.mapped ? statusBadge("s-mapped", `${s.mapped} mapped`, "DSS-mapped bodies, from your own journal", `🗺${s.mapped}`) : "") +
+      (s.source === "own" ? statusBadge("s-own", "yours only", "Spansh doesn't have this system; data is from your own scans") : "") +
+      (s.source === "edsm" ? `<span class="badge s-edsm" title="Spansh is unreachable; this comes from EDSM (no body data)">EDSM</span>` : "");
+    const nb = notable(s);
     return `<tr class="${cls}">
       <td class="bmcell">${bmIcon(s.id, s.name, bms)}</td>
       <td class="name" data-name="${esc(s.name)}" title="click to copy">${isPrev
-        ? `<span class="prevmark" title="you just came from here">↩</span>` : ""}${esc(s.name)}${firstsIcon(s.firsts)}</td>
+        ? `<span class="prevmark" title="you just came from here">↩</span>` : ""}${nameWords(s.name)}${firstsIcon(s.firsts)}<div class="sf2 sub2">${status}</div></td>
       <td class="num dist"${far ? ` title="beyond your max jump range"` : ""}>${s.distance.toFixed(2)}</td>
-      <td class="num hide-sm">${jumps == null ? "" : jumps === 1 ? "1" : `<span class="unk">${jumps}</span>`}</td>
-      <td>${statusPill(s)}${s.mapped ? `<span class="badge s-mapped" title="DSS-mapped bodies, from your own journal">${s.mapped} mapped</span>` : ""}${s.source === "own"
-        ? `<span class="badge s-own" title="Spansh doesn't have this system; data is from your own scans">yours only</span>` : ""}${s.source === "edsm"
-        ? `<span class="badge s-edsm" title="Spansh is unreachable; this comes from EDSM (no body data)">EDSM</span>` : ""}</td>
-      <td>${star(s)}</td><td class="bodies" data-pop data-id="${esc(s.id)}">${bodies(s)}</td>
-      <td class="notable">${notable(s)}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm">${known}</td></tr>`;
+      <td class="num hide-sm c2hide">${jumps == null ? "" : jumps === 1 ? "1" : `<span class="unk">${jumps}</span>`}</td>
+      <td class="c2hide">${status}</td>
+      <td>${star(s)}</td><td class="bodies" data-pop data-id="${esc(s.id)}">${bodies(s)}${nb ? `<div class="sf2 sub2 notable">${nb}</div>` : ""}</td>
+      <td class="notable c2hide">${nb}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm c2hide">${known}</td></tr>`;
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
+  // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
+  if (applyAppMode()) { renderSurface(); drawMap(); }
 }
 function emptyMessage(rows) {
   const others = data.systems.filter(s => s.id64 !== (data.position && data.position.id64)).length;
@@ -2133,10 +2395,10 @@ function renderBookmarks(bms) {
   const fk = focusKey("bmRows");
   document.getElementById("bmRows").innerHTML = list.map(b => `<tr>
       <td class="bmcell">${bmIcon(b.id, b.name, bms)}</td>
-      <td class="name" data-name="${esc(b.name)}" title="click to copy">${esc(b.name)}</td>
+      <td class="name" data-name="${esc(b.name)}" title="click to copy">${nameWords(b.name)}</td>
       <td class="num dist">${b.distance == null ? "?" : b.distance.toLocaleString("en-US", {maximumFractionDigits: 2})}</td>
       <td class="note">${esc(b.note) || `<span class="unk">no note</span>`}</td>
-      <td class="hide-sm unk">${esc((b.created || "").slice(0, 10))}</td></tr>`).join("") ||
+      <td class="hide-sm unk c2hide">${esc((b.created || "").slice(0, 10))}</td></tr>`).join("") ||
     `<tr><td colspan="5" class="unk">No bookmarks yet. Click ☆ beside any system to add one.</td></tr>`;
   refocus("bmRows", fk);
 }
@@ -2182,7 +2444,7 @@ document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
   if (b.dataset.view !== view && pinnedSystem) { pinnedSystem = null; if (selectedBody) closeBody(); }  // a pin belongs to the view it was made in
   if (b.dataset.view === "now" && view !== "now") viewBeforeNow = view;
   if (b.dataset.view === "hist" && view !== "hist") histKey = null;   // fresh numbers each time the tab opens
-  view = b.dataset.view; store.set("view", view); render();
+  keepPanes(() => { view = b.dataset.view; store.set("view", view); render(); });
 });
 
 // ---- Here: every body in the current system ----
@@ -2195,9 +2457,9 @@ function pinSystem(id) {
   // the system you are in is not "pinned": Here shows it anyway, with its to-do line
   pinnedSystem = posId() === String(id) ? null : String(id);
   if (view === "overview" && ovState.collapsed) { ovState.collapsed = false; saveOv(); }   // else the pin shows nothing
-  if (selectedBody) closeBody(); hidePop(); render(); renderHere();
+  if (selectedBody) closeBody(); hidePop(); render(); renderHere(); paneTop("hereMain");
 }
-function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); renderHere(); }
+function unpinSystem() { pinnedSystem = null; if (selectedBody) closeBody(); render(); renderHere(); paneTop("hereMain"); }
 let hereRefreshError = null;
 async function loadHere() {
   const id = shownSystem(); if (!id) return;
@@ -2248,9 +2510,9 @@ function placeOverview() {
   const r = document.querySelector(`input[name=ovLayout][value="${ovState.layout}"]`); if (r) r.checked = true;
 }
 const saveOv = () => store.set("overview", ovState);
-document.getElementById("ovCollapse").onclick = () => { ovState.collapsed = !ovState.collapsed; saveOv(); render(); };
-document.getElementById("ovFlip").onclick = () => { ovState.flip = !ovState.flip; saveOv(); render(); };
-document.querySelectorAll("input[name=ovLayout]").forEach(r => r.onchange = () => { ovState.layout = r.value; saveOv(); render(); });
+document.getElementById("ovCollapse").onclick = () => keepPanes(() => { ovState.collapsed = !ovState.collapsed; saveOv(); render(); });
+document.getElementById("ovFlip").onclick = () => keepPanes(() => { ovState.flip = !ovState.flip; saveOv(); render(); });
+document.querySelectorAll("input[name=ovLayout]").forEach(r => r.onchange = () => keepPanes(() => { ovState.layout = r.value; saveOv(); render(); }));
 // Drag the divider: the system pane's share of the width, 20-70 %.
 const ovDivider = document.getElementById("ovDivider");
 ovDivider.addEventListener("pointerdown", e => {
@@ -2278,6 +2540,8 @@ function bodyValueTitle(b) {
   return (maxBonus() ? "" : `Max without bonuses: ${credits(b.value_max_base || 0)} (with them: ${credits(b.value_max || 0)})\n\n`) +
     `On board: ${part(v.carto_now, v.bio_now, scan)}\nStill available: ${part(v.carto_left, v.bio_left)}\n\nExobiology here counts ×${v.bio_factor}${v.bio_factor === 5 ? " (nobody had set foot here when you scanned)" : " (someone had already landed here, or you have not scanned it)"}.`;
 }
+// Here's Rings cell: "2 (1 mapped, 0 with hotspots)"
+const ringsText = b => `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}`;
 function renderHere() {
   const h = hereData, head = document.getElementById("hereHead"), lv = document.getElementById("hereLeaving");
   if (!h) { head.textContent = "loading…"; return; }
@@ -2314,7 +2578,7 @@ function renderHere() {
   const dest = data.destination && posId() === h.id64 ? data.destination : null;
   const destBody = dest && h.bodies.find(b => b.body_id === dest.body_id);
   const rowHtml = (b, ind = "") => {
-    const bio = [], f = bioFactor(b);
+    const bio = [], f = bioFactor(b), atm = b.type === "Planet" && b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : "";
     const guessOf = g => (b.bio_guess || []).find(x => x.genus === g);
     const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value * f)})</span>` + codexMark(x, h.region);
     for (const g of bioGenera(b)) {
@@ -2329,24 +2593,26 @@ function renderHere() {
     const unk = bioUnknown(b);
     if (unk) {
       const {opt, list: gl} = unk;
-      bio.push((bio.length ? "<br>" : "") + `<span class="unk">${unk.label}</span>` + (gl.length
-        ? `<br><span class="unk">${opt ? `${optLabel(unk.n, opt, f)}: ` : "likely: "}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits((x.value || 0) * f)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
+      // compact: "2 sig, no DSS" / "+1 sig", and the options' range without the words
+      const unkShort = bioGenera(b).length ? `+${unk.n} sig` : `${unk.n} sig, no DSS`;
+      bio.push((bio.length ? "<br>" : "") + `<span class="unk">${dual(unk.label, unkShort)}</span>` + (gl.length
+        ? `<br><span class="unk">${opt ? dual(`${optLabel(unk.n, opt, f)}: `, `${credits(opt.low * f)}–${credits(opt.high * f)}: `) : dual("likely: ", "", {title: false})}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits((x.value || 0) * f)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
     }
     const codex = b.codex.map(c => `<span class="sp" title="codex">📖 ${esc(c.name)}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
                     b.first_footfall && `<span class="fl" title="first footfall">👣</span>`, !b.scanned && `<span class="unk" title="known to Spansh, not scanned by you">—</span>`].filter(Boolean).join("");
-    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${destBody === b ? " dest" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name" data-name="${esc(b.name)}">${ind}${esc(b.name)}${(b.curiosities || []).length ? ` <span class="cur" title="${b.curiosities.map(c => esc(c.tag + ": " + c.why)).join("&#10;")}">🔭</span>` : ""}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}</td>
-      <td>${esc(b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}</td>
-      <td class="num">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
-      <td class="num${b.gravity >= highGravity() ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}</td>
-      <td class="hide-sm">${b.type === "Planet" ? esc(b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : (b.landable ? "none · landable" : "")) : ""}${b.stale_bio ? ` <span class="unk old" title="${esc(staleBodyTitle(b))}">landable? (old data)</span>` : ""}</td>
-      <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}</td>
-      <td class="num mine">${mineTag(b)}</td>
-      <td>${b.rings ? `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped} mapped${b.hotspots < b.rings_mapped ? `, ${b.hotspots} with hotspots` : ""})` : ""}` : ""}</td>
-      <td>${firsts}</td>
-      <td class="num" title="${bodyValueTitle(b)}">${b.value_now ? credits(b.value_now) : ""}</td>
-      <td class="num" title="${bodyValueTitle(b)}">${maxOf(b) ? credits(maxOf(b)) : ""}</td></tr>`;
+    return `<tr class="${b.main ? "main" : ""}${selectedBody === b.name ? " sel" : ""}${destBody === b ? " dest" : ""}${hotClasses(b)}" data-body="${esc(b.name)}" data-bodypop="${esc(b.name)}"><td class="name" data-name="${esc(b.name)}">${ind}${esc(b.name)}${(b.curiosities || []).length ? ` <span class="cur" title="${b.curiosities.map(c => esc(c.tag + ": " + c.why)).join("&#10;")}">🔭</span>` : ""}${b.notable ? ` <span class="nb ${b.notable}">${b.notable}</span>` : ""}${b.terraformable ? ` <span class="nb T">T</span>` : ""}${firsts ? `<div class="sf2 sub2">${firsts}</div>` : ""}</td>
+      <td>${sfText(b.type === "Star" ? "star" : "planet", b.subtype || "")}${b.type === "Star" ? (b.scoopable ? ` <span class="scoop">⛽</span>` : "") : ""}${b.rings ? `<span class="sf2"> ${icon("ring", "i-ring", b.rings, ringsText(b))}</span>` : ""}${b.dist_ls != null ? `<div class="sf2 sub2 unk">${Math.round(b.dist_ls).toLocaleString()} ls</div>` : ""}</td>
+      <td class="num c2hide">${b.dist_ls != null ? Math.round(b.dist_ls).toLocaleString() : ""}</td>
+      <td class="num${b.gravity >= highGravity() ? " noscoop" : ""}">${b.gravity != null && b.type === "Planet" ? b.gravity.toFixed(2) : ""}${atm ? `<div class="sf2 atm2" title="${esc(atm)}">${esc(shortForm("atmosphere", atm))}</div>` : ""}</td>
+      <td class="hide-sm c2hide">${b.type === "Planet" ? (atm ? sfText("atmosphere", atm) : b.landable ? dual("none · landable", "landable") : "") : ""}${b.stale_bio ? ` <span class="unk old" title="${esc(staleBodyTitle(b))}">${dual("landable? (old data)", "landable?", {title: `landable? (old data): ${staleBodyTitle(b)}`})}</span>` : ""}</td>
+      <td class="bio">${bio.join(" ")}${geoTag(b)}${volcanoIcon(b)}${codex}${b.mining || (b.mined || []).length ? `<span class="sf2"> ${mineTag(b)}</span>` : ""}</td>
+      <td class="num mine c2hide">${mineTag(b)}</td>
+      <td class="c2hide">${b.rings ? dual(esc(ringsText(b)), `${b.rings}${b.rings_mapped ? ` (${b.rings_mapped}🗺${b.hotspots < b.rings_mapped ? `, ${b.hotspots} hot` : ""})` : ""}`) : ""}</td>
+      <td class="c2hide">${firsts}</td>
+      <td class="num c2hide" title="${bodyValueTitle(b)}">${b.value_now ? credits(b.value_now) : ""}</td>
+      <td class="num" title="${bodyValueTitle(b)}">${maxOf(b) ? credits(maxOf(b)) : ""}${b.value_now ? `<div class="sf2 sub2 unk">now ${credits(b.value_now)}</div>` : ""}</td></tr>`;
   };
   document.getElementById("hereMaxTh").title = maxBonus()
     ? "the most it could pay once scanned, mapped and sampled, including first-discovery, first-mapped and first-footfall (×5 bio) bonuses where they apply"
@@ -2363,7 +2629,7 @@ function renderHere() {
     const dk = `${h.id64}|${b.body_id}`;
     if (dk !== lastDestKey) {
       lastDestKey = dk;
-      const tr = document.querySelector("#hereRows tr.dest"); if (tr && tr.scrollIntoView) tr.scrollIntoView({block: "nearest"});
+      revealIn(document.querySelector("#hereRows tr.dest"));
     }
   } else lastDestKey = null;
 }
@@ -2735,14 +3001,19 @@ function renderFirsts() {
       (list.some(x => x.state === "rescanned") ? ` · ${list.filter(x => x.state === "rescanned").length} rescanned` : "") +
       (f.firsts.length && !f.firsts.some(x => x.distance != null) ? " (your position is not known yet)" : "")
     : `${unsold.length} systems with unsold firsts (${credits(unsold.reduce((n, x) => n + (x.value || 0), 0))} cr on board) · ${lost.length} with lost firsts${fShowLost.checked ? back : " (hidden)"}`;
-  const by = b => ["sold", "unsold", "lost"].filter(k => b && b[k]).map(k => `<span class="${k}">${b[k]} ${k}</span>`).join(" · ");
+  // "3 sold · 1 unsold · 2 lost"; compact: "3✓ 1 2✗" (the colours stay: sold green, unsold amber, lost red)
+  const BY_MARK = {sold: "✓", unsold: "", lost: "✗"};
+  const byKeys = b => ["sold", "unsold", "lost"].filter(k => b && b[k]);
+  const byShort = b => byKeys(b).map(k => `<span class="${k}">${b[k]}${BY_MARK[k]}</span>`).join(" ");
+  const by = b => dual(byKeys(b).map(k => `<span class="${k}">${b[k]} ${k}</span>`).join(" · "), byShort(b),
+                       {title: byKeys(b).map(k => `${b[k]} ${k}`).join(" · ")});
   document.getElementById("firstsRows").innerHTML = list.map(x => { const rs = rescanNote(x); return `<tr${rs ? ` class="${rs.cls}"` : ""}>
       <td class="bmcell">${bmIcon(x.id, x.name, bms)}</td>
-      <td class="name" data-name="${esc(x.name)}" title="click to copy">${esc(x.name)}${rs ? `<div class="rescan"${rs.pop ? ` data-rescanpop="${esc(rs.pop)}"` : ` title="${esc(rs.title)}"`}>${esc(rs.text)}</div>` : ""}${lostCols && x.seen ? `<div class="seen seen-sub">${seenCell(x.seen)}</div>` : ""}</td>
+      <td class="name" data-name="${esc(x.name)}" title="click to copy">${nameWords(x.name)}${rs ? `<div class="rescan"${rs.pop ? ` data-rescanpop="${esc(rs.pop)}"` : ` title="${esc(rs.title)}"`}>${esc(rs.text)}</div>` : ""}${x.seen ? `<div class="seen seen-sub${lostCols ? "" : " sf2"}">${seenCell(x.seen)}</div>` : ""}</td>
       <td class="num dist">${x.distance == null ? "?" : x.distance.toLocaleString("en-US", {maximumFractionDigits: 1})}</td>
-      <td class="f-unsold">${x.system ? `<span class="${x.system_state}">🏁 ${x.system_state}</span>` : ""}</td>
-      <td class="by f-by">${by(x.bodies_by)}</td><td class="by f-by">${by(x.mapped_by)}</td>
-      <td class="seen f-unsold">${seenCell(x.seen)}</td>
+      <td class="f-unsold">${x.system ? `<span class="${x.system_state}">${dual(`🏁 ${x.system_state}`, "🏁", {title: `system tag ${x.system_state}`})}</span>` : ""}</td>
+      <td class="by f-by">${by(x.bodies_by)}${byKeys(x.mapped_by).length ? `<div class="sf2" title="first mapped: ${byKeys(x.mapped_by).map(k => `${x.mapped_by[k]} ${k}`).join(" · ")}">🗺 ${byShort(x.mapped_by)}</div>` : ""}</td><td class="by f-by c2hide">${by(x.mapped_by)}</td>
+      <td class="seen f-unsold c2hide">${seenCell(x.seen)}</td>
       ${lostCells(x.recover)}
       <td class="num">${x.value ? credits(x.value) : ""}</td></tr>`; }).join("") ||
     `<tr><td colspan="11" class="unk">${within != null ? `Nothing lost to rescan within ${within} ly.`
@@ -2772,9 +3043,11 @@ function rescanNote(x) {
 // My firsts with show lost: what is still lost there, scan (FSS) / map (DSS) / total (firsts_recovery's values);
 // blank for a system that never lost anything, a muted 0 once everything is back
 function lostCells(r) {
-  if (!r) return `<td class="num f-lost"></td>`.repeat(3);
-  const cell = (v, cls = "") => `<td class="num f-lost${v ? "" : " zero"}${cls}">${v ? credits(v) : "0"}</td>`;
-  return cell(r.lost_scan) + cell(r.lost_map) + cell(r.lost_total, " tot");
+  if (!r) return `<td class="num f-lost c2hide"></td>`.repeat(2) + `<td class="num f-lost"></td>`;
+  const cell = (v, cls = "", title = "") => `<td class="num f-lost${v ? "" : " zero"}${cls}"${title}>${v ? credits(v) : "0"}</td>`;
+  // compact2 drops the scan and map columns: the total's title keeps them
+  return cell(r.lost_scan, " c2hide") + cell(r.lost_map, " c2hide") +
+    cell(r.lost_total, " tot", ` title="scan (FSS) ${credits(r.lost_scan || 0)} + map (DSS) ${credits(r.lost_map || 0)}"`);
 }
 // the "within N ly" box: a positive number, or null (no limit)
 function firstsWithin() {
@@ -2786,7 +3059,10 @@ function seenCell(v) {
   if (!v) return "";
   const when = v.days == null ? "" : v.days < 1 ? "the same day" : `${v.days} d after you`;
   const has = v.spansh_bodies != null ? `Spansh has ${v.spansh_bodies}${v.body_count ? ` of ${v.body_count}` : ""} bodies` : "";
-  return `<span title="Someone else has scanned this: ${v.bodies} bod${v.bodies === 1 ? "y" : "ies"} you discovered reached Spansh from another commander, first on ${esc((v.reported_ts || "").slice(0, 10))}. Your first discovery counts once you sell, if nobody has sold before you.">👁 ${[when, has].filter(Boolean).join(" · ")}</span>`;
+  // compact: "👁 +8 d · 7/12"
+  const short = [v.days == null ? "" : v.days < 1 ? "same day" : `+${v.days} d`,
+    v.spansh_bodies != null ? `${v.spansh_bodies}${v.body_count ? `/${v.body_count}` : ""}` : ""].filter(Boolean).join(" · ");
+  return `<span title="Someone else has scanned this: ${v.bodies} bod${v.bodies === 1 ? "y" : "ies"} you discovered reached Spansh from another commander, first on ${esc((v.reported_ts || "").slice(0, 10))}. Your first discovery counts once you sell, if nobody has sold before you.">${dual(`👁 ${[when, has].filter(Boolean).join(" · ")}`, `👁 ${short}`, {title: [when, has].filter(Boolean).join(" · ")})}</span>`;
 }
 // ---- Left behind: unfinished work in systems you have visited nearby ----
 let leftKey = null, leftData = null;
@@ -2808,7 +3084,7 @@ function renderLeft() {
     const maps = r.maps.filter(m => m.increment >= hlLevel("body")), bio = r.bio.filter(b => b.value >= bioMinNow());
     const worth = maps.reduce((n, m) => n + m.increment, 0) + bio.reduce((n, b) => n + b.value, 0);
     const bits = [r.unfound ? `${r.unfound} bod${r.unfound === 1 ? "y" : "ies"} not found` : "",
-      maps.length ? "map " + maps.map(m => `<b>${esc(m.body)}</b> <span class="unk">${esc(m.subtype)}${m.terraformable ? " T" : ""} +${credits(m.increment)}</span>`).join(", ") : "",
+      maps.length ? "map " + maps.map(m => `<b>${esc(m.body)}</b> <span class="unk">${sfText("planet", m.subtype)}${m.terraformable ? " T" : ""} +${credits(m.increment)}</span>`).join(", ") : "",
       // genera null: FSS signals nobody DSS'd, priced as the leaving alert prices them (an upper bound)
       bio.length ? "bio " + bio.map(b => `<b>${esc(b.body)}</b> <span class="unk">${b.genera === null ? `${b.signals} signal${b.signals === 1 ? "" : "s"}, not DSS'd`
         : b.genera.map(esc).join(", ")} ≤${credits(b.value)}</span>`).join(", ") : "",
@@ -2879,7 +3155,7 @@ function renderMat() {
         (list.map(x => `<span class="name" data-name="${esc(x.system)}" title="click to copy the system">${esc(x.body)}</span> <span class="unk">${x.pct}% · ${x.distance} ly</span>`).join(" · ") || `<span class="unk">none scanned nearby</span>`) + `</td></tr>`; }).join("") +
     `</tbody></table>` : "";
   document.getElementById("matSites").innerHTML = matSitesHtml(m.mining_sites || []);
-  if (matScroll && Object.keys(src).length) { matScroll = false; document.getElementById("matSources").scrollIntoView({block: "start"}); }
+  if (matScroll && Object.keys(src).length) { matScroll = false; revealIn(document.getElementById("matSources"), "start"); }
   const f = mFilter.value.trim().toLowerCase();
   const rows = m.rows.filter(r => (!mHeld.checked || r.count) && (!f || r.name.toLowerCase().includes(f)));
   const cats = ["Raw", "Manufactured", "Encoded", "Other"];
@@ -2995,13 +3271,13 @@ async function tailLog() {   // new journal lines since the newest row: prepend 
     const hadError = !!L.error; L.error = null;
     if (hadError && !(r.rows && r.rows.length)) renderLog();
     if (r.rows && r.rows.length) {
-      const before = document.documentElement.scrollHeight, y = window.scrollY;
+      const mark = scrollMark(document.getElementById("logRows"));
       r.rows.forEach(x => L.fresh.add(x.id));
       L.rows = r.rows.concat(L.rows);
       // a long session with the Log open: keep the newest rows (each holds its raw event), "more" fetches the rest
       if (L.rows.length > LOG_MAX_ROWS) { L.rows.length = LOG_MAX_ROWS; L.next = L.rows[LOG_MAX_ROWS - 1].id; }
       renderLog();
-      if (y > 0) window.scrollBy(0, document.documentElement.scrollHeight - before);  // keep your place unless at the top
+      keepPlace(mark);   // keep your place unless at the top (in the Log's pane in app mode)
       setTimeout(() => { r.rows.forEach(x => L.fresh.delete(x.id)); }, 2500);
     }
   } catch { if (gen === L.gen) { L.loading = false; L.journal = null; } }
@@ -3014,7 +3290,7 @@ function openBodyIn(id, name) {
   selectedBody = name; selectedSystem = id; bodyData = null;
   const panel = document.getElementById("bodyPanel");
   panel.hidden = false; panel.innerHTML = `<h3><b>${esc(name)}</b> <button type="button" onclick="closeBody()">✕</button></h3><div class="unk">loading…</div>`;
-  render(); renderHere(); reloadBody();
+  render(); renderHere(); reloadBody(); paneTop("hereMain", "bodyPanel");
 }
 const localTime = ts => { const d = new Date(ts); return isNaN(d) ? ts : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}); };
 const localDay = ts => { const d = new Date(ts); return isNaN(d) ? "" : d.toLocaleDateString([], {weekday: "short", year: "numeric", month: "short", day: "numeric"}); };
@@ -3029,7 +3305,7 @@ function renderLog() {
       (r.id64 ? `<span class="goto" data-goto="${esc(r.id64)}" title="open in Here">⌖</span>` : "") : "";
     const body = r.body && r.id64 ? ` <span class="goto" data-body="${esc(r.body)}" data-bsys="${esc(r.id64)}" title="open ${esc(r.body)} in Here">🔍</span>` : "";
     h += `<tr class="ln ${r.cat}${L.fresh.has(r.id) ? " fresh" : ""}" data-id="${esc(r.id)}"><td class="t" title="${esc(r.ts)}">${localTime(r.ts)}</td>` +
-      `<td title="${r.cat}">${CAT_GLYPH[r.cat] || ""}</td><td class="ev hide-sm">${esc(r.event)}</td><td class="sum">${esc(r.summary)}${body}</td><td>${sys}</td></tr>`;
+      `<td title="${r.cat} · ${esc(r.event)}">${CAT_GLYPH[r.cat] || ""}</td><td class="ev hide-sm c2hide">${esc(r.event)}</td><td class="sum">${esc(r.summary)}${body}</td><td>${sys}</td></tr>`;
     if (L.open.has(r.id)) h += `<tr class="raw"><td colspan="5"><pre>${esc(JSON.stringify(r.raw, null, 2))}</pre></td></tr>`;
   }
   document.getElementById("logRows").innerHTML = h || `<tr><td colspan="5" class="unk">${L.loading ? "" : "No events match."}</td></tr>`;
@@ -3041,6 +3317,11 @@ lDays.onchange = () => { saveLog(); loadLog(); };
 let lTimer = null;
 lFilter.oninput = () => { clearTimeout(lTimer); lTimer = setTimeout(() => loadLog(), 350); };
 document.getElementById("lMore").onclick = moreLog;
+// app mode: scrolling the Log's pane near its end fetches the next page (the More button stays for the page layout)
+document.getElementById("logPane").addEventListener("scroll", e => {
+  const p = e.currentTarget;
+  if (appOn() && L.next && !L.loading && p.scrollHeight - p.scrollTop - p.clientHeight < 400) moreLog();
+}, {passive: true});
 document.getElementById("logRows").addEventListener("click", e => {
   const b = e.target.closest("[data-body]"); if (b) return openBodyIn(b.dataset.bsys, b.dataset.body);
   const g = e.target.closest("[data-goto]"); if (g) return showInHere(g.dataset.goto);
@@ -3086,7 +3367,9 @@ async function loadBio() {
   renderBio();
 }
 const when = ts => ts ? ts.slice(0, 10) + " " + ts.slice(11, 16) : "";
-const sysCell = s => !s ? "" : `<span class="name" data-name="${esc(s.name)}" title="click to copy">${esc(s.name)}</span><span class="goto" data-goto="${esc(s.id)}" title="open in Here">⌖</span>`;
+// a table's time cell: "2026-09-19 18:02", compact "09-19 18:02", compact2 "09-19"
+const whenCell = ts => { const w = when(ts); return w ? dual(esc(w), esc(shortForm("when", w)), {title: w, s2: esc(w.slice(5, 10))}) : ""; };
+const sysCell = s => !s ? "" : `<span class="name" data-name="${esc(s.name)}" title="click to copy">${nameWords(s.name)}</span><span class="goto" data-goto="${esc(s.id)}" title="open in Here">⌖</span>`;
 function renderBio() {
   const b = bioData, st = document.getElementById("bStatus");
   if (!b || b.error) { st.textContent = b ? b.error : ""; return; }
@@ -3104,19 +3387,22 @@ function renderBio() {
     (n["in progress"] ? ` · <span class="progress">${n["in progress"]} in progress</span>` : "") +
     (rows.length !== b.rows.length ? ` · showing ${rows.length}` : "");
   document.querySelectorAll("th[data-bsort]").forEach(h => h.classList.toggle("on", h.dataset.bsort === k));
+  // compact2: the species goes under its genus, the variant (and the time) only in titles
+  const species = r => (r.species || "").split(" ").slice(1).join(" ") || r.species || "";
   document.getElementById("bioRows").innerHTML = rows.map(r => `<tr>
-      <td>${when(r.ts)}</td><td>${sysCell(r.system)}</td><td>${esc(r.body)}</td><td>${esc(r.genus || "")}</td>
-      <td>${esc((r.species || "").split(" ").slice(1).join(" ") || r.species || "")}</td><td class="hide-sm">${esc((r.variant || "").split(" - ").pop())}</td>
-      <td class="num">${r.samples}/3</td>
-      <td class="${r.state === "in progress" ? "progress" : r.state}" title="${r.sold_ts ? "sold " + when(r.sold_ts) : ""}">${r.state}</td>
+      <td>${whenCell(r.ts)}</td><td>${sysCell(r.system)}</td><td>${esc(r.body)}</td><td>${esc(r.genus || "")}${species(r) ? `<div class="sf2 sub2">${esc(species(r))}</div>` : ""}</td>
+      <td class="c2hide">${esc(species(r))}</td><td class="hide-sm c2hide">${esc((r.variant || "").split(" - ").pop())}</td>
+      <td class="num c2hide">${r.samples}/3</td>
+      <td class="${r.state === "in progress" ? "progress" : r.state}" title="${r.sold_ts ? "sold " + when(r.sold_ts) : ""}">${dual(esc(r.state), esc(shortForm("state", r.state)),
+        {title: `${r.state} · ${r.samples}/3 samples`, s2: r.state === "in progress" ? `${r.samples}/3` : esc(r.state)})}</td>
       <td class="num" title="${r.factor === 5 ? "×5 first footfall bonus" : ""}">${r.value ? credits(r.value) + (r.factor === 5 ? " ✦" : "") : "?"}</td></tr>`).join("") ||
     `<tr><td colspan="9" class="unk">${b.rows.length ? "Nothing matches the filter." : "No samples in this period."}</td></tr>`;
   const cx = b.codex.filter(c => !f || [c.name, c.category, c.region, c.system && c.system.name].some(x => (x || "").toLowerCase().includes(f)));
   document.getElementById("cStatus").textContent = `· ${b.codex.length} in this period, ${b.codex.filter(c => c.new).length} new to your codex, ` +
     `${credits(b.codex.reduce((s, c) => s + (c.voucher || 0), 0))} cr in vouchers`;
-  document.getElementById("codexRows").innerHTML = cx.map(c => `<tr><td>${when(c.ts)}</td><td>${esc(c.name)}</td>
-      <td class="hide-sm">${esc([c.category, c.subcategory].filter(Boolean).join(" · "))}</td><td class="hide-sm">${esc(c.region || "")}</td>
-      <td>${sysCell(c.system)}</td><td>${c.voucher ? `💰 ${c.voucher.toLocaleString()} cr` : c.new ? "✦ new" : ""}</td></tr>`).join("") ||
+  document.getElementById("codexRows").innerHTML = cx.map(c => `<tr><td>${whenCell(c.ts)}</td><td>${esc(c.name)}</td>
+      <td class="hide-sm c2hide">${esc([c.category, c.subcategory].filter(Boolean).join(" · "))}</td><td class="hide-sm c2hide">${esc(c.region || "")}</td>
+      <td>${sysCell(c.system)}</td><td>${c.voucher ? dual(`💰 ${c.voucher.toLocaleString()} cr`, `💰 ${credits(c.voucher)}`) : c.new ? dual("✦ new", "✦") : ""}</td></tr>`).join("") ||
     `<tr><td colspan="6" class="unk">No codex entries in this period.</td></tr>`;
 }
 document.querySelectorAll("th[data-bsort]").forEach(h => h.onclick = () => {
@@ -3192,57 +3478,63 @@ function renderHistory() {
   const fmt = ts => ts.slice(0, 10) + " " + ts.slice(11, 16);
   const a = h.all_time;
   document.getElementById("histAll").innerHTML = !a ? "" : `<tr class="alltime" title="every session in your journals${a.since ? ", since " + a.since.slice(0, 10) : ""}">
-      <td><b>All time</b> <span class="unk">${a.sessions.toLocaleString()} sessions</span></td>
-      <td class="num">${a.jumps.toLocaleString()}</td><td class="num">${Math.round(a.ly).toLocaleString()}</td><td class="num hide-sm">${a.max_sol.toLocaleString()}</td>
-      <td class="num">${a.firsts.toLocaleString()}</td><td class="num hide-sm">${a.bodies_first.toLocaleString()}</td><td class="num">${a.mapped.toLocaleString()}</td>
-      <td class="num hide-sm">${a.footfalls.toLocaleString()}</td><td class="num">${a.samples.toLocaleString()}</td><td class="num hide-sm">${a.codex_new.toLocaleString()}</td></tr>`;
+      <td><b>All time</b> <span class="unk c1hide">${a.sessions.toLocaleString()} sessions</span></td>
+      <td class="num">${a.jumps.toLocaleString()}</td><td class="num">${Math.round(a.ly).toLocaleString()}</td><td class="num hide-sm c2hide">${a.max_sol.toLocaleString()}</td>
+      <td class="num">${a.firsts.toLocaleString()}</td><td class="num hide-sm c2hide">${a.bodies_first.toLocaleString()}</td><td class="num">${a.mapped.toLocaleString()}</td>
+      <td class="num hide-sm">${a.footfalls.toLocaleString()}</td><td class="num">${a.samples.toLocaleString()}</td><td class="num hide-sm c2hide">${a.codex_new.toLocaleString()}</td></tr>`;
   const L = h.ledger || {}, ss = L.since_last_sale, car = L.career;
   if (ss && ss.since) document.getElementById("histAll").insertAdjacentHTML("beforeend",
-    `<tr class="alltime sincesale" title="everything since your last sale to Universal Cartographics"><td><b>Since your last sale</b> <span class="unk">${ss.days} d · ${esc(ss.since.slice(0, 10))}</span></td>
-      <td class="num">${ss.jumps.toLocaleString()}</td><td class="num">${Math.round(ss.ly).toLocaleString()}</td><td class="num hide-sm">${ss.max_sol.toLocaleString()}</td>
-      <td class="num">${ss.firsts}</td><td class="num hide-sm">${ss.bodies_first}</td><td class="num">${ss.mapped}</td>
-      <td class="num hide-sm">${ss.footfalls}</td><td class="num">${ss.samples}</td><td class="num hide-sm">${ss.codex_new}</td></tr>`);
+    `<tr class="alltime sincesale" title="everything since your last sale to Universal Cartographics"><td><b>${dual("Since your last sale", "Since sale")}</b> <span class="unk">${ss.days} d<span class="c1hide"> · ${esc(ss.since.slice(0, 10))}</span></span></td>
+      <td class="num">${ss.jumps.toLocaleString()}</td><td class="num">${Math.round(ss.ly).toLocaleString()}</td><td class="num hide-sm c2hide">${ss.max_sol.toLocaleString()}</td>
+      <td class="num">${ss.firsts}</td><td class="num hide-sm c2hide">${ss.bodies_first}</td><td class="num">${ss.mapped}</td>
+      <td class="num hide-sm">${ss.footfalls}</td><td class="num">${ss.samples}</td><td class="num hide-sm c2hide">${ss.codex_new}</td></tr>`);
   if (car && car.Exploration) { const e = car.Exploration, o = car.Exobiology || {};
     document.getElementById("histAll").insertAdjacentHTML("beforeend",
       `<tr class="alltime career" title="the game's own statistics (your whole career, including journals Outrider never saw), as of ${esc((car.ts || "").slice(0, 10))}">
-        <td><b>Career</b> <span class="unk">game statistics</span></td><td class="num">${(e.Total_Hyperspace_Jumps || 0).toLocaleString()}</td>
-        <td class="num">${Math.round(e.Total_Hyperspace_Distance || 0).toLocaleString()}</td><td class="num hide-sm" title="greatest distance from your start">${Math.round(e.Greatest_Distance_From_Start || 0).toLocaleString()}</td>
-        <td class="num" title="systems visited">${(e.Systems_Visited || 0).toLocaleString()}</td><td class="num hide-sm"></td><td class="num" title="planets mapped (surface scans)">${(e.Planets_Scanned_To_Level_3 || 0).toLocaleString()}</td>
-        <td class="num hide-sm">${(e.First_Footfalls || 0).toLocaleString()}</td><td class="num" title="organic species encountered">${(o.Organic_Species_Encountered || 0).toLocaleString()}</td><td class="num hide-sm"></td></tr>`); }
+        <td><b>Career</b> <span class="unk c1hide">game statistics</span></td><td class="num">${(e.Total_Hyperspace_Jumps || 0).toLocaleString()}</td>
+        <td class="num">${Math.round(e.Total_Hyperspace_Distance || 0).toLocaleString()}</td><td class="num hide-sm c2hide" title="greatest distance from your start">${Math.round(e.Greatest_Distance_From_Start || 0).toLocaleString()}</td>
+        <td class="num" title="systems visited">${(e.Systems_Visited || 0).toLocaleString()}</td><td class="num hide-sm c2hide"></td><td class="num" title="planets mapped (surface scans)">${(e.Planets_Scanned_To_Level_3 || 0).toLocaleString()}</td>
+        <td class="num hide-sm">${(e.First_Footfalls || 0).toLocaleString()}</td><td class="num" title="organic species encountered">${(o.Organic_Species_Encountered || 0).toLocaleString()}</td><td class="num hide-sm c2hide"></td></tr>`); }
   const fmtD = t => t ? t.slice(0, 10) : "start";
-  const lossHtml = ls => ls.map(l => `<span class="lost" title="${l.ship ? `${l.bodies} bodies (${l.firsts} first discoveries) died with the ship` : "you died, the ship survived"}` +
-    `${l.bio_runs ? `; ${l.bio_runs} completed sample run${l.bio_runs === 1 ? "" : "s"} lost` : ""}">✗ ${esc(l.ts.slice(0, 10))} −${credits((l.value || 0) + (l.bio_value || 0))}` +
-    `${l.bio_value ? ` (${l.value ? `${credits(l.value)} carto, ` : ""}${credits(l.bio_value)} bio)` : ""}</span>`).join(" ");
+  // compact: "✗ 09-01 −12.3M" (the split between carto and bio stays in the full form and the title)
+  const lossHtml = ls => ls.map(l => {
+    const why = (l.ship ? `${l.bodies} bodies (${l.firsts} first discoveries) died with the ship` : "you died, the ship survived") +
+      (l.bio_runs ? `; ${l.bio_runs} completed sample run${l.bio_runs === 1 ? "" : "s"} lost` : "");
+    const full = `✗ ${l.ts.slice(0, 10)} −${credits((l.value || 0) + (l.bio_value || 0))}` +
+      `${l.bio_value ? ` (${l.value ? `${credits(l.value)} carto, ` : ""}${credits(l.bio_value)} bio)` : ""}`;
+    return `<span class="lost" title="${esc(why)}">` +
+      dual(esc(full), `✗ ${esc(l.ts.slice(5, 10))} −${credits((l.value || 0) + (l.bio_value || 0))}`, {title: `${full}: ${why}`}) + `</span>`;
+  }).join(" ");
   // the trip still under way: a trip row only exists once a cartographic sale ends it, so losses since the last
   // sale (every loss, if you have never sold) and Vista Genomics sales since it (L.current: its payout so far and
   // x5 check; every sale, for a player who sells only exobiology) would show nowhere
   const cur = (L.losses || []).filter(l => !(ss && ss.since) || l.ts > ss.since), ct = L.current, ctNote = ct ? tripBioText(ct) : "";
-  const curRow = !cur.length && !ct ? "" : `<tr class="curtrip${ctNote ? " hasnote" : ""}" title="since your last sale to Universal Cartographics: the trip ends at your next one"><td>${ss && ss.since ? fmtD(ss.since) : "start"} → now</td>` +
+  const curRow = !cur.length && !ct ? "" : `<tr class="curtrip${ctNote ? " hasnote" : ""}" title="since your last sale to Universal Cartographics: the trip ends at your next one"><td>${ss && ss.since ? dual(fmtD(ss.since), shortForm("day", fmtD(ss.since))) : "start"} → now</td>` +
     `<td class="num">${ss && ss.days != null ? ss.days : ""}</td><td class="num">${ss ? (ss.jumps || 0).toLocaleString() : ""}</td>` +
     `<td class="num hide-sm">${ss ? Math.round(ss.ly || 0).toLocaleString() : ""}</td><td class="num">${ss ? ss.firsts ?? "" : ""}</td>` +
     (ct && ct.paid_bio ? `<td class="num" title="${credits(ct.paid_bio)} exobiology so far; cartographics not sold">${credits(ct.paid_bio)}</td>` : `<td class="num unk">not sold</td>`) +
-    `<td class="num hide-sm"></td><td class="num hide-sm"></td><td class="num hide-sm"></td><td class="num hide-sm"></td><td>${lossHtml(cur)}</td></tr>` +
+    `<td class="num hide-sm c2hide"></td><td class="num hide-sm c2hide"></td><td class="num hide-sm c2hide"></td><td class="num hide-sm c2hide"></td><td>${lossHtml(cur)}</td></tr>` +
     (ctNote ? `<tr class="tripnote"><td colspan="11" class="unk">🧬 ${esc(ctNote)}</td></tr>` : "");
   document.getElementById("tripRows").innerHTML = curRow + (L.trips || []).map(t => {
     const est = t.estimate ? ` <span class="unk">${t.estimate ? (t.paid_carto >= t.estimate ? "+" : "") + Math.round(100 * (t.paid_carto - t.estimate) / t.estimate) + "%" : ""}</span>` : "";
     const losses = lossHtml(t.losses);
     const note = tripBioText(t);
-    return `<tr${note ? ` class="hasnote"` : ""}><td>${fmtD(t.start)} → ${fmtD(t.end)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
+    return `<tr${note ? ` class="hasnote"` : ""}><td>${dual(`${fmtD(t.start)} → ${fmtD(t.end)}`, `${shortForm("day", fmtD(t.start))} → ${shortForm("day", fmtD(t.end))}`)}</td><td class="num">${t.days ?? ""}</td><td class="num">${t.jumps.toLocaleString()}</td>
       <td class="num hide-sm">${Math.round(t.ly).toLocaleString()}</td><td class="num">${t.firsts}</td>
       <td class="num" title="${credits(t.paid_carto || 0)} cartographics + ${credits(t.paid_bio || 0)} exobiology">${credits(t.paid)}</td>
-      <td class="num hide-sm">${t.estimate ? credits(t.estimate) + est : ""}</td><td class="num hide-sm">${t.per_hour ? credits(t.per_hour) : ""}</td>
-      <td class="num hide-sm">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm">${t.first_rate ?? ""}</td><td>${losses}</td></tr>` +
+      <td class="num hide-sm c2hide">${t.estimate ? credits(t.estimate) + est : ""}</td><td class="num hide-sm c2hide">${t.per_hour ? credits(t.per_hour) : ""}</td>
+      <td class="num hide-sm c2hide">${t.per_jump ? credits(t.per_jump) : ""}</td><td class="num hide-sm c2hide">${t.first_rate ?? ""}</td><td>${losses}</td></tr>` +
       (note ? `<tr class="tripnote"><td colspan="11" class="unk">🧬 ${esc(note)}</td></tr>` : "");
   }).join("") + ((L.trips || []).length || ct ? "" : `<tr><td colspan="11" class="unk">No sales on record yet.</td></tr>`);
   document.getElementById("topRows").innerHTML = (L.top_finds || []).map(f => `<tr><td><span class="name" data-name="${esc(f.body)}" title="click to copy">${esc(f.body)}</span></td>
-      <td>${esc(f.type || "")}${f.first_discovered ? " 🏁" : ""}${f.mapped ? " 🗺" : ""}</td><td class="num">${credits(f.value)}</td>
-      <td class="${f.state === "lost" ? "lost" : f.state === "sold" ? "sold" : "unsold"}">${f.state === "unsold" ? "aboard" : f.state}</td><td class="hide-sm">${esc((f.ts || "").slice(0, 10))}</td></tr>`).join("");
+      <td>${sfText("body", f.type || "")}${f.first_discovered ? " 🏁" : ""}${f.mapped ? " 🗺" : ""}</td><td class="num">${credits(f.value)}</td>
+      <td class="${f.state === "lost" ? "lost" : f.state === "sold" ? "sold" : "unsold"}">${f.state === "unsold" ? "aboard" : f.state}</td><td class="hide-sm c2hide">${esc((f.ts || "").slice(0, 10))}</td></tr>`).join("");
   document.getElementById("histRows").innerHTML = h.sessions.map((s, i) => {
     const open = openSessions.has(s.start);
-    return `<tr class="sess${open ? " open" : ""}" data-sess="${esc(s.start)}"><td>${fmt(s.start)} → ${s.end.slice(11, 16)}</td>
-      <td class="num">${s.jumps}</td><td class="num">${s.ly.toLocaleString()}</td><td class="num hide-sm">${s.max_sol.toLocaleString()}</td>
-      <td class="num">${s.firsts}</td><td class="num hide-sm">${s.bodies_first}</td><td class="num">${s.mapped}</td>
-      <td class="num hide-sm">${s.footfalls}</td><td class="num">${s.samples}</td><td class="num hide-sm">${s.codex_new}</td></tr>` +
+    return `<tr class="sess${open ? " open" : ""}" data-sess="${esc(s.start)}"><td>${dual(`${fmt(s.start)} → ${s.end.slice(11, 16)}`, `${fmt(s.start).slice(5)} → ${s.end.slice(11, 16)}`, {s2: esc(fmt(s.start).slice(5))})}</td>
+      <td class="num">${s.jumps}</td><td class="num">${s.ly.toLocaleString()}</td><td class="num hide-sm c2hide">${s.max_sol.toLocaleString()}</td>
+      <td class="num">${s.firsts}</td><td class="num hide-sm c2hide">${s.bodies_first}</td><td class="num">${s.mapped}</td>
+      <td class="num hide-sm">${s.footfalls}</td><td class="num">${s.samples}</td><td class="num hide-sm c2hide">${s.codex_new}</td></tr>` +
       (open ? `<tr><td colspan="10" class="systems">${s.systems.map(x => `<span><span class="name" data-name="${esc(x.name)}" title="click to copy">${esc(x.name)}</span>` +
         `${x.kind === "CarrierJump" ? " 🚢" : x.kind === "Location" ? " ⟳" : ""} <span class="unk">${x.ts.slice(11, 16)}</span></span>`).join("")}</td></tr>` : "");
   }).join("") || `<tr><td colspan="10" class="unk">No jumps in this period.</td></tr>`;
@@ -3329,12 +3621,17 @@ function drawMap() {
   if (M.legend !== legend) { M.legend = legend; mEl("mLegend").innerHTML = legend; }   // not on every drag frame
   const dpr = window.devicePixelRatio || 1;
   const w = mEl("mapWrap").clientWidth;
+  if (appOn()) {
+    // app mode: the box between the bar and the legend is the view's height left (CSS); the canvas fills it
+    const h = Math.max(120, mEl("mapWrap").clientHeight);
+    if (M.sizeKey !== `app|${h}|${w}`) { M.sizeKey = `app|${h}|${w}`; M.h = h; mapCanvas.style.height = ""; }
+  }
   // fill the window down to the legend and hint beneath it (measured, since the legend's length varies)
   const top = mapCanvas.getBoundingClientRect().top + scrollY;
   const below = [mEl("mLegend"), mapCanvas.closest("section").querySelector(".hint")]
     .reduce((n, el) => n + (el ? el.offsetHeight + (parseFloat(getComputedStyle(el).marginTop) || 0) : 0), 0);
   const sizeKey = `${innerHeight}|${Math.round(top)}|${below}|${w}`;
-  if (M.sizeKey !== sizeKey) {   // only when the window or what is around the map changed (not on every drag frame)
+  if (!appOn() && M.sizeKey !== sizeKey) {   // only when the window or what is around the map changed (not on every drag frame)
     M.sizeKey = sizeKey;
     M.h = Math.max(360, Math.floor(innerHeight - top - below - 4));
     mapCanvas.style.height = M.h + "px";
@@ -3639,8 +3936,8 @@ function closeSearchBody() {
   document.getElementById("sBodyPanel").hidden = true; document.getElementById("sMain").classList.remove("detail");
   renderSearch();
 }
-const hitHtml = (h, sys) => typeof h === "string" ? esc(h)
-  : `<span class="shit${sBody.sys === sys && sBody.name === h.body ? " sel" : ""}" data-sbodypop="${esc(h.body)}" data-sys="${esc(sys)}"${h.here ? ` data-here="1" title="open the system in Here"` : ""}>${esc(h.t)}</span>`;
+const hitHtml = (h, sys) => typeof h === "string" ? sfText("text", h)
+  : `<span class="shit${sBody.sys === sys && sBody.name === h.body ? " sel" : ""}" data-sbodypop="${esc(h.body)}" data-sys="${esc(sys)}"${h.here ? ` data-here="1" title="open the system in Here"` : ""}>${sfText("text", h.t, h.here ? {title: `${h.t} · open the system in Here`} : {})}</span>`;
 document.getElementById("sRows").addEventListener("click", e => {
   const h = e.target.closest("[data-sbodypop]"); if (!h) return;
   if (h.dataset.here) showInHere(h.dataset.sys);   // a mining hit: Here, with the ⛏ column and its survey odds
@@ -3662,7 +3959,7 @@ function renderSearch(bms) {
     : (a, b) => a.distance - b.distance);
   document.getElementById("sRows").innerHTML = rows.map(r => `<tr>
       <td class="bmcell">${bmIcon(r.id, r.name, bms || bmMap())}</td>
-      <td class="name" data-name="${esc(r.name)}" title="click to copy">${esc(r.name)}${firstsIcon(r.firsts)}${r.visited
+      <td class="name" data-name="${esc(r.name)}" title="click to copy">${nameWords(r.name)}${firstsIcon(r.firsts)}${r.visited
         ? `<span class="badge s-visited">visited</span>` : ""}</td>
       <td class="num dist">${r.distance.toFixed(2)}</td>
       <td class="matches">${Object.entries(r.matches).map(([k, hits]) =>
@@ -4759,7 +5056,7 @@ const hasVolcanism = b => b.type === "Planet" && !!b.volcanism && !/^no volcanis
 // just the fact of volcanism (hover names it, the body panel has the rest); brighter where the body is landable
 const volcanoIcon = b => hasVolcanism(b)
   ? ` <span class="volc${b.landable ? " land" : ""}" title="${esc(b.volcanism)}${b.landable ? " · landable: geological sites possible" : " · not landable"}">🌋</span>` : "";
-const geoTag = b => b.geo ? ` <span class="sp geo" title="geological signals">🪨 ${b.geo} geo</span>` : "";
+const geoTag = b => b.geo ? ` <span class="sp geo" title="geological signals">${dual(`🪨 ${b.geo} geo`, `🪨${b.geo}`, {title: `${b.geo} geological signal${b.geo === 1 ? "" : "s"}`})}</span>` : "";   // Here's table only
 // Planetary mining locations (the FSS count, or Spansh's): the count, with the ground's odds from the Elite Dangerous
 // Field Manual's survey (CMDR Grumlop, CC BY-SA 4.0; mining_odds.json) as a pop-up. Odds, not the body's contents.
 const mineCount = n => `${n} planetary mining location${n === 1 ? "" : "s"}`;
@@ -5078,6 +5375,39 @@ document.addEventListener("keydown", e => {
     e.preventDefault(); e.target.click();
   }
 });
+// App mode: the window does not scroll, so Page Up/Down, Home and End go to the view's main pane while the focus is
+// on nothing that scrolls or types (the page itself, a tab button just clicked); the pane then keeps the focus, and
+// the keys work on it natively from there. A focused pane, a field or an open dialog keeps its own keys.
+document.addEventListener("keydown", e => {
+  const step = {PageDown: 0.9, PageUp: -0.9, End: Infinity, Home: -Infinity}[e.key];
+  if (step === undefined || !appOn() || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const a = document.activeElement;
+  if (a && a !== document.body && (a.closest(".pane, dialog, [contenteditable]") || /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))) return;
+  const p = document.getElementById(VIEW_PANE[view]);
+  if (!p || !p.getClientRects().length) return;
+  e.preventDefault();
+  p.scrollTop = isFinite(step) ? p.scrollTop + step * p.clientHeight : step > 0 ? p.scrollHeight : 0;
+  p.focus({preventScroll: true});
+});
+// app mode follows the window's size (and the header's: render checks it); what is sized to its box redraws
+addEventListener("resize", () => { if (applyAppMode() && data) render(); });
+// ...and to its box's size, which also changes when the header grows or shrinks (tiles folded, a strip shown):
+// the overview's surface map and the galaxy map. One frame later, so a redraw never feeds back into the same pass.
+if (typeof ResizeObserver !== "undefined") {
+  const seen = new Map();
+  let queued = false;
+  const ro = new ResizeObserver(entries => {
+    let changed = false;
+    for (const en of entries) {
+      const k = `${Math.round(en.contentRect.width)}x${Math.round(en.contentRect.height)}`;
+      if (seen.get(en.target) !== k) { seen.set(en.target, k); changed = true; }
+    }
+    if (!changed || queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; if (!data) return; if (appOn()) renderSurface(); drawMap(); });
+  });
+  for (const id of ["ovHere", "ovMap", "mapWrap"]) ro.observe(document.getElementById(id));
+}
 document.getElementById("matSources").addEventListener("click", e => {
   const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);
 });

@@ -126,6 +126,20 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
   screen speaks) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+- **Page layout: scroll the pane, not the window.** On a window of at least 900 × 600 (`appWanted`; not Now) the
+  body gets `app`: it is the window's height with no page scroll, the header stays, the view fills the rest (flex
+  columns with `min-height: 0` down the chain) and each `.pane` (a bordered box, tabindex in app mode) scrolls on its
+  own, its `thead th` sticky. A view's controls sit above its pane. A new list goes in a `.pane` with an id (and in
+  `VIEW_PANE` if it is the view's main one). Scroll with `revealIn(el)` (a row into view, under the sticky heading),
+  `scrollMark`/`keepPlace` (rows added above) and `paneOf(el)`, never `window.scrollTo`/`scrollIntoView` directly;
+  size things to their box in app mode, not to `innerHeight` (only Now and page mode use the window). App-mode CSS is
+  the `body.app` block at the end of `page.css`; below the size nothing of it applies, so check both.
+- **Compact tables.** The tables in `FIT_TABLES` get `compact` (then `compact2`) when they do not fit their box
+  (`fitTable`, decided by `compactLevel` from the min-content width at each level; ResizeObserver plus a
+  MutationObserver on the rows). A cell holds both forms: `dual(full, short, {s2})` / `sfText(kind, text)` give
+  `.lf` + `.sf` (or `.sf1`/`.sf2`), the short one titled with the full text; `.c1hide`/`.c2hide` drop a column. Put
+  abbreviations in `SHORT_FORMS` / `shortForm(kind, text)` (headings: `SHORT_FORMS.head`, applied at start), never
+  ad hoc, and only in those tables (outside them both forms would show). Speech and notifications keep the full words.
 - **Spoken lines.** Every alert key must agree across `speech.json`, `outrider.speech.KEYS` (with its placeholders),
   `outrider.speech.SAMPLES` (a value for every placeholder), a `line("key", ...)` call in `page.js` and a
   `LINE_SAMPLES` entry in `page.js`. The shipped lists hold 50 lines each for business, sarcastic, sweet and

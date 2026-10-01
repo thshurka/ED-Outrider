@@ -1398,7 +1398,8 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
   }
   {   // batch F: the pre-Odyssey mark (Nearby, Left behind, Here) and the firsts watch (My firsts, the Unsold tile)
     const w = dom.window, d = w.document, before = errors.length, bad = [], got = {};
-    const txt = h => { const el = d.createElement("div"); el.innerHTML = h; return el.textContent; };
+    // the text a table shows while it fits: the compact forms (.sf, .sf1, .sf2) left out
+    const txt = h => { const el = d.createElement("div"); el.innerHTML = h; el.querySelectorAll(".sf, .sf1, .sf2").forEach(e => e.remove()); return el.textContent; };
     const old = {bodies: 3, genera_top: ["Bacterium", "Stratum"], up_to: 4200000, reported: "2019-06-01"};
     got.near = txt(w.eval(`oldDataTag(${JSON.stringify(old)})`));
     got.nearTitle = /Last reported 2019 by a pre-Odyssey client/.test(w.eval(`oldDataTag(${JSON.stringify(old)})`));
@@ -2097,7 +2098,8 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     // show lost: the Lost value columns (scan / map / total) instead of System tag and Seen by others; blank for a
     // system that lost nothing, 0 once everything is back
     const shown = el => el && w.getComputedStyle(el).display !== "none";
-    const heads = () => [...d.querySelectorAll("#firstsTable thead th")].filter(shown).map(th => th.textContent);
+    const heads = () => [...d.querySelectorAll("#firstsTable thead th")].filter(shown).map(th => { const c = th.cloneNode(true);
+      c.querySelectorAll(".sf, .sf1, .sf2").forEach(e => e.remove()); return c.textContent; });   // the full headings (the table fits)
     const lostRow = name => { const tr = d.querySelector(`#firstsRows td.name[data-name="${name}"]`).closest("tr");
       return [...tr.querySelectorAll("td.f-lost")].map(td => td.textContent); };
     got.lostHeads = heads();
@@ -2142,6 +2144,162 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const goodR = !bad.length && errors.length === before;
     allOk = allOk && goodR;
     console.log(goodR ? "OK" : "FAIL", "| rescan checklist |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "within N ly filter, nearest first, rescanned / part-way / plain lost rows, what is left in the part-way pop-up with values, Lost columns and sort", errors.slice(before));
+  }
+  // App layout: at 900 x 600 or more (and a header that leaves the view room) the page fits the window (body.app, no
+  // page scroll) and each view's main pane scrolls with sticky headings; smaller windows and Now scroll the page.
+  // Overview's map stays in the system pane, sized by its box (no window-height inline style); scrolling goes to the
+  // pane (a row jump, the Log keeping your place and fetching more near the end, Page Down); the tiles fold into one
+  // line that is stored, exported and coloured like its tiles.
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, v0 = view, s0 = data.surface, ov0 = {...ovState}, d0 = JSON.stringify({u: data.unsold, f: data.fuel});
+      const size = (vw, vh) => { Object.defineProperty(window, "innerWidth", {value: vw, configurable: true});
+                                 Object.defineProperty(window, "innerHeight", {value: vh, configurable: true});
+                                 window.dispatchEvent(new Event("resize")); return document.body.classList.contains("app"); };
+      o.pure = [appWanted(2576, 1340, 300, false), appWanted(1280, 720, 300, false), appWanted(899, 1000, 100, false),
+                appWanted(1600, 599, 100, true), appWanted(1280, 720, 480, false), appWanted(1280, 720, 480, true)];
+      view = "near"; render();
+      o.sizes = [size(1920, 1000), size(800, 1280), size(390, 844), size(1280, 720)];
+      view = "now"; render(); o.now = appOn(); view = "log"; render(); o.back = appOn();
+      const cs = el => getComputedStyle(el);
+      o.body = cs(document.body).overflow;
+      o.tabbable = [...document.querySelectorAll(".pane")].every(p => p.tabIndex === 0);
+      // each view's main pane: overflow auto, its first table heading sticky
+      o.panes = Object.entries(VIEW_PANE).map(([v, id]) => { view = v; render(); const p = document.getElementById(id), th = p.querySelector("thead th");
+        return v + ":" + cs(p).overflow + ":" + (th ? cs(th).position : "-"); });
+      // Overview: the map in the system pane under the body table, Nearby its own pane, no inline window height
+      data.surface = {body: "ABC 1", system: "5", body_id: 3, lat: 0, lon: 0, heading: 0, alt: 0, radius: 1000000, show: true, down: true,
+        alt_avg: false, rhino: false, ship: null, rigs: [], sites: [], locations: [], bio: []};
+      Object.assign(ovState, {layout: "side", collapsed: false}); view = "overview"; render();
+      const hv = document.getElementById("hereView"), map = document.getElementById("ovMap"), near = document.getElementById("nearPane");
+      o.ov = {map: !map.hidden && document.getElementById("ovHere").contains(map) && !near.contains(map), inline: hv.style.height,
+              nearPane: document.getElementById("ovNear").contains(near) && cs(near).overflow, here: cs(document.getElementById("hereMain")).overflow};
+      size(800, 1280); o.ovPage = hv.style.height !== ""; size(1280, 720);   // page mode: the pane is sized to the window as before
+      data.surface = s0;
+      // a row jump scrolls the pane, never the window
+      let winScrolls = 0; const sb = window.scrollBy, siv = Element.prototype.scrollIntoView;
+      window.scrollBy = () => { winScrolls++; }; Element.prototype.scrollIntoView = () => { winScrolls++; };
+      const fake = (el, rect, extra = {}) => { el.getBoundingClientRect = () => rect;
+        for (const [k, v] of Object.entries({scrollTop: 0, ...extra})) Object.defineProperty(el, k, {value: v, writable: true, configurable: true}); };
+      view = "here"; render();
+      const hm = document.getElementById("hereMain"), row = document.querySelector("#hereRows tr");
+      fake(hm, {top: 400, bottom: 700}, {clientHeight: 300, scrollTop: 100});
+      fake(row, {top: 900, bottom: 930});
+      revealIn(row); o.jump = hm.scrollTop;
+      // the Log: new rows above keep your place in the pane; near the end of the pane, the next page is fetched
+      view = "log"; render();
+      const lp = document.getElementById("logPane");
+      fake(lp, {top: 300, bottom: 700}, {scrollTop: 500, scrollHeight: 4000, clientHeight: 400});
+      const m = scrollMark(document.getElementById("logRows")); lp.scrollHeight = 4600; keepPlace(m); o.keep = lp.scrollTop;
+      let more = 0; const more0 = window.moreLog; window.moreLog = () => { more++; };
+      const L0 = {next: L.next, loading: L.loading}; L.next = "x"; L.loading = false;
+      lp.scrollTop = 1000; lp.dispatchEvent(new Event("scroll")); const far = more;
+      lp.scrollTop = 4000; lp.dispatchEvent(new Event("scroll"));
+      o.more = [far, more]; window.moreLog = more0; Object.assign(L, L0);
+      // Page Down with nothing focused scrolls the view's pane (and focuses it)
+      lp.getClientRects = () => [1]; lp.scrollTop = 0; document.activeElement && document.activeElement.blur && document.activeElement.blur();
+      document.dispatchEvent(new KeyboardEvent("keydown", {key: "PageDown", bubbles: true, cancelable: true}));
+      o.pgdn = [lp.scrollTop, document.activeElement === lp];
+      o.winScrolls = winScrolls;
+      window.scrollBy = sb; Element.prototype.scrollIntoView = siv;
+      for (const el of [hm, row, lp]) { delete el.getBoundingClientRect; delete el.getClientRects; for (const k of ["scrollTop", "scrollHeight", "clientHeight"]) delete el[k]; }
+      // the tiles fold into one line, stored and exported, coloured like the tiles
+      view = "near"; render();
+      const btn = document.getElementById("tilesBtn"), line = document.getElementById("tilesLine");
+      btn.click();
+      o.fold = {tiles: document.getElementById("tiles").hidden, line: !line.hidden, stored: localStorage.getItem("tilesCollapsed"),
+                exported: settingsDoc().settings.tilesCollapsed, btn: btn.textContent, name: line.textContent.includes(data.position.name)};
+      data.unsold = {...(data.unsold || {}), total: 9e12, error: null, carto: {estimated_payout: 9e12}, bio: {estimated_value: 0}, firsts: null, species: []};
+      data.fuel = {...(data.fuel || {}), live: true, main: 3, capacity: 32, pct: 9};
+      render();
+      o.fold.urgent = [...line.querySelectorAll(".tl-urgent")].map(e => e.textContent.replace(/[0-9.,]+[A-Z]?/g, "N"));
+      btn.click(); o.unfold = {tiles: !document.getElementById("tiles").hidden, line: line.hidden, stored: localStorage.getItem("tilesCollapsed")};
+      const dd = JSON.parse(d0); data.unsold = dd.u; data.fuel = dd.f;
+      Object.assign(ovState, ov0); view = v0; size(1024, 768); render();
+      return JSON.stringify(o);
+    })()`));
+    const want = {pure: [true, true, false, false, false, true], sizes: [true, false, false, true], now: false, back: true, body: "hidden", tabbable: true,
+      panes: ["overview:auto:sticky", "near:auto:sticky", "here:auto:sticky", "bio:auto:sticky", "bm:auto:sticky", "search:auto:sticky",
+              "hist:auto:sticky", "log:auto:sticky", "mat:auto:-", "firsts:auto:sticky"],
+      ov: {map: true, inline: "", nearPane: "auto", here: "auto"}, ovPage: true, jump: 100 + (930 - 700), keep: 1100, more: [0, 1], pgdn: [360, true], winScrolls: 0,
+      fold: {tiles: true, line: true, stored: "true", exported: true, btn: "▾", name: true, urgent: ["⛽ N%", "unsold N"]},
+      unfold: {tiles: true, line: true, stored: "false"}};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodAL = !bad.length && errors.length === before;
+    allOk = allOk && goodAL;
+    console.log(goodAL ? "OK" : "FAIL", "| app layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "on and off by window size and for Now, no page scroll, panes scroll with sticky headings, overview map in its pane, row jump / Log / Page Down scroll the pane, tiles fold, stored, exported and coloured", errors.slice(before));
+  }
+  // Compact tables: the level decision (pure), the abbreviations, both forms in the cells with the full text in the
+  // short form's title, and fitTable toggling compact / compact2 by fit with stubbed sizes (jsdom has no layout)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {};
+      o.pure = [compactLevel([500], 600, 0), compactLevel([700, 550], 600, 0), compactLevel([700, 650, 620], 600, 0),
+                compactLevel([590, 500], 600, 1), compactLevel([570], 600, 1), compactLevel([700, 590, 400], 600, 2),
+                compactLevel([700, 570], 600, 2), compactLevel([700], 600, 0)];
+      const S = {planet: ["High metal content world", "Rocky Ice world", "Rocky ice body", "Metal-rich body", "Earth-like world", "Water world",
+                          "Ammonia world", "Icy body", "Rocky body", "Class III gas giant", "Helium-rich gas giant", "Gas giant with water-based life"],
+                 star: ["G (White-Yellow) Star", "M (Red dwarf) Star", "K (Yellow-Orange giant) Star", "A (Blue-White super giant) Star",
+                        "White Dwarf (DA) Star", "Neutron Star", "Black Hole", "T Tauri Star", "L (Brown dwarf) Star", "Wolf-Rayet NC Star"],
+                 atmosphere: ["CarbonDioxide", "Thin Carbon dioxide", "Hot thin Sulphur dioxide", "NeonRich", "No atmosphere", "thin ammonia atmosphere"],
+                 status: ["no scan data", "fully scanned", "unreported", "partly scanned"],
+                 text: ["map 2 Water world T", "Rocky Ice world: 3 A"], when: ["2026-09-19 18:02"]};
+      o.short = Object.fromEntries(Object.entries(S).map(([k, xs]) => [k, xs.map(x => shortForm(k, x))]));
+      o.heads = ["Unsold value", "Dist ls", "Main star"].map(h => SHORT_FORMS.head[h]);
+      o.same = dual("Dist", "Dist");   // nothing extra when the forms are the same
+      // the cells: both forms, the short one titled with the full text
+      view = "near"; render();
+      const nt = document.getElementById("nearTable");
+      const sfs = [...nt.querySelectorAll("tbody .sf, tbody .sf1")];
+      o.nearSf = sfs.length > 0 && sfs.every(e => { const lf = [...e.parentElement.children].find(c => c.classList.contains("lf")); return lf && e.title && e.title.startsWith(lf.textContent); });
+      o.pill = statusPill({status: "explored"});
+      view = "here"; render(); renderHere();
+      const hmc = [...document.querySelectorAll("#hereRows .sf")].find(e => e.textContent === "HMC");
+      o.here = hmc ? [hmc.title, hmc.previousElementSibling.textContent] : null;
+      o.headSf = [...document.querySelectorAll("#firstsTable thead .sf")].map(e => e.textContent);
+      // fitTable with stubbed sizes: natural (min-content) widths 900 / 700 / 500 by level
+      view = "near"; render();
+      const p = nt.parentElement; let avail = 600;
+      p.style.padding = "0px";
+      Object.defineProperty(p, "clientWidth", {get: () => avail, configurable: true});
+      const natural = () => nt.classList.contains("compact2") ? 500 : nt.classList.contains("compact") ? 700 : 900;
+      const wide = () => nt.style.width === "min-content" ? natural() : Math.max(avail, natural());
+      Object.defineProperty(nt, "offsetWidth", {get: wide, configurable: true});
+      Object.defineProperty(nt, "scrollWidth", {get: wide, configurable: true});
+      nt.getClientRects = () => [1];
+      const lvl = () => nt.classList.contains("compact2") ? 2 : nt.classList.contains("compact") ? 1 : 0;
+      const step = a => { avail = a; fitTable(nt); return lvl(); };
+      o.fit = [step(600), step(800), step(1000), step(910), step(890), step(910), step(990)];
+      o.inline = nt.style.width;
+      // what the stylesheet shows: the short form in compact, the full one otherwise
+      step(600);
+      const cell = nt.querySelector("tbody .lf"), disp = e => getComputedStyle(e).display;
+      o.cssCompact = cell ? [disp(cell), disp(cell.nextElementSibling)] : null;
+      o.c2 = disp(nt.querySelector("thead th.c2hide"));
+      step(1000);
+      o.cssFull = cell ? [disp(cell), disp(cell.nextElementSibling)] : null;
+      delete p.clientWidth; delete nt.offsetWidth; delete nt.scrollWidth; delete nt.getClientRects; p.style.padding = "";
+      setTableLevel(nt, 0); nt._fitSig = null;
+      // a hidden table is left alone
+      const bt = document.getElementById("bmTable"); bt.hidden = true; fitTable(bt); o.hidden = bt.className;
+      render();
+      return JSON.stringify(o);
+    })()`));
+    const want = {pure: [0, 1, 2, 1, 0, 2, 1, -1],
+      short: {planet: ["HMC", "Rocky ice", "Rocky ice", "Metal-rich", "ELW", "WW", "AW", "Icy", "Rocky", "GG III", "He-rich GG", "GG water life"],
+              star: ["G star", "M star", "K giant", "A supergiant", "WD DA", "Neutron", "BH", "T Tauri", "L star", "WNC"],
+              atmosphere: ["CO₂", "Thin CO₂", "Hot thin SO₂", "Neon-rich", "none", "thin ammonia"],
+              status: ["—", "✓", "?", "part"], text: ["map 2 WW T", "Rocky ice: 3 A"], when: ["09-19 18:02"]},
+      heads: ["Unsold", "ls", "Star"], same: "Dist", nearSf: true,
+      pill: `<span class="badge s-explored" title=""><span class="lf">fully scanned</span><span class="sf" title="fully scanned">✓</span></span>`,
+      here: ["High metal content world", "High metal content world"], headSf: ["Tag", "Seen", "FSS", "DSS", "Lost", "Unsold"],
+      fit: [2, 1, 0, 0, 1, 1, 0], inline: "", cssCompact: ["none", "inline"], c2: "none", cssFull: ["inline", "none"], hidden: ""};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodCT = !bad.length && errors.length === before;
+    allOk = allOk && goodCT;
+    console.log(goodCT ? "OK" : "FAIL", "| compact tables |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "level by fit with slack, short forms, both forms in the cells with the full text in the title, compact / compact2 toggled and undone", errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

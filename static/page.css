@@ -37,7 +37,7 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.name { cursor: copy; font-weight: 500; }
-tr.visited td.name, tr.visited td.dist, tr.visited td.notable, tr.visited td.bodies, tr.visited .badge { color: var(--muted); opacity: .75; }
+tr.visited td.name, tr.visited td.dist, tr.visited .notable, tr.visited td.bodies, tr.visited .badge { color: var(--muted); opacity: .75; }
 tr.visited td.name .first, tr.visited td.name .bm { opacity: 1; }
 tr.far td.dist { color: var(--muted); cursor: help; }
 #sub .err { color: var(--bad); font-weight: 600; }
@@ -54,12 +54,12 @@ body.disconnected main { opacity: .5; }
 #leaving { margin-top: 4px; font-size: 13px; color: var(--warn); }
 #leaving b { font-weight: 600; }
 tr.scoopnext td.name::after { content: " ⛽ nearest scoopable"; color: var(--good); font-size: 11px; }
-td.notable { font-size: 12px; }
-td.notable .nb { display: inline-block; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-right: 3px; }
-td.notable .bio { color: #c77dff; }
-td.notable .old { color: var(--muted); border-style: dashed; cursor: help; } .old { cursor: help; }
+.notable { font-size: 12px; }
+.notable .nb { display: inline-block; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-right: 3px; }
+.notable .bio { color: #c77dff; }
+.notable .old { color: var(--muted); border-style: dashed; cursor: help; } .old { cursor: help; }
 #firstsLine .seen, td.seen span { color: var(--warn); cursor: help; }
-td.notable .ELW { color: var(--good); } td.notable .WW { color: var(--info); } td.notable .AW { color: #c77dff; } td.notable .T { color: var(--warn); }
+.notable .ELW { color: var(--good); } .notable .WW { color: var(--info); } .notable .AW { color: #c77dff; } .notable .T { color: var(--warn); }
 .badge.s-edsm { color: var(--info); margin-left: 4px; }
 #hereHead { font-size: 15px; margin: 12px 0 4px; } #hereHead b { color: var(--accent); }
 #hereLeaving { font-size: 13px; margin-bottom: 8px; } #hereLeaving .ok { color: var(--good); } #hereLeaving .todo { color: var(--warn); }
@@ -518,6 +518,27 @@ main.nearPinned #hereSchematic .sbody { width: 64px; }
   main table { display: block; overflow-x: auto; }
 }
 
+/* Compact tables (fitTable in page.js): a table wider than its box shows its short forms (.compact), then tighter ones
+   with low-value columns dropped or merged (.compact2). .lf full form, .sf short form, .sf1/.sf2 one level only,
+   .c1hide/.c2hide hidden from that level on. A table that fits shows none of this: it looks as it always did. */
+table:not(.compact) .sf, table:not(.compact) .sf1, table:not(.compact) .sf2,
+table.compact .lf, table.compact .c1hide, table.compact:not(.compact2) .sf2,
+table.compact2 .sf1, table.compact2 .c2hide { display: none; }
+table.compact th, table.compact td { padding-left: 5px; padding-right: 5px; }
+table.compact th { letter-spacing: 0; }
+table.compact .badge { padding: 1px 5px; }
+table.compact .icons { gap: 6px; }
+table.compact2 th, table.compact2 td { padding-left: 3px; padding-right: 3px; }
+table.compact2 .badge { padding: 1px 3px; }
+table.compact2 .notable .nb { padding: 0 2px; margin-right: 2px; }
+table.compact2 .icons { gap: 4px; }
+/* compact2: long system names may wrap at their spaces ("Synuefe BH-D / d11-101") rather than push the table wider */
+table.compact2 td.name, table.compact2 td > .name { white-space: normal; }
+table.compact2 td.name, table.compact2 td:has(> .name) { min-width: 7em; }
+.nw { white-space: nowrap; }
+#hereTable .atm2 { font-size: 11px; color: var(--muted); }
+table .sub2 { margin-top: 2px; font-weight: 400; font-size: 12px; }
+
 /* alerts dialog: one row per alert kind */
 .alerttable { width: auto; margin: 4px 0 2px; font-size: 13px; }
 .alerttable th, .alerttable td { padding: 2px 8px; border-bottom: 1px solid var(--line); white-space: normal; }
@@ -686,3 +707,84 @@ details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: poin
   #nowView.mapon:not(.mapsplit) .now-body { font-size: clamp(18px, 2.2vw, 30px); }
   #nowView.mapon:not(.mapsplit) .now-small, #nowView.mapon:not(.mapsplit) .now-cap { font-size: clamp(16px, 1.9vw, 26px); }
 }
+
+/* ---- the header tiles: ▴ folds them into one summary line (▾ unfolds), page.js drawTilesFold / tilesLineHtml ---- */
+.tilewrap { display: flex; gap: 6px; align-items: flex-start; margin-top: 10px; }
+.tilewrap > .tiles { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+.tilesline { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); padding: 4px 10px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; line-height: 1.5; }
+.tilesline .tl, .tilesline .tl-sys { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tilesline .tl-sys { color: var(--accent); }
+.tilesline .tl-sep { color: var(--muted); }
+.tilesline .tl-warn { color: var(--warn); } .tilesline .tl-urgent { color: var(--bad); }
+.tilesline .tl-urgent::before { content: "⚠ "; }
+.tilesline .tl { display: inline-block; max-width: min(36ch, 100%); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.tilesbtn { flex: 0 0 auto; background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
+  font: inherit; font-size: 11px; line-height: 1; padding: 4px 5px; cursor: pointer; }
+.tilesbtn:hover, .tilesbtn:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+/* ---- app mode (page.js applyAppMode: a window at least 900 x 600, not Now): the page fits the window. The header stays,
+   the view fills the rest (a flex column with min-height: 0 down the chain), and each .pane, a bordered box, scrolls on
+   its own with its table headings sticky; a view's controls sit above its pane and stay put. Below the size the page
+   scrolls as before (none of this applies) ---- */
+body.app { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+body.app header { position: relative; flex: 0 0 auto; }
+body.app main { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 8px 16px 12px; }
+body.app main > section, body.app main > #nearWrap { flex: 1 1 0; min-height: 0; margin-top: 0; display: flex; flex-direction: column; }
+body.app .pane { flex: 1 1 0; min-height: 0; overflow: auto; margin-top: 8px; padding: 0 8px 8px; border: 1px solid var(--line);
+  border-radius: 8px; overscroll-behavior: contain; scroll-padding-top: 36px; }
+body.app .pane:focus { outline: none; } body.app .pane:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+body.app .pane > table:first-child, body.app .pane > div:first-child > table:first-child { margin-top: 0; }
+/* rows scroll under the headings: an opaque background, and the line under them drawn by the cell (a collapsed
+   table border would scroll away with the rows) */
+body.app .pane thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px var(--line); }
+body.app #bodyPanel thead th, body.app #sBodyPanel thead th { position: static; box-shadow: none; }
+body.app .pane .hint { margin-top: 8px; }
+body.app .tablebar { padding-top: 0; }
+/* Overview: Nearby and This system side by side (or stacked), each the full height; Nearby's list scrolls under its
+   options, the system's body table scrolls under its heading and to-do line, and the lower half (surface map or body
+   panel) stays put */
+body.app #overView { margin-top: 0; }
+body.app #ovPanes { flex: 1 1 0; min-height: 0; display: flex; }
+body.app #overView.side #ovPanes { flex-direction: row; align-items: stretch; }
+body.app #overView.stack #ovPanes { flex-direction: column; gap: 8px; }
+body.app #overView #ovNear, body.app #overView #ovHere { max-height: none; overflow: hidden; min-height: 0; display: flex; flex-direction: column;
+  border-bottom: 0; margin-bottom: 0; }
+body.app #overView.stack #ovHere, body.app #overView.stack #ovNear { flex: 1 1 0; }
+body.app #ovNear > #nearWrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+body.app #ovHere > #hereView { flex: 1 1 0; min-height: 0; height: auto; display: flex; flex-direction: column; }
+body.app #ovHere #hereView > #hereMain { flex: 1 1 0; min-height: 120px; }
+body.app #ovHere #hereView > #bodyPanel { flex: 1 1 0; min-height: 0; margin-top: 8px; padding-top: 0; border-top: 1px solid var(--line); }
+body.app #ovHere #hereView > #ovMap { flex: 0 1 50%; min-height: 150px; }
+/* the to-do line under a system's heading gives way first when the pane is short (it scrolls on its own then) */
+body.app #hereLeaving { flex: 0 1 auto; min-height: 1.6em; max-height: 30vh; overflow-y: auto; }
+body.app #ovHere #hereLeaving, body.app main.nearPinned #hereLeaving { max-height: 25%; }
+/* stacked, the system pane is wide and short: the surface map or the body panel goes beside the body table */
+body.app #overView.stack #ovHere > #hereView.mapon, body.app #overView.stack #ovHere > #hereView.detail { display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 12px; }
+body.app #overView.stack #ovHere > #hereView.mapon > #hereHead, body.app #overView.stack #ovHere > #hereView.mapon > #hereLeaving,
+body.app #overView.stack #ovHere > #hereView.detail > #hereHead, body.app #overView.stack #ovHere > #hereView.detail > #hereLeaving { grid-column: 1 / -1; max-height: 4.6em; }
+body.app #overView.stack #ovHere > #hereView > #hereMain { grid-row: 3; grid-column: 1; min-height: 0; }
+body.app #overView.stack #ovHere > #hereView > #ovMap, body.app #overView.stack #ovHere > #hereView > #bodyPanel { grid-row: 3; grid-column: 2; min-height: 0; }
+body.app #overView.stack #ovHere > #hereView > #ovMap { margin-top: 8px; border-top: 0; padding-top: 0; }
+body.app #overView.stack #ovHere.hasMap, body.app #overView.stack #ovHere.hasDetail { flex-grow: 1.6; }
+body.app #ovHere #hereHead { margin-top: 0; }
+/* Here: the body table (and schematic) and the body panel beside it each scroll on their own */
+body.app main > #hereView.detail { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto auto minmax(120px, 1fr); gap: 0 16px; }
+body.app main > #hereView.detail > #hereMain { grid-row: 3; grid-column: 1; }
+body.app main > #hereView.detail > #bodyPanel { grid-row: 3; grid-column: 2; position: static; max-height: none; padding-left: 8px; border-left: 1px solid var(--line); }
+body.app main > #hereView > #hereHead { margin-top: 0; }
+/* Nearby with a system pinned: the list left, the system right, each the full height */
+body.app main.nearPinned { flex-direction: row; align-items: stretch; gap: 16px; }
+body.app main.nearPinned > #nearWrap { flex: 3 1 0; min-width: 0; }
+body.app main.nearPinned > #hereView { flex: 2 1 0; min-width: 0; position: static; max-height: none; overflow: hidden; border-left: 0;
+  padding-left: 0; margin-top: 0; display: flex; flex-direction: column; }
+body.app main.nearPinned > #hereView > #hereMain { flex: 1 1 0; min-height: 120px; }
+body.app main.nearPinned > #hereView.detail > #bodyPanel { flex: 1 1 0; min-height: 0; margin-top: 8px; padding-top: 0; border-top: 1px solid var(--line); }
+/* the galaxy map: the canvas fills the box between its bar and its legend */
+body.app #mapWrap { flex: 1 1 0; min-height: 0; position: relative; }
+body.app #mapCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Search: one pane (the forms are too tall to stay put on a short window); the body panel stays beside the results */
+body.app #findForm { margin-top: 8px; }
+body.app #sBodyPanel { top: 0; max-height: calc(100vh - var(--head-h, 130px) - 48px); }
+body.app #bmTools { margin-top: 0; }

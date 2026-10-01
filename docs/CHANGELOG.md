@@ -2,6 +2,22 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-01 · The page fits the window; header tiles fold into one line; compact tables
+- On a window of at least 900 × 600 (not Now) the page no longer scrolls: the header stays, the view fills the
+  rest, and its lists scroll in bordered panes with sticky column headings. Overview: Nearby and This system each
+  the full height, the body table scrolling above the surface map or body panel (stacked: the map or panel beside
+  the table). Here: the table and the body panel scroll apart. Nearby, Samples, Bookmarks, History, Log, Materials,
+  My firsts: one pane under the view's controls. Search: one pane for the forms and results. Map: the canvas fills
+  the view. Smaller windows and phones scroll the page as before; a header too tall for the window falls back too.
+- Page Up/Down, Home and End scroll the view's pane when nothing else has the focus; the Log fetches more when its
+  pane nears the end; a row brought into view (Here's in-game target) and the Log's new rows scroll the pane.
+- ▴ beside the tiles folds them into one line in the tiles' colours (per browser: `tilesCollapsed`).
+- Compact tables: a table wider than its box (by fit, not screen size: a pane, the Overview's split, a phone) shows
+  short forms (HMC, Rocky ice, G star, WD DA, CO₂; Nearby's status as —, 62%, ✓, ?, 🗺3; shorter headings), and if
+  that is not enough, a tighter level that merges or drops low-value columns (Nearby: status under the name, notable
+  under the bodies; Here: atmosphere under gravity, ls under the class, firsts under the name, mining in Bio, Now under
+  Max; My firsts, Samples, History, Log, Bookmarks likewise). The full text is in the title. A table that fits is unchanged.
+
 ## 2026-09-30 · Repository layout: the outrider package, resources/, data/, docs/
 - The modules moved into the `outrider/` package without their `ed_` prefix (`outrider/bio.py`, ...); their
   command lines run as `python3 -m outrider.honk --test`, `python3 -m outrider.button --listen`,
