@@ -143,3 +143,20 @@
 # button = "BTN_TRIGGER_HAPPY5"    # the button's evdev name, or its code number, as --listen prints it
 # hold_ms = 600                    # held this long (ms) or more: a hold
 # double_ms = 350                  # a second press within this long (ms) of the first release: a double tap
+
+[highway]
+# The Neutron Highway: a route plotted with Spansh (neutron stars as boosts) that Outrider follows as you fly.
+# clipboard = true          # on arriving at a route system, copy the next system's name to the desktop clipboard
+#                           # (wl-copy under Wayland, xclip under X11; Linux), ready to paste into the galaxy map
+# autotarget = false        # after an FSD supercharge in a route system, target the next system. Not built yet:
+#                           # it only logs "would target ..." and presses nothing
+# autotarget_delay = 5      # seconds after the supercharge (0 to 60)
+# efficiency = 60           # the neutron plotter's efficiency (%, 1 to 100): lower goes further out of its way
+#                           # for neutron stars
+# The Highway map draws the galactic regions; it can also show a top-down galaxy image of your own under them.
+# Outrider ships none: point this at one you downloaded (PNG, JPEG, WebP or GIF; a path relative to this folder, or
+# absolute). Only that file is served to the page.
+# background_image = ""
+# background_extent = [-45000, 45000, -20000, 70000]   # ly: the image's edges, [xmin, xmax, zmin, zmax]. The default
+#                           # is the bounds the usual galaxy images (EDAstro's charts) use: X -45000 to 45000, Z -20000 to 70000
+# background_opacity = 0.6  # 0.05 to 1

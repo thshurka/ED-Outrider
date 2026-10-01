@@ -40,6 +40,7 @@ around you, then layers your own scans on top — nothing is ever uploaded.
 | 🌿 **On the ground** | What is left to sample on the body, a countdown to the next colony, and a warning when a run elsewhere would be discarded. |
 | ⛽ **Fuel you can trust** | Jumps left at max range and at your pace, laden range, fuel per hop, how scoopable your recent stars have been, and a nudge to top up before a dry stretch. |
 | 🧭 **Decide where to go** | Unfinished systems nearby, the nearest buyers for your data, bookmarks and a next stop, stellar phenomena, and a search across Spansh. |
+| 🛣 **Neutron Highway** | Plot a neutron route with Spansh for any ship you have flown; Outrider follows it as you fly, says the next stop and puts its name on the clipboard for the galaxy map. |
 | 📜 **Your logbook** | Every journal event in a searchable log, every exobiology sample and what became of it, and a schematic of the system. |
 | 📈 **The long view** | Each trip from sale to sale with what it actually paid, what each ship loss cost, your best finds, ranks and career statistics. |
 | 🗣 **A voice with personality** | A natural neural voice, down to business, sarcastic or sweet, briefing you on arrival and warning before you leave something unfinished. |
@@ -225,9 +226,9 @@ notification and be spoken (🗣), chosen per alert in the **🔔 alerts** dialo
 - a Rhino mining rig nearing the 5 km leash, and rigs still marked out when you dock the Rhino (see The surface map)
 
 Spoken but not notified unless you tick it: the arrival briefing, the FSS debrief, leaving a body with
-sampling unfinished, each species completed, tank full, a high-gravity approach with a lot aboard, and
-discovery streaks (ten known systems in a row, or five undiscovered). Off until ticked: **jumponium** (see
-the voice, below).
+sampling unfinished, each species completed, tank full, a high-gravity approach with a lot aboard, the
+Neutron Highway's next stop, and discovery streaks (ten known systems in a row, or five undiscovered). Off
+until ticked: **jumponium** (see the voice, below).
 
 The same dialog holds the thresholds. Your browser remembers them; the config file sets what a new
 browser starts with.
@@ -395,6 +396,43 @@ for your next visit and listed under Materials' **Mining sites**.
 The map's sizes and the leash distance are in the thresholds table under Alerts; the spoken leash warning
 always uses the config file's `rig_warn`.
 
+## 🛣 The Neutron Highway
+
+The **Highway** tab plots a route with [Spansh](https://spansh.co.uk), using neutron stars as boosts, and
+follows it as you fly. One route is kept (saved, so following it needs no network) until you plot another or
+**Clear route** (two clicks).
+
+- **Two plotters.** **Exact** (the default) plans every jump with its fuel and refuel stops from your ship's
+  own figures (drive, masses, tanks, Guardian booster, engineering), with your cargo and the options use
+  injections, exclude secondary stars and already supercharged. **Neutron** plans waypoints only, from a range,
+  ×4 or ×6 supercharge (the SCO Mk II) and an efficiency: for a ship you haven't flown, or a quick plot.
+- **Ship.** The dropdown lists every ship you have flown, as of its latest Loadout ("loadout as of" a date), with
+  the current one selected. A ship bought but never flown has no Loadout and isn't listed ("another ship: type its
+  range" for the neutron plotter). For the neutron plotter, the **Range** box starts at the chosen ship's laden
+  range with that cargo; type another to override it (↺ puts it back).
+- **The list** shows the next 200 jumps (the next one highlighted; the done ones grey and folded) with distance,
+  ⚡ neutron, fuel used and left, ⛽ refuel and light years remaining; click a name to copy it. Off the route, the
+  nearest route system is marked. Beside it, a top-down map of the route (drag, zoom, **fit route**, **galaxy**) on
+  the galactic regions, with Sol, Sagittarius A*, Colonia, Beagle Point and your carrier marked; click a name to copy
+  it. The corner buttons turn the regions, names and image on and off (per browser).
+- **Your own galaxy image** under the map: download one (e.g. an EDAstro galaxy chart) and set `[highway]
+  background_image` to its path; `background_extent` says where its edges are. Outrider doesn't ship one.
+- **Following.** Arriving at any route system moves you to it, neutron or not, forwards or back. Arriving
+  anywhere else once you have joined the route is **Off Route: Detour** (flying to its start isn't); the next
+  route system you reach resumes it. The last one is **Highway complete**, and the route stays until cleared.
+- **The highway line** under the tiles on Overview, Nearby and Here: "🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly ·
+  38 of 399 · refuel in 3", or the detour with the nearest route system. The name copies; anywhere else opens the tab.
+- **Clipboard.** On arriving at a route system (and right after a plot), the next system's name goes on the
+  desktop clipboard, ready to paste into the galaxy map's search. Linux: it needs `wl-copy` (Wayland, the
+  `wl-clipboard` package) or `xclip` (X11); the tab says when neither is found. `[highway] clipboard = false`
+  turns it off.
+- **The voice** (alerts row **Neutron Highway**, spoken but not notified by default): "Next Neutron Highway Stop:
+  Hwy Stop 38, with three jumps left to refuel. Boost your FSD to continue." (the refuel part within 5 jumps of a
+  stop, the boost sentence in a neutron system); "Refuel here before continuing." at a refuel stop; "Off route:
+  detour.", "Back on the highway." and "Highway complete."
+- **Auto-target is not built yet.** `[highway] autotarget = true` waits `autotarget_delay` seconds after an FSD
+  supercharge in a route system and only logs "would target …"; it presses no keys.
+
 ## 🎯 Auto honk
 
 On Linux, Outrider can fire the Discovery Scanner for you. On arriving by hyperspace it waits a moment,
@@ -483,6 +521,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC** |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
+| `[highway]` | The Neutron Highway: `clipboard` (copy the next system on arrival), `autotarget` (not built yet: only logs), `autotarget_delay`, `efficiency` (the neutron plotter's), `background_image` (an image you downloaded, under the map), `background_extent` (its edges in ly, default X −45000…45000, Z −20000…70000), `background_opacity` |
 
 Command-line flags override the file for a single run:
 
@@ -549,7 +588,7 @@ pass).
 <p align="center">
 Data from <a href="https://spansh.co.uk">Spansh</a> and <a href="https://www.edsm.net">EDSM</a>.
 Exobiology spawn conditions are the community's work, as gathered by the Canonn Research Group and maintained in
-<a href="https://github.com/Silarn/EDMC-BioScan">EDMC-BioScan</a>; the galactic region map is
+<a href="https://github.com/Silarn/EDMC-BioScan">EDMC-BioScan</a>; the galactic region map (for the exobiology rules and the Highway map's regions) is
 <a href="https://github.com/klightspeed/EliteDangerousRegionMap">klightspeed's</a> (MIT); sample colony
 distances and colour variants are from <a href="https://github.com/Silarn/EDMC-ExploData">EDMC-ExploData</a> (GPL-2.0).
 Planetary mining odds are CMDR Grumlop's survey from the

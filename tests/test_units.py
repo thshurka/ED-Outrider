@@ -8967,7 +8967,7 @@ class ReviewBatchE(unittest.TestCase):
 
     # ---- X2: a nav-beacon scan is no first discovery ----
     def test_nav_beacon_scans_make_no_firsts(self):
-        self.assertEqual(ed_outrider.PARSER_VERSION, 34)
+        self.assertGreaterEqual(ed_outrider.PARSER_VERSION, 34)   # bumped for it (35: fleet_loadouts)
         self.j.handle({"event": "FSDJump", "timestamp": "2026-01-01T00:00:00Z", "StarSystem": "Old", "SystemAddress": 3,
                        "StarPos": [0, 0, 0]})
         for kind in ("NavBeaconDetail", "NavBeacon"):
@@ -9214,6 +9214,21 @@ class ReviewBatchF(unittest.TestCase):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
             self.assertIn("module_warn = 80", f.read())
+
+    def test_highway_form_is_a_shared_setting(self):
+        # the Highway tab's last plot options (H2): per browser, exported, and accepted as a server copy; an object, so
+        # the page reads a value of another shape as unset; the per-device folds (hwyDoneOpen) stay out
+        import re
+        self.assertIn("highway", ed_outrider.BROWSER_SETTINGS)
+        self.assertNotIn("hwyDoneOpen", ed_outrider.BROWSER_SETTINGS)
+        doc, err = ed_outrider.check_browser_defaults({"version": 1, "settings": {"highway": {"plotter": "neutron", "injections": True}}})
+        self.assertIsNone(err)
+        self.assertEqual(doc["settings"]["highway"]["plotter"], "neutron")
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "static", "page.js"), encoding="utf-8") as f:
+            js = f.read()
+        shapes = js[js.index("const SETTING_SHAPES = {"):js.index("};", js.index("const SETTING_SHAPES = {"))]
+        self.assertTrue(re.search(r"\bhighway: isObj\b", shapes))
 
     def test_tiles_collapsed_is_a_shared_setting(self):
         # the header tiles folded into one line: per browser, exported, and accepted as a server copy for new browsers
@@ -9479,3 +9494,746 @@ class RescanChecklist(unittest.TestCase):
         self.assertEqual({t["name"]: t["value"] for t in self.items["todo_map"]},
                          {"A 2": self.worth(12, 2, True) - self.worth(12, 2, False)})
 
+
+
+class _HwResp:
+    """A Spansh answer for the Highway tests: an HTTP status and a JSON body (or an exception json() raises)."""
+
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+    async def json(self, content_type=None):
+        if isinstance(self.body, Exception):
+            raise self.body
+        return self.body
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise ed_outrider.ClientError(f"HTTP {self.status}")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _HwSession:
+    """A stand-in aiohttp session: each get() takes the next scripted answer (the last one repeats); an exception in
+    the script is raised by get() itself (Spansh unreachable). Nothing here touches the network."""
+
+    def __init__(self, script):
+        self.script, self.calls = list(script), []
+
+    def get(self, url, params=None):
+        self.calls.append((url, dict(params or {})))
+        item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        if isinstance(item, Exception):
+            raise item
+        return _HwResp(*item)
+
+
+class HighwayH1(unittest.TestCase):
+    """Neutron Highway, batch H1 (server): fleet loadouts, Spansh plot jobs (mocked), the route, progress and detours,
+    the spoken moments, the clipboard (mocked), the auto-target stub and the config. No network, no clipboard tool."""
+
+    # a fixture exact-plotter result in Spansh's layout: neutron at the start, A and D; a refuel stop at C
+    EXACT = {"jumps": [
+        {"name": "Start", "id64": 100, "x": 0, "y": 0, "z": 0, "distance": 0, "distance_to_destination": 200,
+         "fuel_used": 0, "fuel_in_tank": 32, "must_refuel": 0, "has_neutron": True},
+        {"name": "Neu A", "id64": 101, "x": 50, "y": 0, "z": 0, "distance": 50, "distance_to_destination": 150,
+         "fuel_used": 5.1, "fuel_in_tank": 26.9, "must_refuel": 0, "has_neutron": True},
+        {"name": "Bridge B", "id64": 102, "x": 80, "y": 0, "z": 0, "distance": 30, "distance_to_destination": 120,
+         "fuel_used": 3.2, "fuel_in_tank": 23.7, "must_refuel": 0, "has_neutron": False},
+        {"name": "Scoop C", "id64": 103, "x": 100, "y": 0, "z": 0, "distance": 20, "distance_to_destination": 100,
+         "fuel_used": 2.0, "fuel_in_tank": 21.7, "must_refuel": 1, "has_neutron": False},
+        {"name": "Neu D", "id64": 104, "x": 150, "y": 0, "z": 0, "distance": 50, "distance_to_destination": 50,
+         "fuel_used": 5.0, "fuel_in_tank": 27.0, "must_refuel": 0, "has_neutron": True},
+        {"name": "End", "id64": 105, "x": 200, "y": 0, "z": 0, "distance": 50, "distance_to_destination": 0,
+         "fuel_used": 5.0, "fuel_in_tank": 22.0, "must_refuel": 0, "has_neutron": False}]}
+    # and a neutron-plotter one: waypoints with the jumps between them, no fuel
+    NEUTRON = {"system_jumps": [
+        {"system": "Start", "id64": 100, "x": 0, "y": 0, "z": 0, "distance_jumped": 0, "distance_left": 300, "jumps": 0,
+         "neutron_star": True},
+        {"system": "Waypoint", "id64": 201, "x": 150, "y": 0, "z": 0, "distance_jumped": 150, "distance_left": 150,
+         "jumps": 3, "neutron_star": True},
+        {"system": "Far End", "id64": 202, "x": 300, "y": 0, "z": 0, "distance_jumped": 150, "distance_left": 0,
+         "jumps": 4, "neutron_star": False}], "total_jumps": 7}
+
+    @staticmethod
+    def loadout(ts, ship_id=7, name="Sample Ship", ship="krait_light", fsd="int_hyperdrive_overcharge_size5_class5",
+                mods=None, unladen=410.5, r0=58.4, booster=True):
+        fsd_mod = {"Slot": "FrameShiftDrive", "Item": fsd, "Health": 1.0}
+        if mods:
+            fsd_mod["Engineering"] = {"Modifiers": [{"Label": k, "Value": v, "OriginalValue": v / 2} for k, v in mods.items()]}
+        modules = [fsd_mod] + ([{"Slot": "Slot03_Size5", "Item": "int_guardianfsdbooster_size5", "Health": 1.0}] if booster else [])
+        return {"event": "Loadout", "timestamp": ts, "Ship": ship, "ShipID": ship_id, "ShipName": name, "ShipIdent": "SP-01",
+                "HullHealth": 1.0, "UnladenMass": unladen, "CargoCapacity": 8, "MaxJumpRange": r0,
+                "FuelCapacity": {"Main": 32.0, "Reserve": 0.63}, "Modules": modules}
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.now = time.time()
+
+    def ts(self, s):
+        return ed_outrider.iso_ts(self.now + s)
+
+    def jump(self, s, id64, name, x, kind="FSDJump"):
+        self.j.handle({"event": kind, "timestamp": self.ts(s) if isinstance(s, (int, float)) else s, "StarSystem": name,
+                       "SystemAddress": id64, "StarPos": [x, 0, 0]})
+
+    def plot_exact(self, start=-100):
+        """The fixture route stored as a finished plot, you at its start (arrived `start` s ago)."""
+        self.jump(start, 100, "Start", 0)
+        rows = ed_outrider.highway_rows("exact", self.EXACT)
+        return self.state.highway_store(rows, {"plotter": "exact", "options": {}, "ship": None})
+
+    def hw_moments(self):
+        return [(m["what"], m["text"]) for m in self.j.moments if m["kind"] == "highway"]
+
+    # ---- fleet loadouts ----
+
+    def test_fleet_loadouts_latest_per_ship(self):
+        self.j.handle(self.loadout("2026-01-02T00:00:00Z"))
+        self.j.handle(self.loadout("2026-01-03T00:00:00Z", ship_id=9, name="", ship="mandalay"))
+        self.j.handle(self.loadout("2026-01-01T00:00:00Z", name="Old name"))   # older, read later: kept out
+        self.j.handle(dict(self.loadout("2026-01-04T00:00:00Z", ship_id=11, ship="adder_taxi")))   # a shuttle: no
+        fleet = self.state.fleet_list()
+        self.assertEqual([(f["ship_id"], f["name"], f["type"], f["ts"][:10]) for f in fleet],
+                         [(9, None, "mandalay", "2026-01-03"), (7, "Sample Ship", "krait_light", "2026-01-02")])
+        f = fleet[1]["figures"]
+        self.assertEqual((f["fuel_main"], f["fuel_reserve"], f["booster_ly"], f["fuel_power"], f["supercharge"], f["exact"]),
+                         (32.0, 0.63, 10.5, 2.45, 4, True))
+        self.assertAlmostEqual(fleet[1]["range"], ed_outrider.fleet_range(f), places=6)
+        # a newer Loadout replaces the row
+        self.j.handle(self.loadout("2026-01-05T00:00:00Z", name="Renamed", r0=60.0))
+        self.assertEqual(self.state.fleet_ship(7)["name"], "Renamed")
+        self.assertEqual(self.state.fleet_ship(7)["figures"]["max_range"], 60.0)
+
+    def test_fleet_rebuilt_by_a_reread_and_route_kept(self):
+        import shutil, tempfile
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        here = os.path.dirname(os.path.abspath(__file__))
+        jdir = os.path.join(tmp, "journals")
+        shutil.copytree(os.path.join(here, "fixtures", "journals"), jdir)
+        path = os.path.join(tmp, "x.sqlite")
+        db = ed_outrider.open_db(path)
+        j = ed_outrider.Journals(db)
+        j.scan_dir(jdir)
+        db.commit()
+        rows = [tuple(r) for r in db.execute("SELECT ship_id, name, ship_type, ts FROM fleet_loadouts")]
+        self.assertEqual(rows, [(7, "Sample Ship", "krait_light", "2026-09-20T19:00:05Z")])
+        st = ed_outrider.State(db, j, None, 25)
+        st.highway_store(ed_outrider.highway_rows("exact", self.EXACT), {"plotter": "exact"})
+        db.close()
+        # the parser version moves on: the journal-derived tables are rebuilt, the live-only route is not touched
+        db = ed_outrider.open_db(path, rescan=True)
+        self.assertEqual(db.execute("SELECT count(*) FROM fleet_loadouts").fetchone()[0], 0)
+        self.assertEqual(db.execute("SELECT count(*) FROM highway_route").fetchone()[0], 6)
+        self.assertIsNotNone(ed_outrider.meta_get(db, "highway"))
+        j = ed_outrider.Journals(db)
+        j.scan_dir(jdir)
+        db.commit()
+        self.assertEqual([tuple(r) for r in db.execute("SELECT ship_id, name, ship_type, ts FROM fleet_loadouts")], rows)
+        db.close()
+        self.assertIn("DELETE FROM fleet_loadouts", ed_outrider.RESET_JOURNAL_DATA)
+        self.assertNotIn("highway", ed_outrider.RESET_JOURNAL_DATA)
+        self.assertEqual(ed_outrider.PARSER_VERSION, 35)
+
+    def test_fleet_figures(self):
+        mul, p, b = 0.013, 2.45, 10.5
+        drive = lambda mf: (mf / mul) ** (1 / p)
+        # an engineered SCO 5A whose Modifiers agree with its MaxJumpRange: the Loadout's own figures are used
+        r0 = 2000 / (400 + 6.1) * drive(6.1) + b
+        f = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", mods={"FSDOptimalMass": 2000, "MaxFuelPerJump": 6.1},
+                                                   unladen=400, r0=r0))
+        self.assertEqual((f["optimal_mass"], f["optimal_source"], f["max_fuel"], f["fuel_multiplier"]), (2000, "loadout", 6.1, 0.013))
+        # stock figures that miss the Loadout's range (the fixture ship): the optimal mass that range implies, so a
+        # plot made from these figures has the game's range
+        f = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z"))
+        self.assertEqual((f["optimal_source"], f["max_fuel"]), ("range", 5.2))
+        self.assertAlmostEqual(f["optimal_mass"] / (410.5 + 5.2) * drive(5.2) + b, 58.4, places=2)
+        # stock and right: kept
+        r0 = 1175 / (300 + 5.2) * drive(5.2)
+        f = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", unladen=300, r0=r0, booster=False))
+        self.assertEqual((f["optimal_mass"], f["optimal_source"], f["booster_ly"]), (1175, "stock", 0))
+        # the Caspian's Mk II: p 2.5025 (the fuel model's), supercharge x6; a size 8 SCO: p 2.90, x4
+        mk2 = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z",
+                                                     fsd="int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"))
+        self.assertEqual((mk2["fuel_power"], mk2["supercharge"], mk2["max_fuel"], mk2["exact"]), (2.5025, 6, 6.8, True))
+        s8 = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", fsd="int_hyperdrive_overcharge_size8_class5"))
+        self.assertEqual((s8["fuel_power"], s8["supercharge"], s8["max_fuel"], s8["fuel_multiplier"]), (2.90, 4, 20.7, 0.013))
+        std = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", fsd="int_hyperdrive_size2_class1_free"))
+        self.assertEqual((std["fuel_power"], std["max_fuel"], std["fuel_multiplier"]), (2.0, 0.6, 0.011))
+        # a drive no table knows: no exact plot (the neutron plotter still works from the range)
+        new = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", fsd="int_hyperdrive_overcharge_size9_class5_new"))
+        self.assertFalse(new["exact"])
+        self.assertIsNotNone(ed_outrider.fleet_range(new))
+
+    # ---- Spansh's routes and plot jobs ----
+
+    def test_highway_rows(self):
+        rows = ed_outrider.highway_rows("exact", self.EXACT)
+        self.assertEqual([(r["system"], r["id64"], r["neutron"], r["refuel"], r["jumps"]) for r in rows][:4],
+                         [("Start", 100, 1, 0, 0), ("Neu A", 101, 1, 0, 1), ("Bridge B", 102, 0, 0, 1), ("Scoop C", 103, 0, 1, 1)])
+        self.assertEqual((rows[1]["fuel_used"], rows[1]["fuel_left"], rows[1]["remaining"]), (5.1, 26.9, 150))
+        n = ed_outrider.highway_rows("neutron", self.NEUTRON)
+        self.assertEqual([(r["system"], r["jumps"], r["neutron"], r["fuel_used"]) for r in n],
+                         [("Start", 0, 1, None), ("Waypoint", 3, 1, None), ("Far End", 4, 0, None)])
+        for bad in (None, {}, {"jumps": "x"}, {"jumps": [EXACT_ROW := {"name": "Only", "id64": 1}]}):
+            with self.assertRaises(ed_outrider.HighwayError):
+                ed_outrider.highway_rows("exact", bad)
+        self.assertEqual(EXACT_ROW["name"], "Only")
+
+    def run_plot(self, script, timeout=5.0, poll=0.01):
+        import asyncio
+        sp = ed_outrider.Spansh(self.db)
+        sp.session = _HwSession(script)
+
+        async def go():
+            return await sp.plot(ed_outrider.SPANSH_GENERIC_ROUTE, {"source": "Start"}, poll=poll, timeout=timeout)
+        return sp.session, asyncio.run(go())
+
+    def test_plot_job_queued_then_done(self):
+        s, result = self.run_plot([(200, {"job": "abc-1", "status": "queued"}), (202, {"job": "abc-1", "status": "queued"}),
+                                   (200, {"job": "abc-1", "status": "ok", "result": self.EXACT})])
+        self.assertEqual(result, self.EXACT)
+        self.assertEqual([c[0] for c in s.calls], [ed_outrider.SPANSH_GENERIC_ROUTE] + [ed_outrider.SPANSH_RESULTS.format(job="abc-1")] * 2)
+        self.assertEqual(s.calls[0][1], {"source": "Start"})
+
+    def test_plot_job_errors(self):
+        import asyncio
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "Spansh: Could not find starting system"):
+            self.run_plot([(400, {"error": "Could not find starting system"})])
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "Spansh: no route"):   # the job itself fails later
+            self.run_plot([(200, {"job": "j", "status": "queued"}), (200, {"status": "error", "error": "no route"})])
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "HTTP 503"):
+            self.run_plot([(503, ValueError("not JSON"))])
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "cannot be reached"):
+            self.run_plot([ed_outrider.ClientError("connection refused")])
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "cannot be reached"):
+            self.run_plot([asyncio.TimeoutError()])
+        t = time.monotonic()
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "had not finished the route after 0.1 s"):
+            s, _ = self.run_plot([(200, {"job": "slow", "status": "queued"})], timeout=0.1, poll=0.03)
+        self.assertLess(time.monotonic() - t, 2)
+        sp = ed_outrider.Spansh(self.db)   # never started (offline): a clear error, no request
+        with self.assertRaisesRegex(ed_outrider.HighwayError, "cannot be reached"):
+            asyncio.run(sp.plot(ed_outrider.SPANSH_ROUTE, {}))
+
+    def test_endpoints(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        self.j.handle(self.loadout("2026-01-02T00:00:00Z"))
+        self.j.handle({"event": "Cargo", "timestamp": "2026-01-02T00:00:01Z", "Vessel": "Ship", "Count": 3})
+        self.jump(-100, 100, "Start", 0)
+        sp = ed_outrider.Spansh(self.db)
+        sp.session = _HwSession([(200, {"job": "e1", "status": "queued"}),
+                                 (200, {"job": "e1", "status": "ok", "result": self.EXACT})])
+        sp.system_names = unittest.mock.AsyncMock(return_value=["Sol", "Solati"])
+        self.state.spansh = sp
+        cb = types_ns(enabled=True, tool="wl-copy", copied=[])
+        cb.copy = lambda text: cb.copied.append(text) or True
+        cb.info = lambda: {"enabled": True, "available": True, "tool": "wl-copy", "why": None, "last": None}
+        self.state.clipboard = cb
+
+        async def go():
+            out = {}
+            with unittest.mock.patch.object(ed_outrider, "HIGHWAY_POLL_S", 0.01):
+                async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                    r = await c.get("/api/highway")
+                    out["empty"] = await r.json()
+                    r = await c.post("/api/highway/plot", json={"to": "End", "injections": True})
+                    out["started"] = (r.status, await r.json())
+                    r = await c.post("/api/highway/plot", json={"to": "End"})
+                    out["busy"] = r.status
+                    await self.state.highway_task
+                    await asyncio.sleep(0.05)   # the clipboard copy runs on the executor
+                    r = await c.get("/api/highway")
+                    out["view"] = await r.json()
+                    r = await c.get("/api/nearby")
+                    out["payload"] = (await r.json())["highway"]
+                    for body in ({"plotter": "x", "to": "End"}, {"to": ""}, {"plotter": "exact", "to": "End", "ship_id": 99},
+                                 {"plotter": "neutron", "to": "End", "ship_id": None}, {"plotter": "neutron", "to": "End", "range": "far"},
+                                 {"plotter": "neutron", "to": "End", "range": 50, "supercharge_multiplier": 5}, [1, 2]):
+                        r = await c.post("/api/highway/plot", json=body)
+                        out.setdefault("bad", []).append(r.status)
+                    r = await c.get("/api/highway/systems?q=Sol")
+                    out["suggest"] = await r.json()
+                    r = await c.get("/api/highway/systems?q=S")
+                    out["short"] = r.status
+                    r = await c.get("/api/highway", headers={"Sec-Fetch-Site": "cross-site"})
+                    out["cross"] = r.status
+                    r = await c.post("/api/highway/clear", headers={"Origin": "http://evil.example"})
+                    out["evil"] = r.status
+                    sp.session = _HwSession([(200, {"job": "n1", "status": "ok", "result": self.NEUTRON})])
+                    r = await c.post("/api/highway/plot", json={"plotter": "neutron", "to": "Far End", "range": 50.5})
+                    await self.state.highway_task
+                    out["neutron_params"] = sp.session.calls[0]
+                    r = await c.post("/api/highway/clear")
+                    out["cleared"] = r.status
+                    r = await c.get("/api/highway")
+                    out["after"] = (await r.json())["route"]
+            return out
+        out = asyncio.run(go())
+        self.assertIsNone(out["empty"]["route"])
+        self.assertEqual([f["ship_id"] for f in out["empty"]["fleet"]], [7])
+        self.assertEqual(out["started"][0], 202)
+        self.assertEqual(out["busy"], 409)
+        v = out["view"]
+        self.assertEqual(v["plotting"]["state"], "done")
+        r = v["route"]
+        self.assertEqual((r["from"], r["to"], r["count"], r["at"], r["furthest"], r["plotter"], r["total_ly"]),
+                         ("Start", "End", 6, 0, 0, "exact", 200))
+        self.assertEqual([x["system"] for x in r["ahead"]], ["Neu A", "Bridge B", "Scoop C", "Neu D", "End"])
+        self.assertEqual([(x["i"], x["system"], x["neutron"], x["fuel_left"]) for x in r["done"]], [(0, "Start", True, 32.0)])
+        self.assertEqual(r["neutrons"], [0, 1, 4])
+        self.assertEqual(r["options"], {"cargo": 3, "injections": True, "exclude_secondary": False, "supercharged": False})
+        self.assertEqual(cb.copied, ["Neu A", "Waypoint"])   # each new plot from where you are: its first hop is copied
+        p = out["payload"]
+        self.assertEqual((p["next"]["name"], p["next"]["neutron"], p["next"]["distance"], p["index"], p["total"],
+                          p["refuel_in"], p["boost_here"], p["off_route"], p["jumps_left"]),
+                         ("Neu A", True, 50.0, 1, 5, 3, True, False, 5))
+        self.assertEqual(out["bad"], [400] * 7)
+        self.assertEqual(out["suggest"], {"q": "Sol", "values": ["Sol", "Solati"]})
+        self.assertEqual((out["short"], out["cross"], out["evil"]), (400, 403, 403))
+        self.assertEqual(out["neutron_params"], (ed_outrider.SPANSH_ROUTE, {"from": "Start", "to": "Far End", "range": 50.5,
+                                                                            "efficiency": 60, "supercharge_multiplier": 4}))
+        self.assertEqual((out["cleared"], out["after"]), (200, None))
+
+    def test_exact_plot_params(self):
+        # the exact plotter's request carries the ship's figures under Spansh's names (as Auto_Neutron's request has them)
+        import asyncio
+        self.j.handle(self.loadout("2026-01-02T00:00:00Z", fsd="int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"))
+        sp = ed_outrider.Spansh(self.db)
+        sp.session = _HwSession([(200, {"job": "e", "status": "ok", "result": self.EXACT})])
+        self.state.spansh = sp
+
+        async def go():
+            out, status = self.state.highway_start_plot({"from": "Start", "to": "End", "cargo": 4, "exclude_secondary": True})
+            await self.state.highway_task
+            return status
+        self.assertEqual(asyncio.run(go()), 202)
+        url, params = sp.session.calls[0]
+        f = self.state.fleet_ship(7)["figures"]
+        self.assertEqual(url, ed_outrider.SPANSH_GENERIC_ROUTE)
+        self.assertEqual(params, {"source": "Start", "destination": "End", "is_supercharged": 0, "use_supercharge": 1,
+                                  "use_injections": 0, "exclude_secondary": 1, "fuel_power": 2.5025,
+                                  "fuel_multiplier": f["fuel_multiplier"], "optimal_mass": f["optimal_mass"],
+                                  "supercharge_multiplier": 6, "base_mass": round(410.5 + 0.63, 3), "tank_size": 32.0,
+                                  "internal_tank_size": 0.63, "max_fuel_per_jump": 6.8, "range_boost": 10.5, "cargo": 4})
+        # a failed plot keeps the route you had and says why
+        sp.session = _HwSession([(400, {"error": "Could not find system End"})])
+
+        async def fail():
+            self.state.highway_start_plot({"from": "Start", "to": "End"})
+            await self.state.highway_task
+        asyncio.run(fail())
+        self.assertEqual(self.state.highway_plotting["state"], "failed")
+        self.assertEqual(self.state.highway_plotting["error"], "Spansh: Could not find system End")
+        self.assertEqual(self.state.highway_view()["route"]["count"], 6)
+
+    # ---- progress, detours, the moments ----
+
+    def test_progress_detour_resume_complete(self):
+        hw = self.plot_exact()
+        self.assertEqual((hw["at"], hw["furthest"]), (0, 0))
+        self.jump(1, 101, "Neu A", 50)
+        self.assertEqual(self.hw_moments()[-1], ("next", "Next Neutron Highway Stop: Bridge B, with two jumps left to refuel. "
+                                                         "Boost your FSD to continue."))
+        self.jump(2, 999, "Elsewhere", 85)
+        self.jump(3, 998, "Elsewhere Two", 86)   # still off: said once
+        self.assertEqual(self.hw_moments()[-1], ("off_route", "Off route: detour."))
+        self.assertEqual(len(self.hw_moments()), 2)
+        p = self.state.highway_summary()
+        self.assertEqual((p["off_route"], p["at"], p["furthest"], p["nearest"]["name"], p["nearest"]["distance"], p["index"]),
+                         (True, None, 1, "Bridge B", 6.0, 2))
+        # back at any route system (not a neutron one: a bridging jump counts)
+        self.jump(4, 102, "Bridge B", 80, kind="CarrierJump")
+        self.assertEqual(self.hw_moments()[-1], ("back", "Back on the highway. Next Neutron Highway Stop: Scoop C, "
+                                                         "with one jump left to refuel."))
+        self.jump(5, 103, "Scoop C", 100)
+        self.assertEqual(self.hw_moments()[-1], ("next", "Refuel here before continuing. Next Neutron Highway Stop: Neu D."))
+        # back along the route: the position moves back, the furthest point stays
+        self.jump(6, 101, "Neu A", 50)
+        p = self.state.highway_summary()
+        self.assertEqual((p["at"], p["furthest"], p["next"]["name"], p["refuel_in"]), (1, 3, "Bridge B", 2))
+        self.jump(7, 105, "End", 200)
+        self.assertEqual(self.hw_moments()[-1], ("complete", "Highway complete."))
+        n = len(self.hw_moments())
+        self.jump(8, 997, "After", 250)   # finished: no detour, the route stays until cleared
+        self.assertEqual(len(self.hw_moments()), n)
+        p = self.state.highway_summary()
+        self.assertEqual((p["complete"], p["off_route"], p["next"], p["furthest"]), (True, False, None, 5))
+        self.state.highway_clear()
+        self.assertIsNone(self.state.highway_summary())
+        self.jump(9, 101, "Neu A", 50)
+        self.assertEqual(len(self.hw_moments()), n)
+
+    def test_moments_only_live_and_never_on_a_reread(self):
+        self.plot_exact(start=-3000)
+        # an arrival older than the plot (a late legacy folder): nothing moves
+        self.jump("2020-01-01T00:00:00Z", 103, "Scoop C", 100)
+        self.assertEqual(ed_outrider.meta_get(self.db, "highway")["at"], 0)
+        # a catch-up after the plot but not just now (the server was down): progress, no words
+        hw = ed_outrider.meta_get(self.db, "highway")
+        hw["created_ts"] = self.ts(-3600)
+        ed_outrider.meta_set(self.db, "highway", hw)
+        self.jump(-1800, 101, "Neu A", 50)
+        self.jump(-1700, 999, "Elsewhere", 60)
+        hw = ed_outrider.meta_get(self.db, "highway")
+        self.assertEqual((hw["at"], hw["furthest"], bool(hw["off_route"]), self.hw_moments()), (None, 1, True, []))
+        self.jump(1, 102, "Bridge B", 80)
+        self.assertEqual([w for w, _ in self.hw_moments()], ["back"])
+        # a journal re-read replays those arrivals: the route's progress and the moments stay as they were
+        before = ed_outrider.meta_get(self.db, "highway")
+        self.db.executescript(ed_outrider.RESET_JOURNAL_DATA)
+        self.j.reload()
+        for s, i, name, x in ((-1800, 101, "Neu A", 50), (-1700, 999, "Elsewhere", 60), (1, 102, "Bridge B", 80)):
+            self.jump(s, i, name, x)
+        self.assertEqual(ed_outrider.meta_get(self.db, "highway"), before)
+        self.assertEqual(len(self.hw_moments()), 1)
+
+    def test_failed_tick_does_not_repeat_the_moment(self):
+        self.plot_exact()
+        cp = self.j.checkpoint()
+        self.jump(1, 101, "Neu A", 50)
+        self.assertEqual(len(self.hw_moments()), 1)
+        self.db.rollback()   # the tick failed: rolled back and reloaded, its lines read again
+        self.j.reload()
+        self.j.restore(cp)
+        self.jump(1, 101, "Neu A", 50)
+        self.assertEqual(len(self.hw_moments()), 1)
+        self.assertEqual(ed_outrider.meta_get(self.db, "highway")["at"], 1)
+
+    def test_summary_before_joining(self):
+        # plotted from elsewhere (you are not at its start yet): the next stop is the start, with nothing done, nothing
+        # flown, no refuel counted from a row you are not at (found with a real Spansh plot: ly_left read 0)
+        self.jump(-100, 555, "Far Away", -40)
+        self.state.highway_store(ed_outrider.highway_rows("exact", self.EXACT), {"plotter": "exact"})
+        p = self.state.highway_summary()
+        self.assertEqual((p["at"], p["index"], p["next"]["name"], p["next"]["distance"], p["ly_left"], p["refuel_in"],
+                          p["jumps_left"], p["off_route"]), (None, 0, "Start", 40.0, None, None, 5, False))
+        self.jump(1, 999, "Elsewhere", -30)   # not joined yet: flying to its start is no detour
+        self.assertEqual((self.hw_moments(), self.state.highway_summary()["off_route"]), ([], False))
+        self.jump(2, 100, "Start", 0)
+        self.assertEqual(self.hw_moments()[-1][0], "next")
+        self.assertEqual(self.state.highway_summary()["ly_left"], 200)
+
+    def test_highway_text(self):
+        rows = ed_outrider.highway_rows("exact", self.EXACT)
+        self.assertEqual(ed_outrider.highway_text(rows, 0),
+                         "Next Neutron Highway Stop: Neu A, with three jumps left to refuel. Boost your FSD to continue.")
+        self.assertEqual(ed_outrider.highway_text(rows, 3), "Refuel here before continuing. Next Neutron Highway Stop: Neu D.")
+        self.assertEqual(ed_outrider.highway_text(rows, 4), "Next Neutron Highway Stop: End. Boost your FSD to continue.")
+        far = [dict(r, refuel=0) for r in rows]
+        far[-1]["refuel"] = 1
+        far = far[:1] + [dict(far[1], id64=i) for i in range(7)] + far[1:]   # the refuel stop is 11 jumps away
+        self.assertNotIn("refuel", ed_outrider.highway_text(far, 0))
+        self.assertEqual(ed_outrider.highway_match(rows, None, "neu d"), 4)   # by name when there is no id64
+        twice = rows + [dict(rows[1])]
+        self.assertEqual((ed_outrider.highway_match(twice, 101, "", 0), ed_outrider.highway_match(twice, 101, "", 3)), (1, 6))
+
+    # ---- the desktop clipboard (never a real tool) ----
+
+    def test_clipboard(self):
+        ran = []
+
+        def run(argv, **kw):
+            ran.append((argv, kw))
+            return types_ns(returncode=0)
+        which = lambda name: "/usr/bin/" + name
+        cb = ed_outrider.Clipboard(True, which=which, run=run, env={"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"})
+        self.assertEqual((cb.tool, cb.argv), ("wl-copy", ["wl-copy"]))
+        self.assertTrue(cb.copy("Neu A"))
+        argv, kw = ran[0]
+        self.assertEqual((argv, kw["input"], kw.get("shell", False), kw["timeout"]), (["wl-copy"], b"Neu A", False, 5))
+        x11 = ed_outrider.Clipboard(True, which=lambda n: n == "xclip" and "/usr/bin/xclip", run=run, env={"DISPLAY": ":0"})
+        self.assertEqual(x11.argv, ["xclip", "-selection", "clipboard"])
+        none = ed_outrider.Clipboard(True, which=which, run=run, env={})
+        self.assertEqual((none.tool, none.info()["available"]), (None, False))
+        self.assertIn("wl-copy", none.info()["why"])
+        self.assertFalse(none.copy("X"))
+        off = ed_outrider.Clipboard(False, which=which, run=run, env={"DISPLAY": ":0"})
+        self.assertFalse(off.copy("X"))
+        self.assertEqual(len(ran), 1)
+        bad = ed_outrider.Clipboard(True, which=which, run=lambda *a, **k: types_ns(returncode=1), env={"DISPLAY": ":0"})
+        self.assertFalse(bad.copy("X"))
+        self.assertEqual(bad.info()["last"]["error"], "xclip failed")
+
+        def boom(*a, **k):
+            raise OSError("no such file")
+        self.assertFalse(ed_outrider.Clipboard(True, which=which, run=boom, env={"DISPLAY": ":0"}).copy("X"))
+
+    def test_clipboard_on_live_arrivals_only(self):
+        copied = []
+        self.state.clipboard = types_ns(enabled=True, tool="xclip", copy=lambda t: copied.append(t) or True)
+        self.plot_exact()
+        self.state.highway_copy_next()   # the plot's own copy is the page's job (force); nothing new here
+        self.assertEqual(copied, [])
+        self.jump(1, 101, "Neu A", 50)
+        self.state.highway_copy_next()
+        self.state.highway_copy_next()   # once per arrival
+        self.assertEqual(copied, ["Bridge B"])
+        self.jump(2, 999, "Elsewhere", 60)   # off route: nothing to copy
+        self.state.highway_copy_next()
+        self.jump(3, 105, "End", 200)        # the end: nothing next
+        self.state.highway_copy_next()
+        self.assertEqual(copied, ["Bridge B"])
+        # an arrival read late (catch-up): not copied
+        self.state.highway_clear()
+        self.plot_exact(start=-3000)
+        hw = ed_outrider.meta_get(self.db, "highway")
+        hw["created_ts"] = self.ts(-3600)
+        ed_outrider.meta_set(self.db, "highway", hw)
+        self.jump(-1800, 101, "Neu A", 50)
+        self.state.highway_copy_next()
+        self.assertEqual(copied, ["Bridge B"])
+        # switched off in the config
+        self.jump(4, 102, "Bridge B", 80)
+        self.state.clipboard.enabled = False
+        self.state.highway_copy_next()
+        self.assertEqual(copied, ["Bridge B"])
+
+    # ---- the auto-target stub ----
+
+    def test_autotarget_stub_timing(self):
+        import asyncio, contextlib, io
+        self.plot_exact()
+        self.jump(1, 101, "Neu A", 50)
+        self.state.highway_cfg.update(autotarget=True, autotarget_delay=0.2)
+        out = io.StringIO()
+
+        async def go(move=False):
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2 + move), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            self.assertFalse(self.state.maybe_autotarget())   # one per supercharge
+            await asyncio.sleep(0.1)
+            early = self.state.autotarget_last
+            if move:
+                self.jump(3 + move, 102, "Bridge B", 80)
+            await asyncio.sleep(0.25)
+            return early
+        with contextlib.redirect_stdout(out):
+            early = asyncio.run(go())
+        self.assertIsNone(early)   # not before the delay
+        last = self.state.autotarget_last
+        self.assertEqual((last["system"], last["done"]), ("Bridge B", True))
+        self.assertIn("would target Bridge B", out.getvalue())
+        # jumped before the delay ran out: nothing targeted
+        self.state.autotarget_last = None
+        with contextlib.redirect_stdout(io.StringIO()):
+            asyncio.run(go(move=True))
+        self.assertEqual(self.state.autotarget_last["done"], False)
+        # off (the default), an old supercharge, or one outside the route: nothing scheduled
+
+        async def none():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(20), "BoostValue": 4})
+            off = self.state.maybe_autotarget()
+            self.state.highway_cfg["autotarget"] = True
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(21), "BoostValue": 4})
+            old = self.state.maybe_autotarget(now=self.now + 21 + ed_outrider.HIGHWAY_LIVE_S + 5)
+            self.jump(22, 999, "Elsewhere", 60)
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(23), "BoostValue": 4})
+            return off, old, self.state.maybe_autotarget()
+        self.state.highway_cfg["autotarget"] = False
+        self.assertEqual(asyncio.run(none()), (False, False, False))
+        self.assertIs(ed_outrider.HIGHWAY["autotarget"], False)
+
+    # ---- config ----
+
+    def test_config_keys(self):
+        import contextlib, io, tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = ed_outrider.settings_from({}, args, None, ([], []))
+        bg = {"background_image": "", "background_extent": [-45000.0, 45000.0, -20000.0, 70000.0], "background_opacity": 0.6}
+        self.assertEqual(st["highway"], dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}, **bg))
+        back = tomllib.loads(ed_outrider.config_text(st))["highway"]
+        self.assertEqual(back, dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5, "efficiency": 60}, **bg))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            st = ed_outrider.settings_from({"highway": {"clipboard": False, "autotarget": "yes", "autotarget_delay": 500,
+                                                        "efficiency": 0}}, args, None, ([], []))
+        self.assertEqual(st["highway"], dict({"clipboard": False, "autotarget": False, "autotarget_delay": 60.0, "efficiency": 1}, **bg))
+        self.assertIn("[highway] autotarget", err.getvalue())
+        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["highway"]["clipboard"], False)
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
+            example = f.read()
+        with open(os.path.join(here, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for key in ("clipboard", "autotarget", "autotarget_delay", "efficiency"):
+            self.assertIn(f"# {key} = ", example[example.index("[highway]"):])
+            self.assertIn(f"`{key}`", readme[readme.index("| `[highway]`"):].split("\n")[0])
+
+
+class HighwayMap(unittest.TestCase):
+    """The Highway map's background: the region layer (GET /api/regions, from the shipped bio_rules.json, read only)
+    and the optional background image (GET /api/highway/background: the configured file only, image types only)."""
+
+    def setUp(self):
+        import tempfile
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.tmp)
+        self.png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40   # only the signature matters to the server
+
+    def write(self, name, data):
+        path = os.path.join(self.tmp, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    def get(self, url, headers=None, **params):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def go():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                r = await c.get(url, params=params, headers=headers or {})
+                return r.status, r.headers.copy(), await r.read()
+        return asyncio.run(go())
+
+    @staticmethod
+    def cell_of(layer, x, z):
+        """A position's region read from the layer as the page does (hwyRegionAt): column and row by truncation."""
+        c, r = int((x - layer["origin"][0]) / layer["cell"]), int((z - layer["origin"][1]) / layer["cell"])
+        if c < 0 or r < 0 or r >= layer["size"]:
+            return 0
+        x0 = 0
+        for length, v in layer["rows"][r]:
+            if c < x0 + length:
+                return v
+            x0 += length
+        return 0
+
+    def test_region_layer_encoding(self):
+        L = outrider.bio.region_layer()
+        R = outrider.bio.load_rules()
+        self.assertEqual(L["rows"], R["region_grid"])   # the shipped runs as they are: [length, region] per row
+        self.assertEqual((L["size"], L["origin"]), (2048, [-49985, -24105]))
+        self.assertAlmostEqual(L["cell"], 4096 / 83)
+        self.assertTrue(all(sum(n for n, _ in row) == L["size"] for row in L["rows"]))
+        self.assertEqual(len(L["names"]), 43)
+        self.assertIsNone(L["names"][0])
+        self.assertEqual(L["source"]["licence"], "MIT")
+        # the landmarks land in their regions, read the page's way and the server's
+        for (x, y, z), name in [((0, 0, 0), "Inner Orion Spur"), ((25.21875, -20.90625, 25899.96875), "Galactic Centre"),
+                                ((-9530.5, -910.28125, 19808.125), "Inner Scutum-Centaurus Arm"),
+                                ((-1111.5625, -134.21875, 65269.75), "The Abyss")]:
+            n = self.cell_of(L, x, z)
+            self.assertEqual(L["names"][n], name)
+            self.assertEqual(outrider.bio.region_number(x, y, z), n)
+        # outside the grid: nothing
+        self.assertEqual(self.cell_of(L, -60000, 0), 0)
+        # one label per region, each inside its own region (a curved arm's centroid can fall outside it)
+        self.assertEqual(sorted(lb["n"] for lb in L["labels"]), list(range(1, 43)))
+        for lb in L["labels"]:
+            self.assertEqual(self.cell_of(L, lb["x"], lb["z"]), lb["n"], lb["name"])
+            self.assertEqual(lb["name"], L["names"][lb["n"]])
+            self.assertGreater(lb["cells"], 0)
+
+    def test_regions_endpoint(self):
+        st, h, body = self.get("/api/regions", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(st, 200)
+        self.assertEqual(h.get("Content-Encoding"), "gzip")   # 185 KB of runs: compressed on the wire
+        d = json.loads(body)
+        self.assertEqual(d, json.loads(json.dumps(outrider.bio.region_layer())))
+        etag = h["ETag"]
+        self.assertEqual(h["Cache-Control"], "no-cache")
+        st, h2, body = self.get("/api/regions", headers={"If-None-Match": etag})
+        self.assertEqual((st, body, h2["ETag"]), (304, b"", etag))   # the page has it: not sent again
+        self.assertEqual(self.get("/api/regions", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
+        with unittest.mock.patch.object(outrider.bio, "load_rules", return_value=None):
+            st, _, body = self.get("/api/regions")
+        self.assertEqual(st, 404)
+        self.assertIn("region map", json.loads(body)["error"])
+
+    def test_background_image_route(self):
+        cfg = self.state.highway_cfg
+        # none configured
+        st, _, body = self.get("/api/highway/background")
+        self.assertEqual(st, 404)
+        self.assertFalse(self.state.highway_view()["background"]["image"])
+        # the configured file, whatever the request asks for
+        path = self.write("galaxy.png", self.png)
+        self.write("secret.png", b"\x89PNG\r\n\x1a\nsecret")
+        cfg["background_image"] = path
+        for params in ({}, {"path": "/etc/passwd"}, {"path": os.path.join(self.tmp, "secret.png")}, {"v": "../../x"}):
+            st, h, body = self.get("/api/highway/background", **params)
+            self.assertEqual((st, body), (200, self.png), params)
+            self.assertEqual(h["Content-Type"], "image/png")
+            self.assertEqual(h["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(self.get("/api/highway/background/../secret.png")[0], 404)
+        bg = self.state.highway_view()["background"]
+        self.assertEqual((bg["image"], bg["name"], bg["extent"], bg["why"]), (True, "galaxy.png", ed_outrider.HIGHWAY_BG_EXTENT, None))
+        self.assertTrue(bg["v"].endswith(f"-{len(self.png)}"))
+        # another site cannot read it
+        self.assertEqual(self.get("/api/highway/background", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
+        # not an image by its extension or its content, missing, a folder, empty: never served
+        bad = {"text": self.write("notes.txt", b"hello"), "toml": self.write("ed_outrider.toml", b"[server]"),
+               "svg": self.write("map.svg", b"<svg onload='x'/>"), "fake": self.write("fake.png", b"#!/bin/sh\n"),
+               "webp": self.write("fake.webp", b"RIFF\x00\x00\x00\x00WAVE"), "empty": self.write("empty.jpg", b""),
+               "missing": os.path.join(self.tmp, "gone.png"), "folder": os.path.join(self.tmp, "dir.png")}
+        os.mkdir(bad["folder"])
+        for what, p in bad.items():
+            cfg["background_image"] = p
+            st, h, body = self.get("/api/highway/background")
+            self.assertEqual(st, 404, what)
+            self.assertNotIn(b"hello", body)
+            bg = self.state.highway_view()["background"]
+            self.assertFalse(bg["image"], what)
+            self.assertTrue(bg["why"], what)
+        # the other types by their first bytes
+        for name, data, ctype in [("a.jpg", b"\xff\xd8\xff\xe0rest", "image/jpeg"), ("a.gif", b"GIF89a....", "image/gif"),
+                                  ("a.webp", b"RIFF\x10\x00\x00\x00WEBPVP8 ", "image/webp")]:
+            cfg["background_image"] = self.write(name, data)
+            st, h, body = self.get("/api/highway/background")
+            self.assertEqual((st, h["Content-Type"], body), (200, ctype, data))
+
+    def test_background_config(self):
+        import contextlib, io, tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = ed_outrider.settings_from({"highway": {"background_image": "pics/galaxy.png", "background_extent": [-40000, 40000, -20000, 70000],
+                                                    "background_opacity": 0.4}}, args, None, ([], []))
+        hw = st["highway"]
+        self.assertEqual(hw["background_image"], os.path.join(ed_outrider.SCRIPT_DIR, "pics/galaxy.png"))   # relative to the repo
+        self.assertEqual((hw["background_extent"], hw["background_opacity"]), ([-40000.0, 40000.0, -20000.0, 70000.0], 0.4))
+        back = tomllib.loads(ed_outrider.config_text(st))["highway"]
+        self.assertEqual((back["background_image"], back["background_extent"], back["background_opacity"]),
+                         ("pics/galaxy.png", [-40000, 40000, -20000, 70000], 0.4))
+        self.assertEqual(ed_outrider.settings_from({"highway": {"background_image": "/abs/g.JPG"}}, args, None, ([], []))
+                         ["highway"]["background_image"], "/abs/g.JPG")
+        # a file that is not an image type, a bad extent and an opacity out of range: reported, the defaults used
+        for cfg, key, want in [({"background_image": "ed_outrider.toml"}, "background_image", ""),
+                               ({"background_image": "data/ed_outrider.sqlite"}, "background_image", ""),
+                               ({"background_image": "x.svg"}, "background_image", ""),
+                               ({"background_image": 3}, "background_image", ""),
+                               ({"background_extent": [1, 2, 3]}, "background_extent", ed_outrider.HIGHWAY_BG_EXTENT),
+                               ({"background_extent": [5, 1, 0, 9]}, "background_extent", ed_outrider.HIGHWAY_BG_EXTENT),
+                               ({"background_extent": [0, 1, True, 9]}, "background_extent", ed_outrider.HIGHWAY_BG_EXTENT),
+                               ({"background_extent": "all"}, "background_extent", ed_outrider.HIGHWAY_BG_EXTENT)]:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                got = ed_outrider.settings_from({"highway": cfg}, args, None, ([], []))["highway"][key]
+            self.assertEqual(got, want, cfg)
+            self.assertIn(f"[highway] {key}", err.getvalue())
+        self.assertEqual(ed_outrider.settings_from({"highway": {"background_opacity": 7}}, args, None, ([], []))["highway"]["background_opacity"], 1.0)
+        self.assertEqual(ed_outrider.settings_from({"highway": {"background_opacity": 0}}, args, None, ([], []))["highway"]["background_opacity"], 0.05)
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
+            example = f.read()
+        with open(os.path.join(here, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for key in ("background_image", "background_extent", "background_opacity"):
+            self.assertIn(f"# {key} = ", example[example.index("[highway]"):])
+            self.assertIn(f"`{key}`", readme[readme.index("| `[highway]`"):].split("\n")[0])

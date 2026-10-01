@@ -20,7 +20,7 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 
 | Events | What for |
 |---|---|
-| `FSDJump`, `CarrierJump`, `Location` | Visits, the jump path (`jumps`), current and previous position, region crossings. `FSDJump` `JumpDist`/`FuelUsed`/`FuelLevel` feed the fuel model (not when `BoostUsed`). `Taxi`/`Multicrew` mark rides that are not your ship's fuel or honk. A `Location` in the system you are already in is a relog, not an arrival. |
+| `FSDJump`, `CarrierJump`, `Location` | Visits, the jump path (`jumps`), current and previous position, region crossings. `FSDJump` `JumpDist`/`FuelUsed`/`FuelLevel` feed the fuel model (not when `BoostUsed`). `Taxi`/`Multicrew` mark rides that are not your ship's fuel or honk. A `Location` in the system you are already in is a relog, not an arrival. `FSDJump`/`CarrierJump` also move the Neutron Highway along its route (`highway_arrival`). |
 | `FSDTarget` | The targeted system (sound verdict, "leaving unfinished work" check) and its star class. |
 | `StartJump` | Star class of the destination; `JumpType: Hyperspace` means the FSD is charging (the charge line, the speech queue clears). |
 | `Scan` | Bodies (`own_bodies`, the record used everywhere), the arrival star's `WasDiscovered` (discovery streak verdict), first-scan `WasDiscovered`/`WasMapped`/`WasFootfalled` (`own_firsts`), landable `Materials` (jumponium), valuable finds. Nav-beacon scans (`ScanType` NavBeaconDetail/NavBeacon) never count as your discoveries. |
@@ -40,11 +40,11 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 | `SellOrganicData` | Vista Genomics sales, each `BioData` entry with its `Bonus` (the x5 check). |
 | `Died`, `Resurrect` | Deaths and whether the ship (and its data) was lost (`Option`). |
 | `LoadGame`, `Commander`, `Rank`, `Progress`, `Promotion`, `Statistics`, `Shutdown` | Logins and sessions, credits at login, ranks, career statistics, the quit (recap, quit backup). |
-| `Loadout` | Ship, jump range, fuel capacity, unladen mass, FSD and Guardian booster, engineering modifiers, hull and core module health, rebuy. |
+| `Loadout` | Ship, jump range, fuel capacity, unladen mass, FSD and Guardian booster, engineering modifiers, hull and core module health, rebuy. Also the latest one per `ShipID` goes to `fleet_loadouts` (`note_fleet`, `fleet_figures`): the Highway's ship list and the exact plotter's inputs. |
 | `EngineerCraft` | Engineering that moves the jump range before the next `Loadout`. |
 | `Cargo` (`Vessel: Ship`) | Tonnes in the hold: the ship's mass for the fuel model. |
 | `FuelScoop`, `RefuelAll`, `RefuelPartial` | Last refuel. |
-| `HullDamage`, `Repair`, `RepairAll`, `RepairDrone`, `AfmuRepairs`, `HeatDamage`, `Interdicted`, `JetConeBoost` | Hull and module health, danger alerts, a neutron/white dwarf charge. |
+| `HullDamage`, `Repair`, `RepairAll`, `RepairDrone`, `AfmuRepairs`, `HeatDamage`, `Interdicted`, `JetConeBoost` | Hull and module health, danger alerts. `JetConeBoost` is the FSD supercharge signal (neutron or white dwarf cone, `BoostValue` the multiplier): the next jump's range, the "supercharged" moment, and the Highway's auto-target trigger. |
 | `Docked`, `Undocked` | Docked state and services (`exploration` = Universal Cartographics, `vistagenomics`), dock/undock alerts. |
 | `CarrierStats`, `CarrierLocation`, `CarrierJumpRequest`, `CarrierJumpCancelled` | Your fleet carrier. |
 | `NavRouteClear` | The plotted route was cleared. |
@@ -126,7 +126,16 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
   (`FSD_POWER_ITEM`) is 2.5025. Guardian boosters add `GUARDIAN_BOOST` light years. Sources: EDCD
   coriolis-data (`frame_shift_drive.json` "fuelpower", `guardian_fsd_booster.json` "jumpboost") and
   EDDiscovery's EliteDangerousCore (`ModuleList.cs` "PowerConstant", which rounds the Mk II to 2.503).
-- `Loadout` is only written at login and at outfitting, so an `EngineerCraft` in between is applied by hand.
+- The Caspian's **SCO Mk II** drive (`int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii`): fuel multiplier
+  0.011 (coriolis-data; Auto_Neutron's table says 0.004), power 2.5025, a neutron supercharge of ×6 (every other
+  drive ×4), 6.8 t MaxFuelPerJump. Checked against the author's real Loadout: FSDOptimalMass 7238.5 (engineered),
+  MaxFuelPerJump 6.8 and a size 5 Guardian booster (10.5 ly) give 82.97 ly, the Loadout's own `MaxJumpRange` and the
+  game's. `fleet_figures` still checks every drive's figures against `MaxJumpRange` (within 1%) and, when they miss,
+  plots with the optimal mass that range implies.
+- `JetConeBoost` says a supercharge happened, not where: the Highway takes it as "boosted in this route system" only
+  when you are at a route system (`maybe_autotarget`), and only within `HIGHWAY_LIVE_S` of the line.
+- `Loadout` is only written at login and at outfitting, so an `EngineerCraft` in between is applied by hand (the
+  fuel model does; `fleet_loadouts` rows stay as of their Loadout).
   Jet-cone boosts wear modules but health only updates at the next `Loadout`.
 
 **Other**

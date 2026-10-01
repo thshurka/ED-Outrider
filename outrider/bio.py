@@ -516,6 +516,68 @@ def region_name(x, y, z):
     return names[n] if n and n < len(names) else None
 
 
+REGION_CELL = 4096 / 83   # ly per grid cell (_cached_region's 83 cells per 4096 ly)
+
+
+def region_layer():
+    """The region map for the Highway tab's galaxy map, or None without rules: klightspeed's grid as it is shipped
+    (`rows`: one list per row of [run length, region number] pairs, row 0 at the smallest Z, each run going +X from
+    the origin; 0 is outside the map), the names, and a label point per region (`labels`: n, name, x, z, cells).
+    A row's cells are `cell` ly square from `origin` [x, z], so a position's cell is the one region_number() reads.
+    A label goes at the region's centroid, or at its cell nearest the centroid when that falls outside it (a curved
+    arm), so it always lands inside its region."""
+    R = load_rules()
+    if not R or not R.get("region_grid"):
+        return None
+    grid, names = R["region_grid"], R["region_names"]
+    acc = {}   # region -> [cells, sum of column centres, sum of row centres]
+    for row, runs in enumerate(grid):
+        c = 0
+        for length, n in runs:
+            if n:
+                a = acc.setdefault(n, [0, 0.0, 0.0])
+                a[0] += length
+                a[1] += length * (c + length / 2)   # the run's column centres: c + 0.5 ... c + length - 0.5
+                a[2] += length * (row + 0.5)
+            c += length
+    labels = []
+    for n, (cells, sx, sz) in sorted(acc.items()):
+        cx, cz = sx / cells, sz / cells
+        row, col = int(cz), int(cx)
+        if _run_value(grid, row, col) != n:   # outside its own region: the region's cell nearest the centroid
+            best = None
+            for r, runs in enumerate(grid):
+                c = 0
+                for length, v in runs:
+                    if v == n:
+                        nx = min(max(cx, c + 0.5), c + length - 0.5)
+                        d = (nx - cx) ** 2 + (r + 0.5 - cz) ** 2
+                        if best is None or d < best[0]:
+                            best = (d, nx, r + 0.5)
+                    c += length
+            cx, cz = best[1], best[2]
+        labels.append({"n": n, "name": names[n] if n < len(names) else f"Region {n}",
+                       "x": round(REGION_ORIGIN[0] + cx * REGION_CELL, 1), "z": round(REGION_ORIGIN[2] + cz * REGION_CELL, 1),
+                       "cells": cells})
+    src = next((s for s in R.get("sources") or () if s.get("name") == "EliteDangerousRegionMap"), {})
+    return {"origin": [REGION_ORIGIN[0], REGION_ORIGIN[2]], "cell": REGION_CELL, "size": len(grid), "rows": grid,
+            "names": names, "labels": labels,
+            "source": {"name": "klightspeed/EliteDangerousRegionMap", "url": src.get("url"), "licence": src.get("licence", "MIT"),
+                       "commit": src.get("commit")}}
+
+
+def _run_value(grid, row, col):
+    """The region number in one grid cell (0 outside the grid or the map)."""
+    if not 0 <= row < len(grid) or col < 0:
+        return 0
+    c = 0
+    for length, v in grid[row]:
+        if col < c + length:
+            return v
+        c += length
+    return 0
+
+
 def _dist(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 

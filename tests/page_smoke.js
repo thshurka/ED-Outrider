@@ -21,7 +21,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
   console.log(ok ? "OK" : "FAIL", "| header |", d.querySelector("#sub").textContent.slice(0, 80), "| errors:", errors);
   // every view: [button, element that must end up with content]
   const views = [["overview", "#ovPanes"], ["near", "#rows"], ["here", "#hereRows"], ["bio", "#bioRows"], ["bm", "#bmTable"],
-                 ["search", "#searchForm"], ["hist", "#histRows"], ["log", "#logRows"], ["mat", "#matGrid"], ["firsts", "#firstsRows"], ["now", "#nowView"]];
+                 ["search", "#searchForm"], ["hist", "#histRows"], ["log", "#logRows"], ["mat", "#matGrid"], ["firsts", "#firstsRows"], ["hwy", "#hwyHead"], ["now", "#nowView"]];
   let allOk = ok;
   for (const [v, sel] of views) {
     const btn = d.querySelector(`[data-view="${v}"]`);
@@ -240,6 +240,27 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
                stopped.join() === "Leaving with unfinished work." && pure;
     w.sayNow = realSay; w.eval(`speechOn = ${saved[0]}; isSpeaker = ${saved[1]}; speechItems = []`);
     console.log(ok ? "OK" : "FAIL", "| jump clears speech |", spoken.join(" / "), "| cut:", stopped.join(), errors.slice(before));
+  }
+  // the Neutron Highway's moments (H1): said in their plain words under their own alerts row, not notified by default
+  {
+    const w = dom.window, before = errors.length, said = [];
+    const realPlay = w.play, realSpeak = w.speak;
+    w.speak = (t, o) => said.push([t, (o || {}).kind]); w.play = () => {};
+    const res = JSON.parse(w.eval(`(() => {
+      const saved = data.moments, flags = [speechOn, isSpeaker, alertSpeak.highway, lastMomentSeq];
+      speechOn = true; isSpeaker = true; alertSpeak.highway = true;
+      const s0 = lastMomentSeq, mk = (i, m) => Object.assign({seq: s0 + i, ts: new Date().toISOString()}, m);
+      data.moments = [mk(1, {kind: "highway", what: "next", text: "Next Neutron Highway Stop: Ossia. Boost your FSD to continue."}),
+                      mk(2, {kind: "highway", what: "off_route", text: "Off route: detour."})];
+      onData();
+      const out = {row: ALERTS.some(a => a[0] === "highway"), notify: alertCfg.highway, seq: lastMomentSeq === s0 + 2};
+      data.moments = saved; [speechOn, isSpeaker, alertSpeak.highway] = flags; lastMomentSeq = flags[3];
+      return JSON.stringify(out); })()`));
+    w.speak = realSpeak; w.play = realPlay;
+    const words = said.map(x => x[0]).join("|");
+    const ok = res.row && res.notify === false && res.seq && said.every(x => x[1] === "highway") &&
+               words === "Next Neutron Highway Stop: Ossia. Boost your FSD to continue.|Off route: detour." && errors.length === before;
+    console.log(ok ? "OK" : "FAIL", "| highway moments spoken |", words, JSON.stringify(res), errors.slice(before));
   }
   // one speaker: a window that is not the speaker still shows the alert but plays and says nothing; the
   // ▶ voice button still speaks; a danger line comes only from business and never swears
@@ -1094,8 +1115,10 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       takeCopilot({seq: n + 1, action: "replay", words: "Copilot check."}, false); takeCopilot({seq: n + 1, action: "replay", words: "Copilot check."}, false);
       isSpeaker = false; takeCopilot({seq: n + 2, action: "replay", words: "Not this window."}, false); isSpeaker = true;
       takeCopilot({seq: n + 3, action: "replay", words: "Stale."}, true)`);
+    // read the number at once: a live payload during the wait below carries the server's own seq and resets it
+    const seqTaken = w.eval("lastCopilotSeq > 0");
     await sleep(200);
-    got.copilot = [fates().filter(f => f[0] === "Copilot check.").length, fates().some(f => /Not this window|Stale/.test(f[0])), w.eval("lastCopilotSeq > 0")];
+    got.copilot = [fates().filter(f => f[0] === "Copilot check.").length, fates().some(f => /Not this window|Stale/.test(f[0])), seqTaken];
     w.eval('takeCopilot({seq: lastCopilotSeq + 1, action: "again"}, false)');
     await sleep(200);
     got.again = fates().filter(f => f[0] === "Copilot check.").length;
@@ -2221,7 +2244,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     })()`));
     const want = {pure: [true, true, false, false, false, true], sizes: [true, false, false, true], now: false, back: true, body: "hidden", tabbable: true,
       panes: ["overview:auto:sticky", "near:auto:sticky", "here:auto:sticky", "bio:auto:sticky", "bm:auto:sticky", "search:auto:sticky",
-              "hist:auto:sticky", "log:auto:sticky", "mat:auto:-", "firsts:auto:sticky"],
+              "hist:auto:sticky", "log:auto:sticky", "mat:auto:-", "firsts:auto:sticky", "hwy:auto:sticky"],
       ov: {map: true, inline: "", nearPane: "auto", here: "auto"}, ovPage: true, jump: 100 + (930 - 700), keep: 1100, more: [0, 1], pgdn: [360, true], winScrolls: 0,
       fold: {tiles: true, line: true, stored: "true", exported: true, btn: "▾", name: true, urgent: ["⛽ N%", "unsold N"]},
       unfold: {tiles: true, line: true, stored: "false"}};
@@ -2300,6 +2323,309 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const goodCT = !bad.length && errors.length === before;
     allOk = allOk && goodCT;
     console.log(goodCT ? "OK" : "FAIL", "| compact tables |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}` : "level by fit with slack, short forms, both forms in the cells with the full text in the title, compact / compact2 toggled and undone", errors.slice(before));
+  }
+  // ---- the Neutron Highway (H2, the page): a fixture route of 400 systems at system 37 (GET api/highway and Spansh
+  // never asked: every highway request is answered here), the Highway tab's list (done grey and folded, the next 200
+  // ahead in orange, the next one highlighted), the form (defaults from the fleet, the range override, the plotters'
+  // fields), a plot (its body, polled until done), errors, clear, the map's projection, and the highway line
+  const hwyFixture = ({n = 400, at = 37, plotter = "exact", off = false, complete = false} = {}) => {
+    const rows = [];
+    for (let i = 0; i < n; i++) rows.push({i, system: i === 0 ? "Hwy Start" : i === n - 1 ? "Hwy End" : `Hwy Stop ${i}`, id: String(7000000000 + i),
+      x: 1000 - i * 10, y: 0, z: 2000 + i * 40, distance: i ? 41.2 : 0, fuel_used: plotter === "exact" && i ? 1.5 : null,
+      fuel_left: plotter === "exact" ? 20 : null, neutron: i % 3 === 1, refuel: plotter === "exact" && i > 0 && i % 17 === 0,
+      jumps: i ? (plotter === "neutron" ? 3 : 1) : 0, remaining: (n - 1 - i) * 41.2});
+    if (complete) at = n - 1;
+    const nx = complete ? null : at + 1, start = nx ?? n;
+    const summary = {id: "hwy-test", plotter, destination: "Hwy End", total: n - 1, index: nx, at: off ? null : at, furthest: at, complete,
+      off_route: off, nearest: off ? {name: "Hwy Stop 39", id: "7000000039", index: 39, distance: 12} : null,
+      jumps_total: n - 1, jumps_left: nx == null ? 0 : n - nx, ly_left: rows[at].remaining, refuel_here: false, refuel_in: 3,
+      next: nx == null ? null : {name: rows[nx].system, id: rows[nx].id, neutron: rows[nx].neutron, refuel: false, jumps: 1, distance: 4.2},
+      boost_here: false};
+    const route = {id: "hwy-test", plotter, ship: {ship_id: 7, name: "Sample Ship", type: "krait_light", ts: "2026-09-20T19:00:05Z"},
+      options: {}, created_ts: "2026-10-01T14:02:00Z", at: off ? null : at, furthest: at, off_route: off, done_ts: complete ? "x" : null,
+      from: "Hwy Start", to: "Hwy End", count: n, total_ly: rows[0].remaining, summary,
+      done: rows.slice(Math.max(0, start - 20), start), ahead: rows.slice(start, start + 400),   // 400: more than the page lists
+      points: rows.map(r => [r.x, r.z]), neutrons: rows.filter(r => r.neutron).map(r => r.i)};
+    return {route, summary};
+  };
+  const hwyFleet = [
+    {ship_id: 7, name: "Sample Ship", type: "krait_light", ts: "2026-09-20T19:00:05Z", range: 55.5,
+     figures: {unladen: 410.5, max_range: 58.4, fuel_main: 32, booster_ly: 10.5, max_fuel: 5.2, supercharge: 4, exact: true}},
+    {ship_id: 3, name: "Long Haul", type: "anaconda", ts: "2026-08-02T10:00:00Z", range: 71.2,
+     figures: {unladen: 520, max_range: 75, fuel_main: 64, booster_ly: 0, max_fuel: 8, supercharge: 6, exact: true}}];
+  const hwyPayload = (fx, plotting = null) => ({route: fx ? fx.route : null, plotting, fleet: hwyFleet, ship_id: 7, cargo: 4,
+    position: {name: "Hwy Stop 37", id: "7000000037", x: 630, y: 0, z: 3480},
+    clipboard: {enabled: true, available: false, tool: null, why: "neither", last: null}, autotarget: {enabled: false}, defaults: {efficiency: 60}});
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, realCopy = w.copyText, calls = [], copied = [];
+    const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status, headers: {"Content-Type": "application/json"}}));
+    let answer = () => json(hwyPayload(hwyFixture()));
+    w.fetch = (u, o) => {
+      const url = String(u);
+      if (url.startsWith("api/highway")) { calls.push([url, o && o.method || "GET", o && o.body ? JSON.parse(o.body) : null]); return answer(url, o); }
+      return realFetch(u, o);
+    };
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    const fx = hwyFixture();
+    w.eval(`data.highway = ${JSON.stringify(fx.summary)}`);
+    d.querySelector('[data-view="hwy"]').click(); await sleep(800);
+    const got = {};
+    const rowsAhead = d.querySelectorAll("#hwyRows tr.ahead");
+    got.ahead = rowsAhead.length;   // the 200 cap, though 400 came
+    got.more = (d.querySelector("#hwyRows tr.hwymore") || {}).textContent || "";
+    got.next = [...d.querySelectorAll("#hwyRows tr.next")].map(r => r.dataset.i).join();
+    got.doneFolded = d.querySelectorAll("#hwyDone tr.done").length;
+    d.getElementById("hwyDoneBtn").click(); await sleep(100);
+    got.doneOpen = [...d.querySelectorAll("#hwyDone tr.done")].map(r => r.dataset.i);
+    got.at = (d.querySelector("#hwyDone tr.at") || {dataset: {}}).dataset.i;
+    d.getElementById("hwyDoneBtn").click();
+    got.head = d.getElementById("hwyHead").textContent.replace(/\s+/g, " ");
+    got.clip = /No wl-copy\/xclip found/.test(got.head);
+    got.fit = w.eval("FIT_TABLES.includes('hwyTable') && VIEW_PANE.hwy === 'hwyPane'");
+    got.formFolded = !d.getElementById("hwyPlot").open;
+    // the form: the current ship, its cargo, the laden range with that cargo (the server's fleet_range)
+    const laden = (f, c) => Math.round(((f.max_range - f.booster_ly) * (f.unladen + f.max_fuel) / (f.unladen + f.fuel_main + c) + f.booster_ly) * 100) / 100;
+    const sel = d.getElementById("hwyShip"), rng = d.getElementById("hwyRange"), mult = d.getElementById("hwyMult");
+    got.ship = sel.value; got.cargo = d.getElementById("hwyCargo").value; got.range = Number(rng.value);
+    got.wantRange = laden(hwyFleet[0].figures, 4);
+    got.shipText = sel.options[0].textContent;
+    // the plotters' own fields
+    const radio = v => d.querySelector(`[name=hwyPlotter][value=${v}]`);
+    radio("neutron").click(); radio("neutron").dispatchEvent(new w.Event("change"));
+    got.neutronFields = [d.querySelector(".hwy-nopt").hidden, d.querySelector(".hwy-xopt").hidden];
+    // the range override sticks; another ship brings its own range and supercharge back
+    rng.value = "40"; rng.dispatchEvent(new w.Event("input"));
+    w.eval("fillHwyForm(H.data)");
+    got.override = [rng.value, d.getElementById("hwyRangeReset").hidden];
+    sel.value = "3"; sel.dispatchEvent(new w.Event("change"));
+    got.other = [Number(rng.value), laden(hwyFleet[1].figures, 0), mult.value, d.getElementById("hwyCargo").value];
+    rng.value = "48.5"; rng.dispatchEvent(new w.Event("input"));
+    d.getElementById("hwyTo").value = "Colonia";
+    // a plot: the neutron plotter's body, then polled until the job is done
+    let polls = 0;
+    answer = (url, o) => {
+      if (url === "api/highway/plot") return json({ok: true, plotting: {state: "running", plotter: "neutron", from: "Hwy Stop 37", to: "Colonia", started: new Date().toISOString()}}, 202);
+      polls++;
+      if (polls < 3) return json(hwyPayload(fx, {state: "running", plotter: "neutron", from: "Hwy Stop 37", to: "Colonia", started: new Date().toISOString()}));
+      const nf = hwyFixture({plotter: "neutron", at: 0}); nf.route.id = nf.summary.id = "hwy-test-2";
+      return json(hwyPayload(nf, {state: "done", plotter: "neutron", from: "Hwy Stop 37", to: "Colonia"}));
+    };
+    d.getElementById("hwyGo").click(); await sleep(400);
+    got.plotBody = (calls.find(c => c[0] === "api/highway/plot") || [])[2];
+    got.running = d.getElementById("hwyStatus").textContent;
+    await sleep(4300);
+    got.polls = polls;
+    got.afterPlot = [d.getElementById("hwyStatus").textContent, d.getElementById("hwyTable").classList.contains("neutron"),
+                     d.querySelectorAll("#hwyRows tr.ahead").length];
+    // the exact plotter's body (its ticks, no range) and a refusal shown in its words
+    radio("exact").click(); radio("exact").dispatchEvent(new w.Event("change"));
+    got.exactFields = [d.querySelector(".hwy-nopt").hidden, d.querySelector(".hwy-xopt").hidden];
+    d.getElementById("hwyInject").checked = true; d.getElementById("hwyInject").dispatchEvent(new w.Event("change"));
+    sel.value = "7"; sel.dispatchEvent(new w.Event("change"));
+    answer = url => url === "api/highway/plot" ? json({error: "a route is being plotted already"}, 409) : json(hwyPayload(fx));
+    calls.length = 0;
+    d.getElementById("hwyGo").click(); await sleep(300);
+    got.exactBody = (calls.find(c => c[0] === "api/highway/plot") || [])[2];
+    got.err = [d.getElementById("hwyStatus").textContent, d.getElementById("hwyStatus").className];
+    got.saved = w.eval("JSON.parse(localStorage.getItem('highway'))");
+    // a plot that failed at Spansh: said in plain words
+    w.eval(`H.status = null; H.data.plotting = {state: "failed", error: "Spansh found no route between those systems"}; drawHwyStatus()`);
+    got.failed = d.getElementById("hwyStatus").textContent;
+    // the destination's name suggestions (debounced)
+    answer = url => url.startsWith("api/highway/systems") ? json({q: "Col", values: ["Colonia", "Col 285 Sector AA-A c1"]}) : json(hwyPayload(fx));
+    const to = d.getElementById("hwyTo"); to.value = "Col"; to.dispatchEvent(new w.Event("input")); await sleep(600);
+    got.suggest = [...d.querySelectorAll("#hwyNames option")].map(o => o.value).join("|");
+    // clear: two clicks (the first only asks)
+    answer = url => url === "api/highway/clear" ? json({ok: true}) : json(hwyPayload(null));
+    calls.length = 0;
+    d.getElementById("hwyClear").click(); await sleep(50);
+    got.clearFirst = [calls.length, d.getElementById("hwyClear").textContent];
+    d.getElementById("hwyClear").click(); await sleep(400);
+    got.cleared = [calls.map(c => c[0] + " " + c[1]).join(), d.querySelector("#hwyRows").textContent.trim(), d.getElementById("hwyPlot").open];
+    // the map's pure projection: fit with padding, north (+Z) up, zoom about a point, the scale bar's lengths
+    got.proj = JSON.parse(w.eval(`(() => { const v = hwyFit([[0, 0], [100, 50], [null, 3]], 220, 120, 10);
+      const one = hwyFit([[5, 5]], 100, 100), none = hwyFit([], 100, 100);
+      const asym = hwyFit([[0, 0], [100, 100]], 300, 300, {top: 60, right: 40, bottom: 40, left: 40});
+      const z = hwyZoom(v, 2, 10, 110);
+      return JSON.stringify({v: [v.cx, v.cz, v.scale], a: hwyToScreen(v, 0, 0), b: hwyToScreen(v, 100, 50), one: one.scale === HWY_MAX_SCALE,
+        none, asym: [hwyToScreen(asym, 0, 100), hwyToScreen(asym, 100, 0)], zoomKeeps: hwyToScreen(z, 0, 0), zs: z.scale,
+        back: hwyToWorld(v, ...hwyToScreen(v, 33, 44)).map(x => Math.round(x * 1e6) / 1e6), nice: [hwyNiceLy(1), hwyNiceLy(0.02), hwyNiceLy(30)]}); })()`));
+    // the highway line under the header: Overview, Nearby and Here only; next, off route, complete; the name copies,
+    // anywhere else opens the tab
+    w.copyText = t => copied.push(t);
+    const line = () => d.getElementById("hwyLine");
+    w.eval(`data.highway = ${JSON.stringify(fx.summary)}; view = "overview"; render()`);
+    got.lineNext = line().textContent.replace(/\s+/g, " ").trim();
+    line().querySelector(".copy").click();
+    w.eval(`view = "map"; render()`);
+    got.lineOnMap = line().innerHTML;
+    w.eval(`data.highway = ${JSON.stringify(hwyFixture({off: true}).summary)}; view = "near"; render()`);
+    got.lineOff = line().textContent.replace(/\s+/g, " ").trim();
+    w.eval(`data.highway = ${JSON.stringify(hwyFixture({complete: true}).summary)}; view = "here"; render()`);
+    got.lineDone = line().textContent.replace(/\s+/g, " ").trim();
+    line().click(); await sleep(300);
+    got.opened = w.eval("view");
+    w.eval(`data.highway = null; view = "overview"; render()`);
+    got.lineGone = line().innerHTML;
+    w.fetch = realFetch; w.copyText = realCopy; got.copied = copied;
+    w.eval(`localStorage.removeItem("highway"); localStorage.removeItem("hwyDoneOpen")`);
+    const want = {ahead: 200, next: "38", doneFolded: 0, doneOpen: Array.from({length: 20}, (_, k) => String(18 + k)), at: "37",
+      clip: true, fit: true, formFolded: true, ship: "7", cargo: "4", neutronFields: [false, true], override: ["40", false],
+      exactFields: [true, false], failed: "Could not plot the route: Spansh found no route between those systems.",
+      suggest: "Colonia|Col 285 Sector AA-A c1", clearFirst: [0, "Click again to clear"],
+      cleared: ["api/highway/clear POST,api/highway GET", "No route yet.", true],
+      lineNext: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3", lineOnMap: "",
+      lineOff: "🛣 Off Route: Detour · nearest Hwy Stop 39 12.0 ly", lineDone: "🛣 Highway complete", opened: "hwy", lineGone: "",
+      copied: ["Hwy Stop 38"]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const p = got.proj;
+    if (!/\+162 more after these/.test(got.more)) bad.push("more");
+    if (!(/To Hwy End from Hwy Start/.test(got.head) && /399 jumps/.test(got.head) && /left 362 jumps/.test(got.head))) bad.push("head");
+    if (Math.abs(got.range - got.wantRange) > 0.011) bad.push("range");
+    if (!/Sample Ship \(current\) · Krait Phantom · 55\.5 ly · loadout as of 2026-09-20/.test(got.shipText)) bad.push("shipText");
+    if (!(Math.abs(got.other[0] - got.other[1]) < 0.011 && got.other[2] === "6" && got.other[3] === "0")) bad.push("other");
+    if (JSON.stringify(got.plotBody) !== JSON.stringify({plotter: "neutron", to: "Colonia", ship_id: 3, cargo: 0, range: 48.5, efficiency: 60, supercharge_multiplier: 6})) bad.push("plotBody");
+    if (!/^Plotting Hwy Stop 37 → Colonia with Spansh \(neutron plotter\)…/.test(got.running)) bad.push("running");
+    if (!(got.polls >= 3 && /^Plotted: 399 jumps to Hwy End/.test(got.afterPlot[0]) && got.afterPlot[1] && got.afterPlot[2] === 200)) bad.push("afterPlot");
+    if (JSON.stringify(got.exactBody) !== JSON.stringify({plotter: "exact", to: "Colonia", ship_id: 7, cargo: 4, injections: true, exclude_secondary: false, supercharged: false})) bad.push("exactBody");
+    if (!(got.err[0] === "Could not plot the route: a route is being plotted already." && got.err[1] === "err")) bad.push("err");
+    if (!(got.saved && got.saved.plotter === "exact" && got.saved.injections === true)) bad.push("saved");
+    if (!(JSON.stringify(p.v) === "[50,25,2]" && JSON.stringify(p.a) === "[10,110]" && JSON.stringify(p.b) === "[210,10]" && p.one && p.none === null
+          && JSON.stringify(p.asym) === "[[50,60],[250,260]]" && JSON.stringify(p.zoomKeeps) === "[10,110]" && p.zs === 4
+          && JSON.stringify(p.back) === "[33,44]" && JSON.stringify(p.nice) === "[100,5000,2]")) bad.push("proj");
+    const goodHW = !bad.length && errors.length === before;
+    allOk = allOk && goodHW;
+    console.log(goodHW ? "OK" : "FAIL", "| highway tab |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "200 of 400 ahead, done folded and grey, the next highlighted; form from the fleet, range override, plotters' fields; plot body and polled to done; errors; clear; projection; the line in three states with copy", errors.slice(before));
+  }
+  // off route: the Highway list marks the nearest route system (from the live summary, so it follows each jump without
+  // a fetch) and scrolls it into view in the pane, never the window; a nearest among the done rows shows while folded
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, got = {};
+    const off = hwyFixture({off: true});
+    w.fetch = (u, o) => String(u).startsWith("api/highway") ? Promise.resolve(new Response(JSON.stringify(hwyPayload(off)),
+      {status: 200, headers: {"Content-Type": "application/json"}})) : realFetch(u, o);
+    // a pane 300 px tall at 300 px, the nearest row below it at 900-930 (jsdom has no layout); window scrolls counted
+    let winScrolls = 0;
+    const proto = w.Element.prototype, gbr = proto.getBoundingClientRect, siv = proto.scrollIntoView, sb = w.scrollBy, st = w.scrollTo;
+    proto.getBoundingClientRect = function () {
+      if (this.id === "hwyPane") return {top: 300, bottom: 600, left: 0, right: 500, width: 500, height: 300};
+      if (this.classList && this.classList.contains("nearest")) return {top: 900, bottom: 930, left: 0, right: 500, width: 500, height: 30};
+      return gbr.call(this);
+    };
+    proto.scrollIntoView = () => { winScrolls++; }; w.scrollBy = () => { winScrolls++; }; w.scrollTo = () => { winScrolls++; };
+    const pane = d.getElementById("hwyPane");
+    Object.defineProperty(pane, "clientHeight", {value: 300, configurable: true});
+    Object.defineProperty(pane, "scrollTop", {value: 0, writable: true, configurable: true});
+    w.eval(`H.doneOpen = false; H.nextShown = null; data.highway = ${JSON.stringify(off.summary)}`);
+    d.querySelector('[data-view="hwy"]').click(); await sleep(800);
+    got.app = w.eval("appOn()");
+    got.nearest = [...d.querySelectorAll("#hwyTable tr.nearest")].map(r => r.dataset.i);
+    got.next = [...d.querySelectorAll("#hwyRows tr.next")].map(r => r.dataset.i);
+    got.scroll = pane.scrollTop;
+    // a jump while still off route: the live summary's nearest moves to the one you left (done, the rows folded)
+    w.eval(`data.highway = Object.assign({}, data.highway, {nearest: {name: "Hwy Stop 37", id: "7000000037", index: 37, distance: 3}}); renderHwy()`);
+    got.doneNearest = [...d.querySelectorAll("#hwyDone tr")].map(r => r.className);
+    got.winScrolls = winScrolls;
+    proto.getBoundingClientRect = gbr; proto.scrollIntoView = siv; w.scrollBy = sb; w.scrollTo = st;
+    delete pane.clientHeight; delete pane.scrollTop;
+    // back on the route: no mark
+    const on = hwyFixture();
+    w.eval(`data.highway = ${JSON.stringify(on.summary)}; H.data.route = ${JSON.stringify(on.route)}; renderHwy()`);
+    got.backOn = d.querySelectorAll("#hwyTable tr.nearest").length;
+    w.fetch = realFetch;
+    w.eval(`data.highway = null; H.nextShown = null; view = "overview"; render()`);
+    const want = {app: true, nearest: ["39"], next: ["38"], scroll: 330, doneNearest: ["hwydonehead", "done nearest"], winScrolls: 0, backOn: 0};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodHN = !bad.length && errors.length === before;
+    allOk = allOk && goodHN;
+    console.log(goodHN ? "OK" : "FAIL", "| highway nearest off route |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "the nearest route system marked and scrolled into view in the pane (not the window); a done one shown while folded; gone back on the route", errors.slice(before));
+  }
+  // the Highway map's background: the region layer from api/regions decoded as the server reads it, the landmarks'
+  // projection, the corner toggles (per device), and the drawing order on a recording canvas: image, regions, names and
+  // landmarks under the route, which still draws on top
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, got = {};
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    const fx = hwyFixture();
+    w.fetch = (u, o) => String(u).startsWith("api/highway") ? Promise.resolve(new Response(JSON.stringify(hwyPayload(fx)),
+      {status: 200, headers: {"Content-Type": "application/json"}})) : realFetch(u, o);
+    w.eval(`data.highway = ${JSON.stringify(fx.summary)}`);
+    d.querySelector('[data-view="hwy"]').click(); await sleep(800);
+    await w.eval("loadRegions()");
+    for (let i = 0; i < 20 && !w.eval("RG.data"); i++) await sleep(250);
+    got.regions = JSON.parse(w.eval(`JSON.stringify({labels: RG.labels && RG.labels.length, segs: RG.segs ? RG.segs.length / 4 > 10000 : false,
+      at: [[0, 0], [25.21875, 25899.96875], [-9530.5, 19808.125], [-1111.5625, 65269.75], [-60000, 0]].map(p => hwyRegionName(...p)),
+      biggestFirst: RG.labels[0].cells >= RG.labels[RG.labels.length - 1].cells})`));
+    // the whole galaxy fitted into 900 × 900 px with no padding: 0.01 px per ly, Sol 200 px above the bottom edge
+    got.proj = JSON.parse(w.eval(`(() => { const v = hwyFit(HWY_GALAXY, 900, 900, 0);
+      return JSON.stringify({scale: v.scale, marks: HWY_LANDMARKS.map(([n, x, z]) => [n, ...hwyToScreen(v, x, z).map(a => Math.round(a * 100) / 100)])}); })()`));
+    // the toggles: regions and labels shown, the image button only with an image configured; per device
+    const btn = k => d.querySelector(`.hwylayers [data-layer="${k}"]`);
+    got.pressed = ["regions", "labels", "image"].map(k => btn(k).getAttribute("aria-pressed"));
+    got.imageHidden = btn("image").hidden;
+    btn("regions").click();
+    got.afterClick = [btn("regions").getAttribute("aria-pressed"), w.eval("hwyLayers.regions"), JSON.parse(w.localStorage.getItem("hwyLayers")).regions];
+    btn("regions").click();
+    got.deviceOnly = !w.eval("SETTINGS_KEYS.includes('hwyLayers')");
+    w.eval(`H.data.background = {image: true, v: "1-2", name: "galaxy.png", extent: [-45000, 45000, -20000, 70000], opacity: 0.5, why: null}; drawHwyMap()`);
+    got.imageShown = !btn("image").hidden;
+    // a recording 2D context for every canvas (the map's and the offscreen ones), the map 800 × 600
+    const proto = w.HTMLCanvasElement.prototype, realCtx = proto.getContext, ctxs = new Map();
+    const mkCtx = cv => { const ops = [], st = {};
+      return new Proxy(st, {get(t, k) {
+        if (k === "ops") return ops; if (k === "canvas") return cv;
+        if (k === "measureText") return s => ({width: String(s).length * 6});
+        if (k === "createImageData") return (cw, ch) => ({width: cw, height: ch, data: new Uint8ClampedArray(cw * ch * 4)});
+        if (k === "getImageData") return (x, y, cw, ch) => ({data: new Uint8ClampedArray(cw * ch * 4)});
+        if (k === "createRadialGradient" || k === "createLinearGradient") return () => ({addColorStop() {}});
+        if (k in t) return t[k];
+        return (...a) => { ops.push({op: k, a, lineWidth: t.lineWidth}); }; },
+        set(t, k, v) { t[k] = v; return true; }}); };
+    proto.getContext = function () { if (!ctxs.has(this)) ctxs.set(this, mkCtx(this)); return ctxs.get(this); };
+    const wrap = d.getElementById("hwyMapWrap"), canvas = d.getElementById("hwyCanvas");
+    Object.defineProperty(wrap, "clientWidth", {value: 800, configurable: true});
+    Object.defineProperty(wrap, "clientHeight", {value: 600, configurable: true});
+    const names = new Set(w.eval("RG.labels.map(l => l.name)"));
+    const draw = js => { w.eval(js + "; drawHwyMap()"); const ops = ctxs.get(canvas).ops.splice(0);
+      const layer = ops.findIndex(o => o.op === "drawImage" && o.a[0] && o.a[0].tagName === "CANVAS");
+      const image = ops.findIndex(o => o.op === "drawImage" && o.a[0] && o.a[0].tagName === "IMG");
+      const route = ops.findIndex(o => o.op === "stroke" && o.lineWidth === 2.2);   // the route ahead
+      const texts = ops.filter(o => o.op === "fillText").map(o => o.a[0]);
+      const region = ops.findIndex(o => o.op === "fillText" && names.has(o.a[0]));
+      return {layer, image, route, region, texts, outline: w.eval("RG.layer ? RG.layer.outline : null")}; };
+    // no image: the regions' layer, then names, then the route
+    w.eval(`H.data.background = null; data.carrier = Object.assign({}, data.carrier, {name: "SAMPLE CARRIER", system: "Carrier Home", x: -9300, z: 19400})`);
+    const a = draw("HM.auto = true");
+    got.routeView = [a.layer >= 0, a.route > a.layer, a.image];
+    const gal = draw("HM.auto = false; HM.v = hwyFit(HWY_GALAXY, 800, 600, hwyPad(800))");
+    got.galaxy = [gal.layer >= 0 && gal.layer < gal.route, gal.region >= 0 && gal.region < gal.route,
+                  ["Sol", "Sagittarius A*", "Colonia", "Beagle Point", "SAMPLE CARRIER"].every(t => gal.texts.includes(t)),
+                  gal.texts.indexOf("Sol") < gal.texts.indexOf("Hwy End")];
+    got.named = w.eval("HM.named.filter(n => n.title).map(n => n.name).join('|')");
+    w.eval("hwyLayers.regions = false; hwyLayers.labels = false");
+    const off = draw("0");
+    got.off = [off.layer, off.region, off.texts.includes("Sol"), off.route >= 0];
+    w.eval("hwyLayers.regions = true; hwyLayers.labels = true");
+    // your image under the regions (borders only over it), the route on top
+    const im = draw(`H.data.background = {image: true, v: "1-2", name: "galaxy.png", extent: [-45000, 45000, -20000, 70000], opacity: 0.5, why: null};
+      HM.imgV = "1-2"; HM.img = document.createElement("img"); HM.imgOk = true`);
+    got.image = [im.image >= 0 && im.image < im.layer && im.layer < im.route, im.outline];
+    proto.getContext = realCtx; delete wrap.clientWidth; delete wrap.clientHeight;
+    w.fetch = realFetch;
+    w.eval(`localStorage.removeItem("hwyLayers"); Object.assign(hwyLayers, {regions: true, labels: true, image: true});
+      RG.layer = null; RG.base = null; HM.img = null; HM.imgV = null; HM.imgOk = false; data.highway = null; view = "overview"; render()`);
+    const want = {regions: {labels: 42, segs: true, at: ["Inner Orion Spur", "Galactic Centre", "Inner Scutum-Centaurus Arm", "The Abyss", null], biggestFirst: true},
+      proj: {scale: 0.01, marks: [["Sol", 450, 700], ["Sagittarius A*", 450.25, 441], ["Colonia", 354.7, 501.92], ["Beagle Point", 438.88, 47.3]]},
+      pressed: ["true", "true", "true"], imageHidden: true, afterClick: ["false", false, false], deviceOnly: true, imageShown: true,
+      routeView: [true, true, -1], galaxy: [true, true, true, true], named: "Sol|Sagittarius A*|Colonia|Beagle Point|Carrier Home",
+      off: [-1, -1, false, true], image: [true, true]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodBG = !bad.length && errors.length === before;
+    allOk = allOk && goodBG;
+    console.log(goodBG ? "OK" : "FAIL", "| highway map background |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "42 regions decoded as the server reads them; landmarks projected; toggles per device; image, regions, names and landmarks under the route", errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

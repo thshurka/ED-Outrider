@@ -2,6 +2,28 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-01 · The Neutron Highway
+- A **Highway** tab (after Map): plot a route with Spansh, the **exact** plotter (every jump with its fuel and refuel
+  stops, from the chosen ship's Loadout: drive, masses, tanks, Guardian booster, engineering; cargo, injections,
+  exclude secondary stars, already supercharged) or the **neutron** plotter (waypoints from a range, ×4/×6 and an
+  efficiency, with a range override). One plot at a time, polled every 1.5 s for up to 180 s, errors in plain words.
+- The ship list is every ship flown, as of its latest Loadout (`fleet_loadouts`, journal-derived: PARSER_VERSION 35).
+- One active route (`highway_route`, live-only, kept through a re-read and in backups) followed as you fly: progress
+  forwards or back, **Off Route: Detour** once joined, resumed at any route system, **Highway complete** at the end.
+- The list (the next 200 ahead, done rows folded; off the route the nearest route system is marked and scrolled into
+  view in the pane), a top-down map, and a highway line under the tiles on Overview, Nearby and Here.
+- On arrival the next system's name goes on the desktop clipboard (`wl-copy` or `xclip`), and a plain spoken line
+  ("Next Neutron Highway Stop: …", refuel and boost sentences, off route, back on the highway, complete) under the
+  new alerts row **Neutron Highway**, spoken but not notified by default.
+- `[highway]` config: `clipboard`, `autotarget` (a stub that only logs "would target …" after an FSD supercharge),
+  `autotarget_delay`, `efficiency`. Per browser: `highway` (the plotter and its options).
+- The map has a background: the galactic regions (klightspeed's region map, already shipped for the bio rules) as
+  soft theme-aware tints with borders and names sized by zoom, a faint glow round Sagittarius A*, and Sol,
+  Sagittarius A*, Colonia, Beagle Point and your carrier marked (click to copy); a **galaxy** button; corner toggles
+  for regions, names and image (per device). `GET /api/regions` serves the grid (ETag, gzip). Optionally your own
+  galaxy image under it: `[highway] background_image`, `background_extent` (default X −45000…45000, Z −20000…70000),
+  `background_opacity`, served by `GET /api/highway/background` (that file only, image types only).
+
 ## 2026-10-01 · The page fits the window; header tiles fold into one line; compact tables
 - On a window of at least 900 × 600 (not Now) the page no longer scrolls: the header stays, the view fills the
   rest, and its lists scroll in bordered panes with sticky column headings. Overview: Nearby and This system each

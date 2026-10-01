@@ -27,7 +27,12 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
   Map        3D canvas of the neighbourhood with your path, first discoveries, boost stars
              (neutron / white dwarf) and your carrier; fills the window; left-drag rotates,
              right-drag moves, the wheel zooms
-  History    your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
+  Highway    the Neutron Highway: a route plotted with Spansh (the exact plotter from a flown ship's Loadout, or
+             the neutron plotter from a range), followed as you fly (next stop, detour, back on it, complete): the
+             jump list, a top-down map on the galactic regions (or your own galaxy image), a line under the tiles on
+             Overview / Nearby / Here, the next system put on
+             the desktop clipboard (wl-copy / xclip) and said on arrival; [highway] in the config
+  History   your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
              each death cost including exobiology), your most valuable finds; exports
   Log        every journal event with a one-line summary (outrider/log.py), filtered by category, time and
@@ -107,7 +112,8 @@ Tests: python3 -m unittest discover tests; python3 -m outrider.bio --backtest sc
 your journals.
 
 Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp;
-piper-tts (spoken alerts) and evdev (auto honk, Linux) are optional.
+piper-tts (spoken alerts) and evdev (auto honk, Linux) are optional, as are wl-copy or xclip (the Highway's
+clipboard copy, Linux).
 """
 
 from __future__ import annotations
@@ -115,6 +121,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import hashlib
 import json
 import math
 import os
@@ -126,7 +133,7 @@ import time
 import urllib.parse
 from glob import glob, escape as glob_escape
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 import outrider  # the package beside this script: ROOT, RESOURCES_DIR, DATA_DIR and the modules below
 try:  # the unsold-data estimate (and journal-folder detection)
@@ -169,6 +176,31 @@ SPANSH_SEARCH = "https://spansh.co.uk/api/systems/search"
 SPANSH_DUMP = "https://spansh.co.uk/api/dump/{id64}"
 SPANSH_BODY_SEARCH = "https://spansh.co.uk/api/bodies/search"
 SPANSH_STATION_SEARCH = "https://spansh.co.uk/api/stations/search"
+# The Neutron Highway's plotters: each answers {job} and the route is fetched from the results URL once done
+SPANSH_ROUTE = "https://spansh.co.uk/api/route"                  # the neutron plotter: from, to, range, efficiency
+SPANSH_GENERIC_ROUTE = "https://spansh.co.uk/api/generic/route"  # the exact plotter: the ship's figures, fuel too
+SPANSH_RESULTS = "https://spansh.co.uk/api/results/{job}"
+SPANSH_SYSTEM_NAMES = "https://spansh.co.uk/api/systems/field_values/system_names"   # system names as you type
+HIGHWAY = {"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}   # [highway] defaults
+# The Highway map's optional background image ([highway] background_image): only the configured file is served
+# (GET /api/highway/background), and only one of these image types, checked by its first bytes too (no SVG: it can
+# carry script). The extent [xmin, xmax, zmin, zmax] in ly says where its edges are in the galaxy's plane; the
+# default is the bounds the community's top-down galaxy images use (EDAstro's charts, the galaxy map texture):
+# X -45000 to 45000, Z -20000 to 70000 (40 ly per pixel at 2250 px, Sol at pixel 1125, 1750).
+HIGHWAY_BG_TYPES = {".png": ("image/png", (b"\x89PNG\r\n\x1a\n",)), ".jpg": ("image/jpeg", (b"\xff\xd8\xff",)),
+                    ".jpeg": ("image/jpeg", (b"\xff\xd8\xff",)), ".gif": ("image/gif", (b"GIF87a", b"GIF89a")),
+                    ".webp": ("image/webp", (b"RIFF",))}
+HIGHWAY_BG_EXTENT = [-45000.0, 45000.0, -20000.0, 70000.0]
+HIGHWAY_BG_OPACITY = 0.6
+HIGHWAY_BG_MAX_BYTES = 64 * 1024 * 1024   # a bigger file is refused (a galaxy image is a few MB)
+HIGHWAY_POLL_S = 1.5        # s between two asks for a plot job's result (Spansh politeness: 1-2 s)
+HIGHWAY_PLOT_TIMEOUT = 180  # s a plot may take before we give up on it
+HIGHWAY_AHEAD = 200         # route rows GET /api/highway lists ahead of you...
+HIGHWAY_DONE = 20           # ...and done rows above them (the most recent)
+HIGHWAY_REFUEL_WARN = 5     # the arrival line says "with three jumps left to refuel" this many jumps ahead or fewer
+HIGHWAY_LIVE_S = 120        # s: an arrival or a supercharge older than this is catch-up (no clipboard, no auto-target)
+HIGHWAY_MAX_ROWS = 50000    # a route longer than this is refused (Spansh's own cap is far lower)
+HIGHWAY_SUGGEST_CACHE = 200  # system-name suggestions kept (per typed prefix)
 SELLER_REFRESH_LY = 100      # look for the nearest places to sell again after moving this far
 SELLER_REFRESH_S = 6 * 3600  # ...or this long (carriers move)
 EDSM_SYSTEM = "https://www.edsm.net/api-v1/system"
@@ -255,7 +287,7 @@ BROWSER_SETTINGS = ("alerts", "alertSound", "alertSpeak", "speech", "speechStyle
                     "sayMapped", "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
                     "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
                     "log", "lbRadius", "fShowLost", "fWithin", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
-                    "surfaceCfg", "moduleWarn", "tilesCollapsed")
+                    "surfaceCfg", "moduleWarn", "tilesCollapsed", "highway")
 BROWSER_DEFAULTS_MAX = 64 * 1024   # bytes
 BROWSER_DEFAULTS_FILE = "browser_defaults.json"   # next to the database
 # Spoken alerts' wording: the lines file, and the personalities a browser starts with (see outrider/speech.py).
@@ -523,6 +555,28 @@ def _config_button(v):
     raise TypeError("not a button name or number")
 
 
+def _config_bg_image(v):
+    """[highway] background_image: "" (none) or a path to an image file (relative to the repository, ~ allowed)
+    with one of HIGHWAY_BG_TYPES' extensions; returned absolute."""
+    if not isinstance(v, str):
+        raise TypeError("not a path")
+    if not v.strip():
+        return ""
+    if os.path.splitext(v.strip())[1].lower() not in HIGHWAY_BG_TYPES:
+        raise ValueError("not an image: " + ", ".join(HIGHWAY_BG_TYPES))
+    return os.path.join(SCRIPT_DIR, os.path.expanduser(v.strip()))
+
+
+def _config_extent(v):
+    """[highway] background_extent: [xmin, xmax, zmin, zmax] in ly, each min below its max."""
+    if not isinstance(v, (list, tuple)) or len(v) != 4 or any(isinstance(x, bool) for x in v):
+        raise TypeError("not a list of four numbers")
+    out = [float(x) for x in v]
+    if not all(math.isfinite(x) for x in out) or not (out[0] < out[1] and out[2] < out[3]):
+        raise ValueError("not [xmin, xmax, zmin, zmax]")
+    return out
+
+
 def _config_port(v):
     """A TCP port: a whole number from 1 to 65535 (70000 or -1 would crash the start with an OverflowError, and
     port = true would read as port 1). A quoted number ("9000") still works."""
@@ -565,6 +619,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
     """Resolve every setting with the precedence flag > env > config > default/auto-detect."""
     j, sv, df, sp = (_config_section(cfg, s) for s in ("journals", "server", "defaults", "spansh"))
     ah, spk, cp = _config_section(cfg, "autohonk"), _config_section(cfg, "speech"), _config_section(cfg, "copilot")
+    hw = _config_section(cfg, "highway")
     j = dict(j, live=_config_folders(j.get("live"), "live"), legacy=_config_folders(j.get("legacy"), "legacy"))
     num = lambda sec, table, key, conv, default: _config_value(sec, key, table.get(key), conv, default)
     flag = lambda sec, table, key, default: _config_value(sec, key, table.get(key), _config_bool, default)
@@ -666,6 +721,17 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                     "button": str(num("copilot", cp, "button", _config_button, COPILOT["button"])),
                     "hold_ms": min(3000, max(200, num("copilot", cp, "hold_ms", int, COPILOT["hold_ms"]))),
                     "double_ms": min(1000, max(100, num("copilot", cp, "double_ms", int, COPILOT["double_ms"])))},
+        "highway": {"clipboard": flag("highway", hw, "clipboard", HIGHWAY["clipboard"]),
+                    "autotarget": flag("highway", hw, "autotarget", HIGHWAY["autotarget"]),
+                    "autotarget_delay": min(60.0, max(0.0, num("highway", hw, "autotarget_delay", float,
+                                                               HIGHWAY["autotarget_delay"]))),
+                    # the neutron plotter's efficiency (%): Spansh takes 1 to 100
+                    "efficiency": min(100, max(1, num("highway", hw, "efficiency", int, HIGHWAY["efficiency"]))),
+                    # the map's own background image (absolute path, or "" for none), where its edges are, how opaque
+                    "background_image": num("highway", hw, "background_image", _config_bg_image, ""),
+                    "background_extent": num("highway", hw, "background_extent", _config_extent, list(HIGHWAY_BG_EXTENT)),
+                    "background_opacity": min(1.0, max(0.05, num("highway", hw, "background_opacity", float,
+                                                                 HIGHWAY_BG_OPACITY)))},
     }
 
 
@@ -756,6 +822,15 @@ device = {q(st["copilot"]["device"])}   # a part of the device's name, or a /dev
 button = {q(st["copilot"]["button"])}   # the button's evdev name (e.g. BTN_TRIGGER_HAPPY5) or code number, as --listen prints it
 hold_ms = {st["copilot"]["hold_ms"]}   # ms held (or more) that make a hold
 double_ms = {st["copilot"]["double_ms"]}   # ms between a tap's release and the next press that make a double tap
+
+[highway]   # the Neutron Highway: a Spansh route that Outrider follows as you fly
+clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving at a route system, copy the next one's name to the desktop clipboard (wl-copy or xclip)
+autotarget = {"true" if st["highway"]["autotarget"] else "false"}   # after a neutron supercharge on the route, target the next system (not built yet: it only logs "would target")
+autotarget_delay = {st["highway"]["autotarget_delay"]:g}   # seconds after the supercharge
+efficiency = {st["highway"]["efficiency"]}   # the neutron plotter's efficiency (%): lower takes longer neutron detours
+background_image = {q(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
+background_extent = [{", ".join(f"{x:g}" for x in st["highway"]["background_extent"])}]   # ly: the image's edges, [xmin, xmax, zmin, zmax] (the usual galaxy images: -45000, 45000, -20000, 70000)
+background_opacity = {st["highway"]["background_opacity"]:g}   # 0.05 to 1
 """
 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")
@@ -822,7 +897,8 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 32: body signals keep the planetary mining location count (own_signals.mining).
 # 33: what the SRV's refinery collected on each body (own_mined: "Mined previously").
 # 34: nav-beacon scans make no own_firsts rows; Vista Genomics sales keep their BioData species (bio_sales.bio_data).
-PARSER_VERSION = 34
+# 35: every ship's latest Loadout (fleet_loadouts: the Highway's ship list and the exact plotter's figures).
+PARSER_VERSION = 35
 # Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
@@ -842,7 +918,31 @@ FSD_RANGE_MODS = ("FSDOptimalMass", "MaxFuelPerJump", "Mass")   # engineering mo
 FSD_POWER_ITEM = {"int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii": 2.5025}
 FSD_STANDARD = re.compile(r"int_hyperdrive(?:_overcharge)?_size(\d)_class\d(?:_free)?")   # the size's p holds
 GUARDIAN_BOOST = {1: 4.0, 2: 6.0, 3: 7.75, 4: 9.25, 5: 10.5}
-FUEL_FIT_MIN = 3           # own jumps (with the fuel left and the cargo known) before MaxFuelPerJump is fitted
+# The drives' stock figures for Spansh's exact plotter (fleet_figures): (optimal mass t, MaxFuelPerJump t, fuel multiplier)
+# per Loadout item, classes 1-5 being E-A. From EDCD coriolis-data modules/standard/frame_shift_drive.json ("optmass",
+# "maxfuel", "fuelmul"), checked 2026-10-01. The multiplier is the class's linear constant / 1000 (E 11, D 10, C 8, B 10,
+# A 12; SCO drives E 8, D-B 12, A 13). An engineered drive's FSDOptimalMass and MaxFuelPerJump come from its Modifiers.
+FSD_STOCK = {
+    "int_hyperdrive_size{}_class{}": ((0.011, 0.010, 0.008, 0.010, 0.012), {
+        2: ((48, 54, 60, 75, 90), (0.6, 0.6, 0.6, 0.8, 0.9)), 3: ((80, 90, 100, 125, 150), (1.2, 1.2, 1.2, 1.5, 1.8)),
+        4: ((280, 315, 350, 437.5, 525), (2.0, 2.0, 2.0, 2.5, 3.0)), 5: ((560, 630, 700, 875, 1050), (3.3, 3.3, 3.3, 4.1, 5.0)),
+        6: ((960, 1080, 1200, 1500, 1800), (5.3, 5.3, 5.3, 6.6, 8.0)),
+        7: ((1440, 1620, 1800, 2250, 2700), (8.5, 8.5, 8.5, 10.6, 12.8))}),
+    "int_hyperdrive_overcharge_size{}_class{}": ((0.008, 0.012, 0.012, 0.012, 0.013), {
+        2: ((60, 90, 90, 90, 100), (0.6, 0.9, 0.9, 0.9, 1.0)), 3: ((100, 150, 150, 150, 167), (1.2, 1.8, 1.8, 1.8, 1.9)),
+        4: ((350, 525, 525, 525, 585), (2.0, 3.0, 3.0, 3.0, 3.2)), 5: ((700, 1050, 1050, 1050, 1175), (3.3, 5.0, 5.0, 5.0, 5.2)),
+        6: ((1200, 1800, 1800, 1800, 2000), (5.3, 8.0, 8.0, 8.0, 8.3)),
+        7: ((1800, 2700, 2700, 2700, 3000), (8.5, 12.8, 12.8, 12.8, 13.1)),
+        8: ((2800, 4200, 4200, 4200, 4670), (13.6, 20.4, 20.4, 20.4, 20.7))}),
+}
+FSD_DATA = {name.format(size, c + 1): (opt[c], mf[c], mul[c])
+            for name, (mul, sizes) in FSD_STOCK.items() for size, (opt, mf) in sizes.items() for c in range(5)}
+# the Caspian's Mk II: coriolis-data says 0.011 (Auto_Neutron's table says 4/1000). Either way fleet_figures checks the
+# figures against the Loadout's own MaxJumpRange and, when they miss it, takes the optimal mass that range implies
+FSD_DATA["int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"] = (4670, 6.8, 0.011)
+FSD_MK2_SUPERCHARGE = 6   # the Mk II's neutron supercharge multiplies the range by 6; every other drive by 4
+FSD_RANGE_TOLERANCE = 0.01   # the stated figures must give the Loadout's MaxJumpRange to within 1%, or the range decides
+FUEL_FIT_MIN = 3          # own jumps (with the fuel left and the cargo known) before MaxFuelPerJump is fitted
 FUEL_FIT_POWER_MIN = 5     # ... and before p is fitted, for a drive neither table knows (a new variant)
 JUMP_CARGO_S = 120         # s: a Status.json hold this close to a jump stands in for a Cargo not read yet
 SCOOP_RATE_OF = 20         # arrivals the scoopable share is taken over
@@ -1066,6 +1166,19 @@ CREATE TABLE IF NOT EXISTS firsts_watch (
 -- Bookmarks made on the page (the game's own bookmarks never reach the journal).
 CREATE TABLE IF NOT EXISTS bookmarks (
     id64 INTEGER PRIMARY KEY, name TEXT, x REAL, y REAL, z REAL, note TEXT, created_ts TEXT);
+-- Every ship you have flown, as its latest Loadout (one row per ShipID, an older Loadout read later never replaces a
+-- newer one): the Highway's ship list and the exact plotter's inputs. figures: JSON from fleet_figures (drive, masses,
+-- tanks, booster, range). Journal-derived: RESET_JOURNAL_DATA clears it and the re-read rebuilds it.
+CREATE TABLE IF NOT EXISTS fleet_loadouts (
+    ship_id INTEGER PRIMARY KEY, name TEXT, ship_type TEXT, ident TEXT, ts TEXT, figures TEXT);
+-- The Neutron Highway: the one active route Spansh plotted (idx 0 is where it starts), with its plot in meta
+-- 'highway' (plotter, ship, options, created_ts, and the progress: at, furthest, off_route, arrival_ts, done_ts).
+-- distance: the jump into this system; remaining: ly left to the destination from here; jumps: jumps from the row
+-- before (the neutron plotter's waypoints can be several); fuel_used/fuel_left only from the exact plotter. Live only
+-- (a plot cannot be rebuilt from journals), so a journal re-read keeps it (not in RESET_JOURNAL_DATA); backups carry it.
+CREATE TABLE IF NOT EXISTS highway_route (
+    idx INTEGER PRIMARY KEY, system TEXT, id64 INTEGER, x REAL, y REAL, z REAL, distance REAL, fuel_used REAL,
+    fuel_left REAL, neutron INTEGER, refuel INTEGER, jumps INTEGER, remaining REAL);
 CREATE INDEX IF NOT EXISTS route_xyz ON route_systems (x, y, z);
 CREATE INDEX IF NOT EXISTS visits_xyz ON visits (x, y, z);
 """
@@ -1078,6 +1191,7 @@ DELETE FROM own_firsts; DELETE FROM own_mapped; DELETE FROM own_footfall; DELETE
 DELETE FROM own_genera; DELETE FROM own_organic; DELETE FROM codex; DELETE FROM bio_sales;
 DELETE FROM own_barycentres; DELETE FROM phenomena; DELETE FROM sale_events; DELETE FROM logins;
 DELETE FROM own_mined; DELETE FROM meta WHERE key IN ('srv_state', 'vehicle', 'ship_marker', 'body_here');
+DELETE FROM fleet_loadouts;
 DELETE FROM meta WHERE key IN ('ship', 'carrier', 'fuel_hist', 'last_scoop', 'commander', 'materials', 'last_session', 'cargo');
 DELETE FROM meta WHERE key LIKE 'legacy:%' OR key IN ('pos', 'prev', 'jump_range', 'state_ts');
 """
@@ -1729,6 +1843,7 @@ class Journals:
         # the Rhino collection under way (live lines only, see note_burst): {system, body_id, body, start, last,
         # lat, lon, target: ("rig" | "site", id), n, minerals {name: tons}, tons, said}
         self.burst = None
+        self._hw_rows = (None, [])   # (route id, highway_route rows): the Highway's route, read once per plot
         self.reload()
 
     def moment(self, kind, ts, **kw):
@@ -1832,6 +1947,62 @@ class Journals:
                                    "ts": ts, "boosts": 0}
         self.modules[str(sid)] = {"ts": ts, "mods": mods}
         meta_set(self.db, "modules", self.modules)
+
+    def note_fleet(self, ev, ts):
+        """A Loadout: that ship's row in fleet_loadouts (the Highway's ship list), unless a newer Loadout is kept."""
+        sid = ev.get("ShipID")
+        if sid is None or not ev.get("Ship") or not_a_ship(ev.get("Ship")):
+            return
+        self.db.execute("""INSERT INTO fleet_loadouts (ship_id, name, ship_type, ident, ts, figures) VALUES (?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(ship_id) DO UPDATE SET name=excluded.name, ship_type=excluded.ship_type,
+                             ident=excluded.ident, ts=excluded.ts, figures=excluded.figures
+                           WHERE excluded.ts >= fleet_loadouts.ts""",
+                        (sid, ev.get("ShipName") or None, ev.get("Ship"), ev.get("ShipIdent") or None, ts,
+                         json.dumps(fleet_figures(ev))))
+
+    def highway_route(self, hw):
+        """The active route's rows (cached per plot: a new plot has a new id)."""
+        if not hw:
+            return []
+        if self._hw_rows[0] != hw.get("id"):
+            self._hw_rows = (hw.get("id"), [dict(r) for r in self.db.execute("SELECT * FROM highway_route ORDER BY idx")])
+        return self._hw_rows[1]
+
+    def highway_arrival(self, id64, name, ts):
+        """A jump into a system with a Highway route active: progress (the row you are at, the furthest reached),
+        the detour when the system is not on the route, back on it at any route system (neutron or not), and the
+        end. Only arrivals after the plot and after the last one applied count, so a journal re-read or a late
+        legacy folder never moves it; the spoken moments only for a jump just now (live_event)."""
+        hw = meta_get(self.db, "highway")
+        if not hw or ts <= max(hw.get("created_ts") or "", hw.get("arrival_ts") or ""):
+            return
+        rows = self.highway_route(hw)
+        if not rows:
+            return
+        at, furthest, done = hw.get("at"), hw.get("furthest"), bool(hw.get("done_ts"))
+        i = highway_match(rows, id64, name, at if at is not None else furthest or 0)
+        hw["arrival_ts"] = ts
+        say = None
+        if i is None:
+            hw["at"] = None
+            # a detour once the route was joined (flying to its start is not one), said once until back on it
+            if not done and furthest is not None and not hw.get("off_route"):
+                hw["off_route"] = {"ts": ts, "system": name, "id64": id64}
+                say = ("off_route", "Off route: detour.")
+        else:
+            back = bool(hw.get("off_route"))
+            hw.update(at=i, furthest=max(i, furthest if furthest is not None else i), off_route=None)
+            if done:
+                pass   # finished: the route stays visible, quietly, until cleared
+            elif i == len(rows) - 1:
+                hw["done_ts"] = ts
+                say = ("complete", "Highway complete.")
+            else:
+                say = ("back" if back else "next", ("Back on the highway. " if back else "") + highway_text(rows, i))
+        meta_set(self.db, "highway", hw)
+        if say and live_event(ts):
+            nxt = rows[i + 1]["system"] if i is not None and i + 1 < len(rows) else None
+            self.moment("highway", ts, what=say[0], text=say[1], system=name, index=i, next=nxt)
 
     def ship_modules(self):
         """The current ship's core module record ({slot: {...}}), or None."""
@@ -2038,6 +2209,7 @@ class Journals:
                 return
         if name == "Loadout":
             self.note_modules(ev, ts)
+            self.note_fleet(ev, ts)
             if ev.get("HullHealth") is not None and ts >= (self.hull or {}).get("ts", ""):
                 self.hull = {"pct": round(ev["HullHealth"] * 100), "ts": ts}
                 meta_set(self.db, "hull", self.hull)
@@ -2267,6 +2439,8 @@ class Journals:
             meta_set(self.db, "pos", self.pos)
         if ev.get("event") == "FSDJump" and current and not ride:
             self.jump_arrival = {"id64": id64, "name": ev.get("StarSystem"), "ts": ts}
+        if name in ("FSDJump", "CarrierJump") and current and not relog:
+            self.highway_arrival(id64, ev.get("StarSystem"), ts)
 
     def note_region(self, prev, id64, x, y, z, ts):
         """A jump from `prev` into a galactic region not announced this session: the arrival briefing opens with it
@@ -3570,6 +3744,207 @@ def jumps_left(model, fuel, cargo, d=None, cap=1000):
     return n + more, round(ly + more * hop, 1)
 
 
+# ---- the Neutron Highway: fleet figures, Spansh's routes, the spoken line, the desktop clipboard ----
+
+def fleet_figures(ev):
+    """A Loadout's figures for the Highway: the ship's masses, tanks and range, and Spansh's exact plotter inputs
+    (fuel_power, fuel_multiplier, optimal_mass, max_fuel, supercharge, booster_ly). The power is the fuel model's
+    (fsd_power: size 8 = 2.90, the Mk II 2.5025); MaxFuelPerJump and the optimal mass from the drive's engineering
+    Modifiers, else its stock figures (FSD_DATA). Those must give the Loadout's own MaxJumpRange (at the unladen mass
+    plus one max jump's fuel, as fsd_range has it) to within FSD_RANGE_TOLERANCE; when they don't (a table error, a
+    drive variant), the optimal mass that range implies is used instead, so Spansh plans with the range the game
+    shows. exact: False when a figure is missing (a drive no table knows): the neutron plotter still works."""
+    mods = ev.get("Modules") or []
+    fsd_mod = next((m for m in mods if m.get("Slot") == "FrameShiftDrive"), {})
+    item = (fsd_mod.get("Item") or "").lower()
+    eng = {x.get("Label"): x.get("Value") for x in (fsd_mod.get("Engineering") or {}).get("Modifiers") or []
+           if isinstance(x.get("Value"), (int, float)) and not isinstance(x.get("Value"), bool)}
+    stock = FSD_DATA.get(re.sub(r"_free$", "", item))
+    size = re.search(r"size(\d)", item)
+    booster = next((re.search(r"size(\d)", m.get("Item", "").lower()) for m in mods
+                    if "guardianfsdbooster" in (m.get("Item") or "").lower()), None)
+    boost = GUARDIAN_BOOST.get(int(booster.group(1)), 0) if booster else 0
+    cap = ev.get("FuelCapacity") or {}
+    power = fsd_power({"fsd": item, "fsd_size": int(size.group(1)) if size else None})
+    max_fuel = eng.get("MaxFuelPerJump") or (stock[1] if stock else None)
+    mult = stock[2] if stock else None
+    opt = eng.get("FSDOptimalMass") or (stock[0] if stock else None)
+    source = "loadout" if eng.get("FSDOptimalMass") else "stock" if opt else None
+    r0, unladen = ev.get("MaxJumpRange"), ev.get("UnladenMass")
+    if r0 and unladen and max_fuel and mult and power and r0 > boost:
+        drive = (max_fuel / mult) ** (1 / power)   # the range at the optimal mass is opt / mass × this
+        if not opt or abs((opt / (unladen + max_fuel) * drive + boost) / r0 - 1) > FSD_RANGE_TOLERANCE:
+            opt, source = round((r0 - boost) * (unladen + max_fuel) / drive, 2), "range"
+    out = {"fsd": item, "fsd_size": int(size.group(1)) if size else None, "unladen": unladen, "max_range": r0,
+           "fuel_main": cap.get("Main"), "fuel_reserve": cap.get("Reserve"), "cargo_capacity": ev.get("CargoCapacity"),
+           "booster_ly": boost, "fuel_power": power, "fuel_multiplier": mult, "optimal_mass": opt, "optimal_source": source,
+           "max_fuel": max_fuel,
+           "supercharge": FSD_MK2_SUPERCHARGE if "overchargebooster_mkii" in item else 4}
+    out["exact"] = all(out.get(k) for k in ("fuel_power", "fuel_multiplier", "optimal_mass", "max_fuel", "unladen", "fuel_main"))
+    return out
+
+
+def fleet_range(fig, cargo=0, fuel=None):
+    """A fleet ship's jump range with `cargo` t aboard and the main tank full (or `fuel` t), by the fuel model's
+    scaling of its Loadout range; None without the masses."""
+    if not fig or not fig.get("unladen") or not fig.get("max_range"):
+        return None
+    model = {"unladen": fig["unladen"], "r0": fig["max_range"], "boost": fig.get("booster_ly") or 0,
+             "max_fuel": fig.get("max_fuel"), "power": fig.get("fuel_power")}
+    return round(fsd_range(model, fig["unladen"] + (fig.get("fuel_main") if fuel is None else fuel or 0) + (cargo or 0)), 2)
+
+
+class HighwayError(Exception):
+    """A plot that failed, in words for the page (Spansh down, an unknown system, a timeout)."""
+
+
+def _num(v, conv=float):
+    """A number from Spansh's answer, or None (a missing or broken field)."""
+    try:
+        out = conv(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return out if not isinstance(out, float) or math.isfinite(out) else None
+
+
+def highway_rows(plotter, result):
+    """Spansh's finished route as highway_route rows (dicts), the start first. The exact plotter's "jumps" carry every
+    jump with its fuel; the neutron plotter's "system_jumps" are waypoints with the jumps between them."""
+    if not isinstance(result, dict):
+        raise HighwayError("Spansh sent a route in a shape Outrider does not know")
+    raw = result.get("jumps") if plotter == "exact" else result.get("system_jumps")
+    if not isinstance(raw, list):
+        raise HighwayError("Spansh sent a route in a shape Outrider does not know")
+    rows = []
+    for i, j in enumerate(raw):
+        if not isinstance(j, dict):
+            continue
+        name = j.get("name") if plotter == "exact" else j.get("system")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        id64 = _num(j.get("id64"), int)
+        row = {"system": name.strip(), "id64": id64 if id64 is not None and 0 <= id64 < 2 ** 63 else None,
+               "x": _num(j.get("x")), "y": _num(j.get("y")), "z": _num(j.get("z"))}
+        if plotter == "exact":
+            row.update(distance=_num(j.get("distance")), fuel_used=_num(j.get("fuel_used")),
+                       fuel_left=_num(j.get("fuel_in_tank")), neutron=1 if j.get("has_neutron") else 0,
+                       refuel=1 if j.get("must_refuel") else 0, jumps=0 if not rows else 1,
+                       remaining=_num(j.get("distance_to_destination")))
+        else:
+            row.update(distance=_num(j.get("distance_jumped")), fuel_used=None, fuel_left=None,
+                       neutron=1 if j.get("neutron_star") else 0, refuel=0,
+                       jumps=max(0, _num(j.get("jumps"), int) or 0) if rows else 0, remaining=_num(j.get("distance_left")))
+        rows.append(row)
+    if len(rows) < 2:
+        raise HighwayError("Spansh found no route between those systems")
+    if len(rows) > HIGHWAY_MAX_ROWS:
+        raise HighwayError(f"a route of {len(rows)} systems is longer than Outrider keeps ({HIGHWAY_MAX_ROWS})")
+    return rows
+
+
+NUMBER_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+
+
+def number_words(n):
+    return NUMBER_WORDS[n] if 0 <= n < len(NUMBER_WORDS) else str(n)
+
+
+def highway_match(rows, id64, name, near=0):
+    """The route row a system is, or None: by id64 (by name when a row has none). A system on the route twice gives
+    the occurrence at or after `near` (where you were), else the latest before it."""
+    low = (name or "").strip().lower()
+    hits = [i for i, r in enumerate(rows)
+            if (r["id64"] == id64 if r["id64"] is not None and id64 is not None else (r["system"] or "").lower() == low)]
+    if not hits:
+        return None
+    ahead = [i for i in hits if i >= near]
+    return ahead[0] if ahead else hits[-1]
+
+
+def highway_refuel_in(rows, i):
+    """Jumps from row i to the next refuel stop after it, or None."""
+    return next((j - i for j in range(i + 1, len(rows)) if rows[j]["refuel"]), None)
+
+
+def highway_bg_file(path):
+    """The Highway map's background image at `path` (the configured one): (content type, os.stat result), or
+    ValueError in words when it cannot be served: not one of HIGHWAY_BG_TYPES by its extension and its first bytes,
+    missing, not a regular file, empty or over HIGHWAY_BG_MAX_BYTES."""
+    kind = HIGHWAY_BG_TYPES.get(os.path.splitext(path)[1].lower())
+    if not kind:
+        raise ValueError("not an image file (" + ", ".join(HIGHWAY_BG_TYPES) + ")")
+    try:
+        st = os.stat(path)
+        if not os.path.isfile(path):
+            raise ValueError("not a file")
+        with open(path, "rb") as fh:
+            head = fh.read(12)
+    except OSError as e:
+        raise ValueError(f"cannot be read ({e.strerror or type(e).__name__})") from None
+    if not 0 < st.st_size <= HIGHWAY_BG_MAX_BYTES:
+        raise ValueError("empty" if not st.st_size else f"over {HIGHWAY_BG_MAX_BYTES // 2 ** 20} MB")
+    if not head.startswith(kind[1]) or (kind[0] == "image/webp" and head[8:12] != b"WEBP"):
+        raise ValueError(f"its content is not {kind[0]}")
+    return kind[0], st
+
+
+def highway_text(rows, i):
+    """The line said on arriving at route row i (not the last): the next stop, a refuel coming up or due here, and
+    the supercharge in a neutron system. Plain words (personality lines come later)."""
+    here, nxt = rows[i], rows[i + 1]
+    k = highway_refuel_in(rows, i)
+    text = f"Next Neutron Highway Stop: {nxt['system']}"
+    if k is not None and k <= HIGHWAY_REFUEL_WARN:
+        text += f", with {number_words(k)} jump{'' if k == 1 else 's'} left to refuel"
+    text += "."
+    if here["refuel"]:
+        text = "Refuel here before continuing. " + text
+    if here["neutron"]:
+        text += " Boost your FSD to continue."
+    return text
+
+
+class Clipboard:
+    """The desktop clipboard (Linux): wl-copy under Wayland, xclip under X11, whichever is installed for the session
+    there is. Run as a plain subprocess (no shell) with the text on its stdin; both fork to serve the selection, so
+    the call returns at once. Tests pass fakes for `which`, `run` and `env`: nothing is ever copied from a test."""
+    TOOLS = (("wl-copy", "WAYLAND_DISPLAY", ("wl-copy",)), ("xclip", "DISPLAY", ("xclip", "-selection", "clipboard")))
+
+    def __init__(self, enabled=True, which=None, run=None, env=None):
+        import shutil
+        import subprocess
+        self.enabled = bool(enabled)
+        self._which, self._run, self._env = which or shutil.which, run or subprocess.run, os.environ if env is None else env
+        self._devnull = subprocess.DEVNULL
+        self.tool = self.argv = None
+        for name, var, argv in self.TOOLS:
+            if self._env.get(var) and self._which(name):
+                self.tool, self.argv = name, list(argv)
+                break
+        self.last = None   # {text, ok, ts, error}: the latest copy, for the Highway tab
+
+    def info(self):
+        why = None if self.tool else "neither wl-copy (Wayland) nor xclip (X11) was found for this desktop session"
+        return {"enabled": self.enabled, "available": bool(self.tool), "tool": self.tool, "why": why, "last": self.last}
+
+    def copy(self, text):
+        """Put `text` on the clipboard; True when the tool said it did (blocking, briefly: run it off the loop)."""
+        if not (self.enabled and self.argv and text):
+            return False
+        err = None
+        try:
+            ok = self._run(self.argv, input=str(text).encode(), stdout=self._devnull, stderr=self._devnull,
+                           timeout=5, check=False).returncode == 0
+            if not ok:
+                err = f"{self.tool} failed"
+        except (OSError, ValueError) as e:
+            ok, err = False, f"{self.tool}: {e}"
+        except Exception as e:  # noqa: BLE001 -- subprocess.TimeoutExpired and the like: report, never raise
+            ok, err = False, f"{self.tool}: {type(e).__name__}"
+        self.last = {"text": str(text), "ok": ok, "ts": iso_ts(time.time()), "error": err}
+        return ok
+
+
 def tally(items):
     out = {}
     for i in items:
@@ -3896,6 +4271,7 @@ class Spansh:
         self.sem = asyncio.Semaphore(SPANSH_CONCURRENCY)
         self.sem_fast = asyncio.Semaphore(SPANSH_INTERACTIVE)
         self.sem_search = asyncio.Semaphore(SPANSH_INTERACTIVE)   # online Search: never queues behind a refresh
+        self.sem_plot = asyncio.Semaphore(1)   # the Highway's plots: one at a time
 
     async def start(self):
         self.session = ClientSession(timeout=ClientTimeout(total=60),
@@ -3967,6 +4343,54 @@ class Spansh:
                  "ls": round(x.get("distance_to_arrival") or 0), "large_pad": bool(x.get("has_large_pad")),
                  "x": x.get("system_x"), "y": x.get("system_y"), "z": x.get("system_z")}
                 for x in d.get("results") or []]
+
+    async def plot(self, url, params, poll=None, timeout=None):
+        """A Spansh route job (the neutron or the exact plotter): submit it, then ask for its result every `poll` s
+        (HIGHWAY_POLL_S) until it is done or `timeout` s (HIGHWAY_PLOT_TIMEOUT) pass. One plot at a time. The result
+        dict, or HighwayError in words for the page (Spansh's own error, unreachable, timed out)."""
+        poll = HIGHWAY_POLL_S if poll is None else poll
+        timeout = HIGHWAY_PLOT_TIMEOUT if timeout is None else timeout
+        if self.session is None:
+            raise HighwayError("Spansh cannot be reached (no network session)")
+        async with self.sem_plot:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            d = await self._plot_get(url, params)
+            while d.get("result") is None:
+                job = d.get("job")
+                if not isinstance(job, str) or not re.fullmatch(r"[\w-]{1,100}", job):
+                    raise HighwayError("Spansh sent neither a route nor a job to wait for")
+                if loop.time() + poll > deadline:
+                    raise HighwayError(f"Spansh had not finished the route after {timeout:g} s: try again later")
+                await asyncio.sleep(poll)
+                d = await self._plot_get(SPANSH_RESULTS.format(job=job), None)
+            return d["result"]
+
+    async def _plot_get(self, url, params):
+        """One request of a plot: Spansh's JSON answer (queued, or the result), or HighwayError."""
+        try:
+            async with self.session.get(url, params=params) as r:
+                try:
+                    d = await r.json(content_type=None)
+                except ValueError:
+                    d = None
+                why = d.get("error") if isinstance(d, dict) else None
+                if why:
+                    raise HighwayError(f"Spansh: {why}")
+                if r.status >= 400 or not isinstance(d, dict):
+                    raise HighwayError(f"Spansh answered HTTP {r.status}: it may be down, try again later"
+                                       if r.status >= 400 else "Spansh's answer was not JSON")
+                return d
+        except (ClientError, asyncio.TimeoutError) as e:
+            raise HighwayError(f"Spansh cannot be reached ({type(e).__name__}): try again later") from e
+
+    async def system_names(self, q):
+        """Spansh's system names starting with `q` (the Highway's to field, as you type)."""
+        async with self.sem_fast:
+            async with self.session.get(SPANSH_SYSTEM_NAMES, params={"q": q}) as r:
+                r.raise_for_status()
+                d = await r.json(content_type=None)
+        return [v for v in (d.get("values") or []) if isinstance(v, str)][:20] if isinstance(d, dict) else []
 
     def cached(self, id64):
         return cached_base(self.db, id64)
@@ -4361,6 +4785,20 @@ class State:
         self._surface_sent = None
         self._rig_leash = {}
         self._location_landing = None
+        # the Neutron Highway: [highway] settings, the plot under way ({state: running | failed | done, plotter, from,
+        # to, started, error}), the desktop clipboard (an outrider Clipboard, set at start; None in tests), the arrival
+        # whose next system was copied, the auto-target stub (the supercharge it last looked at, its task, what it did)
+        self.highway_cfg = dict(HIGHWAY, background_image="", background_extent=list(HIGHWAY_BG_EXTENT),
+                                background_opacity=HIGHWAY_BG_OPACITY)
+        self.highway_plotting = None
+        self.highway_task = None
+        self.clipboard = None
+        self._hw_copied = (meta_get(db, "highway") or {}).get("arrival_ts")   # copied before a restart: not again
+        self._autotarget_boost = (journals.boost or {}).get("ts")
+        self.autotarget_task = None
+        self.autotarget_last = None
+        self._suggest = collections.OrderedDict()   # typed name -> Spansh's system names (HIGHWAY_SUGGEST_CACHE kept)
+        self._hw_near = (None, None)   # ((route id, position id64), the nearest route row) while off the route
 
     def bump(self):
         self.version += 1
@@ -4389,6 +4827,7 @@ class State:
             "sellers": self.sellers_summary(),
             "next_stop": self.next_stop_summary(),
             "route": self.route_summary(),
+            "highway": self.highway_summary(),
             "backup": dict(meta_get(self.db, "last_backup") or {}, running=bool(self.backup_task and not self.backup_task.done()),
                            every_days=BACKUP_EVERY_DAYS, keep=BACKUP_KEEP),
             "last_session": self.last_session(),
@@ -7735,6 +8174,328 @@ class State:
         self.bump()
         return True
 
+    # ---- the Neutron Highway ----
+
+    def fleet_list(self):
+        """Every ship you have flown (its latest Loadout), the newest first: the Highway's ship list."""
+        out = []
+        for r in self.db.execute("SELECT * FROM fleet_loadouts ORDER BY ts DESC"):
+            fig = json.loads(r["figures"] or "{}")
+            out.append({"ship_id": r["ship_id"], "name": r["name"], "type": r["ship_type"], "ident": r["ident"],
+                        "ts": r["ts"], "range": fleet_range(fig), "figures": fig})
+        return out
+
+    def fleet_ship(self, ship_id):
+        r = self.db.execute("SELECT * FROM fleet_loadouts WHERE ship_id=?", (ship_id,)).fetchone()
+        return dict(r, figures=json.loads(r["figures"] or "{}")) if r else None
+
+    def highway_state(self):
+        """(meta, rows) of the active route, or (None, [])."""
+        hw = meta_get(self.db, "highway")
+        rows = self.journals.highway_route(hw) if hw else []
+        return (hw, rows) if hw and rows else (None, [])
+
+    @staticmethod
+    def highway_next(hw, rows):
+        """The index of the next route system to fly to (None once you are at the end)."""
+        at, furthest = hw.get("at"), hw.get("furthest")
+        i = at + 1 if at is not None else furthest + 1 if furthest is not None else 0
+        return i if i < len(rows) else None
+
+    def highway_nearest(self, hw, rows):
+        """While off the route: the nearest route system not yet passed {name, id, index, distance}, or None."""
+        pos = self.journals.pos
+        if not pos or not hw.get("off_route"):
+            return None
+        key = (hw["id"], pos["id64"])
+        if self._hw_near[0] != key:
+            best = min(((dist(pos, r), i) for i, r in enumerate(rows) if i >= (hw.get("furthest") or 0)
+                        and None not in (r["x"], r["y"], r["z"])), default=None)
+            self._hw_near = (key, best and {"name": rows[best[1]]["system"], "id": str(rows[best[1]]["id64"])
+                                            if rows[best[1]]["id64"] is not None else None,
+                                            "index": best[1], "distance": round(best[0], 1)})
+        return self._hw_near[1]
+
+    def highway_summary(self):
+        """The highway line's facts for /api/nearby (Overview, Nearby, Here), or None with no route: the next system
+        (neutron, refuel, ly from here), where you are on the route, the refuel coming up, and the detour."""
+        hw, rows = self.highway_state()
+        if not hw:
+            return None
+        pos, n = self.journals.pos, len(rows)
+        at, nx = hw.get("at"), self.highway_next(hw, rows)
+        base = at if at is not None else nx - 1 if nx is not None else n - 1   # -1: not on it yet (before its start)
+        nxt = rows[nx] if nx is not None else None
+        here = rows[at] if at is not None else None
+        return {
+            "id": hw["id"], "plotter": hw.get("plotter"), "destination": rows[-1]["system"], "total": n - 1,
+            "index": nx, "at": at, "furthest": hw.get("furthest"), "complete": bool(hw.get("done_ts")),
+            "off_route": bool(hw.get("off_route")), "nearest": self.highway_nearest(hw, rows),
+            "jumps_total": sum(r["jumps"] or 0 for r in rows),
+            "jumps_left": sum(r["jumps"] or 0 for r in rows[nx:]) if nx is not None else 0,
+            "ly_left": rows[base]["remaining"] if base >= 0 else None,
+            "refuel_here": bool(here and here["refuel"]),
+            "refuel_in": highway_refuel_in(rows, base) if base >= 0 else None,
+            "next": nxt and {"name": nxt["system"], "id": str(nxt["id64"]) if nxt["id64"] is not None else None,
+                             "neutron": bool(nxt["neutron"]), "refuel": bool(nxt["refuel"]), "jumps": nxt["jumps"],
+                             "distance": round(dist(pos, nxt), 1) if pos and None not in (nxt["x"], nxt["y"], nxt["z"])
+                             else nxt["distance"]},
+            "boost_here": bool(here and here["neutron"]),
+        }
+
+    @staticmethod
+    def highway_row_out(i, r):
+        return {"i": i, "system": r["system"], "id": str(r["id64"]) if r["id64"] is not None else None,
+                "x": r["x"], "y": r["y"], "z": r["z"], "distance": r["distance"], "fuel_used": r["fuel_used"],
+                "fuel_left": r["fuel_left"], "neutron": bool(r["neutron"]), "refuel": bool(r["refuel"]),
+                "jumps": r["jumps"], "remaining": r["remaining"]}
+
+    def highway_view(self):
+        """GET /api/highway: the route with its progress (the next HIGHWAY_AHEAD rows and the HIGHWAY_DONE most recent
+        done above them), the plot under way, the fleet, the clipboard and the auto-target stub."""
+        hw, rows = self.highway_state()
+        route = None
+        if hw:
+            nx = self.highway_next(hw, rows)
+            start = nx if nx is not None else len(rows)
+            route = dict({k: hw.get(k) for k in ("id", "plotter", "ship", "options", "created_ts", "at", "furthest",
+                                                  "off_route", "arrival_ts", "done_ts")},
+                         **{"from": rows[0]["system"], "to": rows[-1]["system"], "count": len(rows),
+                            "total_ly": rows[0]["remaining"], "summary": self.highway_summary(),
+                            "done": [self.highway_row_out(i, rows[i]) for i in range(max(0, start - HIGHWAY_DONE), start)],
+                            "ahead": [self.highway_row_out(i, rows[i]) for i in range(start, min(len(rows), start + HIGHWAY_AHEAD))],
+                            # every point for the map: [x, z] in the galaxy's plane, and the neutron flags
+                            "points": [[r["x"], r["z"]] for r in rows], "neutrons": [i for i, r in enumerate(rows) if r["neutron"]]})
+        cb = self.clipboard.info() if self.clipboard else {"enabled": self.highway_cfg["clipboard"], "available": False,
+                                                           "tool": None, "why": "not started", "last": None}
+        pos = self.journals.pos
+        return {"route": route, "plotting": self.highway_plotting, "fleet": self.fleet_list(),
+                "ship_id": (self.journals.ship or {}).get("ship_id"), "cargo": (self.journals.cargo or {}).get("count"),
+                "position": with_id(pos), "clipboard": cb,
+                "autotarget": {"enabled": self.highway_cfg["autotarget"], "delay": self.highway_cfg["autotarget_delay"],
+                               "last": self.autotarget_last},
+                "defaults": {"efficiency": self.highway_cfg["efficiency"]}, "background": self.highway_background()}
+
+    def highway_background(self):
+        """The map's background image as the page needs it: image (one is configured and can be served now), its
+        extent [xmin, xmax, zmin, zmax], opacity, v (changes with the file: the image's URL carries it), name, why
+        (when it is configured but cannot be served)."""
+        cfg = self.highway_cfg
+        path = cfg.get("background_image") or ""
+        out = {"image": False, "extent": cfg.get("background_extent") or list(HIGHWAY_BG_EXTENT),
+               "opacity": cfg.get("background_opacity", HIGHWAY_BG_OPACITY), "v": None,
+               "name": os.path.basename(path) or None, "why": None}
+        if path:
+            try:
+                _, st = highway_bg_file(path)
+                out.update(image=True, v=f"{int(st.st_mtime)}-{st.st_size}")
+            except ValueError as e:
+                out["why"] = str(e)
+        return out
+
+    def highway_start_plot(self, body):
+        """POST /api/highway/plot: check the request, start the Spansh job in the background, (answer, HTTP status).
+        {plotter: exact | neutron, from (default: where you are), to, ship_id (default: the current ship), cargo,
+        injections, exclude_secondary, supercharged (exact); range, efficiency, supercharge_multiplier (neutron)}."""
+        if self.highway_task and not self.highway_task.done():
+            return {"error": "a route is being plotted already"}, 409
+        plotter = body.get("plotter", "exact")
+        if plotter not in ("exact", "neutron"):
+            return {"error": "plotter must be exact or neutron"}, 400
+        name = lambda v: " ".join(v.split()) if isinstance(v, str) else ""
+        frm = name(body.get("from")) or (self.journals.pos or {}).get("name") or ""
+        to = name(body.get("to"))
+        if not frm or not to or len(frm) > FIND_NAME_MAX or len(to) > FIND_NAME_MAX:
+            return {"error": f"give the from and to systems' names (up to {FIND_NAME_MAX} characters)"}, 400
+        flag = lambda k: body.get(k) is True
+
+        def number(k, lo, hi, conv=float, default=None):
+            v = body.get(k)
+            if v is None or v == "":
+                return default
+            try:
+                if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+                    raise ValueError(k)
+                v = conv(float(v))
+            except (ValueError, OverflowError):
+                raise ValueError(f"{k} is not a number") from None
+            if not (lo <= v <= hi):
+                raise ValueError(f"{k} is out of range ({lo:g} to {hi:g})")
+            return v
+        sid = body.get("ship_id", (self.journals.ship or {}).get("ship_id"))
+        ship = self.fleet_ship(sid) if isinstance(sid, int) and not isinstance(sid, bool) else None
+        fig = (ship or {}).get("figures") or {}
+        same = ship and ship["ship_id"] == (self.journals.ship or {}).get("ship_id")
+        try:
+            cargo = number("cargo", 0, 100000, int, (self.journals.cargo or {}).get("count") if same else 0) or 0
+            if plotter == "exact":
+                if not ship:
+                    return {"error": "pick a ship you have flown (it needs a Loadout in your journals)"}, 400
+                if not fig.get("exact"):
+                    return {"error": f"Outrider does not know this ship's frame shift drive ({fig.get('fsd') or 'none'}): "
+                                     "use the neutron plotter with its range"}, 400
+                reserve = fig.get("fuel_reserve") or 0
+                params = {"source": frm, "destination": to, "is_supercharged": int(flag("supercharged")),
+                          "use_supercharge": 1, "use_injections": int(flag("injections")),
+                          "exclude_secondary": int(flag("exclude_secondary")), "fuel_power": fig["fuel_power"],
+                          "fuel_multiplier": fig["fuel_multiplier"], "optimal_mass": fig["optimal_mass"],
+                          "supercharge_multiplier": fig["supercharge"], "base_mass": round(fig["unladen"] + reserve, 3),
+                          "tank_size": fig["fuel_main"], "internal_tank_size": reserve,
+                          "max_fuel_per_jump": fig["max_fuel"], "range_boost": fig.get("booster_ly") or 0, "cargo": cargo}
+                options = {"cargo": cargo, "injections": flag("injections"), "exclude_secondary": flag("exclude_secondary"),
+                           "supercharged": flag("supercharged")}
+                url = SPANSH_GENERIC_ROUTE
+            else:
+                rng = number("range", 1, 1000, float, fleet_range(fig, cargo) if ship else None)
+                if not rng:
+                    return {"error": "give the jump range (ly), or pick a ship you have flown"}, 400
+                eff = number("efficiency", 1, 100, int, self.highway_cfg["efficiency"])
+                mult = number("supercharge_multiplier", 4, 6, int, fig.get("supercharge") or 4)
+                if mult not in (4, 6):
+                    raise ValueError("supercharge_multiplier must be 4 or 6")
+                params = {"from": frm, "to": to, "range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult}
+                options = {"range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult, "cargo": cargo}
+                url = SPANSH_ROUTE
+        except ValueError as e:
+            return {"error": str(e)}, 400
+        meta = {"plotter": plotter, "options": options,
+                "ship": ship and {"ship_id": ship["ship_id"], "name": ship["name"], "type": ship["ship_type"], "ts": ship["ts"]}}
+        self.highway_plotting = {"state": "running", "plotter": plotter, "from": frm, "to": to,
+                                 "started": iso_ts(time.time()), "error": None}
+        self.highway_task = asyncio.get_running_loop().create_task(self._highway_plot(url, params, plotter, meta))
+        self.bump()
+        return {"ok": True, "plotting": self.highway_plotting}, 202
+
+    async def _highway_plot(self, url, params, plotter, meta):
+        p = self.highway_plotting
+        try:
+            result = await self.spansh.plot(url, params)
+            rows = highway_rows(plotter, result)
+            self.highway_store(rows, meta)
+            p.update(state="done")
+            self.highway_copy_next(force=True)   # you are usually at its start: the first hop is ready to paste
+        except HighwayError as e:
+            p.update(state="failed", error=str(e))
+        except Exception as e:  # noqa: BLE001 -- say it on the page rather than lose it in a task
+            import traceback
+            traceback.print_exc()
+            p.update(state="failed", error=f"{type(e).__name__}: {e}")
+        finally:
+            p["ended"] = iso_ts(time.time())
+            self.bump()
+
+    def highway_store(self, rows, meta):
+        """A new route replaces the old one: its rows, and its meta with where you are on it now."""
+        self.db.execute("DELETE FROM highway_route")
+        self.db.executemany("INSERT INTO highway_route (idx, system, id64, x, y, z, distance, fuel_used, fuel_left, neutron,"
+                            " refuel, jumps, remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [(i, r["system"], r["id64"], r["x"], r["y"], r["z"], r["distance"], r["fuel_used"],
+                              r["fuel_left"], r["neutron"], r["refuel"], r["jumps"], r["remaining"]) for i, r in enumerate(rows)])
+        pos = self.journals.pos
+        i = highway_match(rows, pos["id64"], pos["name"]) if pos else None
+        now = time.time()
+        hw = dict(meta, id=f"{now:.6f}", created_ts=iso_ts(now), at=i, furthest=i, off_route=None,
+                  arrival_ts=None, done_ts=None)
+        meta_set(self.db, "highway", hw)
+        self.db.commit()
+        self._hw_copied = None
+        return hw
+
+    def highway_clear(self):
+        """POST /api/highway/clear: forget the route (and stop a plot under way)."""
+        if self.highway_task and not self.highway_task.done():
+            self.highway_task.cancel()
+            if self.highway_plotting:
+                self.highway_plotting.update(state="failed", error="cancelled")
+        self.db.execute("DELETE FROM highway_route")
+        meta_set(self.db, "highway", None)
+        self.db.commit()
+        self.bump()
+
+    def highway_copy_next(self, force=False):
+        """After an arrival on the route (live, HIGHWAY_LIVE_S), or a new plot (force): copy the next system's name to
+        the desktop clipboard, once per arrival. Off the event loop when there is one (the tool forks, but a stuck
+        one must not stall the journal tailing)."""
+        hw, rows = self.highway_state()
+        cb = self.clipboard
+        if not hw or not cb or not cb.enabled or not cb.tool:
+            return False
+        key = hw.get("arrival_ts") or hw.get("created_ts")
+        if key == self._hw_copied and not force:
+            return False
+        self._hw_copied = key
+        if hw.get("at") is None or hw.get("done_ts"):
+            return False
+        if not force and not (hw.get("arrival_ts") and live_event(hw["arrival_ts"]) and
+                              time.time() - ts_seconds(hw["arrival_ts"]) <= HIGHWAY_LIVE_S):
+            return False
+        nx = self.highway_next(hw, rows)
+        if nx is None:
+            return False
+        name = rows[nx]["system"]
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop:
+            fut = loop.run_in_executor(None, cb.copy, name)
+            fut.add_done_callback(lambda _f: self.bump())
+        else:
+            cb.copy(name)
+        return True
+
+    def maybe_autotarget(self, now=None):
+        """The auto-target stub: a live FSD supercharge (JetConeBoost) in a route system, [highway] autotarget on: after
+        autotarget_delay s, "target the next system". For now that only logs "would target X" (no key presses: the
+        real sequence comes later through auto honk's uinput path, opt-in)."""
+        b = self.journals.boost
+        if not b or b.get("ts") == self._autotarget_boost:
+            return False
+        self._autotarget_boost = b.get("ts")
+        now = time.time() if now is None else now
+        if not self.highway_cfg["autotarget"]:
+            return False
+        try:
+            if now - ts_seconds(b["ts"]) > HIGHWAY_LIVE_S:
+                return False
+        except (KeyError, TypeError, ValueError):
+            return False
+        hw, rows = self.highway_state()
+        pos = self.journals.pos
+        if not hw or hw.get("at") is None or not pos or rows[hw["at"]]["id64"] not in (None, pos["id64"]):
+            return False
+        nx = self.highway_next(hw, rows)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:   # no event loop (a test driving tick() by hand): nothing to schedule
+            return False
+        if nx is None:
+            return False
+        self.autotarget_task = loop.create_task(self._autotarget(rows[nx]["system"], pos["id64"]))
+        return True
+
+    async def _autotarget(self, system, id64):
+        await asyncio.sleep(self.highway_cfg["autotarget_delay"])
+        if (self.journals.pos or {}).get("id64") != id64:   # jumped (or left) meanwhile: nothing to target from here
+            self.autotarget_last = {"system": system, "ts": iso_ts(time.time()), "done": False, "why": "you had jumped"}
+        else:
+            print(f"highway auto-target (stub, no key pressed): would target {system}")
+            self.autotarget_last = {"system": system, "ts": iso_ts(time.time()), "done": True,
+                                    "why": "stub: would target (no key pressed)"}
+        self.bump()
+
+    async def highway_suggest(self, q):
+        """System names starting with q, from Spansh (cached per q)."""
+        key = q.lower()
+        if key in self._suggest:
+            self._suggest.move_to_end(key)
+            return self._suggest[key]
+        names = await self.spansh.system_names(q)
+        self._suggest[key] = names
+        while len(self._suggest) > HIGHWAY_SUGGEST_CACHE:
+            self._suggest.popitem(last=False)
+        return names
+
     def sellers_summary(self):
         """Nearest places to sell from here: the nearest of each kind, preferring fresh entries (a carrier
         seen by Spansh weeks ago may be long gone), and the nearest permanent station."""
@@ -7886,6 +8647,8 @@ class State:
             self.maybe_locate_carrier()
             self.maybe_find_sellers()
             self.maybe_backup_on_quit()
+            self.highway_copy_next()
+            self.maybe_autotarget()
             # a new moment (approach, left body, FSD supercharged...) is a call-out: the long poll answers now,
             # not at the next unrelated bump
             if self.tail_error != last_error or self.journals.moment_seq != seq_before:
@@ -8723,6 +9486,64 @@ def make_app(state, hosts=None):
         body, status = state.start_backup()
         return web.json_response(body, status=status)
 
+    async def highway_view(_):
+        return web.json_response(state.highway_view())
+
+    async def highway_plot_view(request):
+        """Plot a Neutron Highway route with Spansh (in the background: GET /api/highway shows how it went)."""
+        body = await json_object(request)
+        if body is None:
+            return web.json_response({"error": "expected a JSON object"}, status=400)
+        out, status = state.highway_start_plot(body)
+        return web.json_response(out, status=status)
+
+    async def highway_clear_view(_):
+        state.highway_clear()
+        return web.json_response({"ok": True})
+
+    async def highway_background_view(_):
+        """GET /api/highway/background: the image [highway] background_image names, and only that file (nothing in
+        the request picks a path), only an image type checked by its extension and first bytes (highway_bg_file)."""
+        path = state.highway_cfg.get("background_image") or ""
+        if not path:
+            return web.json_response({"error": "no [highway] background_image in the config"}, status=404)
+        try:
+            ctype, _ = highway_bg_file(path)
+        except ValueError as e:
+            return web.json_response({"error": f"background_image: {e}"}, status=404)
+        return web.FileResponse(path, headers={"Content-Type": ctype, "Cache-Control": "no-cache",
+                                               "X-Content-Type-Options": "nosniff"})
+
+    regions_cache = {"rules": None, "body": None, "etag": None}
+
+    async def regions_view(request):
+        """GET /api/regions: the galactic region map for the Highway tab's galaxy map (outrider.bio.region_layer:
+        klightspeed's run-length grid, the names and a label point per region), built once per rules file and
+        answered with an ETag (304 when the page already has it), compressed (185 KB, about 40 KB gzipped)."""
+        rules = outrider.bio.load_rules() if outrider.bio else None
+        if rules is not regions_cache["rules"] or regions_cache["body"] is None:
+            layer = outrider.bio.region_layer() if rules else None
+            body = json.dumps(layer, separators=(",", ":")).encode() if layer else None
+            regions_cache.update(rules=rules, body=body, etag=body and '"' + hashlib.sha1(body).hexdigest()[:20] + '"')
+        if not regions_cache["body"]:
+            return web.json_response({"error": "no region map (resources/bio_rules.json is missing)"}, status=404)
+        headers = {"ETag": regions_cache["etag"], "Cache-Control": "no-cache"}
+        if request.headers.get("If-None-Match") == regions_cache["etag"]:
+            return web.Response(status=304, headers=headers)
+        resp = web.Response(body=regions_cache["body"], content_type="application/json", headers=headers)
+        resp.enable_compression()
+        return resp
+
+    async def highway_systems_view(request):
+        """GET /api/highway/systems?q=: Spansh's system names starting with q (the to field as you type)."""
+        q = " ".join((request.query.get("q") or "").split())
+        if not 2 <= len(q) <= FIND_NAME_MAX:
+            return web.json_response({"error": f"give 2 to {FIND_NAME_MAX} characters"}, status=400)
+        try:
+            return web.json_response({"q": q, "values": await state.highway_suggest(q)})
+        except (ClientError, asyncio.TimeoutError, ValueError) as e:
+            return web.json_response({"error": f"Spansh cannot be reached ({type(e).__name__})"}, status=502)
+
     async def synth(sp, text, speed, voice):
         """A line as WAV from Piper, or None (the page then uses browser speech for it). `speed` and `voice` as
         the page sent them: a personality's own voice only if installed, so a name from the page never downloads."""
@@ -8975,6 +9796,12 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/hush", hush_view)
     app.router.add_post("/api/copilot", copilot_view)
     app.router.add_post("/api/backup", backup_view)
+    app.router.add_get("/api/highway", highway_view)
+    app.router.add_get("/api/highway/systems", highway_systems_view)
+    app.router.add_get("/api/highway/background", highway_background_view)
+    app.router.add_get("/api/regions", regions_view)
+    app.router.add_post("/api/highway/plot", highway_plot_view)
+    app.router.add_post("/api/highway/clear", highway_clear_view)
     app.router.add_get("/api/defaults", defaults_get)
     app.router.add_post("/api/defaults", defaults_post)
     app.router.add_post("/api/nextstop", next_stop_view)
@@ -9225,7 +10052,18 @@ async def run(args, st):
         button_task = asyncio.create_task(state.button.run())
     print("co-pilot button: " + (f"{st['copilot']['button'] or '?'} on {st['copilot']['device'] or '?'}"
                                  if st["copilot"]["enabled"] else "off ([copilot] enabled)"))
-    state.speech = outrider.speech.SpeechLines(st["speech_file"])
+    state.highway_cfg = dict(st["highway"])
+    state.clipboard = Clipboard(st["highway"]["clipboard"])
+    print("highway clipboard: " + (f"{state.clipboard.tool} (the next system is copied on arriving at a route system)"
+                                   if state.clipboard.tool and state.clipboard.enabled else
+                                   "off ([highway] clipboard)" if not state.clipboard.enabled else
+                                   "neither wl-copy nor xclip found") +
+          ("; auto-target stub on (it only logs)" if st["highway"]["autotarget"] else ""))
+    bg = state.highway_background()
+    if bg["name"]:
+        print(f"highway map background: {st['highway']['background_image']}" +
+              (f" cannot be shown: {bg['why']}" if bg["why"] else ""))
+    state.speech =outrider.speech.SpeechLines(st["speech_file"])
     sp = state.speech.info()
     print(f"spoken alerts: wording from {sp['file']}" if sp["version"] else f"spoken alerts: {sp['error']}")
     for msg in sp["problems"]:
@@ -9264,7 +10102,7 @@ async def run(args, st):
     finally:
         tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task, state.seller_task,
                              state.carrier_task, state.searcher.task, state.honk_test_task, state.backup_wait_task, button_task,
-                             firsts_task) if t]
+                             firsts_task, state.highway_task, state.autotarget_task) if t]
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

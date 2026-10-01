@@ -8,14 +8,14 @@ const SETTINGS_KEYS = ["alerts", "alertSound", "alertSpeak", "speech", "speechSt
   "sayMapped", "honkAnnounce", "sound", "unsoldCfg", "highlightCfg", "bioMinCfg", "maxBonus", "codexNewCounts",
   "highG", "streakCfg", "skipFloor", "sort", "sorts", "showVisited", "showExplored", "oneJump", "map",
   "log", "lbRadius", "fShowLost", "fWithin", "mHeld", "bioSort", "bState", "bDays", "hDays", "routineQuiet", "fuelJumps",
-  "surfaceCfg", "moduleWarn", "tilesCollapsed"];
+  "surfaceCfg", "moduleWarn", "tilesCollapsed", "highway"];
 const serverSettings = () => { const s = typeof window !== "undefined" && window.SERVER_DEFAULTS;
   return s && s.settings && typeof s.settings === "object" ? s.settings : {}; };
 // The shape a shared setting must have to be used: a hand-edited import or server copy with, say, a string for
 // the personalities would otherwise throw in every spoken alert. A value of the wrong type reads as unset.
 const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const SETTING_SHAPES = {alerts: isObj, alertSound: isObj, alertSpeak: isObj, speechStyles: Array.isArray, unsoldCfg: isObj,
-  highlightCfg: isObj, streakCfg: isObj, sorts: isObj, map: isObj, log: isObj, bioSort: isObj, surfaceCfg: isObj};
+  highlightCfg: isObj, streakCfg: isObj, sorts: isObj, map: isObj, log: isObj, bioSort: isObj, surfaceCfg: isObj, highway: isObj};
 // null is a fine value for a plain setting (a reset stores it: "follow the default"), but a key with a shape is
 // read as an object or list at start-up, so a null there reads as unset too (else `lSaved.days` stops the script)
 const settingOk = (k, v) => !SETTING_SHAPES[k] || SETTING_SHAPES[k](v);
@@ -72,7 +72,7 @@ const SHORT_FORMS = {
   head: {"Main star": "Star", "Value now / max": "Value", "Dist ls": "ls", "Atmosphere": "Atm", "Bio / Geo": "Bio",
     "System tag": "Tag", "Seen by others": "Seen", "Lost: scan (FSS)": "FSS", "Lost: map (DSS)": "DSS", "Lost total": "Lost",
     "Unsold value": "Unsold", "Max from Sol": "Sol", "🏁 systems": "🏁", "ship losses": "losses", "Samples": "Samp",
-    "Bookmarked system": "System"},
+    "Bookmarked system": "System", "Jump ly": "ly", "Fuel used": "Used", "Fuel left": "Fuel", "Remaining ly": "Left"},
   state: {"in progress": "in prog"},
 };
 // the planet classes inside a longer text ("map 2 Water world T"), longest first so "Rocky Ice world" is not "Rocky"
@@ -1232,7 +1232,7 @@ function keepPanes(fn) {
 function paneTop(...ids) { for (const id of ids) { const p = document.getElementById(id); if (p) p.scrollTop = 0; delete paneScroll[id]; } }
 // each view's main pane: Page Up/Down and Home/End scroll it while nothing that scrolls or types has the focus
 const VIEW_PANE = {overview: "nearPane", near: "nearPane", here: "hereMain", bio: "bioPane", bm: "bmPane", search: "searchPane",
-                   hist: "histPane", log: "logPane", mat: "matPane", firsts: "firstsPane"};
+                   hist: "histPane", log: "logPane", mat: "matPane", firsts: "firstsPane", hwy: "hwyPane"};
 // ---- Compact tables: a table wider than its box (its pane, the Overview's split, a phone) switches to its short forms
 // (compact: level 1), then to tighter ones that also drop or merge low-value columns (compact2: level 2), and back once
 // there is room again. Decided by fit, not by screen size, so a wide pane looks exactly as it always did.
@@ -1240,7 +1240,7 @@ const VIEW_PANE = {overview: "nearPane", near: "nearPane", here: "hereMain", bio
 // with each level's forms in turn; going back to a longer form needs COMPACT_SLACK px to spare, so a scrollbar that
 // comes and goes with the row heights cannot make it flap.
 const FIT_TABLES = ["nearTable", "hereTable", "firstsTable", "leftTable", "bioTable", "codexTable", "histTable", "tripTable",
-                    "topTable", "logTable", "sTable", "bmTable"];
+                    "topTable", "logTable", "sTable", "bmTable", "hwyTable"];
 const COMPACT_SLACK = 24;
 // widths[l]: the table's width with level l's forms (measured in order; later ones may be missing); current: its level now
 function compactLevel(widths, avail, current) {
@@ -1316,6 +1316,7 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
   ["scoop", "fuel scooping filled the tank", null],
   ["scoopstop", "fuel scooping stopped early (not above 90%, nor when you jump)", null],
   ["supercharge", "the frame shift drive supercharged in a neutron star or white dwarf cone", null],
+  ["highway", "the Neutron Highway (a route plotted in the Highway tab): the next stop on arriving at a route system (with the boost and refuel stops), off route, back on the highway, and highway complete", null],
   ["find", "a valuable body just scanned (over your highlight levels)", "find"],
   ["jumponium", "a landable body just scanned has a material your FSD injections are short of (premium or standard at 2 or fewer): said with the FSS debrief, or alone when the FSS never completes", "find"],
   ["sampling", "leaving a body with exobiology unfinished (untouched genera only if you landed there); a species completed", "alert"],
@@ -1332,7 +1333,7 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
 const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is what gets spoken
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
   // a notification on every jump (or scoop, or FSS) would be noise: these are spoken by default, not notified
-  {jump: false, honk: false, brief: false, fss: false, mapped: false, scoop: false, scoopstop: false, supercharge: false,
+  {jump: false, honk: false, brief: false, fss: false, mapped: false, scoop: false, scoopstop: false, supercharge: false, highway: false,
    sampling: false, approach: false, bodybrief: false, jumponium: false, rigs: false, rigsout: false},
   store.get("alerts", {}));
 // off until you tick them (the whole row): the jumponium call-out
@@ -1484,7 +1485,7 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 // interdiction are said at most once in 30 s, so a flapping condition cannot keep repeating.
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
-const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium"]);
+const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium", "highway"]);
 // a rig confirmation answers your own press, like a line asked for
 const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" || kind === "rigs" ? 1
   : ["find", "signals", "codex", "bodybrief", "supercharge", "jumponium"].includes(kind) ? 3 : 2;
@@ -2283,11 +2284,14 @@ function render() {
   renderBookmarks(bms);
   renderSearch(bms);
   document.getElementById("mapView").hidden = view !== "map";
+  document.getElementById("hwyView").hidden = view !== "hwy";
+  renderHwyLine();
   document.body.classList.toggle("nowmode", view === "now");
   document.getElementById("nowView").hidden = view !== "now";
   if (view === "now") renderNow(); else renderSurface();   // Now's map, or the on-body strip's copy
   nowWake();
   if (view === "map") { loadMap(); drawMap(); }
+  if (view === "hwy") loadHwy();
   refreshPop();
   const jr = effRange();
   let rows = data.systems.filter(s => s.id64 !== (p && p.id64))
@@ -2377,7 +2381,7 @@ function render() {
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
   // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
-  if (applyAppMode()) { renderSurface(); drawMap(); }
+  if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
 }
 function emptyMessage(rows) {
   const others = data.systems.filter(s => s.id64 !== (data.position && data.position.id64)).length;
@@ -3845,6 +3849,734 @@ mapCanvas.addEventListener("wheel", e => {
 }, {passive: false});
 addEventListener("resize", () => drawMap());
 
+// ---- the Neutron Highway: the Highway tab (the route's jump list, the plot form, a top-down map) and the highway
+// line under the header (Overview, Nearby, Here). The server plots with Spansh in the background (POST
+// api/highway/plot answers 202, or 409 while a plot is under way), follows the route as you fly, and GET api/highway
+// gives the route (the last HIGHWAY_DONE rows done and the next 200 ahead, every point for the map), the plot under
+// way, your fleet and the clipboard. The page polls it every 1.5 s only while a plot runs; otherwise it is asked again
+// when the payload's highway summary moves (an arrival, a detour, a new route).
+const HWY_AHEAD = 200, HWY_POLL_MS = 1500, HWY_SUGGEST_MS = 300;
+const hEl = id => document.getElementById(id);
+const H = {data: null, key: null, loading: false, poll: null, error: null, status: null, routeId: undefined, nextShown: null,
+           doneOpen: store.get("hwyDoneOpen", false) === true, shipSel: null, cargoAuto: true, rangeAuto: true,
+           fleetSig: null, suggestT: null, suggestQ: null, clearArmed: null};
+// the form's last options (per browser): the plotter, the exact plotter's ticks and the neutron plotter's efficiency.
+// The ship, its cargo and range follow the journals instead (a remembered cargo would be stale the next day).
+const hwyCfg = Object.assign({plotter: "exact", injections: false, exclude_secondary: false, supercharged: false, efficiency: null},
+                             store.get("highway", {}));
+const saveHwyCfg = () => store.set("highway", hwyCfg);
+// a fleet ship's laden jump range with `cargo` t aboard and the main tank full: the server's fleet_range (the
+// Loadout's MaxJumpRange is the range at the unladen mass plus one max jump's fuel; range goes as 1/mass, the
+// Guardian booster's light years apart), so the default shown is the one the neutron plotter would use
+function hwyLadenRange(fig, cargo = 0) {
+  if (!fig || !fig.unladen || !fig.max_range) return null;
+  const b = fig.booster_ly || 0, mass = fig.unladen + (fig.fuel_main || 0) + (Number(cargo) || 0);
+  return Math.round(((fig.max_range - b) * (fig.unladen + (fig.max_fuel || 0)) / mass + b) * 100) / 100;
+}
+const hwyName = n => n ? `<b class="copy" data-name="${esc(n)}" title="click to copy">${esc(n)}</b>` : "?";
+// The highway line: what to fly to next, or the detour, or done. Plain words; short for the strip under the header.
+function hwyLineHtml(s, {short = false, glyph = true} = {}) {
+  if (!s) return "";
+  const g = glyph ? `<span class="hwyg" aria-hidden="true">🛣</span> ` : "";
+  if (s.complete) return `${g}<span class="hwydone">Highway complete</span>${short ? "" : ` · you reached ${hwyName(s.destination)}`}`;
+  if (s.off_route) return `${g}<span class="hwyoff">Off Route: Detour</span>` +
+    (s.nearest ? ` · nearest${short ? "" : " route system"} ${hwyName(s.nearest.name)} ${Number(s.nearest.distance).toFixed(1)} ly` : "");
+  const n = s.next;
+  if (!n) return `${g}To ${hwyName(s.destination)}`;
+  const bits = [`${s.index === 0 && s.at == null ? "Start" : "Next"}: ${hwyName(n.name)}`];
+  if (n.neutron) bits.push(`<span class="hwyn" title="a neutron star: supercharge your FSD there">⚡ neutron</span>`);
+  if (n.jumps > 1) bits.push(`${n.jumps} jumps`);
+  if (n.distance != null) bits.push(`${Number(n.distance).toFixed(1)} ly`);
+  bits.push(`${s.index} of ${s.total}`);
+  if (s.refuel_here) bits.push(`<span class="hwyfuel">⛽ refuel here</span>`);
+  else if (s.refuel_in != null) bits.push(`refuel in ${s.refuel_in}`);
+  return g + bits.join(" · ");
+}
+// the strip under the header: only on Overview, Nearby and Here, only with a route
+function renderHwyLine() {
+  const el = hEl("hwyLine"), s = data && data.highway;
+  const html = s && ["overview", "near", "here"].includes(view) ? hwyLineHtml(s, {short: true}) : "";
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+hEl("hwyLine").addEventListener("click", e => {   // the name copies (the page's copy handler); anywhere else opens the tab
+  if (e.target.closest(".copy[data-name]")) return;
+  document.querySelector('[data-view="hwy"]').click();
+});
+const hwyKey = () => { const s = data && data.highway;
+  return JSON.stringify(s ? [s.id, s.index, s.at, s.furthest, s.off_route, s.complete] : null); };
+async function loadHwy(force = false) {
+  const key = hwyKey();
+  if (!force && (key === H.key || H.loading)) return renderHwy();
+  H.key = key; H.loading = true;
+  let d;
+  try { d = await apiJson("api/highway"); } catch (err) { d = {error: err.message}; }
+  H.loading = false;
+  if (d.error) { H.error = d.error; H.key = null; }
+  else { H.error = null; H.data = d; }
+  if (d.plotting && d.plotting.state === "running" && !H.poll) hwyPoll();
+  renderHwy();
+  if (!d.error && view === "hwy" && hwyKey() !== H.key) loadHwy();   // the route moved while this was asked: again
+}
+// while a plot runs: ask again every 1.5 s until it is done (or failed)
+function hwyPoll() {
+  clearTimeout(H.poll);
+  H.poll = setTimeout(async () => {
+    H.poll = null;
+    await loadHwy(true);
+    const p = H.data && H.data.plotting;
+    if (p && p.state === "running" && !H.poll) hwyPoll();
+  }, HWY_POLL_MS);
+}
+const hwyFuel = v => v == null ? "" : fuelT(v);
+function hwyRowHtml(r, cls) {
+  return `<tr class="${cls}" data-i="${r.i}"><td class="num">${r.i}</td>` +
+    `<td class="name" data-name="${esc(r.system)}" title="click to copy">${nameWords(r.system)}</td>` +
+    `<td class="num">${r.i > 0 && r.distance != null ? r.distance.toFixed(1) : ""}</td>` +
+    `<td class="hwyc">${r.neutron ? `<span class="hwyn" title="a neutron star: supercharge your FSD there">⚡</span>` : ""}</td>` +
+    `<td class="num hwy-n">${r.i > 0 && r.jumps != null ? r.jumps : ""}</td>` +
+    `<td class="num hwy-x c2hide">${r.i > 0 ? hwyFuel(r.fuel_used) : ""}</td><td class="num hwy-x">${hwyFuel(r.fuel_left)}</td>` +
+    `<td class="hwyc">${r.refuel ? `<span class="hwyfuel" title="refuel here before continuing">⛽</span>` : ""}</td>` +
+    `<td class="num">${r.remaining != null ? Math.round(r.remaining).toLocaleString() : ""}</td></tr>`;
+}
+const HWY_COLS = 9;
+function hwyClipHtml(cb) {
+  if (!cb) return "";
+  if (!cb.enabled) return `<div class="hwyclip unk">Copying the next system to the clipboard is off ([highway] clipboard in the config).</div>`;
+  if (!cb.available) return `<div class="hwyclip warnc" title="${esc(cb.why || "")}">No wl-copy/xclip found: install one to auto-copy the next system.</div>`;
+  return `<div class="hwyclip unk" title="with ${esc(cb.tool || "")}; paste it into the galaxy map's search">Next system copied to the clipboard on arrival${cb.last && cb.last.text ? ` · last: ${esc(cb.last.text)}` : ""}.</div>`;
+}
+function hwyHeadHtml(hd) {
+  const r = hd.route, live = data && data.highway, s = live && r && live.id === r.id ? live : r && r.summary;
+  if (!r) return `<div class="hwyttl">No route plotted</div><div class="unk">Plot one below: Spansh finds it, Outrider follows it as you fly ` +
+    `(the next stop, neutron boosts, refuel stops) and says the next system on each arrival.</div>` + hwyClipHtml(hd.clipboard);
+  const n = x => x == null ? "?" : Math.round(x).toLocaleString();
+  const o = r.options || {}, sh = r.ship;
+  const how = r.plotter === "neutron"
+    ? `neutron plotter · ${o.range != null ? `${o.range} ly range · ` : ""}×${o.supercharge_multiplier || 4} · ${o.efficiency ?? "?"}% efficiency`
+    : `exact plotter${o.injections ? " · injections" : ""}${o.exclude_secondary ? " · no secondary stars" : ""}`;
+  const ship = sh ? ` · ${esc(shipLabel(sh.name, sh.type))}${sh.type && shipName(sh.type) !== shipLabel(sh.name, sh.type) ? ` (${esc(shipName(sh.type))})` : ""}` +
+    (sh.ts ? ` <span title="the ship's figures come from this Loadout">as of ${esc(day(sh.ts))}</span>` : "") : "";
+  return `<div class="hwyttl">To ${hwyName(r.to)} <span class="unk">from ${esc(r.from)}</span></div>` +
+    `<div class="hwystats"><b>${n(s && s.jumps_total)}</b> jumps · <b>${n(r.total_ly)}</b> ly` +
+    (s && !s.complete ? ` · left <b>${n(s.jumps_left)}</b> jumps · <b>${n(s.ly_left)}</b> ly` : "") + `</div>` +
+    `<div class="hwystate">${hwyLineHtml(s, {glyph: false})}</div>` +
+    `<div class="unk hwyhow">${esc(how)}${ship}${r.created_ts ? ` · plotted ${esc(when(r.created_ts))}` : ""}</div>` + hwyClipHtml(hd.clipboard);
+}
+function renderHwyList(hd) {
+  const t = hEl("hwyTable"), r = hd.route, doneEl = hEl("hwyDone"), rowsEl = hEl("hwyRows");
+  t.classList.toggle("neutron", !!r && r.plotter === "neutron");
+  if (!r) {
+    doneEl.innerHTML = "";
+    rowsEl.innerHTML = `<tr><td colspan="${HWY_COLS}" class="unk">No route yet.</td></tr>`;
+    return;
+  }
+  const s = r.summary || {}, done = r.done || [], ahead = (r.ahead || []).slice(0, HWY_AHEAD);
+  // off route: the nearest route system not yet passed is marked (the live summary's: it moves with every jump, while
+  // this list is fetched again only when the route position changes); a done one shows even with the done rows folded
+  const live = data && data.highway, ls = live && live.id === r.id ? live : s;
+  const near = ls.off_route && ls.nearest && ls.nearest.index != null ? ls.nearest.index : null;
+  const doneRow = x => hwyRowHtml(x, "done" + (x.i === r.at ? " at" : "") + (x.i === near ? " nearest" : ""));
+  const passed = ahead.length ? ahead[0].i : r.count;   // systems before the next one
+  doneEl.innerHTML = !done.length ? "" :
+    `<tr class="hwydonehead"><td colspan="${HWY_COLS}"><button type="button" class="mini" id="hwyDoneBtn" aria-expanded="${H.doneOpen}">` +
+    `${H.doneOpen ? "▾" : "▸"} ${passed} done${passed > done.length ? ` (the last ${done.length} ${H.doneOpen ? "shown" : "listed"})` : ""}</button></td></tr>` +
+    (H.doneOpen ? done : done.filter(x => x.i === near)).map(doneRow).join("");
+  const more = r.count - passed - ahead.length;
+  rowsEl.innerHTML = ahead.map(x => hwyRowHtml(x, "ahead" + (x.i === s.index ? " next" : "") + (x.i === near ? " nearest" : ""))).join("") +
+    (more > 0 ? `<tr class="hwymore"><td colspan="${HWY_COLS}" class="unk">+${more.toLocaleString()} more after these (the next ${HWY_AHEAD} are listed)</td></tr>` : "") +
+    (!ahead.length ? `<tr><td colspan="${HWY_COLS}" class="hwydone">Highway complete: you reached ${esc(r.to)}.</td></tr>` : "");
+  // the next row (or, off route, the nearest) in view in the pane when it moves (an arrival, a jump), not on every redraw
+  const nk = near != null ? `${r.id}|near|${near}` : `${r.id}|${s.index}`;
+  if (H.nextShown !== nk) { H.nextShown = nk; const el = t.querySelector(near != null ? "tr.nearest" : "tr.next"); if (el && paneOf(el)) revealIn(el); }
+}
+// ---- the plot form ----
+const hForm = hEl("hwyForm");
+const hwyPlotter = () => (hForm.querySelector("[name=hwyPlotter]:checked") || {}).value || "exact";
+const hwyShip = () => { const v = hEl("hwyShip").value, fl = (H.data && H.data.fleet) || [];
+  return v === "" ? null : fl.find(f => String(f.ship_id) === v) || null; };
+function hwyShipText(f, current) {
+  const label = shipLabel(f.name, f.type), type = shipName(f.type);
+  return `${label}${current ? " (current)" : ""}${type !== label ? ` · ${type}` : ""}${f.range ? ` · ${f.range.toFixed(1)} ly` : ""} · loadout as of ${day(f.ts)}` +
+    (f.figures && !f.figures.exact ? " · drive unknown: neutron plotter only" : "");
+}
+// the fields that follow the ship (cargo aboard, laden range, its supercharge) unless you typed your own
+function hwyFollowShip(shipChanged = false) {
+  const hd = H.data || {}, f = hwyShip(), fig = f && f.figures;
+  if (H.cargoAuto) hEl("hwyCargo").value = f && f.ship_id === hd.ship_id ? (hd.cargo || 0) : 0;
+  if (H.rangeAuto) { const rg = hwyLadenRange(fig, hEl("hwyCargo").value); hEl("hwyRange").value = rg ?? ""; }
+  hEl("hwyRange").placeholder = f ? "" : "ly";
+  hEl("hwyRangeReset").hidden = H.rangeAuto || !fig;
+  if (shipChanged) hEl("hwyMult").value = String(fig && fig.supercharge === 6 ? 6 : 4);
+}
+function hwyFormShow() {
+  const p = hwyPlotter();
+  hForm.classList.toggle("neutron", p === "neutron");
+  hForm.querySelector(".hwy-nopt").hidden = p !== "neutron";
+  hForm.querySelector(".hwy-xopt").hidden = p !== "exact";
+  // the neutron plotter can do without a ship (type the range); the exact one needs a Loadout
+  const none = hEl("hwyShip").querySelector('option[value=""]');
+  if (none) { none.disabled = p === "exact"; none.hidden = p === "exact"; }
+  if (p === "exact" && hEl("hwyShip").value === "" && hEl("hwyShip").options.length > 1) {
+    hEl("hwyShip").selectedIndex = [...hEl("hwyShip").options].findIndex(o => o.value !== ""); hwyFollowShip(true);
+  }
+}
+function fillHwyForm(hd) {
+  const fl = hd.fleet || [], sel = hEl("hwyShip");
+  const sig = JSON.stringify(fl.map(f => [f.ship_id, f.name, f.type, f.ts, f.range])) + "|" + hd.ship_id;
+  if (H.fleetSig !== sig) {
+    H.fleetSig = sig;
+    const want = H.shipSel ?? (fl.some(f => f.ship_id === hd.ship_id) ? hd.ship_id : fl.length ? fl[0].ship_id : null);
+    sel.innerHTML = fl.map(f => `<option value="${f.ship_id}">${esc(hwyShipText(f, f.ship_id === hd.ship_id))}</option>`).join("") +
+      `<option value="">${fl.length ? "another ship: type its range" : "no ship flown yet: type the range"}</option>`;
+    sel.value = want == null ? "" : String(want);
+    hwyFollowShip(true);
+  } else if (H.cargoAuto) hwyFollowShip();   // the cargo aboard changed
+  const posName = (data && data.position && data.position.name) || (hd.position && hd.position.name);
+  hEl("hwyFrom").placeholder = posName ? `here: ${posName}` : "where you are";
+  const eff = hEl("hwyEff");
+  if (document.activeElement !== eff) eff.value = hwyCfg.efficiency ?? (hd.defaults && hd.defaults.efficiency) ?? 60;
+  hwyFormShow();
+}
+{
+  const p = hForm.querySelector(`[name=hwyPlotter][value="${hwyCfg.plotter === "neutron" ? "neutron" : "exact"}"]`); if (p) p.checked = true;
+  hEl("hwyInject").checked = !!hwyCfg.injections; hEl("hwyNoSec").checked = !!hwyCfg.exclude_secondary; hEl("hwySuper").checked = !!hwyCfg.supercharged;
+  hForm.querySelectorAll("[name=hwyPlotter]").forEach(r => r.onchange = () => { hwyCfg.plotter = hwyPlotter(); saveHwyCfg(); hwyFormShow(); });
+  for (const [id, k] of [["hwyInject", "injections"], ["hwyNoSec", "exclude_secondary"], ["hwySuper", "supercharged"]])
+    hEl(id).onchange = () => { hwyCfg[k] = hEl(id).checked; saveHwyCfg(); };
+  hEl("hwyEff").onchange = () => { const v = Math.round(Number(hEl("hwyEff").value));
+    hwyCfg.efficiency = hEl("hwyEff").value === "" || !(v >= 1 && v <= 100) ? null : v; saveHwyCfg(); };
+  hEl("hwyShip").onchange = () => { H.shipSel = hEl("hwyShip").value === "" ? "" : Number(hEl("hwyShip").value); H.cargoAuto = true; H.rangeAuto = true; hwyFollowShip(true); };
+  hEl("hwyCargo").oninput = () => { H.cargoAuto = false; hwyFollowShip(); };
+  hEl("hwyRange").oninput = () => { H.rangeAuto = false; hEl("hwyRangeReset").hidden = !hwyShip(); };
+  hEl("hwyRangeReset").onclick = () => { H.rangeAuto = true; hwyFollowShip(); };
+  // name suggestions as you type the destination (Spansh's system names, through the server), debounced
+  hEl("hwyTo").addEventListener("input", () => {
+    clearTimeout(H.suggestT);
+    const q = hEl("hwyTo").value.trim();
+    if (q.length < 3 || q === H.suggestQ) return;
+    H.suggestT = setTimeout(async () => {
+      H.suggestQ = q;
+      let d; try { d = await apiJson(`api/highway/systems?q=${encodeURIComponent(q)}`); } catch { d = null; }
+      if (!d || d.error || H.suggestQ !== q || !Array.isArray(d.values)) return;
+      hEl("hwyNames").innerHTML = d.values.slice(0, 20).map(v => `<option value="${esc(v)}"></option>`).join("");
+    }, HWY_SUGGEST_MS);
+  });
+}
+// the request the form makes: what each plotter takes (the server checks it again)
+function hwyBody() {
+  const p = hwyPlotter(), b = {plotter: p, to: hEl("hwyTo").value.trim()}, num = id => hEl(id).value === "" ? null : Number(hEl(id).value);
+  const from = hEl("hwyFrom").value.trim();
+  if (from) b.from = from;   // empty: where you are (the server knows)
+  if (hEl("hwyShip").value !== "") b.ship_id = Number(hEl("hwyShip").value);
+  if (num("hwyCargo") != null) b.cargo = num("hwyCargo");
+  if (p === "exact") Object.assign(b, {injections: hEl("hwyInject").checked, exclude_secondary: hEl("hwyNoSec").checked,
+                                       supercharged: hEl("hwySuper").checked});
+  else {
+    if (num("hwyRange") != null) b.range = num("hwyRange");
+    if (num("hwyEff") != null) b.efficiency = num("hwyEff");
+    b.supercharge_multiplier = Number(hEl("hwyMult").value) || 4;
+  }
+  return b;
+}
+const hwyErr = e => /^HTTP 5/.test(e || "") ? "Outrider's server had a problem (its terminal says what)" : /fetch|network/i.test(e || "")
+  ? "Outrider did not answer (is it still running?)" : e;
+function setHwyStatus(text, cls = "") { H.status = {text, cls}; drawHwyStatus(); }
+function drawHwyStatus() {
+  const el = hEl("hwyStatus"), p = H.data && H.data.plotting;
+  let text = "", cls = "";
+  if (p && p.state === "running") {
+    const secs = p.started ? Math.max(0, Math.round((Date.now() - new Date(p.started)) / 1000)) : null;
+    text = `Plotting ${p.from} → ${p.to} with Spansh (${p.plotter} plotter)…${secs != null ? ` ${secs} s` : ""}`; cls = "busy";
+  } else if (H.status) ({text, cls} = H.status);
+  else if (p && p.state === "failed") { text = p.error === "cancelled" ? "The plot was cancelled." : `Could not plot the route: ${p.error}.`; cls = "err"; }
+  else if (H.error) { text = `Could not load the highway: ${hwyErr(H.error)}.`; cls = "err"; }
+  el.textContent = text.replace(/\.\.$/, "."); el.className = cls;
+}
+hForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const b = hwyBody();
+  if (!b.to) return setHwyStatus("Type the destination system.", "err");
+  if (b.plotter === "neutron" && b.range == null) return setHwyStatus("Give the jump range (ly) for the neutron plotter.", "err");
+  H.status = null;
+  setHwyStatus("Asking Spansh…", "busy");
+  let r;
+  try { r = await apiJson("api/highway/plot", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(b)}); }
+  catch (err) { r = {error: err.message}; }
+  if (r.error) return setHwyStatus(`Could not plot the route: ${hwyErr(r.error)}.`, "err");
+  H.status = null; H.watch = true;
+  if (H.data) H.data.plotting = r.plotting;
+  drawHwyStatus();
+  hwyPoll();
+});
+hEl("hwyClear").onclick = async () => {
+  const btn = hEl("hwyClear");
+  if (!H.clearArmed) {   // a second click within 4 s clears (a route takes a network plot to get back)
+    H.clearArmed = setTimeout(() => { H.clearArmed = null; btn.textContent = "Clear route"; }, 4000);
+    btn.textContent = "Click again to clear"; return;
+  }
+  clearTimeout(H.clearArmed); H.clearArmed = null; btn.textContent = "Clear route";
+  let r;
+  try { r = await apiJson("api/highway/clear", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}); }
+  catch (err) { r = {error: err.message}; }
+  setHwyStatus(r.error ? `Could not clear the route: ${hwyErr(r.error)}.` : "Route cleared.", r.error ? "err" : "");
+  await loadHwy(true);
+};
+document.addEventListener("click", e => {
+  if (!e.target.closest || !e.target.closest("#hwyDoneBtn")) return;
+  H.doneOpen = !H.doneOpen; store.set("hwyDoneOpen", H.doneOpen);
+  if (H.data) renderHwyList(H.data);
+});
+function renderHwy() {
+  if (view !== "hwy") return;
+  const hd = H.data;
+  if (!hd) { hEl("hwyHead").innerHTML = H.error ? `<div class="err">Could not load the highway: ${esc(hwyErr(H.error))}</div>` : "loading…"; drawHwyStatus(); return; }
+  const r = hd.route;
+  hEl("hwyHead").innerHTML = hwyHeadHtml(hd);
+  // no route: no empty list, the form right under the heading
+  hEl("hwyPanes").classList.toggle("noroute", !r); hEl("hwyPane").hidden = !r;
+  hEl("hwyClear").disabled = !r && !(hd.plotting && hd.plotting.state === "running");
+  renderHwyList(hd);
+  fillHwyForm(hd);
+  // a new route (or none): the form folds away while one is followed, and opens when there is none
+  const rid = r ? r.id : null;
+  if (rid !== H.routeId) {
+    if (H.routeId !== undefined && rid && H.watch) setHwyStatus(`Plotted: ${((r.summary || {}).jumps_total ?? r.count - 1).toLocaleString()} jumps to ${r.to}.`, "ok");
+    H.watch = false;
+    hEl("hwyPlot").open = !rid; H.routeId = rid; HM.auto = true;
+  }
+  const p = hd.plotting;
+  if (p && p.state !== "running" && H.status && H.status.cls === "busy") H.status = null;
+  drawHwyStatus();
+  drawHwyMap();
+}
+// ---- the top-down map: X across, Z up (north: towards the galactic core, as galaxy maps show it) ----
+// A view is {cx, cz, scale (px per ly), w, h}: the world point at the canvas centre. Pure functions, so tests can check them.
+const HWY_MIN_SCALE = 1e-4, HWY_MAX_SCALE = 40;
+// pad: px kept clear at the edges, one number or {top, right, bottom, left} (the legend and the buttons sit at the top)
+function hwyFit(points, w, h, pad = 28) {
+  const ok = (points || []).filter(p => p && p[0] != null && p[1] != null && isFinite(p[0]) && isFinite(p[1]));
+  if (!ok.length || !(w > 0) || !(h > 0)) return null;
+  const P = typeof pad === "number" ? {top: pad, right: pad, bottom: pad, left: pad} : pad;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const [x, z] of ok) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const iw = Math.max(1, w - P.left - P.right), ih = Math.max(1, h - P.top - P.bottom);
+  const scale = Math.max(HWY_MIN_SCALE, Math.min(HWY_MAX_SCALE, Math.min(iw / Math.max(x1 - x0, 1e-9), ih / Math.max(z1 - z0, 1e-9))));
+  // the route's middle at the middle of the box inside the padding (north up: a bigger z is higher on the screen)
+  const mx = (P.left + w - P.right) / 2 - w / 2, my = (P.top + h - P.bottom) / 2 - h / 2;
+  return {cx: (x0 + x1) / 2 - mx / scale, cz: (z0 + z1) / 2 + my / scale, scale, w, h};
+}
+const hwyToScreen = (v, x, z) => [v.w / 2 + (x - v.cx) * v.scale, v.h / 2 - (z - v.cz) * v.scale];
+const hwyToWorld = (v, sx, sy) => [v.cx + (sx - v.w / 2) / v.scale, v.cz - (sy - v.h / 2) / v.scale];
+// zoom by f, keeping the world point under (sx, sy) where it is
+function hwyZoom(v, f, sx = v.w / 2, sy = v.h / 2) {
+  const [x, z] = hwyToWorld(v, sx, sy), scale = Math.max(HWY_MIN_SCALE, Math.min(HWY_MAX_SCALE, v.scale * f));
+  return Object.assign({}, v, {scale, cx: x - (sx - v.w / 2) / scale, cz: z + (sy - v.h / 2) / scale});
+}
+// a scale bar's length: 1, 2 or 5 times a power of ten, about `px` pixels long
+const hwyNiceLy = (scale, px = 110) => { const raw = px / scale, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+  return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * p; };
+// ---- the map's background, under the route: your own image ([highway] background_image, aligned by its extent), the
+// galactic regions (klightspeed's region map from GET api/regions: per row of the grid, runs of [length, region]; see
+// outrider/bio.py region_layer) as soft tints with borders, a faint glow round Sagittarius A*, the region names and
+// landmarks. The tints and borders are drawn once into an offscreen canvas that covers the view and a margin round it
+// at the view's resolution, and reused while you pan and zoom: drawn again only when the view leaves it, the zoom moves
+// by more than HWY_LAYER_ZOOM, or the theme or the layers change. The names are drawn each time (crisp, sized by zoom).
+// Which layers show is per device (store "hwyLayers", not a shared setting: a phone may want the names off).
+const HWY_GALAXY = [[-45000, -20000], [45000, 70000]];   // the whole galaxy: the usual galaxy images' bounds
+// landmarks [name, x, z]: EDSM's locked coordinates (y left out: the map is top down)
+const HWY_LANDMARKS = [["Sol", 0, 0], ["Sagittarius A*", 25.21875, 25899.96875], ["Colonia", -9530.5, 19808.125],
+                       ["Beagle Point", -1111.5625, 65269.75]];
+const HWY_LAYER_ZOOM = 1.6, HWY_LAYER_MAX = 4096;
+const hwyLayers = Object.assign({regions: true, labels: true, image: true}, (v => isObj(v) ? v : {})(store.get("hwyLayers", {})));
+const RG = {data: null, cells: null, segs: null, labels: null, loading: false, failed: false, base: null, layer: null};
+async function loadRegions() {
+  if (RG.data || RG.loading || RG.failed) return;
+  RG.loading = true;
+  let d;
+  try { d = await apiJson("api/regions"); } catch (err) { d = {error: err.message}; }
+  RG.loading = false;
+  if (d.error || !Array.isArray(d.rows) || !(d.size > 0)) { RG.failed = true; return; }
+  hwyRegionsSet(d);
+  drawHwyMap();
+}
+// the runs as one byte per cell (row r is the r-th band of Z from the origin, column c the c-th of X), the borders as
+// segments in cell units [c0, r0, c1, r1] (vertical ones merged down the rows, horizontal ones along them), and the labels
+// biggest region first (the names that fit are placed in that order)
+function hwyRegionsSet(d) {
+  const n = d.size, cells = new Uint8Array(n * n), segs = [], open = new Int32Array(n + 1).fill(-1);
+  d.rows.forEach((runs, r) => {
+    if (r >= n || !Array.isArray(runs)) return;
+    let c = 0;
+    for (const [len, v] of runs) { if (v) cells.fill(v, r * n + Math.min(n, c), r * n + Math.min(n, c + len)); c += len; }
+  });
+  for (let r = 0; r <= n; r++) {
+    for (let c = 1; c < n; c++) {   // vertical borders: column c differs from column c - 1 in this row
+      const diff = r < n && cells[r * n + c] !== cells[r * n + c - 1];
+      if (diff && open[c] < 0) open[c] = r;
+      else if (!diff && open[c] >= 0) { segs.push(c, open[c], c, r); open[c] = -1; }
+    }
+    if (r === 0 || r === n) continue;
+    let from = -1;   // horizontal borders: row r differs from row r - 1
+    for (let c = 0; c <= n; c++) {
+      const diff = c < n && cells[r * n + c] !== cells[(r - 1) * n + c];
+      if (diff && from < 0) from = c;
+      else if (!diff && from >= 0) { segs.push(from, r, c, r); from = -1; }
+    }
+  }
+  RG.data = d; RG.cells = cells; RG.segs = Uint16Array.from(segs); RG.base = null; RG.layer = null;
+  RG.labels = (d.labels || []).slice().sort((a, b) => b.cells - a.cells);
+}
+// the region number at a point of the galaxy's plane (0 outside the map), as outrider/bio.py region_number reads it
+function hwyRegionAt(x, z) {
+  const d = RG.data;
+  if (!d || !RG.cells || x == null || z == null) return 0;
+  const c = Math.trunc((x - d.origin[0]) / d.cell), r = Math.trunc((z - d.origin[1]) / d.cell);
+  return c < 0 || r < 0 || c >= d.size || r >= d.size ? 0 : RG.cells[r * d.size + c];
+}
+const hwyRegionName = (x, z) => { const n = hwyRegionAt(x, z); return n && RG.data.names ? RG.data.names[n] || null : null; };
+function hwyHsl(h, s, l) {   // [r, g, b] 0-255
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l), k = n => (n + h / 30) % 12, f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0), f(8), f(4)].map(x => Math.round(x * 255));
+}
+// a region's tint: hues a golden angle apart, so neighbours (numbered near each other) differ
+const hwyTint = (n, light) => hwyHsl((n * 137.508) % 360, light ? 55 : 50, light ? 45 : 62);
+// the whole grid as a texture, one pixel per cell, north (bigger Z) up: built once per theme
+function hwyRegionBase(light) {
+  if (RG.base && RG.base.light === light) return RG.base.canvas;
+  const n = RG.data.size, cv = document.createElement("canvas");
+  cv.width = cv.height = n;
+  const g = cv.getContext && cv.getContext("2d");
+  if (!g) return null;
+  const img = g.createImageData(n, n), px = img.data, cols = [], alpha = light ? 34 : 44;
+  for (let i = 1; i < 256; i++) cols[i] = hwyTint(i, light);
+  for (let r = 0; r < n; r++) {
+    const out = (n - 1 - r) * n;
+    for (let c = 0; c < n; c++) {
+      const v = RG.cells[r * n + c];
+      if (!v) continue;
+      const o = (out + c) * 4, k = cols[v];
+      px[o] = k[0]; px[o + 1] = k[1]; px[o + 2] = k[2]; px[o + 3] = alpha;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  RG.base = {light, canvas: cv};
+  return cv;
+}
+// the view's rectangle in the galaxy's plane
+const hwyViewRect = v => ({x0: v.cx - v.w / 2 / v.scale, x1: v.cx + v.w / 2 / v.scale, z0: v.cz - v.h / 2 / v.scale, z1: v.cz + v.h / 2 / v.scale});
+// the offscreen region layer for view v (reused while it still covers the view at about this zoom), or null
+function hwyRegionLayer(v, dpr, C, light, outline, lineCol = C.text) {
+  const d = RG.data;
+  if (!d || !RG.cells) return null;
+  const span = d.size * d.cell, gx0 = d.origin[0], gz0 = d.origin[1], gx1 = gx0 + span, gz1 = gz0 + span;
+  const V = hwyViewRect(v), theme = C.bg + C.text + lineCol, L = RG.layer;
+  const want = {x0: Math.max(V.x0, gx0), x1: Math.min(V.x1, gx1), z0: Math.max(V.z0, gz0), z1: Math.min(V.z1, gz1)};
+  if (want.x1 <= want.x0 || want.z1 <= want.z0) return null;   // the view is off the map
+  if (L && L.theme === theme && L.outline === outline && L.dpr === dpr && Math.abs(Math.log(v.scale / L.scale)) < Math.log(HWY_LAYER_ZOOM)
+      && want.x0 >= L.x0 - 1e-6 && want.x1 <= L.x1 + 1e-6 && want.z0 >= L.z0 - 1e-6 && want.z1 <= L.z1 + 1e-6) return L;
+  // half the view's size again on every side (less if the canvas would grow too big), inside the grid
+  const wv = V.x1 - V.x0, hv = V.z1 - V.z0;
+  const rect = m => ({x0: Math.max(gx0, V.x0 - wv * m), x1: Math.min(gx1, V.x1 + wv * m), z0: Math.max(gz0, V.z0 - hv * m), z1: Math.min(gz1, V.z1 + hv * m)});
+  let R = rect(0.5), res = v.scale * dpr;
+  if (Math.max(R.x1 - R.x0, R.z1 - R.z0) * res > HWY_LAYER_MAX) R = rect(0.15);
+  res = Math.min(res, HWY_LAYER_MAX / Math.max(R.x1 - R.x0, R.z1 - R.z0));
+  const W = Math.max(1, Math.ceil((R.x1 - R.x0) * res)), H_ = Math.max(1, Math.ceil((R.z1 - R.z0) * res));
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H_;
+  const g = cv.getContext && cv.getContext("2d");
+  if (!g) return null;
+  if (!outline) {   // the tints: the part of the grid texture under this rectangle, smoothed (soft edges)
+    const base = hwyRegionBase(light);
+    if (base) {
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+      g.drawImage(base, (R.x0 - gx0) / d.cell, (gz1 - R.z1) / d.cell, (R.x1 - R.x0) / d.cell, (R.z1 - R.z0) / d.cell, 0, 0, W, H_);
+    }
+  }
+  // the borders, thinner and fainter when the cells are smaller than a pixel
+  const cpx = d.cell * res, S = RG.segs;
+  const c0 = (R.x0 - gx0) / d.cell, c1 = (R.x1 - gx0) / d.cell, r0 = (R.z0 - gz0) / d.cell, r1 = (R.z1 - gz0) / d.cell;
+  g.strokeStyle = lineCol; g.lineWidth = Math.max(0.6, Math.min(1.2, cpx / 2)) * dpr;
+  g.globalAlpha = (outline ? 0.5 : 0.24) * Math.min(1, 0.5 + cpx / 4);
+  g.beginPath();
+  const X = c => (gx0 + c * d.cell - R.x0) * res, Y = r => (R.z1 - gz0 - r * d.cell) * res;
+  for (let i = 0; i < S.length; i += 4) {
+    if (Math.max(S[i], S[i + 2]) < c0 || Math.min(S[i], S[i + 2]) > c1 || Math.max(S[i + 1], S[i + 3]) < r0 || Math.min(S[i + 1], S[i + 3]) > r1) continue;
+    g.moveTo(X(S[i]), Y(S[i + 1])); g.lineTo(X(S[i + 2]), Y(S[i + 3]));
+  }
+  g.stroke(); g.globalAlpha = 1;
+  RG.layer = Object.assign({canvas: cv, scale: v.scale, dpr, theme, outline}, R);
+  return RG.layer;
+}
+// the background image, once loaded (a new one when the file changes: its URL carries the server's v)
+function hwyBgImage(bg) {
+  if (!bg || !bg.image || !bg.v) return null;
+  if (HM.imgV !== bg.v && typeof Image === "function") {
+    HM.imgV = bg.v; HM.imgOk = false;
+    const im = new Image();
+    im.onload = () => { if (HM.img === im) { HM.imgOk = true; HM.imgLight = hwyImgLight(im); drawHwyMap(); } };
+    im.onerror = () => { if (HM.img === im) HM.imgOk = false; };
+    HM.img = im; im.src = "api/highway/background?v=" + encodeURIComponent(bg.v);
+  }
+  return HM.imgOk ? HM.img : null;
+}
+// whether an image is light on the whole (its mean over an 8 × 8 copy): the names over it are then dark with a light
+// halo, else light with a dark one, whatever the page's theme
+function hwyImgLight(im) {
+  try {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 8;
+    const g = cv.getContext && cv.getContext("2d");
+    if (!g) return null;
+    g.drawImage(im, 0, 0, 8, 8);
+    const px = g.getImageData(0, 0, 8, 8).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+    return sum / (px.length / 4) > 128;
+  } catch { return null; }
+}
+function hwyLayerButtons() {
+  const bg = H.data && H.data.background;
+  for (const b of document.querySelectorAll(".hwylayers [data-layer]")) {
+    b.setAttribute("aria-pressed", String(!!hwyLayers[b.dataset.layer]));
+    if (b.dataset.layer === "image") { b.hidden = !(bg && bg.image); b.title = `your background image${bg && bg.name ? ` (${bg.name})` : ""}`; }
+  }
+}
+document.querySelectorAll(".hwylayers [data-layer]").forEach(b => b.addEventListener("click", () => {
+  const k = b.dataset.layer;
+  hwyLayers[k] = !hwyLayers[k]; store.set("hwyLayers", hwyLayers);
+  drawHwyMap();
+}));
+// everything under the route: image, tints and borders, the core's glow, region names, landmarks (and your carrier).
+// Returns the landmarks drawn, for hovering and click to copy.
+function drawHwyBackground(g, v, w, h, C, dpr) {
+  const S = (x, z) => hwyToScreen(v, x, z), light = C.light, named = [];
+  const img = hwyLayers.image ? hwyBgImage(H.data && H.data.background) : null;
+  if (img) {
+    const e = H.data.background.extent, [x0, y0] = S(e[0], e[3]), [x1, y1] = S(e[1], e[2]);
+    g.globalAlpha = Math.max(0.05, Math.min(1, Number(H.data.background.opacity) || 0.6));
+    g.imageSmoothingEnabled = true;
+    g.drawImage(img, x0, y0, x1 - x0, y1 - y0);
+    g.globalAlpha = 1;
+  }
+  if (hwyLayers.regions || hwyLayers.labels) loadRegions();
+  if (hwyLayers.regions && RG.data) {
+    // over your image only the borders (its own colours show through); on the plain background soft tints too
+    const L = hwyRegionLayer(v, dpr, C, light, !!img, img && HM.imgLight != null ? (HM.imgLight ? "#1d2228" : "#e4e8ee") : C.text);
+    if (L) { const [dx, dy] = S(L.x0, L.z1); g.imageSmoothingEnabled = true; g.drawImage(L.canvas, dx, dy, (L.x1 - L.x0) * v.scale, (L.z1 - L.z0) * v.scale); }
+  }
+  if (!img) {   // a faint glow round Sagittarius A*: the core, where the galaxy is brightest
+    const [gx, gy] = S(HWY_LANDMARKS[1][1], HWY_LANDMARKS[1][2]), rad = Math.max(40, 7000 * v.scale);
+    if (gx + rad > 0 && gx - rad < w && gy + rad > 0 && gy - rad < h) {
+      const gr = g.createRadialGradient(gx, gy, 0, gx, gy, rad), tone = light ? "214,130,40" : "255,205,140";
+      gr.addColorStop(0, `rgba(${tone},${light ? 0.22 : 0.2})`); gr.addColorStop(0.3, `rgba(${tone},${light ? 0.09 : 0.08})`); gr.addColorStop(1, `rgba(${tone},0)`);
+      g.fillStyle = gr; g.fillRect(Math.max(0, gx - rad), Math.max(0, gy - rad), Math.min(w, gx + rad) - Math.max(0, gx - rad), Math.min(h, gy + rad) - Math.max(0, gy - rad));
+    }
+  }
+  // the names' colours: the theme's, or over your image ones that suit how light it is
+  const T = img && HM.imgLight != null ? (HM.imgLight ? {text: "#1d2228", halo: "rgba(255,255,255,.75)", info: "#1f4fa8"}
+                                                      : {text: "#e4e8ee", halo: "rgba(0,0,0,.7)", info: "#9cc4ff"})
+                                       : {text: C.muted, halo: C.bg, info: C.info};
+  // landmarks (and your carrier): placed first, so the region names keep clear of their names
+  const marks = HWY_LANDMARKS.map(([name, x, z]) => ({name, x, z, copy: name}));
+  const c = data && data.carrier;
+  if (c && c.x != null && c.z != null) marks.push({name: c.name || c.callsign || "your carrier", x: c.x, z: c.z, copy: c.system, carrier: true});
+  // kept clear of region names: the legend and buttons along the top, the scale bar and toggles along the bottom
+  const placed = [[0, 0, w, w < 520 ? 60 : 40], [0, h - 26, w, h]];
+  g.font = "11px system-ui, sans-serif";
+  for (const m of marks) {
+    [m.sx, m.sy] = S(m.x, m.z);
+    m.on = !(m.sx < -10 || m.sy < -10 || m.sx > w + 10 || m.sy > h + 10);
+    if (m.on && hwyLayers.labels) placed.push([m.sx - 6, m.sy - 8, m.sx + 9 + g.measureText(m.name).width, m.sy + 8]);
+  }
+  if (hwyLayers.labels && RG.labels) {   // region names at their label points, sized by zoom; one that does not fit its region on screen, or would overlap a bigger region's or a landmark, is left out
+    const fs = Math.round(Math.max(10, Math.min(15, 11 + 1.5 * Math.log2(v.scale / 0.01))));
+    g.font = `600 ${fs}px system-ui, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 3;
+    for (const L of RG.labels) {
+      let [sx, sy] = S(L.x, L.z);
+      if (sx < -150 || sx > w + 150 || sy < -20 || sy > h + 20) continue;
+      const tw = g.measureText(L.name).width, span = Math.sqrt(L.cells) * RG.data.cell * v.scale;
+      if (span < tw * 0.7) continue;
+      // a name running off the side moves in, if it is still inside its region there
+      const ix = Math.max(tw / 2 + 4, Math.min(w - tw / 2 - 4, sx)), iy = Math.max(fs, Math.min(h - fs, sy));
+      if ((ix !== sx || iy !== sy) && hwyRegionAt(...hwyToWorld(v, ix, iy)) === L.n) { sx = ix; sy = iy; }
+      if (sx - tw / 2 < 0 || sx + tw / 2 > w || sy < 0 || sy > h) continue;
+      const box = [sx - tw / 2 - 3, sy - fs / 2 - 2, sx + tw / 2 + 3, sy + fs / 2 + 2];
+      if (placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+      placed.push(box);
+      g.globalAlpha = 0.8; g.strokeStyle = T.halo; g.fillStyle = T.text; g.strokeText(L.name, sx, sy); g.fillText(L.name, sx, sy);
+    }
+    g.globalAlpha = 1; g.textBaseline = "alphabetic";
+  }
+  // landmarks: a ringed dot each, your carrier a small square; names with the labels
+  g.font = "11px system-ui, sans-serif"; g.textAlign = "left";
+  for (const m of marks) {
+    const {sx, sy} = m;
+    if (!m.on) continue;
+    g.strokeStyle = T.info; g.fillStyle = T.info; g.lineWidth = 1.4;
+    if (m.carrier) g.strokeRect(sx - 3.5, sy - 3.5, 7, 7);
+    else { g.beginPath(); g.arc(sx, sy, 4.5, 0, 7); g.stroke(); g.beginPath(); g.arc(sx, sy, 1.4, 0, 7); g.fill(); }
+    if (hwyLayers.labels) {
+      g.lineWidth = 3; g.strokeStyle = T.halo; g.fillStyle = T.info;
+      g.strokeText(m.name, sx + 7, sy + 4); g.fillText(m.name, sx + 7, sy + 4);
+    }
+    if (m.copy) named.push({sx, sy, name: m.copy, title: m.carrier ? `${m.name} (your carrier) in ${m.copy}` : m.name});
+  }
+  return named;
+}
+const HM = {v: null, auto: true, drag: null, named: [], img: null, imgV: null, imgOk: false, imgLight: null};
+const hwyCanvas = hEl("hwyCanvas");
+function hwyMapPoints() {
+  const hd = H.data, r = hd && hd.route, pos = data && data.position;
+  const pts = r ? (r.points || []).slice() : [];
+  if (pos && pos.x != null) pts.push([pos.x, pos.z]);
+  return pts;
+}
+function drawHwyMap() {
+  if (view !== "hwy") return;
+  const wrap = hEl("hwyMapWrap"), w = wrap.clientWidth, h = wrap.clientHeight;
+  const g = w > 0 && h > 0 && hwyCanvas.getContext ? hwyCanvas.getContext("2d") : null;
+  const r = H.data && H.data.route, pos = data && data.position;
+  const bg = H.data && H.data.background;
+  hEl("hwyMapNote").innerHTML = (r ? `<span class="lg-done">━ done</span> <span class="lg-ahead">━ ahead</span> <span class="lg-n">◆ neutron</span>` +
+    ` <span class="lg-f">○ refuel</span> <span class="lg-you">● you</span> <span>↑ +Z (core)</span>` : "No route: plot one to see it here.") +
+    (bg && bg.why ? ` <span class="warnc" title="${esc(bg.name || "")}">background image: ${esc(bg.why)}</span>` : "");
+  hwyLayerButtons();
+  if (!g) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (hwyCanvas.width !== Math.round(w * dpr) || hwyCanvas.height !== Math.round(h * dpr)) {
+    hwyCanvas.width = Math.round(w * dpr); hwyCanvas.height = Math.round(h * dpr);
+  }
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  // the route (and you), or with neither the whole galaxy
+  if (HM.auto || !HM.v) HM.v = hwyFit(hwyMapPoints(), w, h, hwyPad(w)) || hwyFit(HWY_GALAXY, w, h, hwyPad(w));
+  if (!HM.v) return;
+  HM.v = Object.assign(HM.v, {w, h});
+  if (!r && HM.auto) HM.v.scale = Math.min(HM.v.scale, 2);   // just you: a sensible zoom, not 40 px per ly
+  const v = HM.v, cs = getComputedStyle(document.documentElement), col = k => cs.getPropertyValue(k).trim();
+  const C = {muted: col("--muted") || "#7d8794", accent: col("--accent") || "#ff8c1a", text: col("--text") || "#ddd", line: col("--line") || "#333",
+             good: col("--good") || "#5cc98a", bg: col("--bg") || "#000", info: col("--info") || "#6aa8ff", neutron: "#5ce1e6"};
+  C.light = /^#[0-9a-f]{6}$/i.test(C.bg) && parseInt(C.bg.slice(1, 3), 16) > 128;
+  const S = (x, z) => hwyToScreen(v, x, z);
+  HM.named = drawHwyBackground(g, v, w, h, C, dpr);
+  if (r) {
+    const P = r.points || [], s = r.summary || {};
+    const doneTo = s.complete ? P.length - 1 : Math.max(r.furthest ?? -1, r.at ?? -1);
+    const seg = (from, to, colour, width) => {
+      g.strokeStyle = colour; g.lineWidth = width; g.lineJoin = "round"; g.beginPath();
+      let pen = false;
+      for (let i = Math.max(0, from); i <= to && i < P.length; i++) {
+        const p = P[i];
+        if (!p || p[0] == null || p[1] == null) { pen = false; continue; }
+        const [sx, sy] = S(p[0], p[1]);
+        if (pen) g.lineTo(sx, sy); else { g.moveTo(sx, sy); pen = true; }
+      }
+      g.stroke();
+    };
+    if (doneTo > 0) seg(0, doneTo, C.muted, 2);
+    if (doneTo < P.length - 1) seg(Math.max(0, doneTo), P.length - 1, C.accent, 2.2);
+    // each system as a dot when they are far enough apart to tell; neutrons as diamonds; refuels (the rows listed) as rings
+    let worldLen = 0;
+    for (let i = 1; i < P.length; i++) if (P[i] && P[i - 1] && P[i][0] != null && P[i - 1][0] != null) worldLen += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+    const pxPer = P.length < 2 ? 99 : worldLen * v.scale / (P.length - 1), dots = pxPer > 5;
+    const nk = pxPer < 3 ? 0 : Math.min(3.6, pxPer * 0.4);   // neutron diamonds shrink with the spacing (none when packed)
+    const neutrons = new Set(r.neutrons || []);
+    P.forEach((p, i) => {
+      if (!p || p[0] == null || p[1] == null) return;
+      const [sx, sy] = S(p[0], p[1]);
+      if (sx < -10 || sy < -10 || sx > w + 10 || sy > h + 10) return;
+      const isDone = i <= doneTo;
+      if (neutrons.has(i) && nk) {
+        const k = nk; g.fillStyle = isDone ? C.muted : C.neutron;
+        g.beginPath(); g.moveTo(sx, sy - k); g.lineTo(sx + k, sy); g.lineTo(sx, sy + k); g.lineTo(sx - k, sy); g.closePath(); g.fill();
+      } else if (dots) { g.fillStyle = isDone ? C.muted : C.accent; g.beginPath(); g.arc(sx, sy, 1.8, 0, 7); g.fill(); }
+    });
+    for (const x of [...(r.done || []), ...(r.ahead || [])]) {
+      if (x.x == null || x.z == null) continue;
+      const [sx, sy] = S(x.x, x.z);
+      HM.named.push({sx, sy, name: x.system, i: x.i});
+      if (x.refuel) { g.strokeStyle = x.i <= doneTo ? C.muted : C.good; g.lineWidth = 1.6; g.beginPath(); g.arc(sx, sy, 5.5, 0, 7); g.stroke(); }
+    }
+    const label = (sx, sy, text, colour, dy = -10) => {
+      g.font = "12px system-ui, sans-serif"; g.textAlign = "center"; g.lineWidth = 3; g.strokeStyle = C.bg; g.fillStyle = colour;
+      const tx = Math.max(40, Math.min(w - 40, sx)), ty = Math.max(14, Math.min(h - 6, sy + dy));
+      g.strokeText(text, tx, ty); g.fillText(text, tx, ty);
+    };
+    const first = P[0], last = P[P.length - 1];
+    if (first && first[0] != null) {
+      const [sx, sy] = S(first[0], first[1]);
+      g.fillStyle = C.good; g.fillRect(sx - 4, sy - 4, 8, 8); label(sx, sy, r.from, C.text, 18);
+      HM.named.push({sx, sy, name: r.from, i: 0});
+    }
+    if (last && last[0] != null) {
+      const [sx, sy] = S(last[0], last[1]);
+      g.strokeStyle = C.accent; g.lineWidth = 2.5; g.beginPath(); g.arc(sx, sy, 7, 0, 7); g.stroke();
+      g.fillStyle = C.accent; g.beginPath(); g.arc(sx, sy, 2.5, 0, 7); g.fill(); label(sx, sy, r.to, C.accent, -12);
+      HM.named.push({sx, sy, name: r.to, i: P.length - 1});
+    }
+    const ni = s.index, np = ni != null ? P[ni] : null;
+    if (np && np[0] != null && !s.complete) {
+      const [sx, sy] = S(np[0], np[1]);
+      if (pos && pos.x != null) {   // a dashed hop from you to the next stop
+        const [px, py] = S(pos.x, pos.z);
+        g.setLineDash([4, 4]); g.strokeStyle = C.text; g.lineWidth = 1; g.beginPath(); g.moveTo(px, py); g.lineTo(sx, sy); g.stroke(); g.setLineDash([]);
+      }
+      g.strokeStyle = C.text; g.lineWidth = 1.5; g.beginPath(); g.arc(sx, sy, 6, 0, 7); g.stroke();
+    }
+  }
+  if (pos && pos.x != null) {
+    const [sx, sy] = S(pos.x, pos.z);
+    g.fillStyle = C.accent; g.strokeStyle = C.bg; g.lineWidth = 2; g.beginPath(); g.arc(sx, sy, 5.5, 0, 7); g.fill(); g.stroke();
+    if (!r) { g.font = "12px system-ui, sans-serif"; g.textAlign = "center"; g.fillStyle = C.text; g.fillText(pos.name || "you", sx, sy - 12); }
+  }
+  // the scale bar, bottom left
+  const ly = hwyNiceLy(v.scale), len = ly * v.scale, y = h - 14;
+  g.strokeStyle = C.muted; g.lineWidth = 1.5; g.beginPath(); g.moveTo(12, y - 4); g.lineTo(12, y); g.lineTo(12 + len, y); g.lineTo(12 + len, y - 4); g.stroke();
+  g.font = "11px system-ui, sans-serif"; g.textAlign = "left"; g.fillStyle = C.muted;
+  const lyText = `${ly >= 1 ? ly.toLocaleString() : ly} ly`;
+  g.fillText(lyText, 16 + len, y + 1);
+  // the region under the middle of the map, beside the scale bar (its label may be off screen when zoomed in)
+  const mid = (hwyLayers.regions || hwyLayers.labels) && hwyRegionName(...hwyToWorld(v, w / 2, h / 2));
+  if (mid && w >= 420) g.fillText(`centre: ${mid}`, 16 + len + g.measureText(lyText).width + 14, y + 1);
+}
+const hwyPad = w => ({top: w < 520 ? 64 : 48, right: 40, bottom: 34, left: 40});
+const hwyHit = e => { const b = hwyCanvas.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+  let best = null, bd = 10;
+  for (const n of HM.named) { const d = Math.hypot(n.sx - x, n.sy - y); if (d < bd) { bd = d; best = n; } }
+  return best; };
+hwyCanvas.addEventListener("pointerdown", e => {
+  if (!HM.v) return;
+  HM.drag = {x: e.clientX, y: e.clientY, cx: HM.v.cx, cz: HM.v.cz, moved: false};
+  hwyCanvas.setPointerCapture && hwyCanvas.setPointerCapture(e.pointerId); hwyCanvas.classList.add("dragging");
+});
+hwyCanvas.addEventListener("pointermove", e => {
+  if (HM.drag && HM.v) {
+    const dx = e.clientX - HM.drag.x, dy = e.clientY - HM.drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) HM.drag.moved = true;
+    if (HM.drag.moved) { HM.auto = false; HM.v.cx = HM.drag.cx - dx / HM.v.scale; HM.v.cz = HM.drag.cz + dy / HM.v.scale; drawHwyMap(); }
+    return;
+  }
+  const n = hwyHit(e);
+  hwyCanvas.title = n ? `${n.title || `${n.name} (#${n.i})`} · click to copy` : "";
+  hwyCanvas.style.cursor = n ? "copy" : "";
+});
+hwyCanvas.addEventListener("pointerup", e => {
+  const click = HM.drag && !HM.drag.moved; HM.drag = null; hwyCanvas.classList.remove("dragging");
+  if (click) { const n = hwyHit(e); if (n) copyText(n.name); }
+});
+hwyCanvas.addEventListener("wheel", e => {
+  if (!HM.v) return;
+  e.preventDefault();
+  const b = hwyCanvas.getBoundingClientRect();
+  HM.auto = false; HM.v = hwyZoom(HM.v, Math.exp(-e.deltaY * 0.0015), e.clientX - b.left, e.clientY - b.top); drawHwyMap();
+}, {passive: false});
+hEl("hwyZoomIn").onclick = () => { if (HM.v) { HM.auto = false; HM.v = hwyZoom(HM.v, 1.5); drawHwyMap(); } };
+hEl("hwyZoomOut").onclick = () => { if (HM.v) { HM.auto = false; HM.v = hwyZoom(HM.v, 1 / 1.5); drawHwyMap(); } };
+hEl("hwyFit").onclick = () => { HM.auto = true; drawHwyMap(); };
+hEl("hwyGalaxy").onclick = () => { const wr = hEl("hwyMapWrap"); HM.auto = false; HM.v = hwyFit(HWY_GALAXY, wr.clientWidth, wr.clientHeight, hwyPad(wr.clientWidth)); drawHwyMap(); };
+// a theme change redraws (the layer's colours key on the theme)
+if (typeof matchMedia === "function") { const mq = matchMedia("(prefers-color-scheme: light)"); if (mq && mq.addEventListener) mq.addEventListener("change", () => drawHwyMap()); }
+addEventListener("resize", () => drawHwyMap());
+
 // ---- Search ----
 const OPTS = window.__SEARCH_OPTIONS__;
 const sForm = document.getElementById("searchForm");
@@ -4594,6 +5326,8 @@ function onData() {
         else alertOut("sell", `Undocked with ${credits(u.total)} cr still aboard`, `Still to sell: ${leftToSell(u)}.`,   // part of it was sold here
                       {sound: "alert", say: () => line("unsold_urgent", {value: credits(u.total)})});
       }
+      else if (m.kind === "highway" && m.text)   // the Neutron Highway's arrival line, detour, back on it, complete: plain words for now
+        alertOut("highway", m.text.replace(/\.$/, ""), "", {tag: "highway", say: m.text});
       else if (m.kind === "rig" && m.text)   // the co-pilot's rig marking and a rig's collection: plain words, no personality
         alertOut("rigs", m.text.replace(/\.$/, ""), "", {tag: m.what === "collected" ? "rig_collected" : "rig", say: m.text});
       else if (m.kind === "rig_leash" && m.text)   // a rig past the leash warning, or lost at 5 km: danger
@@ -4724,7 +5458,7 @@ const ALERT_SHORT = {arrival: "Arrival", game: "Game start and quit", jump: "FSD
   leaving: "Leaving", fuel: "Fuel", scoop: "Tank full", scoopstop: "Scooping stopped", supercharge: "Supercharge", find: "Find",
   jumponium: "Jumponium", sampling: "Sampling", approach: "High-g approach", bodybrief: "Body brief", sell: "Selling", saleleft: "Sale left data",
   unsold: "Unsold", hull: "Hull and danger", carrier: "Carrier", codex: "Codex", loss: "Ship lost", rigs: "Rigs", rigleash: "Rig leash",
-  rigsout: "Rigs out", mapped: "Mapped", signals: "Signals", manual: "Asked for"};
+  rigsout: "Rigs out", mapped: "Mapped", signals: "Signals", highway: "Neutron Highway", manual: "Asked for"};
 const speechMuted = new Set();   // kinds turned off from the tally this session (each shows an undo)
 // "This session: Arrival brief 42 🔇 · FSD charge 40 (3 dropped) 🔇 · …": every kind that was said or queued (not the
 // silent ones: a kind already off would only inflate), noisiest first. 🔇 turns that alert's speech off (its 🗣 tick
@@ -5404,9 +6138,9 @@ if (typeof ResizeObserver !== "undefined") {
     }
     if (!changed || queued) return;
     queued = true;
-    requestAnimationFrame(() => { queued = false; if (!data) return; if (appOn()) renderSurface(); drawMap(); });
+    requestAnimationFrame(() => { queued = false; if (!data) return; if (appOn()) renderSurface(); drawMap(); drawHwyMap(); });
   });
-  for (const id of ["ovHere", "ovMap", "mapWrap"]) ro.observe(document.getElementById(id));
+  for (const id of ["ovHere", "ovMap", "mapWrap", "hwyMapWrap"]) ro.observe(document.getElementById(id));
 }
 document.getElementById("matSources").addEventListener("click", e => {
   const n = e.target.closest(".name"); if (n) copyText(n.dataset.name);

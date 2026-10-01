@@ -102,9 +102,12 @@ import sys
 sys.path.insert(0, ".")
 import ed_outrider, outrider.tts
 OFF = "http://127.0.0.1:9/offline"
-for k in ("SPANSH_SEARCH", "SPANSH_BODY_SEARCH", "SPANSH_STATION_SEARCH", "EDSM_SYSTEM", "EDSM_SPHERE"):
+for k in ("SPANSH_SEARCH", "SPANSH_BODY_SEARCH", "SPANSH_STATION_SEARCH", "EDSM_SYSTEM", "EDSM_SPHERE",
+          "SPANSH_ROUTE", "SPANSH_GENERIC_ROUTE", "SPANSH_SYSTEM_NAMES"):
     setattr(ed_outrider, k, OFF)
 ed_outrider.SPANSH_DUMP = OFF + "/{id64}"
+ed_outrider.SPANSH_RESULTS = OFF + "/{job}"
+ed_outrider.Clipboard.TOOLS = ()   # the desktop clipboard is never touched by the smoke test
 if outrider.bio:
     outrider.bio.update_if_newer = lambda path=None, log=print: None
 outrider.tts.Speaker._download = lambda self, name, status=None: False

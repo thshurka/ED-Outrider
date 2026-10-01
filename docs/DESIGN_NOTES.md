@@ -42,7 +42,31 @@ upstream project's choices, not rules of the game.
 - **"Leaving a body unfinished" only nags** if you landed or sampled there this visit.
 - **Alternatives to a finished target and a heading-aware neighbourhood were declined:** undiscovered systems
   rarely turn up close by.
-- **Parked:** nearest neutron star and a wasted-charge warning (useful if a neutron route plotter is ever added).
+- **Parked:** nearest neutron star and a wasted-charge warning (now that the Highway exists, the next candidates).
+- **The Highway keeps one active route.** A new plot replaces it; waypoints may come later. It is live-only data
+  (`highway_route`), kept through a journal re-read and carried by backups.
+- **Detour and resume:** arriving off the route counts as a detour only once the route was joined (flying to its
+  start is not one), and arriving at *any* route system resumes it, neutron or not, forwards or back. Said once each.
+- **The Highway's cargo is not remembered.** The form takes the cargo aboard from the journals each time (a
+  remembered figure would be stale the next day); only the plotter and its options are per-browser settings.
+- **Auto-target is a stub.** `[highway] autotarget` only logs "would target X" after the delay; the real key
+  sequence (galaxy map, search, paste, plot) is for later, through auto honk's uinput path, opt-in and Linux only.
+- **The Highway's spoken lines are plain text** carried by the moment, not `speech.json` keys yet (personality later).
+- **The Highway map's regions are drawn by the page,** not rendered to an image on the server: `GET /api/regions`
+  sends klightspeed's run-length grid as it is shipped (185 KB, about 40 KB gzipped, an ETag so a reload costs a 304)
+  and the page colours it with the theme's colours at the zoom it needs. A server PNG would need one per theme, an
+  encoder Outrider doesn't have, and the grid again for the borders and names. The tints and borders go into an
+  offscreen canvas covering the view plus a margin, redrawn only when the view leaves it, the zoom moves by more than
+  1.6×, or the theme or layers change; the names are drawn every frame (crisp, sized by zoom, the biggest regions'
+  first, none overlapping). Over your own image the regions are borders only.
+- **The map's layer toggles are per device** (`hwyLayers` in this browser's storage, not a shared setting): how one
+  screen shows the map is not an alert preference, and a phone may want the names off.
+- **The background image is the player's own.** Outrider ships none; only the configured file is served, only as an
+  image type checked by extension and first bytes (no SVG), never a path from the request. The default extent
+  (X −45000…45000, Z −20000…70000) is the bounds quoted for EDAstro's galaxy charts and the galaxy map texture
+  (40 ly per pixel at 2250 px, Sol at pixel 1125, 1750).
+- **Landmarks are fixed:** Sol, Sagittarius A*, Colonia and Beagle Point at EDSM's locked coordinates, and your carrier
+  where the journals put it.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits
@@ -56,6 +80,12 @@ upstream project's choices, not rules of the game.
 - **A carrier jump booked just before quitting shows as "not yet confirmed"** until the next login.
 - **NPC crew deaths are not subtracted** from the crew count: the evidence showed that would be wrong.
 - **Spansh cannot search for planetary mining locations;** that search is Local only.
+- **The neutron plotter gives waypoints, not fuel:** no fuel columns or refuel stops; the exact plotter has them.
+- **Region borders follow the grid,** cells of 4096/83 ≈ 49 ly, so close up they are steps, as the region map defines
+  them; a name sits at its region's centroid (or the region's cell nearest it), so zoomed in it may be off screen (the
+  scale bar's "centre:" says the region under the middle).
+- **The Highway's ship list is as of each ship's latest Loadout;** an `EngineerCraft` after it is not applied, and a
+  ship never flown (no Loadout) can only be plotted with the neutron plotter and a typed range.
 
 ## Not yet tried in a live game
 
@@ -75,3 +105,6 @@ confirmed while playing. Treat reports about them as likely real.
 - Colour-variant prediction against a fresh in-game codex entry (backtested only).
 - The firsts watch's rotation against live Spansh; an OBS source on `/api/status` after the guard change.
 - `--restore` and `--list-backups` against a real database (temp files only).
+- The Highway's plots against live Spansh (both plotters send the requests Spansh's site and Auto_Neutron send;
+  tested with a mocked Spansh), following a route in game, and whether a name copied by `wl-copy`/`xclip` pastes
+  into the galaxy map under Proton.

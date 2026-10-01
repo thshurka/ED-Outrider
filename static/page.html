@@ -13,7 +13,7 @@
 <header>
   <div class="topbar">
     <h1>ED Outrider</h1>
-    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
+    <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hwy" title="the Neutron Highway: plot a route with Spansh and follow it as you fly">Highway</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
     <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
       <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button></span>
   </div>
@@ -33,6 +33,7 @@
   </div>
   <div id="target"></div>
   <div id="routeStrip"></div>
+  <div id="hwyLine" title="the Neutron Highway: click for the route (the name copies it)"></div>
   <div id="leaving"></div>
   <div id="onbody"></div>
   <div id="obMap" hidden><canvas id="obMapCanvas" aria-label="surface map"></canvas><div id="obMapLine" class="smap-line"></div></div>
@@ -260,6 +261,60 @@
   <div id="mLegend"></div>
   <div class="hint">Left-drag to rotate · right-drag to move · scroll to zoom · hover for details · click a system to copy its name.
     The grid is the galactic plane through your position; stalks drop each system onto it.</div>
+</section>
+<section id="hwyView" hidden>
+  <div id="hwyPanes">
+    <div id="hwyHead"></div>
+    <div class="pane" id="hwyPane">
+    <table id="hwyTable">
+      <thead><tr><th class="num" title="the route's system number (0: its start)">#</th><th>System</th>
+        <th class="num" title="the jump to this system (ly)">Jump ly</th><th class="hwyc" title="neutron star: supercharge your FSD there">⚡</th>
+        <th class="num hwy-n" title="jumps to this waypoint (the neutron plotter lists waypoints, not every jump)">Jumps</th>
+        <th class="num hwy-x c2hide" title="fuel the jump burns (t)">Fuel used</th><th class="num hwy-x" title="fuel in the tank after the jump (t)">Fuel left</th>
+        <th class="hwyc" title="refuel here before continuing">⛽</th><th class="num" title="light years left to the destination from this system">Remaining ly</th></tr></thead>
+      <tbody id="hwyDone"></tbody>
+      <tbody id="hwyRows"></tbody>
+    </table>
+    </div>
+    <details id="hwyPlot">
+      <summary>Plot a route</summary>
+      <form id="hwyForm" autocomplete="off">
+        <div class="srow">
+          <span class="seg" role="radiogroup" aria-label="plotter"><label title="every jump with its fuel, from your ship's own figures (Spansh's galaxy plotter)"><input type="radio" name="hwyPlotter" value="exact" checked>Exact</label><label title="neutron stars as boosts, waypoints only (Spansh's neutron plotter): any ship, from its range"><input type="radio" name="hwyPlotter" value="neutron">Neutron</label></span>
+          <label>From <input type="text" id="hwyFrom" maxlength="100" placeholder="where you are" spellcheck="false"></label>
+          <label class="hwyto">To <input type="text" id="hwyTo" maxlength="100" placeholder="destination system" spellcheck="false" list="hwyNames"></label>
+          <datalist id="hwyNames"></datalist>
+        </div>
+        <div class="srow">
+          <label>Ship <select id="hwyShip"></select></label>
+          <label>Cargo <input type="number" id="hwyCargo" min="0" max="100000" step="1" inputmode="numeric"> t</label>
+        </div>
+        <div class="srow hwy-nopt">
+          <label title="the jump range to plot with: the chosen ship's laden range (cargo included) unless you type another">Range <input type="number" id="hwyRange" min="1" max="1000" step="any" inputmode="decimal"> ly</label>
+          <button type="button" id="hwyRangeReset" class="mini" title="back to the ship's laden range" hidden>↺ ship</button>
+          <label title="the neutron supercharge: ×4, or ×6 with the SCO Mk II drive">Supercharge <select id="hwyMult"><option value="4">×4</option><option value="6">×6</option></select></label>
+          <label title="lower takes longer detours to use neutron stars; 100 flies straighter">Efficiency <input type="number" id="hwyEff" min="1" max="100" step="1" inputmode="numeric"> %</label>
+        </div>
+        <div class="srow hwy-xopt">
+          <label title="FSD injections (jumponium) where they shorten the route"><input type="checkbox" id="hwyInject"> use injections</label>
+          <label title="do not route through the secondary stars of a system"><input type="checkbox" id="hwyNoSec"> exclude secondary stars</label>
+          <label title="your FSD is supercharged now (the first jump gets the boost)"><input type="checkbox" id="hwySuper"> already supercharged</label>
+        </div>
+        <div class="srow">
+          <button type="submit" id="hwyGo" class="go">Plot</button>
+          <button type="button" id="hwyClear">Clear route</button>
+          <span id="hwyStatus" role="status"></span>
+        </div>
+      </form>
+    </details>
+    <div id="hwyMapBox">
+      <div id="hwyMapWrap"><canvas id="hwyCanvas" aria-label="the route on the galaxy, top down: X across, Z up (towards the galactic core)"></canvas>
+        <div class="hwymapbtns"><button type="button" id="hwyZoomIn" title="zoom in">+</button><button type="button" id="hwyZoomOut" title="zoom out">−</button><button type="button" id="hwyFit" title="fit the whole route">fit route</button><button type="button" id="hwyGalaxy" title="show the whole galaxy">galaxy</button></div>
+        <div id="hwyMapNote" class="hwymapnote"></div>
+        <div class="hwylayers" role="group" aria-label="map layers (this browser)"><button type="button" data-layer="regions" aria-pressed="true" title="the galactic regions: tints and borders">regions</button><button type="button" data-layer="labels" aria-pressed="true" title="region and landmark names">labels</button><button type="button" data-layer="image" aria-pressed="true" title="your background image ([highway] background_image)" hidden>image</button></div>
+      </div>
+    </div>
+  </div>
 </section>
 <section id="searchView" hidden>
   <div class="pane" id="searchPane">

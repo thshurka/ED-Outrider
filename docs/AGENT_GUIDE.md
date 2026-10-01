@@ -18,9 +18,9 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | File | What it holds |
 |---|---|
 | `outrider/__init__.py` | `ROOT` (the repository), `RESOURCES_DIR` (`resources/`), `DATA_DIR` (`data/`): every default path starts from these. Modules with a CLI run as `python3 -m outrider.<name>` from the repository root |
-| `ed_outrider.py` | Almost everything: config (`settings_from`, `config_text`), the schema (`SCHEMA`, `RESET_JOURNAL_DATA`, `open_db`), the journal reader (`class Journals`), Spansh/EDSM (`class Spansh`), the live state and every summary the page shows (`class State`), Search (`class Searcher`), backups, the web app (`make_app`, `request_guard`) and `run()`/`main()` |
+| `ed_outrider.py` | Almost everything: config (`settings_from`, `config_text`), the schema (`SCHEMA`, `RESET_JOURNAL_DATA`, `open_db`), the journal reader (`class Journals`), Spansh/EDSM (`class Spansh`), the live state and every summary the page shows (`class State`), Search (`class Searcher`), backups, the web app (`make_app`, `request_guard`) and `run()`/`main()`. The Neutron Highway: `fleet_figures`/`fleet_range` (a Loadout's plotter inputs), `highway_rows`/`highway_match`/`highway_text` (Spansh's route as rows, which row a system is, the spoken line), `class Clipboard`, `Spansh.plot`, `Journals.note_fleet`/`highway_arrival` (fleet rows, progress and detours), `State.highway_*` (summary, view, plot, store, clear, copy, background) and `maybe_autotarget` (the stub); `highway_bg_file` (the map's own image: the configured file, image types only) |
 | `outrider/unsold.py` | The unsold cartographic + exobiology estimate (its own journal pass, run in a thread); also journal-folder auto-detection. Works alone from the command line |
-| `outrider/bio.py` | Exobiology predictor: spawn rules, colour variants, values; `--backtest`, `--update-rules` |
+| `outrider/bio.py` | Exobiology predictor: spawn rules, colour variants, values; `--backtest`, `--update-rules`; `region_layer` (the region map for the Highway map: the run-length grid, names, label points) |
 | `outrider/log.py` | The Log view: one-line summaries, read straight from the journal files on request |
 | `outrider/materials.py` | Material names, grades, caps, synthesis recipes, and folding material events into an inventory |
 | `outrider/speech.py` | Loads and checks `speech.json`; `KEYS` (every alert and its placeholders), `SAMPLES`, bans (`banned_path`: `data/speech_banned.json` for the shipped file, beside a copy of your own) |
@@ -28,7 +28,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding and presses it through a uinput virtual keyboard |
 | `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
-| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue |
+| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip) |
 | `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
 | `resources/speech.json` | Spoken lines per alert and personality (business, sarcastic, sweet, plus `_profane` lists) |
 | `resources/bio_rules.json` | Spawn rules and region map data fetched from upstream projects (refreshed at start when upstream changed) |
@@ -60,7 +60,9 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    returns `State.payload()`: position, systems, target, moments (priced by `moments_summary`), fuel,
    surface map, speech info and more. Other views fetch their own endpoints: `/api/system/{id64}`,
    `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
-   `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/status` and `/api/status.txt`.
+   `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/highway` (+ `/systems?q=`, `/background`; POST `/plot`,
+   `/clear`), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`. The payload carries only the highway line's facts
+   (`highway_summary`); the Highway tab fetches the route itself.
 7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
    spoken line from `line(key, vars, plain)`.
@@ -113,8 +115,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   sale_events...) and meta keys must be cleared in `RESET_JOURNAL_DATA`, or a re-read doubles them.
   Live-only data (positions from Status.json, button presses, Spansh answers, estimates made at the time:
   `sample_points`, `surface_rigs`, `surface_sites`, `mining_locations`, `arrival_verdicts`, `sale_estimates`,
-  `firsts_watch`, `bookmarks`, the Spansh cache) cannot be rebuilt and must **stay out** of it. Say which kind
-  a new table is in its schema comment.
+  `firsts_watch`, `bookmarks`, `highway_route` with its meta `highway`, the Spansh cache) cannot be rebuilt and
+  must **stay out** of it (backups carry them). `fleet_loadouts` (the latest Loadout per ShipID) is journal-derived.
+  Say which kind a new table is in its schema comment.
 - **Out-of-order and replayed lines.** Legacy folders are imported late and a re-read replays everything:
   guard current-state updates with `self.fresh(key, ts, ...)`, and anything that should only happen during
   live play (spoken moments about losses, positions, sales in progress) with `live_event(ts)`.
@@ -184,6 +187,15 @@ places above plus `data.defaults`.
 **A new spoken line.** `outrider.speech.KEYS["key"] = "when it is said: {placeholders}"`, `SAMPLES["key"]`, an entry
 in `speech.json` (`"when"` plus five lists), `line("key", vars, "plain fallback")` in page.js, and
 `LINE_SAMPLES.key`. Run the unit tests: they name what is missing.
+
+**A Spansh job (the Highway's plotters).** Spansh answers a plot with `{job}`; `Spansh.plot(url, params)` asks
+`SPANSH_RESULTS` every `HIGHWAY_POLL_S` (1.5 s) until `result` comes, gives up after `HIGHWAY_PLOT_TIMEOUT` (180 s),
+runs one plot at a time (`sem_plot`) and raises `HighwayError` in words for the page. The POST handler validates the
+body, starts the job as a background task (`State.highway_task`, cancelled by clear and at shutdown) and answers
+202 at once; the page polls `GET /api/highway` while `plotting.state` is `running`. Unit tests use a fake session,
+never Spansh; `verify.sh` points every `SPANSH_*` URL at a closed port and sets `Clipboard.TOOLS = ()`, so a
+scratch server neither plots nor touches the desktop clipboard. Moments about the route are kind `highway`
+(`what`: next, back, off_route, complete; plain `text`, no `speech.json` keys yet), only for `live_event` arrivals.
 
 **A new journal event.** Add its name to the right `*_EVENTS` tuple (or `WANTED` never lets the line through),
 handle it, decide journal-derived vs live-only, bump `PARSER_VERSION` if past journals matter, add a
