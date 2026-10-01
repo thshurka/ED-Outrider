@@ -3114,6 +3114,14 @@ def codex_new_group(g, known):
     return bool(g.get("best")) and g["best"].lower() not in species
 
 
+def codex_have(g, known):
+    """The colours of a group's likeliest species already in your codex in the region (`known` is codex_species()),
+    title-cased and sorted: what a ✦ on another colour of the same species says you have ("Lime", "Aquamarine")."""
+    best = (g.get("best") or "").lower()
+    return sorted(n.split(" - ", 1)[1].strip().title() for n in known[0]
+                  if best and " - " in n and n.split(" - ", 1)[0].strip() == best)
+
+
 def with_logged_variants(groups, logged):
     """Groups with the colour the journal logged for a genus on this body (own_organic's variant_name, known
     from the first sample) in place of the predicted candidates. `logged`: {genus: variant name}."""
@@ -6013,7 +6021,10 @@ class State:
                                "variants": g.get("variants") or [], "variant": g.get("variant"),
                                # the likeliest species (its colour variant, when settled) has no codex entry of
                                # yours in this region yet
-                               "codex_new": bool(region and g["genus"] not in got and codex_new_group(g, known_codex))}
+                               "codex_new": bool(region and g["genus"] not in got and codex_new_group(g, known_codex)),
+                               # the colours of that species you have logged in this region, for the ✦'s tooltip
+                               # ("new to your codex here: Bacterium Acies - White; you have Lime")
+                               "codex_have": codex_have(g, known_codex)}
                               for g in bio_groups],
                 "bio_potential": bio_val,
                 # undecided before the DSS: every genus it could be, and the range ("Stratum or Bacterium")

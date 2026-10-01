@@ -276,8 +276,8 @@ function renderStrip() {
         `Credits at login (${esc((cm.login_ts || "").replace("T", " ").slice(0, 16))} UTC)${cm.credits_login != null ? ": " + cm.credits_login.toLocaleString() : ""}` +
         ` plus exploration and exobiology sales since. Other spending and income (market, repairs, missions) is not tracked.`) +
     ln(shipLine) + ln(cm.earned ? `+${credits(cm.earned)} cr sold since login` : "") +
-    ln(["Explore", "Exobiologist"].filter(k => cm.ranks && cm.ranks[k]).map(k => { const r = cm.ranks[k];
-      return `<span title="${k === "Explore" ? "exploration" : "exobiology"} rank${r.progress != null ? `, ${r.progress}% to the next` : ""}">${k === "Explore" ? "Explorer" : "Exobiologist"}: <b>${esc(r.name)}</b>${r.progress != null ? ` <span class="unk">${r.progress}%</span>` : ""}</span>`; }).join(" · "));
+    ["Explore", "Exobiologist"].filter(k => cm.ranks && cm.ranks[k]).map(k => { const r = cm.ranks[k];
+      return ln(`<span title="${k === "Explore" ? "exploration" : "exobiology"} rank${r.progress != null ? `, ${r.progress}% to the next` : ""}">${k === "Explore" ? "Explorer" : "Exobiologist"}: <b>${esc(r.name)}</b>${r.progress != null ? ` <span class="unk">${r.progress}%</span>` : ""}</span>`); }).join("");
   const ns = data.next_stop, nsEl = document.getElementById("nextStopLn"), jr0 = effRange();
   nsEl.innerHTML = ns ? `<span title="your chosen next stop (clears when you arrive)">next stop:</span> <span class="copy" data-name="${esc(ns.name)}" title="click to copy">${esc(ns.name)}</span>` +
     (ns.distance != null ? ` · <b>${ns.distance.toLocaleString("en-US", {maximumFractionDigits: 1})} ly</b>${jr0 ? ` ≈ ${jumpsFor(ns.distance)} jump${jumpsFor(ns.distance) === 1 ? "" : "s"}` : ""}` : "") +
@@ -287,7 +287,8 @@ function renderStrip() {
     (p0.visits ? ` · <span title="arrivals in this system, from your journals">visit ${p0.visits}</span>` : "") : "";
   document.getElementById("streakLn").innerHTML = streakHtml(data.streak);
   const hz = horizon();
-  document.getElementById("horizonLn").innerHTML = hz ? `<span title="${esc(hz.text + ".\n" + hz.why)}">${esc(hz.text)}</span>` : "";
+  // the line keeps just the star; what "unreported" means is in the tooltip
+  document.getElementById("horizonLn").innerHTML = hz ? `<span title="${esc(hz.text + ".\n" + hz.why)}">${esc(hz.text.split(" — ")[0])}</span>` : "";
   // fuel tile
   const f = data.fuel, tf = document.getElementById("tFuel"), el = document.getElementById("fuelLine");
   tf.className = "tile"; tf.title = "";
@@ -815,9 +816,13 @@ function surfaceLine(L) {
   return bits.join(" · ") || `<span class="unk">nothing marked</span>`;
 }
 // Now's map (beside its legend, below on a narrow screen) and the strip's small copy
-let surfLegendKey = null;
+// a legend's title and rows, written only when they change (a rewrite would drop a hover or a half-done click)
+function setSurfLegend(el, s, L, cfg) {
+  const html = `<div class="lg-title">${esc(s.body || "")}${s.alt != null && !s.down ? ` <span class="unk">${Math.round(s.alt)} m up</span>` : ""}</div>` + surfaceLegend(s, L, cfg);
+  if (html !== el._surfKey) { el._surfKey = html; el.innerHTML = html; }
+}
 // a rig picked up without a tap (the game writes nothing when one is): marked picked up from its slot's ✕
-document.getElementById("nowMapLegend").addEventListener("click", async e => {
+for (const id of ["nowMapLegend", "ovMapLegend"]) document.getElementById(id).addEventListener("click", async e => {
   const x = e.target.closest("[data-rigremove]"); if (!x) return;
   e.preventDefault();
   if (!confirm(`Mark rig ${x.dataset.rign} as picked up? What it collected stays as a saved site.`)) return;
@@ -826,21 +831,76 @@ document.getElementById("nowMapLegend").addEventListener("click", async e => {
   catch (err) { r = {error: err.message}; }
   if (r.error) toast(`could not mark the rig: ${r.error}`);
 });
+// How Now fits its map on the screen (pure, so the tests can check it). vw, vh: the window; width: Now's content width;
+// top: where the map's canvas starts on the page (in the chosen arrangement); gap: the space between columns.
+// A wide landscape screen puts the map in a column right of the lines (the legend in a third, beside it), sized to
+// the height left and what the lines need; otherwise the map sits under the lines, sized to the height left, with
+// the legend beside it when that costs the map little and below it (scrolling if it must) when not.
+const NOW_MAP_MIN = 240, NOW_LEGEND_MIN = 260;
+const nowMapSplit = (vw, vh) => vw >= 1100 && vw > vh;
+function nowMapFit({vw, vh, width, top, gap = 24, bottom = 16}) {
+  const split = nowMapSplit(vw, vh), H = vh - top - bottom;
+  if (split) {
+    const textW = Math.max(480, width * 0.3), legendW = Math.round(Math.min(420, Math.max(NOW_LEGEND_MIN, width * 0.18)));
+    const S = Math.max(NOW_MAP_MIN, Math.floor(Math.min(H, width - textW - legendW - 2 * gap)));
+    return {split, beside: true, S, legendW, H};
+  }
+  const under = Math.floor(Math.min(width, H)), side = Math.floor(Math.min(width - NOW_LEGEND_MIN - gap, H));
+  const beside = width >= 700 && side >= under * 0.8;
+  return {split, beside, S: Math.max(NOW_MAP_MIN, Math.min(width, beside ? side : under)), legendW: null, H};
+}
+// How Overview fits the map in the box under the system table (pure): width, height: the box inside its padding.
+// The legend beside the map when a legend column of OV_LEGEND_MIN still leaves the map OV_MAP_MIN; otherwise the map
+// on top (sized to leave the legend a few lines) and the legend under it, scrolling. The map is never wider than the
+// box or taller than it.
+const OV_MAP_MIN = 160, OV_LEGEND_MIN = 220;
+function ovMapFit({width, height, gap = 12}) {
+  width = Math.max(0, Math.floor(width)); height = Math.max(0, Math.floor(height));
+  const side = Math.min(height, width - OV_LEGEND_MIN - gap);
+  if (side >= OV_MAP_MIN) return {beside: true, S: side, legendW: width - side - gap};
+  return {beside: false, S: Math.max(Math.min(120, width, height), Math.min(width, height - 90)), legendW: null};
+}
 function renderSurface() {
   const s = data && data.surface, show = surfaceShows(s), cfg = surfaceCfg();
-  const box = document.getElementById("nowMap"), strip = document.getElementById("obMap");
+  const box = document.getElementById("nowMap"), strip = document.getElementById("obMap"), nv = document.getElementById("nowView");
   const onNow = show && view === "now";
   box.hidden = !onNow;
+  nv.classList.toggle("mapon", onNow);
+  nv.classList.toggle("mapsplit", onNow && nowMapSplit(innerWidth, innerHeight));
   if (onNow) {
-    // beside the legend (the canvas takes what the legend leaves), or above it on a narrow screen (the CSS decides)
-    const w = box.clientWidth || 600, wide = getComputedStyle(box).flexDirection !== "column";
-    const S = Math.round(Math.max(200, Math.min(wide ? Math.min(w * 0.6, w - 280) : w, wide ? Math.max(320, innerHeight * 0.7) : 560)));
-    const L = surfaceLayout(s, cfg, S);
+    const cs = getComputedStyle(nv), px = v => parseFloat(v) || 0;
+    const width = (nv.clientWidth || innerWidth) - px(cs.paddingLeft) - px(cs.paddingRight);
+    const smap = box.querySelector(".smap"), legend = document.getElementById("nowMapLegend");
+    const top = smap.getBoundingClientRect().top + (window.scrollY || 0);
+    const F = nowMapFit({vw: innerWidth, vh: innerHeight, width, top, gap: px(getComputedStyle(box).columnGap) || 24, bottom: Math.max(12, px(cs.paddingBottom))});
+    box.classList.toggle("stack", !F.beside);
+    legend.style.flexBasis = F.legendW ? F.legendW + "px" : "";
+    legend.style.maxHeight = F.split ? Math.max(F.S, F.H) + "px" : "";
+    const L = surfaceLayout(s, cfg, F.S);
     drawSurface(document.getElementById("nowMapCanvas"), L, false);
-    const html = `<div class="lg-title">${esc(s.body || "")}${s.alt != null && !s.down ? ` <span class="unk">${Math.round(s.alt)} m up</span>` : ""}</div>` + surfaceLegend(s, L, cfg);
-    if (html !== surfLegendKey) { surfLegendKey = html; document.getElementById("nowMapLegend").innerHTML = html; }
+    setSurfLegend(legend, s, L, cfg);
   }
-  const onStrip = show && cfg.strip && view !== "now";
+  // Overview: the same map and legend in the lower half of the system pane, where a body's detail panel goes; an
+  // open body panel takes the spot, and the map comes back when it is closed. Not while the pane shows another system.
+  const ovBox = document.getElementById("ovMap"), hv = document.getElementById("hereView");
+  const onOv = show && view === "overview" && !ovState.collapsed && !selectedBody && !pinnedSystem;
+  ovBox.hidden = !onOv;
+  hv.classList.toggle("mapon", onOv);
+  document.getElementById("ovHere").classList.toggle("hasMap", onOv);
+  // the pane ends at the bottom of the window (not the body panel's 78vh, which runs under it on a tall header), so
+  // the whole map is in view without scrolling; never under 420 px (then the page scrolls, as it did before)
+  hv.style.height = onOv ? Math.round(Math.max(420, Math.min(innerHeight * 0.78, innerHeight - hv.getBoundingClientRect().top - (window.scrollY || 0) - 12))) + "px" : "";
+  if (onOv) {
+    const cs = getComputedStyle(ovBox), px = v => parseFloat(v) || 0, legend = document.getElementById("ovMapLegend");
+    const F = ovMapFit({width: ovBox.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight),
+                        height: ovBox.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom), gap: px(cs.columnGap) || 12});
+    ovBox.classList.toggle("stack", !F.beside);
+    legend.style.flexBasis = F.beside ? F.legendW + "px" : "";
+    const L = surfaceLayout(s, cfg, F.S);
+    drawSurface(document.getElementById("ovMapCanvas"), L, F.S < 200);
+    setSurfLegend(legend, s, L, cfg);
+  }
+  const onStrip = show && cfg.strip && view !== "now" && !onOv;
   strip.hidden = !onStrip;
   if (onStrip) {
     const L = surfaceLayout(s, cfg, 120);
@@ -1561,26 +1621,39 @@ const orList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.l
 const nBodies = n => `${n} bod${n === 1 ? "y" : "ies"}`;
 // a planet class for the voice: "Earth-like world", "terraformable high metal content world"
 const spokenClass = (sub, tf) => `${tf ? "terraformable " : ""}${String(sub || "planet").replace(/^(?!Earth)\w/, c => tf ? c.toLowerCase() : c)}`;
+// the spoken reason a body with a species new to your codex here is on the list: said whenever it is, so a body
+// under your bio threshold that the ✦ tick keeps is heard as a codex find, not as money
+const codexWhy = b => codexNewCounts && b.codex_new ? ", new to your codex here" : "";
+// The spoken work list shared by the FSS debrief and the leaving alert: three items at most (the two best maps,
+// then the best bio bodies; either takes a slot the other leaves free), then "and N more". "biology" is said
+// once for the bio bodies, and what every bio body said shares is said once after them ("both new to your codex
+// here, with first footfall"); an attribute only some share stays on those. Runs under way keep their "(Stratum 1
+// of 3)". A long line is slow to hear, and Piper cuts one past 1,000 characters at a sentence end.
+const mapSaid = u => `${u.body}, ${spokenClass(u.subtype, u.terraformable)}${u.increment ? `, ${credits(u.increment)} to map` : ""}`;
+function workSaid(w, runsOf) {
+  const maps = w.maps.map(u => ({v: u.increment || 0, u})).sort((a, b) => b.v - a.v);
+  const bio = w.bio_pending.map(b => { const runs = runsOf(b); return {v: runs.length ? Infinity : pendingWorth(b), b, runs}; })
+    .sort((a, b) => b.v - a.v);
+  const mapsTold = maps.slice(0, Math.max(2, 3 - bio.length)), bioTold = bio.slice(0, 3 - mapsTold.length);
+  const n = bioTold.length, codexAll = n > 1 && bioTold.every(x => codexWhy(x.b)),
+        ffAll = n > 1 && bioTold.every(x => x.b.potential && x.b.factor === 5);
+  const bits = bioTold.map((x, i) => `${i ? "on" : "biology on"} ${x.b.body}${x.runs.length ? ` (${andList(x.runs)})` : ""}` +
+    `${codexAll ? "" : codexWhy(x.b)}${x.b.potential ? `, up to ${credits(pendingWorth(x.b))}${!ffAll && x.b.factor === 5 ? " with first footfall" : ""}` : ""}`);
+  const shared = [codexAll && `${n === 2 ? "both" : "all"} new to your codex here`, ffAll && (codexAll ? "with first footfall" : `${n === 2 ? "both" : "all"} with first footfall`)].filter(Boolean);
+  const group = n ? (n > 1 ? `${bits.slice(0, -1).join(", ")}, and ${bits[n - 1]}` : bits[0]) + (shared.length ? `; ${shared.join(", ")}` : "") : "";
+  const more = w.maps.length + w.bio_pending.length - mapsTold.length - n;
+  return andList([...mapsTold.map(x => mapSaid(x.u)), group].filter(Boolean)) + (more > 0 ? `, and ${more} more` : "");
+}
 // what the FSS debrief names: the maps and the bio your thresholds keep, most valuable first, three at most
 function worthSaying(l) {
   const w = worthLeavingFor(l); if (!w || w.clean) return "";
-  const maps = w.maps.map(u => ({v: u.increment || 0, t: `${u.body}, ${spokenClass(u.subtype, u.terraformable)}${u.increment ? `, ${credits(u.increment)} to map` : ""}`}));
-  const bio = w.bio_pending.map(b => ({v: pendingWorth(b), t: `biology on ${b.body}${b.potential ? `, up to ${credits(pendingWorth(b))}${b.factor === 5 ? " with first footfall" : ""}` : ""}`}));
-  const items = [...maps.sort((a, b) => b.v - a.v).slice(0, 2), ...bio.sort((a, b) => b.v - a.v).slice(0, 2)].slice(0, 3).map(x => x.t);
-  const more = w.maps.length + w.bio_pending.length - items.length;
-  return andList(items) + (more > 0 ? `, and ${more} more` : "");
+  return workSaid(w, () => []);
 }
-// the leaving alert's spoken words: three items at most, picked as the FSS debrief picks them (the two best maps,
-// then the two best bio bodies, a sampling run under way first), then "and N more"; the notification keeps the
-// whole list. A long line is slow to hear, and Piper cuts one past 1,000 characters at a sentence end.
+// the leaving alert's spoken words: picked as the FSS debrief picks them, a sampling run under way first; the
+// notification keeps the whole list
 function leavingSaid(l) {
   const w = worthLeavingFor(l); if (!w || w.clean) return "";
-  const maps = w.maps.map(u => ({v: u.increment || 0, t: `${u.body}, ${spokenClass(u.subtype, u.terraformable)}${u.increment ? `, ${credits(u.increment)} to map` : ""}`}));
-  const bio = w.bio_pending.map(b => { const runs = Object.entries(b.partial || {}).map(([g, n]) => `${g} ${n} of 3`);
-    return {v: runs.length ? Infinity : pendingWorth(b), t: `biology on ${b.body}${runs.length ? ` (${andList(runs)})` : ""}${b.potential ? `, up to ${credits(pendingWorth(b))}${b.factor === 5 ? " with first footfall" : ""}` : ""}`}; });
-  const items = [...maps.sort((a, b) => b.v - a.v).slice(0, 2), ...bio.sort((a, b) => b.v - a.v).slice(0, 2)].slice(0, 3).map(x => x.t);
-  const more = maps.length + bio.length - items.length;
-  return andList(items) + (more > 0 ? `, and ${more} more` : "");
+  return workSaid(w, b => Object.entries(b.partial || {}).map(([g, n]) => `${g} ${n} of 3`));
 }
 // leaving a body: runs under way always; the DSS's untouched genera (over your bio threshold, or unpriced) only
 // when you touched down or sampled there this visit
@@ -2189,6 +2262,7 @@ ovDivider.addEventListener("pointerdown", e => {
     const fromRight = (r.right - ev.clientX) / r.width * 100, fromLeft = (ev.clientX - r.left) / r.width * 100;
     ovState.split = Math.round(Math.max(20, Math.min(70, ovState.flip ? fromLeft : fromRight)));
     ov.style.setProperty("--ovw", ovState.split + "%");
+    if (data) renderSurface();   // the overview's surface map follows the pane's width
   };
   const up = () => { for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) ovDivider.removeEventListener(ev, up);
     ovDivider.removeEventListener("pointermove", move);
@@ -3886,6 +3960,7 @@ if (soundOn) audio();
 drawSoundBtn();
 
 let runId = null, lastArrival = null, lastUnsoldLevel = null, lastCarrierMoved = null, lastCodexTs = null, lastDockTs = null;
+let undiscSaid = null;   // the system whose arrival alert said "undiscovered" out loud (the briefing skips the word)
 let lastMomentSeq = 0, lastSaleTs = null, lastPosId, lastLowFlag = false, hullLatch = 0, saleBanner = null;
 let lastUnderJumps = false, fuelTargetSys = null;   // the "under N jumps" latch; the system a fuel_target card came from
 const hullBand = h => !h || h.pct == null ? 0 : h.pct < 25 ? 2 : h.pct < 50 ? 1 : 0;
@@ -4132,7 +4207,9 @@ function onData() {
       }
       else if (m.kind === "jumponium" && m.jumponium) sayJumponium(m.jumponium);
       else if (m.kind === "arrival_brief") {   // after the honk (or 12 s after arriving without one): one sentence
-        const text = arrivalBriefText(m);
+        let text = arrivalBriefText(m);
+        // the arrival alert has just said this system is undiscovered: the briefing starts at the bodies, not twice
+        if (undiscSaid && undiscSaid === m.system_name && text.startsWith("Undiscovered. ")) text = text.slice(14);
         briefFacts = {sys: m.system, m};
         if (pendingRegion && pendingRegion.sys === String(m.system) && m.region && text) pendingRegion = null;   // said in it
         // "Routine systems: sound only": the soft routine sound in place of the words (only where they would be said)
@@ -4301,11 +4378,13 @@ function onData() {
     const sk = a.streak || {}, cfg = streakCfg();
     const newRun = cfg.new > 1 && a.verdict === "new" && sk.new === cfg.new;
     const knownRun = cfg.known > 1 && sk.known === cfg.known && ["complete", "known"].includes(a.verdict);
-    if (a.undiscovered && a.first_visit)   // nobody has been here before you (your own unsold find does not count twice)
+    if (a.undiscovered && a.first_visit) {   // nobody has been here before you (your own unsold find does not count twice)
+      if (speechOn && alertSpeak.arrival) undiscSaid = a.name;   // the briefing then leaves out its "Undiscovered."
       alertOut("arrival", `${a.name}: ${a.wrong ? "actually undiscovered" : "undiscovered"}${newRun ? ` · ${sk.new} in a row` : ""}`,
                a.wrong ? "the fanfare was deserved after all" : "you are the first here",
                {sound: a.sound || null, say: () => newRun ? line("streak_new", {count: sk.new}, `${sk.new} undiscovered systems in a row.`)
                                                           : line("arrival_undiscovered", {system: a.name}, `${a.name} is undiscovered. You are the first here.`)});
+    }
     else if (a.wrong && !a.undiscovered)   // correct a wrong fanfare out loud
       alertOut("arrival", `${a.name}: already discovered`, "someone was here before you",
                {sound: a.sound || null, say: () => line("arrival_discovered", {system: a.name}, `${a.name}: already discovered`)});
@@ -4711,10 +4790,18 @@ const maxBonus = () => maxBonusCfg ?? (data && data.defaults && data.defaults.ma
 const maxOf = x => maxBonus() || x.value_max_base == null ? x.value_max : x.value_max_base;
 // ✦: the likeliest species of a genus has no codex entry of yours in this region (codex entries, and their
 // vouchers, are per region). A codex entry is per colour variant: when the server could settle the colour
-// (x.variants) it checked those; otherwise it checked the species, which never over-flags.
-const codexMark = (x, region) => x && x.codex_new
-  ? ` <span class="cxnew" title="new to your codex in ${esc(region || "this region")} (${(x.variants || []).length
-      ? `variant ${esc(x.variants.join(" or "))}` : "likeliest species; the colour variant may differ"})">✦</span>` : "";
+// (x.variants) it checked those; otherwise it checked the species, which never over-flags. The title names the new
+// colour and the ones of that species you have logged there (x.codex_have), since two bodies with the same likeliest
+// species can each be new: "new to your codex in Inner Orion Spur: Bacterium Acies - White; you have Lime".
+const codexMark = (x, region) => {
+  if (!x || !x.codex_new) return "";
+  const have = x.codex_have || [], colour = v => v.split(" - ").pop();
+  const fresh = (x.variants || []).filter(v => !have.includes(colour(v)));
+  const what = fresh.length ? fresh.join(" or ")
+    : x.best ? `${x.best} (likeliest species; the colour variant may differ)` : "likeliest species; the colour variant may differ";
+  return ` <span class="cxnew" title="new to your codex in ${esc(region || "this region")}: ${esc(what)}${
+    fresh.length && have.length ? `; you have ${esc(have.join(", "))}` : ""}">✦</span>`;
+};
 // The colour the likeliest species should show, muted after the guess ("Teal", "Lime or Green"); "" when unsure.
 const variantTxt = x => x && (x.variants || []).length
   ? ` <span class="unk" title="expected colour variant">${esc(x.variants.map(v => v.split(" - ").pop()).join(" or "))}</span>` : "";

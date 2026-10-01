@@ -160,6 +160,16 @@ main > #hereView.detail > #bodyPanel { position: sticky; top: calc(var(--head-h,
 #ovHere #hereView.detail { display: flex; flex-direction: column; height: 78vh; }
 #ovHere #hereView.detail > #hereMain { flex: 1 1 50%; overflow: auto; min-height: 0; }
 #ovHere #hereView.detail > #bodyPanel { flex: 1 1 50%; overflow: auto; min-height: 0; border-top: 2px solid var(--line); margin-top: 6px; padding-top: 6px; }
+/* the surface map in the overview: the lower half of the system pane while no body panel is open (the pane's height
+   is set to end at the window's bottom; the table keeps a few rows, and the map inside is sized by ovMapFit) */
+#ovHere #hereView.mapon { display: flex; flex-direction: column; height: 78vh; }
+#ovHere #hereView.mapon > #hereMain { flex: 1 1 0; overflow: auto; min-height: 140px; }
+#ovMap { flex: 0 1 50%; min-height: 0; overflow: hidden; display: flex; gap: 12px; align-items: stretch; border-top: 2px solid var(--line); margin-top: 6px; padding-top: 6px; }
+#ovMap .smap { flex: 0 0 auto; } #ovMap canvas { display: block; touch-action: manipulation; }
+#ovMap .smap-legend { flex: 1 1 auto; min-width: 0; overflow: auto; font-size: 13px; }
+#ovMap .smap-legend .lg-slots { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+#ovMap.stack { flex-direction: column; align-items: center; } #ovMap.stack .smap-legend { width: 100%; flex: 1 1 0; }
+#overView.stack #ovHere.hasMap { max-height: 75vh; }
 #bodyPanel h3 { margin: 0 0 6px; padding: 6px 0; font-size: 15px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
   position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
 #bodyPanel h3 b { color: var(--accent); } #bodyPanel h3 .cls { color: var(--muted); font-weight: 400; font-size: 13px; }
@@ -299,6 +309,9 @@ button.icon.hushbtn.on { border-color: var(--warn); }
 .hushmenu button:hover { border-color: var(--accent); }
 .hushmenu .unk { font-size: 11px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 10px; }
+/* wide screens: Where gets half as much again (its lines are the longest), Commander less (short lines, ranks stacked) */
+@media (min-width: 1200px) { .tiles { grid-template-columns: 1.5fr 0.75fr repeat(4, 1fr); } }
+@media (min-width: 640px) and (max-width: 1199px) { #tWhere { grid-column: span 2; } }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 7px; min-width: 0; }
 .tile .lbl { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
 .tile .val { font-size: 15px; font-weight: 600; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -513,6 +526,8 @@ main.nearPinned #hereSchematic .sbody { width: 64px; }
 .warnc { color: var(--warn); }
 
 .cxnew { color: var(--accent); font-weight: 700; cursor: help; }
+/* Now is read at a glance, often on a tablet with no hover: spell the ✦ out there */
+body.nowmode .cxnew::after { content: " new codex"; font-weight: 600; }
 
 .boosted { color: #5ce1e6; } .hazard { color: var(--warn); }
 
@@ -639,3 +654,35 @@ details.speechlog { margin-top: 12px; } details.speechlog summary { cursor: poin
 @media (max-width: 699px) { #nowMap { flex-direction: column; align-items: center; } .smap-legend { width: 100%; } }
 #obMap { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
 .smap-line { font-size: 13px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Now with its map on a wide landscape screen: the lines left, the map and its legend right, all on one screen
+   (renderSurface sizes the canvas to the height left; the text sizes follow the height as well as the width) */
+#nowView.mapsplit { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr;
+  grid-template-areas: "bar map" "body map"; column-gap: 2vw; align-content: start; }
+#nowView.mapsplit #nowBar { grid-area: bar; float: none; justify-self: end; margin: 0 0 4px; }
+#nowView.mapsplit #nowBody { grid-area: body; min-width: 0; }
+#nowView.mapsplit #nowMap { grid-area: map; margin-top: 0; border-top: 0; padding-top: 0; }
+#nowView.mapsplit .smap-legend { flex: 0 0 auto; overflow-y: auto; font-size: clamp(13px, min(1vw, 1.8vh), 20px); }
+#nowView.mapsplit .smap-legend .lg-slots { grid-template-columns: 1fr; }
+#nowView.mapsplit .now-sys { font-size: clamp(30px, min(2.6vw, 6vh), 80px); margin-bottom: 1.2vh; }
+#nowView.mapsplit .now-line { font-size: clamp(18px, min(1.65vw, 3vh), 40px); margin: 1vh 0; }
+#nowView.mapsplit .now-body { font-size: clamp(16px, min(1.3vw, 2.4vh), 30px); }
+#nowView.mapsplit .now-card { font-size: clamp(18px, min(1.5vw, 2.8vh), 40px); padding: .8vh 1vw; }
+#nowView.mapsplit .now-small, #nowView.mapsplit .now-cap { font-size: clamp(15px, min(1.1vw, 2vh), 26px); }
+#nowView.mapsplit .now-caps { margin-top: 1.5vh; }
+/* under the lines (portrait, phone): the legend below the map when beside it would cost the map too much */
+#nowMap.stack { flex-direction: column; align-items: center; } #nowMap.stack .smap-legend { width: 100%; flex-basis: auto; }
+/* a phone with the map under the lines: the lines a little smaller, so the map has room */
+@media (max-width: 640px) {
+  #nowView.mapon .now-sys { font-size: 30px; margin-bottom: 1vh; }
+  #nowView.mapon .now-line { font-size: 18px; margin: 1vh 0; } #nowView.mapon .now-body { font-size: 16px; }
+  #nowView.mapon .now-small, #nowView.mapon .now-cap { font-size: 15px; } #nowView.mapon .now-caps { margin-top: 1vh; }
+  #nowView.mapon .now-card { font-size: 17px; padding: 6px 10px; margin: 1vh 0; }
+}
+/* a tablet in portrait with the map under the lines: the same, a step down from the no-map sizes */
+@media (min-width: 641px) {
+  #nowView.mapon:not(.mapsplit) .now-sys { font-size: clamp(36px, 5.5vw, 80px); margin-bottom: 1.2vh; }
+  #nowView.mapon:not(.mapsplit) .now-line { font-size: clamp(20px, 2.8vw, 40px); margin: 1vh 0; }
+  #nowView.mapon:not(.mapsplit) .now-card { font-size: clamp(20px, 2.8vw, 44px); padding: 1vh 1.4vw; margin: 1vh 0; }
+  #nowView.mapon:not(.mapsplit) .now-body { font-size: clamp(18px, 2.2vw, 30px); }
+  #nowView.mapon:not(.mapsplit) .now-small, #nowView.mapon:not(.mapsplit) .now-cap { font-size: clamp(16px, 1.9vw, 26px); }
+}

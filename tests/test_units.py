@@ -1277,6 +1277,24 @@ class BioColours(unittest.TestCase):
         self.assertFalse(ed_outrider.codex_new_group(lg, known))
         self.assertIs(ed_outrider.with_logged_variants([g], {})[0], g)
 
+    def test_codex_have_names_logged_colours(self):
+        # Smojooe AR-E b25-4, 2026-09-30: Acies - Lime and - Aquamarine logged in the Inner Orion Spur, body 6's
+        # tellurium predicts White: its ✦ is right, and the tooltip says which colours you already have
+        db = ed_outrider.open_db(":memory:")
+        self.addCleanup(db.close)
+        db.executemany("INSERT INTO codex (ts, entry_id, name, region) VALUES ('t', ?, ?, ?)",
+                       [(2320401, "Bacterium Acies - Lime", "Inner Orion Spur"),
+                        (2320406, "Bacterium Acies - Aquamarine", "Inner Orion Spur"),
+                        (2320407, "Bacterium Acies - White", "Norma Arm"),        # another region: not yours here
+                        (2320201, "Bacterium Aurasus - Teal", "Inner Orion Spur")])
+        known = ed_outrider.codex_species(db, "Inner Orion Spur")
+        g = {"genus": "Bacterium", "best": "Bacterium Acies", "variants": ["Bacterium Acies - White"]}
+        self.assertTrue(ed_outrider.codex_new_group(g, known))
+        self.assertEqual(ed_outrider.codex_have(g, known), ["Aquamarine", "Lime"])
+        self.assertEqual(ed_outrider.codex_have(dict(g, best="Bacterium Vesicula"), known), [])
+        self.assertEqual(ed_outrider.codex_have(dict(g, best=None), known), [])
+        self.assertEqual(ed_outrider.codex_have(g, ed_outrider.codex_species(db, None)), [])
+
     def test_by_genus_carries_variants(self):
         cands = [{"name": "Bacterium Aurasus", "genus": "Bacterium", "value": 1000000, "variants": ["Bacterium Aurasus - Teal"]},
                  {"name": "Bacterium Vesicula", "genus": "Bacterium", "value": 500000, "variants": []}]

@@ -622,7 +622,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       brief: ["2 biological signals, 2 of Stratum, Bacterium or Fungoida, 1.0M to 20.0M, first footfall times five",
               "1 biological signal, up to 3.0M, first footfall times five"],
       pop: [true, true, true, true, true, true],
-      leaving: "A 1, Water world, 900k to map, biology on C 4, up to 20.0M and biology on C 3, up to 20.0M, and 2 more",
+      leaving: "A 1, Water world, 900k to map and biology on C 4, up to 20.0M, and on C 3, up to 20.0M, and 2 more",
       backup: ["backed up 3 h ago · 1 journal not archived (…) back up now", true, true, true],
       doc: [2.5, false, true], styles: true, imp: [1, "speechStyles"]};
     const want2 = {warned: "Stratum,Tussock", noWarn: false, kept: "Bacterium", gone: null, threw: 1, seqOk: true, pageError: true};
@@ -966,7 +966,10 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     const w = dom.window, before = errors.length, got = {}, bad = [];
     got.variant = w.eval(`[variantTxt({variants: ["Bacterium Aurasus - Teal"]}), variantTxt({variants: ["Fungoida Setisis - Yellow", "Fungoida Setisis - Grey"]}), variantTxt({variants: []}), variantTxt(null)]
       .map(h => h.replace(/<[^>]+>/g, "").trim())`);
-    got.mark = w.eval(`[codexMark({codex_new: true, variants: ["Bacterium Aurasus - Teal"]}, "Inner Orion Spur"), codexMark({codex_new: true, variants: []}, "X"), codexMark({codex_new: false, variants: ["A - B"]})]
+    got.mark = w.eval(`[codexMark({codex_new: true, variants: ["Bacterium Aurasus - Teal"]}, "Inner Orion Spur"), codexMark({codex_new: true, variants: []}, "X"), codexMark({codex_new: false, variants: ["A - B"]}),
+      codexMark({codex_new: true, best: "Bacterium Acies", variants: ["Bacterium Acies - White"], codex_have: ["Aquamarine", "Lime"]}, "Inner Orion Spur"),
+      codexMark({codex_new: true, best: "Fungoida Setisis", variants: ["Fungoida Setisis - Yellow", "Fungoida Setisis - Grey"], codex_have: ["Yellow"]}, "Y"),
+      codexMark({codex_new: true, best: "Bacterium Vesicula", variants: [], codex_have: []}, "Z")]
       .map(h => (h.match(/title="([^"]*)"/) || [])[1] || "")`);
     const here = w.eval("data.position && data.position.name");
     if (here) {
@@ -978,8 +981,12 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     } else got.find = ["here", true];   // no position yet on this server: nothing to look up locally
     got.long = (await fetch(base + "api/find?name=" + "x".repeat(101))).status;
     const want = {variant: ["Teal", "Yellow or Grey", "", ""],
-                  mark: ["new to your codex in Inner Orion Spur (variant Bacterium Aurasus - Teal)",
-                         "new to your codex in X (likeliest species; the colour variant may differ)", ""],
+                  mark: ["new to your codex in Inner Orion Spur: Bacterium Aurasus - Teal",
+                         "new to your codex in X: likeliest species; the colour variant may differ", "",
+                         // another colour of a species you logged here: name it and the colours you have
+                         "new to your codex in Inner Orion Spur: Bacterium Acies - White; you have Aquamarine, Lime",
+                         "new to your codex in Y: Fungoida Setisis - Grey; you have Yellow",
+                         "new to your codex in Z: Bacterium Vesicula (likeliest species; the colour variant may differ)"],
                   find: ["here", true], long: 400};
     for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
     const goodS3 = !bad.length && errors.length === before;
@@ -1063,10 +1070,11 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     w.eval(`data.position = Object.assign({}, data.position || {x: 0, y: 0, z: 0, name: "Here"}, {id64: 4242, id: "4242"});
       data.hush = {mode: "jump", until: null, left: null, sys: "4242"}; onHush(false)`);
     got.hushed = w.eval("hushed()");
+    // read the label at once: a live poll during the wait below would replace this made-up hush state
+    got.label = w.document.getElementById("hushLbl").textContent;
     w.eval('alertOut("find", "A find", "", {say: "A find."}); alertOut("hull", "Hull at 40%", "", {tag: "hull", say: "Hull at 40 percent."})');
     await sleep(1400);   // the danger sound plays first (900 ms)
     got.hush = [fateOf("Quiet until the next jump."), fateOf("A find"), fateOf("Hull at 40 percent.")];
-    got.label = w.document.getElementById("hushLbl").textContent;
     w.eval('data.position = Object.assign({}, data.position, {id64: 4243, id: "4243"})');   // the jump
     got.afterJump = w.eval("hushed()");
     w.eval("data.hush = null; onHush(false)");
@@ -1342,6 +1350,10 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     got.briefOpens = run({kind: "arrival_brief", system: sys, system_name: "Here", undiscovered: true, visits: 1, body_count: 5, star_class: "K",
                           region: {region: "Norma Arm", spoken: "the Norma Arm", count: 3}}).map(c => [c[0], c[3]]);
     got.pendingCleared = w.eval("pendingRegion === null");
+    // the arrival alert already said "undiscovered" out loud: the briefing starts at the bodies
+    w.eval('undiscSaid = "Here2"');
+    got.briefSkip = run({kind: "arrival_brief", system: sys, system_name: "Here2", undiscovered: true, visits: 1, body_count: 5, star_class: "K"}).map(c => [c[0], c[3]]);
+    w.eval("undiscSaid = null");
     got.routine = w.eval(`isRoutine({undiscovered: false, visits: 2, all_found: true, star_class: "K", worth: [], bio: null, region: {region: "X"}})`);
     // with the briefing not spoken, its own line (the arrival row, the region key)
     w.eval("alertSpeak.brief = false");
@@ -1372,7 +1384,8 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       strip: "In progress elsewhere: Fungoida Setisis 2/3 on B 2. A new species discards it.",
       dropped: [["sampling", "Fungoida Setisis 2/3 discarded", null, null, "a card only: never spoken"]],
       regionWait: [], regionToast: ["Entering Norma Arm"],
-      briefOpens: [["brief", "Entering the Norma Arm. Undiscovered. 5 bodies. Scoopable K star."]], pendingCleared: true, routine: false,
+      briefOpens: [["brief", "Entering the Norma Arm. Undiscovered. 5 bodies. Scoopable K star."]], pendingCleared: true,
+      briefSkip: [["brief", "5 bodies. Scoopable K star."]], routine: false,
       regionAlone: [["arrival", "Entering Norma Arm", "region", "Entering the Norma Arm.", null]],
       jpDefault: [false, false, false],
       jpOff: [["fss", "All 6 found. Nothing worth staying for."], ["jumponium", "3 has polonium, 1.3 percent."]], jpOffToast: 0,
@@ -1549,7 +1562,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       o.ship = lg.querySelector(".lg-ship").textContent; o.site = (lg.querySelector('[data-tag="U1"]') || {}).textContent;
       o.loc = (lg.querySelector('[data-tag="L3"]') || {}).textContent;
       // the strip's copy: off Now, with the setting ticked
-      store.set("surfaceCfg", {strip: true}); view = "overview"; render();
+      store.set("surfaceCfg", {strip: true}); view = "here"; render();
       o.strip = !document.getElementById("obMap").hidden && document.getElementById("obMapLine").textContent;
       o.nowMapOffNow = document.getElementById("nowMap").hidden;
       // settings: the dialog's inputs, export, import and reset
@@ -1584,6 +1597,129 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodM2;
     console.log(goodM2 ? "OK" : "FAIL", "| M2 surface map |", goodM2 ? "show/hide, heading-up, rings to scale, rig slots, chevron, legend, strip, settings" : JSON.stringify({want, got}), errors.slice(before));
   }
+  // M2 fit: Now's map fits the screen. A wide landscape screen gets two columns (the map sized to the height left and
+  // what the lines need), a portrait tablet or phone the map under the lines sized to the height left; the classes
+  // follow the map shown and hidden
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, v0 = view, s0 = data.surface;
+      // Now's padding is 3vh 4vw: width = vw - 8vw, the split map starts at the top padding
+      o.big = nowMapFit({vw: 2576, vh: 1340, width: 2576 * 0.92, top: 40, gap: 51, bottom: 40});
+      o.hd = nowMapFit({vw: 1920, vh: 1000, width: 1920 * 0.92, top: 30, gap: 38, bottom: 30});
+      o.small = nowMapFit({vw: 1600, vh: 900, width: 1600 * 0.92, top: 27, gap: 32, bottom: 27});
+      o.tablet = nowMapFit({vw: 800, vh: 1280, width: 736, top: 700, gap: 16, bottom: 38});
+      o.tabletLong = nowMapFit({vw: 800, vh: 1280, width: 736, top: 450, gap: 16, bottom: 38});
+      o.phone = nowMapFit({vw: 390, vh: 844, width: 359, top: 520, gap: 8, bottom: 25});
+      o.squat = nowMapSplit(1024, 768);
+      data.surface = {body: "ABC 1", system: "5", body_id: 3, lat: 0, lon: 0, heading: 0, alt: 0, radius: 1000000, show: true, down: true,
+        alt_avg: false, rhino: false, ship: null, rigs: [], sites: [], locations: [], bio: []};
+      view = "now"; render();
+      const nv = document.getElementById("nowView");
+      o.on = nv.classList.contains("mapon") && nv.classList.contains("mapsplit") === nowMapSplit(innerWidth, innerHeight);
+      o.canvas = parseInt(document.getElementById("nowMapCanvas").style.width) >= NOW_MAP_MIN;
+      data.surface = null; render();
+      o.off = !nv.classList.contains("mapon") && !nv.classList.contains("mapsplit");
+      view = v0; data.surface = s0; render();
+      return JSON.stringify(o);
+    })()`));
+    const fitsSplit = (f, vw, vh, top, bottom, gap) => f.split && f.beside && f.S >= 240 && f.S <= vh - top - bottom &&
+      f.S + f.legendW + 2 * gap + 480 <= vw * 0.92 + 1;
+    const want = {big: fitsSplit(got.big, 2576, 1340, 40, 40, 51) && got.big.S > 1000,
+      hd: fitsSplit(got.hd, 1920, 1000, 30, 30, 38), small: fitsSplit(got.small, 1600, 900, 27, 27, 32),
+      tablet: !got.tablet.split && got.tablet.S >= 240 && got.tablet.S <= 1280 - 700 - 38 && got.tablet.S <= 736,
+      tabletLong: !got.tabletLong.split && !got.tabletLong.beside && got.tabletLong.S <= 1280 - 450 - 38 && got.tabletLong.S <= 736,
+      phone: !got.phone.split && !got.phone.beside && got.phone.S >= 240 && got.phone.S <= 844 - 520 - 25 && got.phone.S <= 359,
+      squat: got.squat === false, classes: got.on && got.canvas && got.off};
+    const goodFit = Object.values(want).every(Boolean) && errors.length === before;
+    allOk = allOk && goodFit;
+    console.log(goodFit ? "OK" : "FAIL", "| M2 map fits the screen |", goodFit ? "two columns on a wide landscape screen, stacked on portrait and phone, sized to the height left" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // Overview's surface map: the same map and legend in the lower half of the system pane while the map is shown (the
+  // strip's copy stands down there), sized to the box; an open body panel takes the spot and the map comes back when
+  // it is closed; hidden with the map off, the pane collapsed, or another system pinned into it
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, v0 = view, s0 = data.surface, ov0 = {...ovState}, cfg0 = localStorage.getItem("surfaceCfg");
+      // the pane's lower half at 2576x1340, 1920x1000 and 1600x900 (side by side at 40 %), stacked, and a narrow pane
+      o.fits = [[1000, 470], [740, 350], [610, 310], [2500, 440], [300, 400], [150, 90]].map(([width, height]) => ({width, height, ...ovMapFit({width, height, gap: 12})}));
+      data.surface = {body: "ABC 1", system: "5", body_id: 3, lat: 0, lon: 0, heading: 0, alt: 0, radius: 1000000, show: true, down: true,
+        alt_avg: false, rhino: false, ship: {lat: 0.01, lon: 0.01}, rigs: [], sites: [], locations: [], bio: []};
+      store.set("surfaceCfg", {strip: true});
+      Object.assign(ovState, {layout: "side", collapsed: false}); view = "overview";
+      const box = document.getElementById("ovMap"), hv = document.getElementById("hereView"), cv = document.getElementById("ovMapCanvas");
+      const size = (wd, ht) => { Object.defineProperty(box, "clientWidth", {value: wd, configurable: true});
+                                 Object.defineProperty(box, "clientHeight", {value: ht, configurable: true}); };
+      const state = () => ({shown: !box.hidden, mapon: hv.classList.contains("mapon"), S: parseInt(cv.style.width) || 0, stack: box.classList.contains("stack"),
+                            legend: document.getElementById("ovMapLegend").textContent.includes("ABC 1"), strip: !document.getElementById("obMap").hidden,
+                            inHere: hv.contains(box) && document.getElementById("ovHere").contains(hv)});
+      size(640, 380); render(); o.on = state();
+      size(300, 400); render(); o.narrow = state();
+      size(640, 380);
+      selectedBody = "ABC 1"; render(); o.body = state();
+      closeBody(); o.closed = state();
+      ovState.collapsed = true; render(); o.collapsed = state(); ovState.collapsed = false;
+      data.surface = {...data.surface, show: false, down: undefined}; render(); o.off = state();
+      data.surface = null; render(); o.none = state();
+      view = "here"; data.surface = {body: "ABC 1", lat: 0, lon: 0, heading: 0, radius: 1000000, show: true, down: true, alt: 0, rigs: [], bio: []}; render(); o.hereView = state();
+      delete box.clientWidth; delete box.clientHeight;
+      Object.assign(ovState, ov0); view = v0; data.surface = s0;
+      if (cfg0 === null) localStorage.removeItem("surfaceCfg"); else localStorage.setItem("surfaceCfg", cfg0);
+      render();
+      return JSON.stringify(o);
+    })()`));
+    const inBox = f => f.S <= f.width && f.S <= f.height && f.S >= 0;
+    const want = {
+      fits: got.fits.every(inBox) && got.fits.slice(0, 4).every(f => f.beside && f.S === f.height && f.legendW >= 220) &&
+        !got.fits[4].beside && got.fits[4].S === 300 && !got.fits[5].beside,
+      on: got.on.shown && got.on.mapon && got.on.inHere && !got.on.stack && got.on.S >= 160 && got.on.S <= 380 && got.on.legend && !got.on.strip,
+      narrow: got.narrow.shown && got.narrow.stack && got.narrow.S <= 300 && got.narrow.S > 0,
+      body: !got.body.shown && !got.body.mapon && got.body.strip, closed: got.closed.shown && got.closed.mapon,
+      off: !got.collapsed.shown && !got.off.shown && !got.off.mapon && !got.none.shown && !got.none.mapon,
+      hereView: !got.hereView.shown && !got.hereView.mapon && got.hereView.strip};
+    const good = Object.values(want).every(Boolean) && errors.length === before;
+    allOk = allOk && good;
+    console.log(good ? "OK" : "FAIL", "| overview surface map |", good ? "lower half of the system pane, sized to the box, the body panel takes the spot while open, hidden when the map is off" : JSON.stringify({want, got}), errors.slice(before));
+  }
+  // Codex finds say why: a body under the bio threshold kept by the ✦ tick is spoken as "new to your codex here"
+  // in the leaving warning and the FSS debrief (and drops out with the tick off); the Where line keeps only the star
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const keep = codexNewCounts, o = {};
+      const b = {body: "A 3", signals: 1, genera: ["Bacterium"], partial: {}, potential: 1000000, factor: 5, codex_new: true, dist_ls: 50};
+      const l = {body_count: 8, scanned: 8, unscanned: 0, honked: true, all_found: true, unmapped_valuable: [], unmapped: [], bio_pending: [b]};
+      codexNewCounts = true; o.said = leavingSaid(l); o.worth = worthSaying(l);
+      codexNewCounts = false; o.saidOff = leavingSaid(l);
+      // the spoken list says "biology" once and what every bio body shares once after them
+      codexNewCounts = true;
+      const bb = (body, potential, extra) => Object.assign({body, signals: 1, genera: ["Bacterium"], partial: {}, potential, factor: 5, codex_new: true, dist_ls: 50}, extra);
+      const L = (bio, maps) => ({...l, bio_pending: bio, unmapped: maps || []});
+      const b8 = bb("8", 7780000), b5 = bb("5", 1680000), elw = {body: "A 2", subtype: "Earth-like world", terraformable: false, increment: 1400000, special: true};
+      o.two = worthSaying(L([b5, b8])); o.twoSaid = spokenText(o.two);
+      o.mixed = worthSaying(L([b5, bb("8", 20000000, {codex_new: false})]));
+      o.mixedFf = worthSaying(L([b5, bb("8", 20000000, {codex_new: false, factor: 1})]));
+      o.maps = worthSaying(L([b8, b5], [elw]));
+      o.three = worthSaying(L([b8, b5, bb("3", 1000000)]));
+      o.run = leavingSaid(L([b8, bb("5", 1680000, {partial: {Stratum: 1}})]));
+      codexNewCounts = keep;
+      render(); o.hz = document.getElementById("horizonLn").textContent;
+      return JSON.stringify(o);
+    })()`));
+    const want = [/biology on A 3, new to your codex here, up to 5\.0M with first footfall/.test(got.said),
+      /biology on A 3, new to your codex here/.test(got.worth), got.saidOff === "", !got.hz.includes(" — "),
+      got.two === "biology on 8, up to 38.9M, and on 5, up to 8.4M; both new to your codex here, with first footfall",
+      got.twoSaid === "biology on 8, up to 38.9 million, and on 5, up to 8.4 million; both new to your codex here, with first footfall",
+      got.mixed === "biology on 8, up to 100.0M, and on 5, new to your codex here, up to 8.4M; both with first footfall",
+      got.mixedFf === "biology on 8, up to 20.0M, and on 5, new to your codex here, up to 8.4M with first footfall",
+      got.maps === "A 2, Earth-like world, 1.4M to map and biology on 8, up to 38.9M, and on 5, up to 8.4M; both new to your codex here, with first footfall",
+      got.three === "biology on 8, up to 38.9M, on 5, up to 8.4M, and on 3, up to 5.0M; all new to your codex here, with first footfall",
+      got.run === "biology on 5 (Stratum 1 of 3), up to 8.4M, and on 8, up to 38.9M; both new to your codex here, with first footfall"];
+    const good = want.every(Boolean) && errors.length === before;
+    console.log(good ? "OK" : "FAIL", "| codex finds say why |", good ? "leaving and debrief lines name the codex find, biology and shared attributes said once; Where line keeps only the star" : JSON.stringify({want, got}), errors.slice(before));
+  }
+
   // Batch A (review 2026-10-01): R27 the N and the rim tags centred on every frame (a stand-in canvas whose
   // save/restore keeps the text alignment, as a real one does), R30 two species on a body never share a colour (these
   // two hash to the same one), S1 the rigs-out moment's alert and card, and a rig slot's ✕ marking it picked up
