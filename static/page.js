@@ -3862,8 +3862,9 @@ const H = {data: null, key: null, loading: false, poll: null, error: null, statu
            fleetSig: null, suggestT: null, suggestQ: null, clearArmed: null};
 // the form's last options (per browser): the plotter, the exact plotter's ticks and the neutron plotter's efficiency.
 // The ship, its cargo and range follow the journals instead (a remembered cargo would be stale the next day).
-const hwyCfg = Object.assign({plotter: "exact", injections: false, exclude_secondary: false, supercharged: false, efficiency: null},
-                             store.get("highway", {}));
+// conservative / conservative_ly: null until changed here ([highway] conservative and conservative_ly then)
+const hwyCfg = Object.assign({plotter: "exact", injections: false, exclude_secondary: false, supercharged: false, efficiency: null,
+                              conservative: null, conservative_ly: null}, store.get("highway", {}));
 const saveHwyCfg = () => store.set("highway", hwyCfg);
 // a fleet ship's laden jump range with `cargo` t aboard and the main tank full: the server's fleet_range (the
 // Loadout's MaxJumpRange is the range at the unladen mass plus one max jump's fuel; range goes as 1/mass, the
@@ -3890,6 +3891,10 @@ function hwyLineHtml(s, {short = false, glyph = true} = {}) {
   bits.push(`${s.index} of ${s.total}`);
   if (s.refuel_here) bits.push(`<span class="hwyfuel">⛽ refuel here</span>`);
   else if (s.refuel_in != null) bits.push(`refuel in ${s.refuel_in}`);
+  const hv = s.heavy;   // the next jump is out of range with the fuel aboard (the plan expects a lighter ship)
+  if (hv) bits.push(`<span class="hwyheavy" title="the next jump (${Number(hv.distance).toFixed(1)} ly${hv.boost > 1 ? `, ×${hv.boost} supercharged` : ""}) ` +
+    `is in range only with at most ${Number(hv.need_t).toFixed(1)} t in the main tank: jettison or burn some">⚠ too much fuel for the next jump: ` +
+    `≤ ${Math.floor(hv.need_t)} t, you have ${Math.round(hv.have_t)} t</span>`);
   return g + bits.join(" · ");
 }
 // the strip under the header: only on Overview, Nearby and Here, only with a route
@@ -3951,9 +3956,10 @@ function hwyHeadHtml(hd) {
     `(the next stop, neutron boosts, refuel stops) and says the next system on each arrival.</div>` + hwyClipHtml(hd.clipboard);
   const n = x => x == null ? "?" : Math.round(x).toLocaleString();
   const o = r.options || {}, sh = r.ship;
-  const how = r.plotter === "neutron"
+  const how = (r.plotter === "neutron"
     ? `neutron plotter · ${o.range != null ? `${o.range} ly range · ` : ""}×${o.supercharge_multiplier || 4} · ${o.efficiency ?? "?"}% efficiency`
-    : `exact plotter${o.injections ? " · injections" : ""}${o.exclude_secondary ? " · no secondary stars" : ""}`;
+    : `exact plotter${o.injections ? " · injections" : ""}${o.exclude_secondary ? " · no secondary stars" : ""}`) +
+    (o.conservative_ly ? ` · conservative −${o.conservative_ly} ly` : "");
   const ship = sh ? ` · ${esc(shipLabel(sh.name, sh.type))}${sh.type && shipName(sh.type) !== shipLabel(sh.name, sh.type) ? ` (${esc(shipName(sh.type))})` : ""}` +
     (sh.ts ? ` <span title="the ship's figures come from this Loadout">as of ${esc(day(sh.ts))}</span>` : "") : "";
   return `<div class="hwyttl">To ${hwyName(r.to)} <span class="unk">from ${esc(r.from)}</span></div>` +
@@ -4007,6 +4013,18 @@ function hwyFollowShip(shipChanged = false) {
   hEl("hwyRange").placeholder = f ? "" : "ly";
   hEl("hwyRangeReset").hidden = H.rangeAuto || !fig;
   if (shipChanged) hEl("hwyMult").value = String(fig && fig.supercharge === 6 ? 6 : 4);
+  hwyConsShow();
+}
+// the conservative range's margin (ly), from the box, else this browser's, else [highway] conservative_ly
+const hwyConsSaved = () => hwyCfg.conservative_ly ?? ((H.data && H.data.defaults) || {}).conservative_ly ?? 5;
+const hwyConsLy = () => { const v = Number(hEl("hwyConsLy").value);
+  return hEl("hwyConsLy").value !== "" && v >= 0.5 && v <= 50 ? v : hwyConsSaved(); };
+// what the margin means: that much shorter on a normal jump, times the supercharge on a neutron one
+function hwyConsShow() {
+  const on = hEl("hwyCons").checked, m = hwyConsLy(), f = hwyShip();
+  const mult = hwyPlotter() === "neutron" ? Number(hEl("hwyMult").value) || 4 : (f && f.figures && f.figures.supercharge) || 4;
+  hEl("hwyConsLy").disabled = !on;
+  hEl("hwyConsNote").textContent = on ? `≈ ${m} ly shorter jumps, about ${Math.round(m * mult)} ly on a ×${mult} neutron jump` : "";
 }
 function hwyFormShow() {
   const p = hwyPlotter();
@@ -4019,6 +4037,7 @@ function hwyFormShow() {
   if (p === "exact" && hEl("hwyShip").value === "" && hEl("hwyShip").options.length > 1) {
     hEl("hwyShip").selectedIndex = [...hEl("hwyShip").options].findIndex(o => o.value !== ""); hwyFollowShip(true);
   }
+  hwyConsShow();
 }
 function fillHwyForm(hd) {
   const fl = hd.fleet || [], sel = hEl("hwyShip");
@@ -4035,6 +4054,8 @@ function fillHwyForm(hd) {
   hEl("hwyFrom").placeholder = posName ? `here: ${posName}` : "where you are";
   const eff = hEl("hwyEff");
   if (document.activeElement !== eff) eff.value = hwyCfg.efficiency ?? (hd.defaults && hd.defaults.efficiency) ?? 60;
+  hEl("hwyCons").checked = hwyCfg.conservative ?? !!(hd.defaults && hd.defaults.conservative);
+  if (document.activeElement !== hEl("hwyConsLy")) hEl("hwyConsLy").value = hwyConsSaved();
   hwyFormShow();
 }
 {
@@ -4045,6 +4066,11 @@ function fillHwyForm(hd) {
     hEl(id).onchange = () => { hwyCfg[k] = hEl(id).checked; saveHwyCfg(); };
   hEl("hwyEff").onchange = () => { const v = Math.round(Number(hEl("hwyEff").value));
     hwyCfg.efficiency = hEl("hwyEff").value === "" || !(v >= 1 && v <= 100) ? null : v; saveHwyCfg(); };
+  hEl("hwyCons").onchange = () => { hwyCfg.conservative = hEl("hwyCons").checked; saveHwyCfg(); hwyConsShow(); };
+  hEl("hwyConsLy").onchange = () => { const v = Number(hEl("hwyConsLy").value);
+    hwyCfg.conservative_ly = hEl("hwyConsLy").value === "" || !(v >= 0.5 && v <= 50) ? null : v; saveHwyCfg();
+    hEl("hwyConsLy").value = hwyConsSaved(); hwyConsShow(); };
+  hEl("hwyMult").addEventListener("change", hwyConsShow);
   hEl("hwyShip").onchange = () => { H.shipSel = hEl("hwyShip").value === "" ? "" : Number(hEl("hwyShip").value); H.cargoAuto = true; H.rangeAuto = true; hwyFollowShip(true); };
   hEl("hwyCargo").oninput = () => { H.cargoAuto = false; hwyFollowShip(); };
   hEl("hwyRange").oninput = () => { H.rangeAuto = false; hEl("hwyRangeReset").hidden = !hwyShip(); };
@@ -4076,6 +4102,8 @@ function hwyBody() {
     if (num("hwyEff") != null) b.efficiency = num("hwyEff");
     b.supercharge_multiplier = Number(hEl("hwyMult").value) || 4;
   }
+  b.conservative = hEl("hwyCons").checked;   // always sent: unticked must beat [highway] conservative = true
+  if (b.conservative) b.conservative_ly = hwyConsLy();
   return b;
 }
 const hwyErr = e => /^HTTP 5/.test(e || "") ? "Outrider's server had a problem (its terminal says what)" : /fetch|network/i.test(e || "")

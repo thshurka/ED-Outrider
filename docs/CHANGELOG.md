@@ -2,6 +2,16 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-01 · The Highway: too much fuel for the next jump, conservative range
+- **Too much fuel:** on a live arrival in a route system, and as the fuel changes there, the next jump is checked
+  against the fuel aboard (the current ship's fuel model, its supercharge in a neutron route system); past the most
+  fuel that still reaches it, a warning in the highway line and the Highway header ("⚠ too much fuel for the next
+  jump: ≤ 36 t, you have 140 t", summary field `heavy`) and one spoken line per system. Only for the ship the route
+  was plotted for; the neutron plotter when the next waypoint is one jump away.
+- **Conservative range** in the plot form (off by default; `[highway] conservative`, `conservative_ly = 5`): the
+  neutron plotter gets the range less the margin, the exact plotter an optimal mass scaled so the full-tank range is
+  the margin shorter. The header says "conservative −5 ly". Stored with the per-browser `highway` form settings.
+
 ## 2026-10-01 · The Neutron Highway
 - A **Highway** tab (after Map): plot a route with Spansh, the **exact** plotter (every jump with its fuel and refuel
   stops, from the chosen ship's Loadout: drive, masses, tanks, Guardian booster, engineering; cargo, injections,

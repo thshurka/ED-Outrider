@@ -153,6 +153,9 @@
 # autotarget_delay = 5      # seconds after the supercharge (0 to 60)
 # efficiency = 60           # the neutron plotter's efficiency (%, 1 to 100): lower goes further out of its way
 #                           # for neutron stars
+# conservative = false      # the plot form starts with "Conservative range" ticked: jumps planned a margin shorter
+#                           # than the ship's range, so a jump at the limit still has room for more fuel or cargo
+# conservative_ly = 5       # that margin (ly, 0.5 to 50); on a neutron jump it is multiplied by the supercharge
 # The Highway map draws the galactic regions; it can also show a top-down galaxy image of your own under them.
 # Outrider ships none: point this at one you downloaded (PNG, JPEG, WebP or GIF; a path relative to this folder, or
 # absolute). Only that file is served to the page.

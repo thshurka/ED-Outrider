@@ -410,6 +410,14 @@ follows it as you fly. One route is kept (saved, so following it needs no networ
   the current one selected. A ship bought but never flown has no Loadout and isn't listed ("another ship: type its
   range" for the neutron plotter). For the neutron plotter, the **Range** box starts at the chosen ship's laden
   range with that cargo; type another to override it (↺ puts it back).
+- **Conservative range** (a tick in the form, off by default; `[highway] conservative`): plot jumps a margin
+  (default 5 ly) shorter than the ship's range, so a jump at the limit still has room for a fuller tank. On a ×6
+  neutron jump that is about 30 ly shorter. The header says "conservative −5 ly".
+- **Too much fuel.** The exact plotter plans the fuel too, and a long neutron jump may be in range only with about
+  the fuel it expects aboard (a full tank is heavier). On arriving at a route system, and as the fuel changes there
+  (scooping), Outrider checks the next jump against the fuel actually aboard and warns in the strip and the header
+  ("⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t") and says it once. Only for the ship the route was
+  plotted for, with the game running; for the neutron plotter only when the next waypoint is one jump away.
 - **The list** shows the next 200 jumps (the next one highlighted; the done ones grey and folded) with distance,
   ⚡ neutron, fuel used and left, ⛽ refuel and light years remaining; click a name to copy it. Off the route, the
   nearest route system is marked. Beside it, a top-down map of the route (drag, zoom, **fit route**, **galaxy**) on
@@ -429,7 +437,8 @@ follows it as you fly. One route is kept (saved, so following it needs no networ
 - **The voice** (alerts row **Neutron Highway**, spoken but not notified by default): "Next Neutron Highway Stop:
   Hwy Stop 38, with three jumps left to refuel. Boost your FSD to continue." (the refuel part within 5 jumps of a
   stop, the boost sentence in a neutron system); "Refuel here before continuing." at a refuel stop; "Off route:
-  detour.", "Back on the highway." and "Highway complete."
+  detour.", "Back on the highway.", "Highway complete." and "Too much fuel for the next jump. It needs about 36 tons
+  aboard; you have 140."
 - **Auto-target is not built yet.** `[highway] autotarget = true` waits `autotarget_delay` seconds after an FSD
   supercharge in a route system and only logs "would target …"; it presses no keys.
 
@@ -521,7 +530,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC** |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
-| `[highway]` | The Neutron Highway: `clipboard` (copy the next system on arrival), `autotarget` (not built yet: only logs), `autotarget_delay`, `efficiency` (the neutron plotter's), `background_image` (an image you downloaded, under the map), `background_extent` (its edges in ly, default X −45000…45000, Z −20000…70000), `background_opacity` |
+| `[highway]` | The Neutron Highway: `clipboard` (copy the next system on arrival), `autotarget` (not built yet: only logs), `autotarget_delay`, `efficiency` (the neutron plotter's), `conservative` / `conservative_ly` (the plot form's Conservative range tick and margin, default off / 5 ly), `background_image` (an image you downloaded, under the map), `background_extent` (its edges in ly, default X −45000…45000, Z −20000…70000), `background_opacity` |
 
 Command-line flags override the file for a single run:
 

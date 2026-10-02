@@ -51,6 +51,19 @@ upstream project's choices, not rules of the game.
   remembered figure would be stale the next day); only the plotter and its options are per-browser settings.
 - **Auto-target is a stub.** `[highway] autotarget` only logs "would target X" after the delay; the real key
   sequence (galaxy map, search, paste, plot) is for later, through auto honk's uinput path, opt-in and Linux only.
+- **Too much fuel for the next jump.** Spansh's exact plotter simulates the fuel, so a long neutron jump may be in
+  range only with about the fuel it expects aboard (the Caspian's 487.9 ly ×6 jump: at most about 36 t; a full 160 t
+  tank gives 75.3 × 6 = 452 ly). Checked on a live arrival in a route system (or a plot made where you are) and again
+  as Status.json's fuel changes there (every 3 s at most), against the fuel actually aboard (the main tank, with the
+  reservoir and cargo counted as mass), the current ship's fuel model and its supercharge in a neutron route system.
+  The most fuel that still reaches the jump is found by bisection on `fsd_range` past one max jump's fuel (below that
+  the fuel itself limits the jump). Warned past that by more than 0.5 t (Spansh plans at the limit), said once per
+  system, cleared when the fuel drops or you leave. Only for the ship the route was plotted for; the neutron plotter
+  only when the next waypoint is one jump away (the first jump of several has no known length).
+- **Conservative range** shortens the plan, not the ship: the neutron plotter gets the range less the margin, the
+  exact plotter a smaller optimal mass, scaled so the normal full-tank range is the margin shorter (the range less the
+  booster's ly goes as the optimal mass at every mass, so Spansh's fuel simulation stays consistent; the booster is
+  untouched). Neither cuts the drive's own range by more than half. The margin is recorded in the route's options.
 - **The Highway's spoken lines are plain text** carried by the moment, not `speech.json` keys yet (personality later).
 - **The Highway map's regions are drawn by the page,** not rendered to an image on the server: `GET /api/regions`
   sends klightspeed's run-length grid as it is shipped (185 KB, about 40 KB gzipped, an ETag so a reload costs a 304)
@@ -84,6 +97,8 @@ upstream project's choices, not rules of the game.
 - **Region borders follow the grid,** cells of 4096/83 ≈ 49 ly, so close up they are steps, as the region map defines
   them; a name sits at its region's centroid (or the region's cell nearest it), so zoomed in it may be off screen (the
   scale bar's "centre:" says the region under the middle).
+- **The too-heavy check needs a live arrival:** after an Outrider restart in a route system it waits for the next
+  arrival there (as the clipboard copy does). It trusts the fuel model's range scaling, not Spansh's own code.
 - **The Highway's ship list is as of each ship's latest Loadout;** an `EngineerCraft` after it is not applied, and a
   ship never flown (no Loadout) can only be plotted with the neutron plotter and a typed range.
 
@@ -107,4 +122,4 @@ confirmed while playing. Treat reports about them as likely real.
 - `--restore` and `--list-backups` against a real database (temp files only).
 - The Highway's plots against live Spansh (both plotters send the requests Spansh's site and Auto_Neutron send;
   tested with a mocked Spansh), following a route in game, and whether a name copied by `wl-copy`/`xclip` pastes
-  into the galaxy map under Proton.
+  into the galaxy map under Proton. The too-heavy warning and a conservative plot against a real route.

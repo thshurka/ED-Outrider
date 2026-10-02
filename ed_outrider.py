@@ -181,7 +181,8 @@ SPANSH_ROUTE = "https://spansh.co.uk/api/route"                  # the neutron p
 SPANSH_GENERIC_ROUTE = "https://spansh.co.uk/api/generic/route"  # the exact plotter: the ship's figures, fuel too
 SPANSH_RESULTS = "https://spansh.co.uk/api/results/{job}"
 SPANSH_SYSTEM_NAMES = "https://spansh.co.uk/api/systems/field_values/system_names"   # system names as you type
-HIGHWAY = {"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}   # [highway] defaults
+HIGHWAY = {"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60,   # [highway] defaults
+           "conservative": False, "conservative_ly": 5.0}
 # The Highway map's optional background image ([highway] background_image): only the configured file is served
 # (GET /api/highway/background), and only one of these image types, checked by its first bytes too (no SVG: it can
 # carry script). The extent [xmin, xmax, zmin, zmax] in ly says where its edges are in the galaxy's plane; the
@@ -201,6 +202,10 @@ HIGHWAY_REFUEL_WARN = 5     # the arrival line says "with three jumps left to re
 HIGHWAY_LIVE_S = 120        # s: an arrival or a supercharge older than this is catch-up (no clipboard, no auto-target)
 HIGHWAY_MAX_ROWS = 50000    # a route longer than this is refused (Spansh's own cap is far lower)
 HIGHWAY_SUGGEST_CACHE = 200  # system-name suggestions kept (per typed prefix)
+HIGHWAY_HEAVY_SLACK = 0.5    # t: fuel over the most the next jump allows by more than this is "too heavy" (Spansh plans
+#                              some jumps right at the limit, so a hair over is the model's error, not yours)
+HIGHWAY_HEAVY_EVERY_S = 3.0  # s between two looks at it while the fuel changes in a route system (scooping)
+HIGHWAY_CONSERVATIVE_MAX = 50.0   # ly: the largest conservative margin taken
 SELLER_REFRESH_LY = 100      # look for the nearest places to sell again after moving this far
 SELLER_REFRESH_S = 6 * 3600  # ...or this long (carriers move)
 EDSM_SYSTEM = "https://www.edsm.net/api-v1/system"
@@ -727,6 +732,10 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                                                                HIGHWAY["autotarget_delay"]))),
                     # the neutron plotter's efficiency (%): Spansh takes 1 to 100
                     "efficiency": min(100, max(1, num("highway", hw, "efficiency", int, HIGHWAY["efficiency"]))),
+                    # the plot form's "Conservative range" tick and its margin (ly), as the page starts them
+                    "conservative": flag("highway", hw, "conservative", HIGHWAY["conservative"]),
+                    "conservative_ly": min(HIGHWAY_CONSERVATIVE_MAX, max(0.5, num("highway", hw, "conservative_ly", float,
+                                                                                HIGHWAY["conservative_ly"]))),
                     # the map's own background image (absolute path, or "" for none), where its edges are, how opaque
                     "background_image": num("highway", hw, "background_image", _config_bg_image, ""),
                     "background_extent": num("highway", hw, "background_extent", _config_extent, list(HIGHWAY_BG_EXTENT)),
@@ -828,6 +837,8 @@ clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving 
 autotarget = {"true" if st["highway"]["autotarget"] else "false"}   # after a neutron supercharge on the route, target the next system (not built yet: it only logs "would target")
 autotarget_delay = {st["highway"]["autotarget_delay"]:g}   # seconds after the supercharge
 efficiency = {st["highway"]["efficiency"]}   # the neutron plotter's efficiency (%): lower takes longer neutron detours
+conservative = {"true" if st["highway"]["conservative"] else "false"}   # the plot form starts with "Conservative range" ticked: plot jumps a margin shorter than the ship's range
+conservative_ly = {st["highway"]["conservative_ly"]:g}   # that margin (ly, 0.5 to 50): about this many ly shorter jumps, times the supercharge on a neutron jump
 background_image = {q(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
 background_extent = [{", ".join(f"{x:g}" for x in st["highway"]["background_extent"])}]   # ly: the image's edges, [xmin, xmax, zmin, zmax] (the usual galaxy images: -45000, 45000, -20000, 70000)
 background_opacity = {st["highway"]["background_opacity"]:g}   # 0.05 to 1
@@ -3779,7 +3790,7 @@ def fleet_figures(ev):
            "fuel_main": cap.get("Main"), "fuel_reserve": cap.get("Reserve"), "cargo_capacity": ev.get("CargoCapacity"),
            "booster_ly": boost, "fuel_power": power, "fuel_multiplier": mult, "optimal_mass": opt, "optimal_source": source,
            "max_fuel": max_fuel,
-           "supercharge": FSD_MK2_SUPERCHARGE if "overchargebooster_mkii" in item else 4}
+           "supercharge": fsd_supercharge(item)}
     out["exact"] = all(out.get(k) for k in ("fuel_power", "fuel_multiplier", "optimal_mass", "max_fuel", "unladen", "fuel_main"))
     return out
 
@@ -3787,11 +3798,72 @@ def fleet_figures(ev):
 def fleet_range(fig, cargo=0, fuel=None):
     """A fleet ship's jump range with `cargo` t aboard and the main tank full (or `fuel` t), by the fuel model's
     scaling of its Loadout range; None without the masses."""
+    model = fleet_model(fig)
+    if not model:
+        return None
+    return round(fsd_range(model, fig["unladen"] + (fig.get("fuel_main") if fuel is None else fuel or 0) + (cargo or 0)), 2)
+
+
+def fleet_model(fig):
+    """A fleet ship's figures as a fuel model (fsd_range's inputs), or None without the masses."""
     if not fig or not fig.get("unladen") or not fig.get("max_range"):
         return None
-    model = {"unladen": fig["unladen"], "r0": fig["max_range"], "boost": fig.get("booster_ly") or 0,
-             "max_fuel": fig.get("max_fuel"), "power": fig.get("fuel_power")}
-    return round(fsd_range(model, fig["unladen"] + (fig.get("fuel_main") if fuel is None else fuel or 0) + (cargo or 0)), 2)
+    return {"unladen": fig["unladen"], "r0": fig["max_range"], "boost": fig.get("booster_ly") or 0,
+            "max_fuel": fig.get("max_fuel"), "power": fig.get("fuel_power")}
+
+
+def fsd_supercharge(item):
+    """A drive's neutron supercharge multiplier: ×6 for the SCO Mk II, ×4 for every other."""
+    return FSD_MK2_SUPERCHARGE if "overchargebooster_mkii" in (item or "").lower() else 4
+
+
+def jump_in_reach(model, d, fuel, other=0.0, mult=1):
+    """Whether a d ly jump is in range with `fuel` t in the main tank and `other` t more aboard (cargo, the
+    reservoir), the range multiplied by `mult` (a neutron supercharge: the whole range, the booster's ly too)."""
+    return fsd_range(model, model["unladen"] + fuel + other, fuel) * mult >= d - 1e-9
+
+
+def max_fuel_for_jump(model, d, other=0.0, mult=1, cap=None):
+    """The most fuel (t in the main tank) with which a d ly jump is still in range (see jump_in_reach), or None when
+    no amount reaches it. The range rises with the fuel up to one max jump's worth (below that the fuel limits the
+    jump) and falls with the mass past it, so from that peak the answer is found by bisection on fsd_range itself.
+    With `cap` (the tank), an answer of cap or more is cap: any fuel the tank holds will do."""
+    lo = model.get("max_fuel") or 0.0
+    if cap is not None and cap <= lo:   # a tank smaller than one max jump's fuel: its whole is the best there is
+        return float(cap) if jump_in_reach(model, d, cap, other, mult) else None
+    if not jump_in_reach(model, d, lo, other, mult):
+        return None
+    hi = cap if cap is not None else lo + 64.0
+    if jump_in_reach(model, d, hi, other, mult):
+        if cap is not None:
+            return float(cap)
+        while jump_in_reach(model, d, hi, other, mult):   # no tank given: widen until it no longer reaches
+            lo, hi = hi, hi * 2
+            if hi > 1e7:
+                return hi
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if jump_in_reach(model, d, mid, other, mult) else (lo, mid)
+    return lo
+
+
+def conservative_range(full, margin, boost=0.0):
+    """A range `margin` ly shorter than `full`, never cutting the drive's own part (the booster's ly apart) by more
+    than half: the conservative plot's range."""
+    return max(full - margin, boost + (full - boost) / 2)
+
+
+def conservative_optimal_mass(fig, cargo, margin):
+    """The exact plotter's figures for a conservative plot: the optimal mass that makes the ship's normal full-tank
+    range (cargo aboard) `margin` ly shorter. The range less the booster's ly goes as the optimal mass at every mass
+    (fsd_range), so it is scaled by (R - margin - boost) / (R - boost). (optimal mass, R, the shorter R) or None."""
+    model = fleet_model(fig)
+    if not model or not fig.get("optimal_mass"):
+        return None
+    b = model["boost"]
+    full = fsd_range(model, fig["unladen"] + (fig.get("fuel_main") or 0) + (cargo or 0))
+    short = conservative_range(full, margin, b)
+    return round(fig["optimal_mass"] * (short - b) / (full - b), 3), full, short
 
 
 class HighwayError(Exception):
@@ -4799,6 +4871,9 @@ class State:
         self.autotarget_last = None
         self._suggest = collections.OrderedDict()   # typed name -> Spansh's system names (HIGHWAY_SUGGEST_CACHE kept)
         self._hw_near = (None, None)   # ((route id, position id64), the nearest route row) while off the route
+        # too much fuel for the next jump (highway_heavy_check): {key: (route id, row, arrival), live, said, t, look,
+        # heavy: {need_t, have_t, distance, boost, next} or None}
+        self._hw_heavy = {"key": None, "live": False, "said": False, "t": None, "look": None, "heavy": None}
 
     def bump(self):
         self.version += 1
@@ -8241,7 +8316,93 @@ class State:
                              "distance": round(dist(pos, nxt), 1) if pos and None not in (nxt["x"], nxt["y"], nxt["z"])
                              else nxt["distance"]},
             "boost_here": bool(here and here["neutron"]),
+            "heavy": self.highway_heavy(hw),
         }
+
+    @staticmethod
+    def _hw_heavy_key(hw):
+        return (hw.get("id"), hw.get("at"), hw.get("arrival_ts") or hw.get("created_ts"))
+
+    def highway_heavy(self, hw):
+        """The too-heavy warning for where you are on the route now (highway_heavy_check's), or None."""
+        c = self._hw_heavy
+        return c.get("heavy") if hw and c.get("key") == self._hw_heavy_key(hw) else None
+
+    def highway_heavy_check(self, now=None):
+        """Too much fuel for the next jump: Spansh's exact plotter simulates the fuel, so a long neutron jump may be in
+        range only with about the fuel the plan expects aboard (a full tank weighs the ship down). Looked at on a live
+        arrival in a route system (or a plot made where you are) and again while Status.json's fuel changes there (at
+        most every HIGHWAY_HEAVY_EVERY_S), only for the ship the route was plotted for, with the game running. The
+        next jump's distance (one jump: every exact-plotter row, a neutron-plotter waypoint only when one jump away), the
+        current ship's fuel model (fuel_now: the main tank, the cargo; the reservoir counted as mass), its supercharge
+        when this is a neutron system on the route (or a charge you hold): over the most fuel that still reaches it by
+        HIGHWAY_HEAVY_SLACK, the warning ({need_t, have_t, distance, boost, next}) and one spoken moment per system.
+        Cleared when the fuel drops enough, or you leave. True when the warning changed."""
+        now = time.time() if now is None else now
+        j, c = self.journals, self._hw_heavy
+        hw, rows = self.highway_state()
+        key = self._hw_heavy_key(hw) if hw else None
+        st = j.status_json or {}
+        if key != c.get("key"):
+            ts = key and key[2]
+            try:
+                live = bool(ts and live_event(ts, now) and now - ts_seconds(ts) <= HIGHWAY_LIVE_S)
+            except (TypeError, ValueError):
+                live = False
+            before = c.get("heavy")
+            c.clear()
+            c.update(key=key, live=live, said=False, t=None, look=None, heavy=None)
+            changed = before is not None
+        else:
+            changed = False
+        look = (round(st.get("fuel_main") or 0, 1), round(st.get("fuel_reservoir") or 0, 2), st.get("cargo"),
+                (j.boost or {}).get("ts"), (j.ship or {}).get("ship_id"), bool(st.get("live")))
+        due = key and c["live"] and look != c["look"] and (c["t"] is None or now - c["t"] >= HIGHWAY_HEAVY_EVERY_S)
+        heavy = c["heavy"]
+        if due:
+            c.update(look=look, t=now)
+            heavy = self._highway_heavy_now(hw, rows, st)
+            if heavy != c["heavy"]:
+                c["heavy"], changed = heavy, True
+        if heavy and not c["said"]:
+            c["said"] = True
+            need = int(heavy["need_t"])
+            j.moment("highway", iso_ts(now), what="heavy", system=rows[hw["at"]]["system"], index=hw["at"],
+                     next=heavy["next"], need_t=heavy["need_t"], have_t=heavy["have_t"],
+                     text="Too much fuel for the next jump. " +
+                          (f"It needs about {need} tons aboard" if need >= 1 else "It needs under a ton aboard") +
+                          f"; you have {round(heavy['have_t'])}.")
+        if changed:
+            self.bump()
+        return changed
+
+    def _highway_heavy_now(self, hw, rows, st):
+        j = self.journals
+        at = hw.get("at")
+        if at is None or hw.get("done_ts") or hw.get("off_route") or at + 1 >= len(rows) or not st.get("live"):
+            return None
+        ship, pos = j.ship or {}, j.pos
+        if (hw.get("ship") or {}).get("ship_id") is None or hw["ship"]["ship_id"] != ship.get("ship_id"):
+            return None   # plotted for another ship (or from a typed range): its plan says nothing of this one
+        here, nxt = rows[at], rows[at + 1]
+        if not pos or (here["id64"] is not None and here["id64"] != pos["id64"]):
+            return None
+        if (nxt["jumps"] or 1) != 1:
+            return None   # a neutron-plotter waypoint several jumps away: the first jump's length is not known
+        d = nxt["distance"]
+        if not d and None not in (here["x"], here["y"], here["z"], nxt["x"], nxt["y"], nxt["z"]):
+            d = dist(here, nxt)
+        now = self.fuel_now()
+        if not d or not now:
+            return None
+        model, fuel, cargo = now
+        mult = max((j.boost or {}).get("value") or 1, fsd_supercharge(ship.get("fsd")) if here["neutron"] else 1)
+        other = cargo + (st.get("fuel_reservoir") or 0)
+        need = max_fuel_for_jump(model, d, other, mult)
+        if need is None or fuel <= need + HIGHWAY_HEAVY_SLACK:
+            return None   # light enough (or out of reach whatever the fuel: not a weight problem)
+        return {"need_t": math.floor(need * 10) / 10, "have_t": round(fuel, 1), "distance": round(d, 1), "boost": mult,
+                "next": nxt["system"]}
 
     @staticmethod
     def highway_row_out(i, r):
@@ -8274,7 +8435,8 @@ class State:
                 "position": with_id(pos), "clipboard": cb,
                 "autotarget": {"enabled": self.highway_cfg["autotarget"], "delay": self.highway_cfg["autotarget_delay"],
                                "last": self.autotarget_last},
-                "defaults": {"efficiency": self.highway_cfg["efficiency"]}, "background": self.highway_background()}
+                "defaults": {k: self.highway_cfg[k] for k in ("efficiency", "conservative", "conservative_ly")},
+                "background": self.highway_background()}
 
     def highway_background(self):
         """The map's background image as the page needs it: image (one is configured and can be served now), its
@@ -8296,7 +8458,8 @@ class State:
     def highway_start_plot(self, body):
         """POST /api/highway/plot: check the request, start the Spansh job in the background, (answer, HTTP status).
         {plotter: exact | neutron, from (default: where you are), to, ship_id (default: the current ship), cargo,
-        injections, exclude_secondary, supercharged (exact); range, efficiency, supercharge_multiplier (neutron)}."""
+        injections, exclude_secondary, supercharged (exact); range, efficiency, supercharge_multiplier (neutron);
+        conservative, conservative_ly (both: jumps that many ly shorter than the ship's range)}."""
         if self.highway_task and not self.highway_task.done():
             return {"error": "a route is being plotted already"}, 409
         plotter = body.get("plotter", "exact")
@@ -8328,6 +8491,13 @@ class State:
         same = ship and ship["ship_id"] == (self.journals.ship or {}).get("ship_id")
         try:
             cargo = number("cargo", 0, 100000, int, (self.journals.cargo or {}).get("count") if same else 0) or 0
+            # conservative range: plot jumps `margin` ly shorter than the ship's normal range (the page's tick, else
+            # [highway] conservative), so a jump planned at the limit still has room for more fuel or cargo aboard
+            cons = body.get("conservative", self.highway_cfg.get("conservative", False))
+            if not isinstance(cons, bool):
+                raise ValueError("conservative must be true or false")
+            margin = number("conservative_ly", 0.5, HIGHWAY_CONSERVATIVE_MAX, float,
+                            self.highway_cfg.get("conservative_ly", HIGHWAY["conservative_ly"])) if cons else None
             if plotter == "exact":
                 if not ship:
                     return {"error": "pick a ship you have flown (it needs a Loadout in your journals)"}, 400
@@ -8335,15 +8505,20 @@ class State:
                     return {"error": f"Outrider does not know this ship's frame shift drive ({fig.get('fsd') or 'none'}): "
                                      "use the neutron plotter with its range"}, 400
                 reserve = fig.get("fuel_reserve") or 0
+                # conservative: a smaller optimal mass, so the normal (unboosted, full tank) range is `margin` ly
+                # shorter at every step of Spansh's fuel simulation; the booster's ly are left as they are
+                short = conservative_optimal_mass(fig, cargo, margin) if margin else None
                 params = {"source": frm, "destination": to, "is_supercharged": int(flag("supercharged")),
                           "use_supercharge": 1, "use_injections": int(flag("injections")),
                           "exclude_secondary": int(flag("exclude_secondary")), "fuel_power": fig["fuel_power"],
-                          "fuel_multiplier": fig["fuel_multiplier"], "optimal_mass": fig["optimal_mass"],
+                          "fuel_multiplier": fig["fuel_multiplier"], "optimal_mass": short[0] if short else fig["optimal_mass"],
                           "supercharge_multiplier": fig["supercharge"], "base_mass": round(fig["unladen"] + reserve, 3),
                           "tank_size": fig["fuel_main"], "internal_tank_size": reserve,
                           "max_fuel_per_jump": fig["max_fuel"], "range_boost": fig.get("booster_ly") or 0, "cargo": cargo}
                 options = {"cargo": cargo, "injections": flag("injections"), "exclude_secondary": flag("exclude_secondary"),
                            "supercharged": flag("supercharged")}
+                if short:
+                    options.update(conservative_ly=margin, range_full=round(short[1], 2), range=round(short[2], 2))
                 url = SPANSH_GENERIC_ROUTE
             else:
                 rng = number("range", 1, 1000, float, fleet_range(fig, cargo) if ship else None)
@@ -8353,8 +8528,13 @@ class State:
                 mult = number("supercharge_multiplier", 4, 6, int, fig.get("supercharge") or 4)
                 if mult not in (4, 6):
                     raise ValueError("supercharge_multiplier must be 4 or 6")
+                full = rng
+                if margin:
+                    rng = conservative_range(rng, margin)
                 params = {"from": frm, "to": to, "range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult}
                 options = {"range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult, "cargo": cargo}
+                if margin:
+                    options.update(conservative_ly=margin, range_full=round(full, 2))
                 url = SPANSH_ROUTE
         except ValueError as e:
             return {"error": str(e)}, 400
@@ -8648,6 +8828,7 @@ class State:
             self.maybe_find_sellers()
             self.maybe_backup_on_quit()
             self.highway_copy_next()
+            self.highway_heavy_check()
             self.maybe_autotarget()
             # a new moment (approach, left body, FSD supercharged...) is a call-out: the long poll answers now,
             # not at the next unrelated bump

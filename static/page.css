@@ -595,7 +595,8 @@ tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font
 #hwyLine { margin-top: 4px; font-size: 13px; cursor: pointer; } #hwyLine:empty { display: none; }
 #hwyLine:hover { color: var(--text); } #hwyLine .copy { cursor: copy; }
 .hwyoff { color: var(--warn); font-weight: 600; } .hwydone { color: var(--good); font-weight: 600; }
-.hwyn { color: var(--info); } .hwyfuel { color: var(--good); }
+.hwyn { color: var(--info); } .hwyfuel { color: var(--good); } .hwyheavy { color: var(--warn); font-weight: 600; }
+#hwyConsNote { font-size: 12px; }
 #hwyView { margin-top: 12px; }
 #hwyPanes { display: flex; flex-direction: column; gap: 8px; }
 #hwyHead { order: 1; font-size: 13px; } #hwyMapBox { order: 2; } #hwyPlot { order: 3; } #hwyPane { order: 4; }

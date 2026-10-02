@@ -2484,10 +2484,10 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     if (Math.abs(got.range - got.wantRange) > 0.011) bad.push("range");
     if (!/Sample Ship \(current\) · Krait Phantom · 55\.5 ly · loadout as of 2026-09-20/.test(got.shipText)) bad.push("shipText");
     if (!(Math.abs(got.other[0] - got.other[1]) < 0.011 && got.other[2] === "6" && got.other[3] === "0")) bad.push("other");
-    if (JSON.stringify(got.plotBody) !== JSON.stringify({plotter: "neutron", to: "Colonia", ship_id: 3, cargo: 0, range: 48.5, efficiency: 60, supercharge_multiplier: 6})) bad.push("plotBody");
+    if (JSON.stringify(got.plotBody) !== JSON.stringify({plotter: "neutron", to: "Colonia", ship_id: 3, cargo: 0, range: 48.5, efficiency: 60, supercharge_multiplier: 6, conservative: false})) bad.push("plotBody");
     if (!/^Plotting Hwy Stop 37 → Colonia with Spansh \(neutron plotter\)…/.test(got.running)) bad.push("running");
     if (!(got.polls >= 3 && /^Plotted: 399 jumps to Hwy End/.test(got.afterPlot[0]) && got.afterPlot[1] && got.afterPlot[2] === 200)) bad.push("afterPlot");
-    if (JSON.stringify(got.exactBody) !== JSON.stringify({plotter: "exact", to: "Colonia", ship_id: 7, cargo: 4, injections: true, exclude_secondary: false, supercharged: false})) bad.push("exactBody");
+    if (JSON.stringify(got.exactBody) !== JSON.stringify({plotter: "exact", to: "Colonia", ship_id: 7, cargo: 4, injections: true, exclude_secondary: false, supercharged: false, conservative: false})) bad.push("exactBody");
     if (!(got.err[0] === "Could not plot the route: a route is being plotted already." && got.err[1] === "err")) bad.push("err");
     if (!(got.saved && got.saved.plotter === "exact" && got.saved.injections === true)) bad.push("saved");
     if (!(JSON.stringify(p.v) === "[50,25,2]" && JSON.stringify(p.a) === "[10,110]" && JSON.stringify(p.b) === "[210,10]" && p.one && p.none === null
@@ -2497,6 +2497,63 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodHW;
     console.log(goodHW ? "OK" : "FAIL", "| highway tab |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "200 of 400 ahead, done folded and grey, the next highlighted; form from the fleet, range override, plotters' fields; plot body and polled to done; errors; clear; projection; the line in three states with copy", errors.slice(before));
+  }
+  // too much fuel for the next jump: the warning in the strip and the Highway header; the Conservative range option
+  // (off by default, [highway] defaults when this browser has none, the note, the plot body, saved per browser) and
+  // the header's "conservative −5 ly"
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, got = {}, calls = [];
+    const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status, headers: {"Content-Type": "application/json"}}));
+    const fx = hwyFixture();
+    fx.route.id = fx.summary.id = "hwy-heavy";
+    fx.summary.heavy = {need_t: 36.0, have_t: 140.2, distance: 487.9, boost: 6, next: "Hwy Stop 38"};
+    fx.route.options = {cargo: 0, conservative_ly: 5, range_full: 75.34, range: 70.34};
+    w.fetch = (u, o) => {
+      const url = String(u);
+      if (!url.startsWith("api/highway")) return realFetch(u, o);
+      calls.push([url, o && o.body ? JSON.parse(o.body) : null]);
+      return url === "api/highway/plot" ? json({error: "a route is being plotted already"}, 409) : json(hwyPayload(fx));
+    };
+    const txt = id => d.getElementById(id).textContent.replace(/\s+/g, " ").trim();
+    w.eval(`data.highway = ${JSON.stringify(fx.summary)}; view = "overview"; render()`);
+    got.strip = txt("hwyLine");
+    d.querySelector('[data-view="hwy"]').click(); await sleep(700);
+    got.head = txt("hwyHead");
+    const cons = d.getElementById("hwyCons"), ly = d.getElementById("hwyConsLy"), sel = d.getElementById("hwyShip");
+    d.getElementById("hwyPlot").open = true;
+    sel.value = "7"; sel.dispatchEvent(new w.Event("change"));
+    got.off = [cons.checked, ly.value, ly.disabled, txt("hwyConsNote")];
+    cons.checked = true; cons.dispatchEvent(new w.Event("change"));
+    ly.value = "4"; ly.dispatchEvent(new w.Event("change"));
+    got.noteX4 = txt("hwyConsNote");
+    sel.value = "3"; sel.dispatchEvent(new w.Event("change"));
+    got.noteX6 = txt("hwyConsNote");
+    d.getElementById("hwyTo").value = "Colonia";
+    calls.length = 0;
+    d.getElementById("hwyGo").click(); await sleep(300);
+    got.body = (calls.find(c => c[0] === "api/highway/plot") || [])[1];
+    got.saved = w.eval("JSON.parse(localStorage.getItem('highway'))");
+    // a browser that never touched it follows [highway] conservative / conservative_ly
+    w.eval(`hwyCfg.conservative = null; hwyCfg.conservative_ly = null; H.data.defaults = {efficiency: 60, conservative: true, conservative_ly: 7}; fillHwyForm(H.data)`);
+    got.defaults = [cons.checked, ly.value, txt("hwyConsNote")];
+    w.eval(`hwyCfg.conservative = null; hwyCfg.conservative_ly = null; H.data.defaults = {efficiency: 60}; fillHwyForm(H.data)`);
+    got.plain = [cons.checked, ly.value, ly.disabled];
+    w.fetch = realFetch;
+    w.eval(`localStorage.removeItem("highway"); data.highway = null; H.shipSel = null; view = "overview"; render()`);
+    const want = {strip: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 · ⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t",
+      off: [false, "5", true, ""], noteX4: "≈ 4 ly shorter jumps, about 16 ly on a ×4 neutron jump",
+      noteX6: "≈ 4 ly shorter jumps, about 24 ly on a ×6 neutron jump",
+      body: {plotter: "exact", to: "Colonia", ship_id: 3, cargo: 0, injections: true, exclude_secondary: false, supercharged: false,
+             conservative: true, conservative_ly: 4},
+      defaults: [true, "7", "≈ 7 ly shorter jumps, about 42 ly on a ×6 neutron jump"], plain: [false, "5", true]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    if (!(/conservative −5 ly/.test(got.head) && /⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t/.test(got.head))) bad.push("head");
+    if (!(got.saved && got.saved.conservative === true && got.saved.conservative_ly === 4)) bad.push("saved");
+    const ok = !bad.length && errors.length === before;
+    allOk = allOk && ok;
+    console.log(ok ? "OK" : "FAIL", "| highway too heavy and conservative range |", bad.length
+      ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "the warning in the strip and the header; the tick off by default, the note per supercharge, the body, saved, [highway] defaults", errors.slice(before));
   }
   // off route: the Highway list marks the nearest route system (from the live summary, so it follows each jump without
   // a fetch) and scrolls it into view in the pane, never the window; a nearest among the done rows shows while folded

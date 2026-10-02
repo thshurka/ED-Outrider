@@ -10045,29 +10045,252 @@ class HighwayH1(unittest.TestCase):
         self.assertEqual(asyncio.run(none()), (False, False, False))
         self.assertIs(ed_outrider.HIGHWAY["autotarget"], False)
 
+    # ---- too much fuel for the next jump; conservative range ----
+
+    # the author's Caspian Explorer (its real Loadout): the SCO Mk II (p 2.5025, multiplier 0.011, x6), an engineered
+    # optimal mass, a size 5 Guardian booster, a 160 t tank and a 1.14 t reservoir: the game's MaxJumpRange 82.97 ly
+    CASPIAN = {"unladen": 1295.875, "max_range": 82.97, "booster_ly": 10.5, "max_fuel": 6.8, "fuel_power": 2.5025,
+               "fuel_multiplier": 0.011, "optimal_mass": 7238.5, "fuel_main": 160.0, "fuel_reserve": 1.14}
+
+    def caspian_loadout(self, ts, ship_id=39):
+        ev = self.loadout(ts, ship_id=ship_id, name="Wanderer II", ship="explorer_nx",
+                          fsd="int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii",
+                          mods={"FSDOptimalMass": 7238.5, "MaxFuelPerJump": 6.8}, unladen=1295.875, r0=82.97)
+        ev["FuelCapacity"] = {"Main": 160.0, "Reserve": 1.14}
+        return ev
+
+    def test_max_fuel_for_a_jump_caspian(self):
+        c, m = self.CASPIAN, ed_outrider.fleet_model(self.CASPIAN)
+        self.assertAlmostEqual(ed_outrider.fsd_range(m, c["unladen"] + c["max_fuel"]), 82.97, places=6)   # the game's figure
+        full = ed_outrider.fleet_range(c)
+        self.assertAlmostEqual(full, 75.3, delta=0.06)   # a full tank: 75.3 x 6 = 452 ly
+        # a 487.9 ly neutron jump (81.3 ly x 6): in range only with about 36 t aboard (the reservoir counted as mass)
+        need = ed_outrider.max_fuel_for_jump(m, 487.9, other=1.14, mult=6, cap=160)
+        self.assertAlmostEqual(need, 36.07, delta=0.02)
+        self.assertLess(need, 50)
+        self.assertTrue(ed_outrider.jump_in_reach(m, 487.9, need, 1.14, 6))
+        self.assertFalse(ed_outrider.jump_in_reach(m, 487.9, need + 0.01, 1.14, 6))
+        self.assertFalse(ed_outrider.jump_in_reach(m, 487.9, 160, 1.14, 6))
+        # Spansh's own formula from the exact plotter's inputs agrees: optimal mass / mass x (max fuel / mult)^(1/p) + booster
+        drive = (c["max_fuel"] / c["fuel_multiplier"]) ** (1 / c["fuel_power"])
+        self.assertAlmostEqual((c["optimal_mass"] / (c["unladen"] + 1.14 + need) * drive + 10.5) * 6, 487.9, delta=0.1)
+        # cargo weighs like fuel; no cap: the same answer
+        self.assertAlmostEqual(ed_outrider.max_fuel_for_jump(m, 487.9, other=11.14, mult=6), need - 10, delta=0.01)
+        self.assertAlmostEqual(ed_outrider.max_fuel_for_jump(m, 487.9, other=1.14, mult=6), need, places=6)
+        # a full tank's jump: any fuel the tank holds will do; past the best range whatever the fuel: None
+        self.assertEqual(ed_outrider.max_fuel_for_jump(m, 451, other=1.14, mult=6, cap=160), 160.0)
+        self.assertEqual(ed_outrider.max_fuel_for_jump(m, 75.0, cap=160), 160.0)
+        self.assertIsNone(ed_outrider.max_fuel_for_jump(m, 500, other=1.14, mult=6, cap=160))
+        # below one max jump's fuel the fuel itself limits the jump: a 5 t tank cannot pay for the longest jump
+        self.assertIsNone(ed_outrider.max_fuel_for_jump(m, 80, cap=5))
+        self.assertEqual(ed_outrider.max_fuel_for_jump(m, 60, cap=5), 5.0)
+
+    def heavy_route(self, rows_at, plotter="exact", ship_id=39, start=-100):
+        """A route through the Caspian's long neutron jump, you at its start (arrived `start` s ago, plotted now):
+        Start (neutron) -487.9 ly-> Neu Far (not neutron) -40 ly-> Plain -60 ly-> End."""
+        self.j.handle(self.caspian_loadout(self.ts(-1000), ship_id=39))
+        self.jump(start, 300, "Start", 0)
+        rows = [dict(system=n, id64=i, x=x, y=0.0, z=0.0, distance=d, fuel_used=None, fuel_left=None, neutron=nu, refuel=0,
+                     jumps=jm, remaining=627.9 - x) for n, i, x, d, nu, jm in rows_at]
+        return self.state.highway_store(rows, {"plotter": plotter, "options": {},
+                                               "ship": {"ship_id": ship_id, "name": "Wanderer II", "type": "explorer_nx"}})
+
+    ROUTE_HEAVY = [("Start", 300, 0.0, 0, 1, 0), ("Neu Far", 301, 487.9, 487.9, 0, 1), ("Plain", 302, 527.9, 40.0, 0, 1),
+                   ("End", 303, 587.9, 60.0, 0, 1)]
+
+    def fuel(self, main, reservoir=1.14, cargo=0, live=True):
+        self.j.status_json = {"fuel_main": main, "fuel_reservoir": reservoir, "cargo": cargo, "live": live, "ts": self.ts(0)}
+
+    def heavy_moments(self):
+        return [m["text"] for m in self.j.moments if m["kind"] == "highway" and m["what"] == "heavy"]
+
+    def test_heavy_warning(self):
+        self.heavy_route(self.ROUTE_HEAVY)
+        self.fuel(140)
+        t = self.now
+        self.assertTrue(self.state.highway_heavy_check(t))   # a plot made where you are: looked at at once
+        h = self.state.highway_summary()["heavy"]
+        self.assertEqual((h["have_t"], h["distance"], h["boost"], h["next"]), (140, 487.9, 6, "Neu Far"))
+        self.assertAlmostEqual(h["need_t"], 36.0, delta=0.11)
+        self.assertEqual(self.heavy_moments(), ["Too much fuel for the next jump. It needs about 36 tons aboard; you have 140."])
+        self.assertEqual(self.state.highway_view()["route"]["summary"]["heavy"], h)   # the Highway header has it too
+        # the fuel changes: looked at again, at most every HIGHWAY_HEAVY_EVERY_S, said once per system
+        self.fuel(120)
+        self.assertFalse(self.state.highway_heavy_check(t + 1))
+        self.assertEqual(self.state.highway_summary()["heavy"]["have_t"], 140)
+        self.assertTrue(self.state.highway_heavy_check(t + 1 + ed_outrider.HIGHWAY_HEAVY_EVERY_S))
+        self.assertEqual(self.state.highway_summary()["heavy"]["have_t"], 120)
+        t += 10
+        self.fuel(36.5)   # within HIGHWAY_HEAVY_SLACK of the limit: no warning (the plan sits right at it)
+        self.assertTrue(self.state.highway_heavy_check(t))
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        t += 10
+        self.fuel(150)    # scooped again: the warning is back, but it is not said twice in one system
+        self.state.highway_heavy_check(t)
+        self.assertEqual(self.state.highway_summary()["heavy"]["have_t"], 150)
+        self.assertEqual(len(self.heavy_moments()), 1)
+        # a jet-cone charge held at a plain system multiplies that jump too; with none, a normal jump within range
+        # needs no warning at a full tank (Neu Far -> Plain is 40 ly)
+        self.jump(t - self.now + 1, 301, "Neu Far", 487.9)
+        self.assertTrue(self.state.highway_heavy_check(t + 1))   # left: cleared
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        self.fuel(160)
+        self.state.highway_heavy_check(t + 20)
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        self.assertEqual(len(self.heavy_moments()), 1)
+
+    def test_heavy_only_live_for_this_ship(self):
+        # an arrival read late (catch-up): nothing looked at in that system
+        self.heavy_route(self.ROUTE_HEAVY)
+        hw = ed_outrider.meta_get(self.db, "highway")
+        hw["created_ts"] = self.ts(-3600)
+        ed_outrider.meta_set(self.db, "highway", hw)
+        self.fuel(140)
+        self.state.highway_heavy_check(self.now)
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        self.assertEqual(self.heavy_moments(), [])
+        # the game not running (Status.json stale): no warning
+        self.state.highway_clear()
+        self.heavy_route(self.ROUTE_HEAVY)
+        self.fuel(140, live=False)
+        self.state.highway_heavy_check(self.now)
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        # plotted for another ship (or from a typed range: no ship): skipped
+        for sid in (40, None):
+            self.state.highway_clear()
+            self.heavy_route(self.ROUTE_HEAVY, ship_id=sid)
+            self.fuel(140)
+            self.state.highway_heavy_check(self.now)
+            self.assertIsNone(self.state.highway_summary()["heavy"])
+        self.assertEqual(self.heavy_moments(), [])
+        # off the route: nothing to say about the next jump
+        self.state.highway_clear()
+        self.heavy_route(self.ROUTE_HEAVY)
+        self.jump(1, 999, "Elsewhere", 5)
+        self.fuel(140)
+        self.state.highway_heavy_check(self.now + 2)
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+
+    def test_heavy_neutron_plotter(self):
+        # the neutron plotter has no fuel figures: the range check works when the next waypoint is one jump away
+        self.heavy_route(self.ROUTE_HEAVY, plotter="neutron")
+        self.fuel(140)
+        self.state.highway_heavy_check(self.now)
+        self.assertEqual(self.state.highway_summary()["heavy"]["next"], "Neu Far")
+        self.assertEqual(len(self.heavy_moments()), 1)
+        # several jumps to the next waypoint: the first one's length is not known, so nothing is said
+        self.state.highway_clear()
+        far = [r if r[0] != "Neu Far" else r[:5] + (3,) for r in self.ROUTE_HEAVY]
+        self.heavy_route(far, plotter="neutron")
+        self.fuel(140)
+        self.state.highway_heavy_check(self.now)
+        self.assertIsNone(self.state.highway_summary()["heavy"])
+        self.assertEqual(len(self.heavy_moments()), 1)
+
+    def test_heavy_in_the_tick(self):
+        # the tick looks after the commit: a live arrival at the neutron start with a full tank warns once
+        import contextlib
+        self.heavy_route(self.ROUTE_HEAVY)
+        self.fuel(160)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", []))
+            for name in ("watch_status", "maybe_refresh", "apply_own_changes", "maybe_classify_target", "maybe_unsold",
+                         "maybe_sale_left", "maybe_locate_carrier", "maybe_find_sellers", "maybe_backup_on_quit"):
+                stack.enter_context(unittest.mock.patch.object(self.state, name, lambda *a: None))
+            self.state.tick({})
+            self.state.tick({})
+        self.assertEqual(self.heavy_moments(), ["Too much fuel for the next jump. It needs about 36 tons aboard; you have 160."])
+
+    def test_conservative_plot_params(self):
+        import asyncio
+        self.j.handle(self.caspian_loadout("2026-01-02T00:00:00Z"))
+        self.j.handle({"event": "Cargo", "timestamp": "2026-01-02T00:00:01Z", "Vessel": "Ship", "Count": 0})
+        sp = ed_outrider.Spansh(self.db)
+        self.state.spansh = sp
+
+        def plot(body, result=None):
+            sp.session = _HwSession([(200, {"job": "c", "status": "ok", "result": result or self.EXACT})])
+
+            async def go():
+                out, status = self.state.highway_start_plot(dict({"from": "Start", "to": "End"}, **body))
+                if status == 202:
+                    await self.state.highway_task
+                return status, out
+            status, out = asyncio.run(go())
+            return status, out, (sp.session.calls[0][1] if sp.session.calls else None)
+        f = self.state.fleet_ship(39)["figures"]
+        # exact: the optimal mass scaled so the normal full-tank range is 5 ly shorter; the booster untouched
+        status, _, params = plot({"conservative": True, "conservative_ly": 5})
+        self.assertEqual(status, 202)
+        self.assertEqual(params["range_boost"], 10.5)
+        self.assertLess(params["optimal_mass"], f["optimal_mass"])
+        full = ed_outrider.fsd_range(ed_outrider.fleet_model(f), f["unladen"] + f["fuel_main"])
+        short = ed_outrider.fsd_range(dict(ed_outrider.fleet_model(f), r0=10.5 + (f["max_range"] - 10.5) * params["optimal_mass"] / f["optimal_mass"]),
+                                      f["unladen"] + f["fuel_main"])
+        self.assertAlmostEqual(short, full - 5, delta=0.05)
+        drive = (f["max_fuel"] / f["fuel_multiplier"]) ** (1 / f["fuel_power"])   # and by Spansh's own formula
+        spansh = lambda opt: opt / (params["base_mass"] + params["tank_size"]) * drive + params["range_boost"]
+        self.assertAlmostEqual(spansh(f["optimal_mass"]) - spansh(params["optimal_mass"]), 5, delta=0.05)
+        self.assertAlmostEqual(full, 75.34, delta=0.01)
+        o = ed_outrider.meta_get(self.db, "highway")["options"]
+        self.assertEqual((o["conservative_ly"], o["range_full"], o["range"]), (5.0, round(full, 2), round(full - 5, 2)))
+        self.assertEqual(self.state.highway_view()["route"]["options"]["conservative_ly"], 5.0)
+        # off (the default): the ship's own figures, no margin recorded
+        status, _, params = plot({})
+        self.assertEqual(params["optimal_mass"], f["optimal_mass"])
+        self.assertNotIn("conservative_ly", ed_outrider.meta_get(self.db, "highway")["options"])
+        # [highway] conservative = true starts it on; the request's own tick wins
+        self.state.highway_cfg.update(conservative=True, conservative_ly=3.0)
+        _, _, params = plot({})
+        self.assertAlmostEqual(spansh(f["optimal_mass"]) - spansh(params["optimal_mass"]), 3, delta=0.05)
+        _, _, params = plot({"conservative": False})
+        self.assertEqual(params["optimal_mass"], f["optimal_mass"])
+        self.state.highway_cfg.update(conservative=False, conservative_ly=5.0)
+        self.assertEqual(self.state.highway_view()["defaults"], {"efficiency": 60, "conservative": False, "conservative_ly": 5.0})
+        # neutron: the range less the margin, never under half of it
+        _, _, params = plot({"plotter": "neutron", "range": 50, "conservative": True, "conservative_ly": 5}, self.NEUTRON)
+        self.assertEqual((params["range"], params["supercharge_multiplier"]), (45.0, 6))
+        o = ed_outrider.meta_get(self.db, "highway")["options"]
+        self.assertEqual((o["range"], o["range_full"], o["conservative_ly"]), (45.0, 50.0, 5.0))
+        _, _, params = plot({"plotter": "neutron", "conservative": True, "conservative_ly": 5}, self.NEUTRON)
+        self.assertAlmostEqual(params["range"], round(ed_outrider.fleet_range(f) - 5, 2), places=6)   # the ship's range less 5
+        _, _, params = plot({"plotter": "neutron", "range": 8, "conservative": True, "conservative_ly": 6}, self.NEUTRON)
+        self.assertEqual(params["range"], 4.0)
+        _, _, params = plot({"plotter": "neutron", "range": 50, "conservative": False}, self.NEUTRON)
+        self.assertEqual(params["range"], 50)
+        # refused: a margin out of range, a tick that is not a boolean
+        for bad in ({"conservative": True, "conservative_ly": 0}, {"conservative": True, "conservative_ly": 51},
+                    {"conservative": "yes"}, {"conservative": True, "conservative_ly": "far"}):
+            status, out, params = plot(bad)
+            self.assertEqual((status, params), (400, None), bad)
+
     # ---- config ----
 
     def test_config_keys(self):
         import contextlib, io, tomllib
         args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
         st = ed_outrider.settings_from({}, args, None, ([], []))
-        bg = {"background_image": "", "background_extent": [-45000.0, 45000.0, -20000.0, 70000.0], "background_opacity": 0.6}
+        bg = {"background_image": "", "background_extent": [-45000.0, 45000.0, -20000.0, 70000.0], "background_opacity": 0.6,
+              "conservative": False, "conservative_ly": 5.0}
         self.assertEqual(st["highway"], dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}, **bg))
         back = tomllib.loads(ed_outrider.config_text(st))["highway"]
         self.assertEqual(back, dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5, "efficiency": 60}, **bg))
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             st = ed_outrider.settings_from({"highway": {"clipboard": False, "autotarget": "yes", "autotarget_delay": 500,
-                                                        "efficiency": 0}}, args, None, ([], []))
-        self.assertEqual(st["highway"], dict({"clipboard": False, "autotarget": False, "autotarget_delay": 60.0, "efficiency": 1}, **bg))
+                                                        "efficiency": 0, "conservative": True, "conservative_ly": 99}},
+                                           args, None, ([], []))
+        self.assertEqual(st["highway"], dict(dict({"clipboard": False, "autotarget": False, "autotarget_delay": 60.0, "efficiency": 1}, **bg),
+                                             conservative=True, conservative_ly=50.0))
         self.assertIn("[highway] autotarget", err.getvalue())
-        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["highway"]["clipboard"], False)
+        back = tomllib.loads(ed_outrider.config_text(st))["highway"]
+        self.assertEqual((back["clipboard"], back["conservative"], back["conservative_ly"]), (False, True, 50))
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(here, "ed_outrider.toml.example"), encoding="utf-8") as f:
             example = f.read()
         with open(os.path.join(here, "README.md"), encoding="utf-8") as f:
             readme = f.read()
-        for key in ("clipboard", "autotarget", "autotarget_delay", "efficiency"):
+        for key in ("clipboard", "autotarget", "autotarget_delay", "efficiency", "conservative", "conservative_ly"):
             self.assertIn(f"# {key} = ", example[example.index("[highway]"):])
             self.assertIn(f"`{key}`", readme[readme.index("| `[highway]`"):].split("\n")[0])
 

@@ -289,6 +289,11 @@
           <label>Ship <select id="hwyShip"></select></label>
           <label>Cargo <input type="number" id="hwyCargo" min="0" max="100000" step="1" inputmode="numeric"> t</label>
         </div>
+        <div class="srow hwy-cons">
+          <label title="plot jumps a margin shorter than the ship's range, so a jump planned at the limit still has room for more fuel or cargo aboard"><input type="checkbox" id="hwyCons"> Conservative range</label>
+          <label title="how much shorter than the ship's normal range (ly); a neutron jump is shorter by this times the supercharge">by <input type="number" id="hwyConsLy" min="0.5" max="50" step="any" inputmode="decimal"> ly</label>
+          <span id="hwyConsNote" class="unk"></span>
+        </div>
         <div class="srow hwy-nopt">
           <label title="the jump range to plot with: the chosen ship's laden range (cargo included) unless you type another">Range <input type="number" id="hwyRange" min="1" max="1000" step="any" inputmode="decimal"> ly</label>
           <button type="button" id="hwyRangeReset" class="mini" title="back to the ship's laden range" hidden>↺ ship</button>
