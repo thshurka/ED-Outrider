@@ -76,24 +76,20 @@ Your own files (the database, backups, downloaded voices, banned lines) all go i
 <table>
 <tr>
 <td width="50%" valign="top">
-<b>Nearby</b> — every known system within range: distance, how much has been scanned, the main star
-and whether you can scoop it, notable bodies, curiosities (🔭) and a credit estimate. Sort and hide
-visited or fully scanned systems. The radius (20–50 ly) is a dropdown in the Where tile. A dashed
-<i>old data</i> mark flags a system whose Spansh records predate Odyssey: thin-atmosphere planets there may
-hold life nobody has sampled; it is never added to the values or spoken. ⛏ N counts planetary mining
-locations on ground worth a Rhino (metal-rich, high metal content, rocky with magma volcanism; not icy).
+<b>Nearby</b> — every known system within range (20–50 ly, the Where tile's dropdown): distance, how much
+is scanned, the main star and whether it scoops, notable bodies, curiosities (🔭) and a credit estimate. Sort,
+or hide visited and fully scanned systems. A dashed <i>old data</i> mark flags Spansh records from before
+Odyssey (thin-atmosphere planets there may hold unsampled life). ⛏ N counts planetary mining locations on
+ground worth a Rhino.
 <br><br><img src="docs/images/nearby.png" alt="Nearby systems">
 </td>
 <td width="50%" valign="top">
-<b>Here</b> — the current system body by body, with bio and geo signals and 🌋 for volcanism. Before the
-DSS each bio signal shows the genera it could be. Hover a body for a summary, click it for everything.
-⛏ counts planetary mining locations (your FSS, or Spansh's). Hover or tap it for the minerals a community
-survey found at that kind of ground ("Deuterium 54% · Low Temp Diamonds 27%": odds, not contents), and
-<i>Mined previously</i>: what your SRV refined there ("Water 10 t (Last: 30 Sep)").
-The to-do line ticks itself off as you honk, map and sample, in a <i>suggested order</i>: nearest first, with
-supercruise time and credits per minute ("~2 min · 450k/min"), and "skip?" on anything not worth the trip.
-Bio nobody had set foot on is valued with the ×5 first-footfall bonus ("up to 95.0M 👣×5"). In a system
-Spansh knows, it says how many bodies Spansh is missing ("2 not on Spansh").
+<b>Here</b> — the current system body by body: values, bio and geo signals, 🌋 volcanism, and before the
+DSS the genera each bio signal could be. Hover a body for a summary, click it for everything. ⛏ gives a
+community survey's mineral odds for that ground (odds, not contents) and what your SRV mined there before.
+The to-do line ticks itself off as you honk, map and sample, in a suggested order with supercruise time and
+credits per minute ("~2 min · 450k/min"; "skip?" when not worth the trip). Bio nobody has set foot on is
+valued with the ×5 first-footfall bonus.
 <br><br><img src="docs/images/here.png" alt="The current system">
 </td>
 </tr>
@@ -105,21 +101,18 @@ white dwarfs.
 <br><br><img src="docs/images/map.png" alt="The 3D map">
 </td>
 <td width="50%" valign="top">
-<b>History</b> — your sessions (jumps, light-years, first discoveries, mapping, samples, codex), an
-all-time row, "since your last sale" and the game's career statistics. Below: every trip from sale to
-sale with what it actually paid against Outrider's estimate, a check of the exobiology ×5 against the
-prediction ("🧬 47 sold, 44 with x5 as predicted, 3 without"), credits per hour and per jump, what each
-death cost, and your 25 most valuable finds. The trip under way shows what you have sold to Vista Genomics
-since your last cartographic sale (a player who sells only exobiology sees every sale there).
+<b>History</b> — sessions (jumps, light-years, discoveries, mapping, samples), an all-time row, "since
+your last sale" and the game's career statistics. Below: every trip from sale to sale with what it paid
+against Outrider's estimate, the exobiology ×5 checked against the prediction, credits per hour and per jump,
+what each death cost, and your 25 most valuable finds.
 <br><br><img src="docs/images/history.png" alt="History">
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <b>Samples</b> — every exobiology sample run: species, variant, body, value, and whether it is
-<i>aboard</i>, <i>sold</i> or <i>lost</i> (a Vista Genomics sale of some species leaves the others aboard). Filter, sort, export. Codex entries sit underneath. Unsold runs are
-priced one by one ("x5 on 42 of 47 runs"); a run whose body scan is missing from your journals is priced
-at your past sales' ×5 rate.
+<i>aboard</i>, <i>sold</i> or <i>lost</i>. Filter, sort, export; codex entries underneath. Unsold runs are
+priced one by one ("x5 on 42 of 47 runs").
 <br><br><img src="docs/images/samples.png" alt="Samples">
 </td>
 <td width="50%" valign="top">
@@ -130,10 +123,9 @@ search any text, click a row for the raw event.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<b>Materials</b> — materials against their caps, and how many FSD injections, limpets, SRV
-refuels and repairs, and Rhino mining rig restocks you can make right now. <b>Mining sites</b> lists each
-body your SRV mined: minerals and tons, saved spots, the last date and the distance. ⌖ opens it in Here;
-<b>forget</b> clears its saved spots (the tons come from the journals and stay).
+<b>Materials</b> — materials against their caps, and how many FSD injections, limpets, SRV refuels and
+repairs and Rhino rig restocks you can make now. <b>Mining sites</b> lists each body your SRV mined: minerals
+and tons, saved spots, the last date and the distance.
 <br><br><img src="docs/images/materials.png" alt="Materials">
 </td>
 <td width="50%" valign="top">
@@ -145,21 +137,19 @@ keeps the schematic under the list or tree.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<b>Search</b> — systems with particular stars (or just <i>scoopable</i>), planets, rings, hotspots, or
-unfinished exobiology within a radius, from what Outrider knows (<i>Local</i>) or everything reported
-(<i>Spansh</i>). <i>Planetary mining locations</i> (Local only) takes an optional mineral and keeps a body
-when the survey found it at 10% or more of that ground's locations ("A 2 · metal-rich: ⛏ 5, Platinum 46% of
-surveyed locations (~2 expected)"). The name box finds any system, says how far it is and whether you've
-been, and opens it in Here, where ☆ bookmarks it or makes it the next stop.
+<b>Search</b> — systems with particular stars (or just <i>scoopable</i>), planets, rings, hotspots,
+unfinished exobiology or planetary mining locations (one mineral, if you like) within a radius, from what
+Outrider knows (<i>Local</i>) or everything reported (<i>Spansh</i>). The name box finds any system and opens
+it in Here, where ☆ bookmarks it or makes it the next stop.
 <br><br><img src="docs/images/search.png" alt="Search">
 </td>
 <td width="50%" valign="top">
 <b>My firsts</b> — visited systems with first-discovery data you haven't sold. The <b>firsts watch</b>
-checks them on Spansh in the background (each daily for a month, then weekly; at most 150 checks a day)
-and marks any someone else has scanned since you ("👁 8 d after you"). Selling first still keeps your name, as long as nobody sold before
-you. Tick <b>show lost</b> and set <b>within N ly</b> for a rescan checklist of data lost with a ship, nearest first: amber
-part-way ("rescanned 5 of 12 · 2 maps to redo", hover for which are left), green once it is all scanned again, gone once sold; the Lost columns price what is still to scan and map (sort by Lost total). <b>Left behind</b> lists visited systems nearby with work over your thresholds. <b>Bookmarks</b> hold
-notes and your <b>next stop</b>.
+checks them on Spansh in the background and marks any someone else has scanned since you ("👁 8 d after you");
+selling first still keeps your name if nobody sold before you. <b>Show lost</b> with <b>within N ly</b> is a
+rescan checklist for data lost with a ship, nearest first, priced by what is left to scan and map. <b>Left
+behind</b> lists nearby systems with work over your thresholds; <b>Bookmarks</b> hold notes and your <b>next
+stop</b>.
 <br><br><img src="docs/images/firsts.png" alt="My firsts">
 </td>
 </tr>
@@ -167,13 +157,9 @@ notes and your <b>next stop</b>.
 
 The **Overview** at the top shows Here and Nearby together: drag the divider, swap sides or stack them.
 
-On a window at least about 900 × 600 the page fits the window: the header stays put and each view's lists
-scroll in their own boxes, with their column headings kept in view (Page Up/Down and the wheel scroll the box
-under focus or the pointer). Smaller windows and phones scroll the page as before. **▴** beside the tiles
-folds them into one line ("Talvik Reach · ⛽ 64% · 12.79B cr · unsold 92k · carrier 6.4 ly", in the tiles'
-amber and red); **▾** unfolds them. It is remembered per browser.
-A table too wide for its box (a small screen, the Overview's split) switches to short forms ("HMC", "G star", ✓ for
-fully scanned; hover for the full text) rather than scroll sideways.
+On a window of at least about 900 × 600 the page fits the window: the header stays put and each list scrolls
+in its own box. **▴** folds the tiles into one line (remembered per browser). A table too wide for its box
+switches to short forms ("HMC", "G star"; hover for the full text) rather than scroll sideways.
 
 **Now** is the cockpit view for a second monitor or a tablet, in big text: the system, the target, fuel,
 what to do next, the body you have targeted, and the nearest unvisited system.
@@ -188,25 +174,19 @@ what to do next, the body you have targeted, and the nearest unvisited system.
 - It keeps the screen awake on localhost or HTTPS. On a tablet over plain http, set its screen timeout.
 - On a planet, the **surface map** appears under the lines (see below).
 
-The **header** shows the galactic region, ranks, fuel, hull damage, your carrier's jump countdown, the
-nearest places to sell, and when you were last backed up. Under hull, any core module under your level
-(`module_warn`, 80%) shows: "FSD 78% · Power plant 79% (as of 20:19 · 6 boosts since)". That is as of the
-last Loadout or repair, since the journal logs nothing in between; jet-cone boosts since are counted. The
-welcome back and the co-pilot's status report say it too.
+The **header** shows the galactic region, ranks, fuel, hull, any core module under your level (`module_warn`,
+80%; as of the last Loadout or repair, since the journal logs nothing in between), your carrier's jump countdown,
+the nearest places to sell, and the last backup.
 
-The **fuel tile** counts jumps as the ship gets lighter: "≈6 jumps at max range (484 ly), 3,500 at your
-pace". It works for any drive (sizes 2 to 8, the Caspian's Mk II included, engineered or not, with or without a
-Guardian booster) from your own Loadout and jumps; the tooltip says how many more jumps it needs to learn a new
-ship. Engineering moves the range at once. Nearby shows laden range ("83.5 ly · 78.0 laden") and the targeted
-jump's cost ("38.2 ly · 0.9 t · leaves 5 max jumps"); on a low tank the range shrinks to what the fuel pays for
-("out of range (needs 4.0 t)"). "scoopable: 9 of last 20" turns amber when your fuel is short for the gaps
-between scoopable stars (Apex and multicrew jumps don't count), and at a star you can't scoop it names one
-in the system that you can.
+The **fuel tile** counts jumps as the ship gets lighter ("≈6 jumps at max range (484 ly), 3,500 at your pace"),
+for any drive, engineered or not, from your own Loadout and jumps. Nearby shows laden range and the targeted
+jump's cost ("38.2 ly · 0.9 t · leaves 5 max jumps"). "scoopable: 9 of last 20" turns amber when your fuel is
+short for the gaps between scoopable stars. In the SRV or the Nomad it keeps the ship's tank and adds the
+vehicle's own fuel.
 
-Under the Where tile, the **discovery streak** is a dot per arrival for your last 20 (gold: first
-discovery, amber: bodies nobody had reported, blue: fully known, grey: revisited). Below it, the
-**unreported horizon**: "nearest known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the
-galaxy map is one nobody has reported.
+Under the Where tile, the **discovery streak** is a dot per arrival for your last 20 (gold: first discovery,
+amber: bodies nobody had reported, blue: known, grey: revisited), and the **unreported horizon**: "nearest
+known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the galaxy map is one nobody has reported.
 
 ## 🔔 Alerts
 
@@ -329,10 +309,8 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
   is said twice. **Speak from this window** takes over; **This screen speaks: auto / always / never** sets it
   per browser.
 - **Play speech and sounds on this PC.** Ticked in the dialog, the PC running Outrider plays the voice and
-  sounds itself, so there is no click to allow audio, and the voice comes from the PC even with the page on
-  a tablet. A page must still be open. Linux only: uses `pw-play`, `paplay`, `aplay` or `ffplay`
-  (`[speech] server_player`). A line plays to its end however long it is. Closing or reloading the
-  speaking window stops its line on the PC.
+  sounds itself: no click to allow audio, and the voice comes from the PC even with the page on a tablet (a page
+  must still be open). Linux only: `pw-play`, `paplay`, `aplay` or `ffplay` (`[speech] server_player`).
 
 **Spoken lines: what was said, and banning lines**
 
@@ -399,48 +377,51 @@ always uses the config file's `rig_warn`.
 ## 🛣 The Neutron Highway
 
 The **Highway** tab plots a route with [Spansh](https://spansh.co.uk), using neutron stars as boosts, and
-follows it as you fly. One route is kept (saved, so following it needs no network) until you plot another or
-**Clear route** (two clicks).
+follows it as you fly. One route is kept (following it needs no network) until you plot another or
+**Clear route**.
 
-- **Two plotters.** **Exact** (the default) plans every jump with its fuel and refuel stops from your ship's
-  own figures (drive, masses, tanks, Guardian booster, engineering), with your cargo and the options use
-  injections, exclude secondary stars and already supercharged. **Neutron** plans waypoints only, from a range,
-  ×4 or ×6 supercharge (the SCO Mk II) and an efficiency: for a ship you haven't flown, or a quick plot.
-- **Ship.** The dropdown lists every ship you have flown, as of its latest Loadout ("loadout as of" a date), with
-  the current one selected. A ship bought but never flown has no Loadout and isn't listed ("another ship: type its
-  range" for the neutron plotter). For the neutron plotter, the **Range** box starts at the chosen ship's laden
-  range with that cargo; type another to override it (↺ puts it back).
-- **Conservative range** (a tick in the form, off by default; `[highway] conservative`): plot jumps a margin
-  (default 5 ly) shorter than the ship's range, so a jump at the limit still has room for a fuller tank. On a ×6
-  neutron jump that is about 30 ly shorter. The header says "conservative −5 ly".
-- **Too much fuel.** The exact plotter plans the fuel too, and a long neutron jump may be in range only with about
-  the fuel it expects aboard (a full tank is heavier). On arriving at a route system, and as the fuel changes there
-  (scooping), Outrider checks the next jump against the fuel actually aboard and warns in the strip and the header
-  ("⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t") and says it once. Only for the ship the route was
-  plotted for, with the game running; for the neutron plotter only when the next waypoint is one jump away.
-- **The list** shows the next 200 jumps (the next one highlighted; the done ones grey and folded) with distance,
-  ⚡ neutron, fuel used and left, ⛽ refuel and light years remaining; click a name to copy it. Off the route, the
-  nearest route system is marked. Beside it, a top-down map of the route (drag, zoom, **fit route**, **galaxy**) on
-  the galactic regions, with Sol, Sagittarius A*, Colonia, Beagle Point and your carrier marked; click a name to copy
-  it. The corner buttons turn the regions, names and image on and off (per browser).
-- **Your own galaxy image** under the map: download one (e.g. an EDAstro galaxy chart) and set `[highway]
-  background_image` to its path; `background_extent` says where its edges are. Outrider doesn't ship one.
-- **Following.** Arriving at any route system moves you to it, neutron or not, forwards or back. Arriving
-  anywhere else once you have joined the route is **Off Route: Detour** (flying to its start isn't); the next
-  route system you reach resumes it. The last one is **Highway complete**, and the route stays until cleared.
-- **The highway line** under the tiles on Overview, Nearby and Here: "🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly ·
-  38 of 399 · refuel in 3", or the detour with the nearest route system. The name copies; anywhere else opens the tab.
-- **Clipboard.** On arriving at a route system (and right after a plot), the next system's name goes on the
-  desktop clipboard, ready to paste into the galaxy map's search. Linux: it needs `wl-copy` (Wayland, the
-  `wl-clipboard` package) or `xclip` (X11); the tab says when neither is found. `[highway] clipboard = false`
-  turns it off.
-- **The voice** (alerts row **Neutron Highway**, spoken but not notified by default): "Next Neutron Highway Stop:
-  Hwy Stop 38, with three jumps left to refuel. Boost your FSD to continue." (the refuel part within 5 jumps of a
-  stop, the boost sentence in a neutron system); "Refuel here before continuing." at a refuel stop; "Off route:
-  detour.", "Back on the highway.", "Highway complete." and "Too much fuel for the next jump. It needs about 36 tons
-  aboard; you have 140."
-- **Auto-target is not built yet.** `[highway] autotarget = true` waits `autotarget_delay` seconds after an FSD
-  supercharge in a route system and only logs "would target …"; it presses no keys.
+<p align="center">
+  <img src="docs/images/highway.png" alt="The Highway tab: the jump list, and the route on a map of the galaxy's regions" width="900">
+</p>
+
+- **Two plotters.** **Exact** (the default) plans every jump with its fuel and refuel stops from your ship's own
+  figures (drive, masses, tanks, Guardian booster, engineering) and your cargo. **Neutron** plans waypoints only,
+  from a range, the supercharge (×4, or ×6 with the SCO Mk II) and an efficiency: for a ship you haven't flown, or
+  a quick plot.
+- **Ship.** Any ship you have flown, as of its latest Loadout. The neutron plotter's **Range** starts at that
+  ship's laden range; type another to override it.
+- **Conservative range** (off by default): jumps a margin (5 ly) shorter than the ship's range, leaving room for a
+  fuller tank.
+- **Too much fuel.** A long neutron jump may be in range only with the fuel the plotter expected. On arrival, and
+  as you scoop, Outrider checks the next jump against the fuel aboard and warns ("⚠ too much fuel for the next
+  jump: ≤ 36 t, you have 140 t").
+- **The list** shows the next 200 jumps with distance, ⚡ neutron, fuel and ⛽ refuel stops; click a name to copy
+  it. The map beside it draws the route on the galactic regions with landmarks and your carrier. You can put your
+  own galaxy image under it (`background_image`, an EDAstro chart say).
+- **Following.** Arriving at any route system moves you along, forwards or back; anywhere else is **Off Route:
+  Detour** until you are back on it. A line under the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron
+  · 4.2 ly · 38 of 399 · refuel in 3").
+- **Clipboard.** On arrival the next system's name goes on the desktop clipboard for the galaxy map (Linux:
+  `wl-copy` or `xclip`).
+- **The voice:** "Next Neutron Highway Stop: Hwy Stop 38, with three jumps left to refuel. Boost your FSD to
+  continue.", plus refuel stops, detours, "Back on the highway", "Highway complete" and the fuel warning.
+
+**Auto-target** (Linux, off by default; the tab's **Auto-target the next system** box). After an FSD supercharge
+in a route system it waits 5 s, then presses keys to make the next route system your target: it opens the galaxy
+map, searches for the system, plots the route, closes the map and checks the target took. It says "Successfully
+targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own alerts row.
+
+- **Keyboard bindings:** Galaxy Map Open, UI Up, UI Select and the galaxy map's Camera Yaw Right need one (the
+  box lists any missing; a built-in preset can't be read). It shares auto honk's virtual keyboard; honk goes first.
+- It never runs docked, landed, in a vehicle or on foot, in danger, with the FSD charging or a panel open. It stops
+  if anything unexpected happens, closing the map only if it opened it.
+- **The keys go to whichever window has focus**: stay in the game until it is done.
+- **Test now** in the box targets the nearest known system a plain jump away, after a 5-second countdown.
+  `python3 -m outrider.target --show` prints the steps with your keys.
+- Every step can be changed under `[highway]` (`autotarget_search`, `autotarget_submit`, `autotarget_plot`…) if a
+  game update moves things; `autotarget_entry = "paste"` pastes the name instead of typing it.
+- **Frontier's rules:** this is key-press automation like auto honk (and tools such as Auto_Neutron). Whether to
+  use it is your call.
 
 ## 🎯 Auto honk
 
@@ -530,7 +511,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC** |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
-| `[highway]` | The Neutron Highway: `clipboard` (copy the next system on arrival), `autotarget` (not built yet: only logs), `autotarget_delay`, `efficiency` (the neutron plotter's), `conservative` / `conservative_ly` (the plot form's Conservative range tick and margin, default off / 5 ly), `background_image` (an image you downloaded, under the map), `background_extent` (its edges in ly, default X −45000…45000, Z −20000…70000), `background_opacity` |
+| `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
 Command-line flags override the file for a single run:
 
@@ -575,6 +556,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `voice_lab.py` | A window for trying voices and lines, and downloading Piper voices |
 | `outrider/button.py` | The co-pilot button (Linux, optional); `--listen` |
 | `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
+| `outrider/target.py` | The Highway's auto-target (Linux, optional); `--show` |
 | `outrider/bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
 | `resources/bio_rules.json` | Spawn rules, colour variants, nebulae and regions from BioScan, ExploData and klightspeed's region map |
 | `resources/mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |

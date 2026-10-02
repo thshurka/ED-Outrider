@@ -2,6 +2,32 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-02 · The Highway: auto-target the next system; vehicle fuel; a shorter README
+- **Auto-target** replaces the stub (Linux, off by default): after an FSD supercharge in a route system and
+  `autotarget_delay` s, Outrider presses keys through auto honk's virtual keyboard to open the galaxy map, search for
+  the next system (typed with a US keymap, or pasted), plot the route, close the map and check Status.json's
+  `Destination.System` (`outrider/target.py`). Keys come from the active preset's keyboard bindings (GalaxyMapOpen,
+  UI_Up, UI_Select, CamYawRight...) or `autotarget_keys`.
+- Guards: never docked, landed, in the SRV or on foot, in danger, with the FSD charging, a map or panel open, the game
+  not live, or the next system already targeted; aborts on an unexpected GuiFocus, a timeout, a jump or a changed
+  system (closing the map only if it opened it). One try per supercharge; one sequence at a time with auto honk (the
+  honk first).
+- The Highway tab's **Auto-target the next system** box: toggle, delay (remembered, POST `/api/highway/autotarget`),
+  **test now** (POST `/api/highway/autotarget/test`: 5 s countdown, then one run; refused with the reason), the last
+  result, missing bindings and the steps. Spoken results under the new alerts row **Auto-target**: "Successfully
+  targeted neutron jump target X" / "Failed to target neutron jump target X".
+- Config: `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`,
+  `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run`.
+  `python3 -m outrider.target --show` prints the steps with your keys.
+- The default sequence was tuned in game with the author (2026-10-02) and targets a system end to end: UI Up then
+  UI Select into the search box (UI Right went to Trade Routes), Enter twice after half-second waits (the suggestion
+  lists late), a short Camera Yaw Right to give the focus back to the map, then UI Select held to plot.
+- **Test now** targets the nearest known system within a plain jump, so it needs no route.
+- **In the SRV or the Nomad** the fuel tile keeps the ship's tank (it read 0 t, red) and adds "Current vehicle:
+  Nomad" with the vehicle's own fuel; `LaunchVessel` (the Nomad) is tracked like `LaunchSRV`.
+- README trimmed (views, layout, header and fuel, the Highway) with a new Highway screenshot; every screenshot
+  regenerated.
+
 ## 2026-10-01 · The Highway: too much fuel for the next jump, conservative range
 - **Too much fuel:** on a live arrival in a route system, and as the fuel changes there, the next jump is checked
   against the fuel aboard (the current ship's fuel model, its supercharge in a neutron route system); past the most

@@ -117,29 +117,42 @@ def primary_fire_binding(journal_dirs=()):
     return answer
 
 
-def _read_binding(d):
-    """primary_fire_binding for the controls folder d, read from disk (OSError passes through)."""
+# StartPreset.4.start (Odyssey) names one preset per line: General, Ship, SRV, On foot. The interface keys (UI_*) are
+# General controls, Primary Fire and the galaxy map Ship ones; an older file has a single line for everything
+GENERAL_ACTIONS = frozenset({"UI_Up", "UI_Down", "UI_Left", "UI_Right", "UI_Select", "UI_Back", "UI_Toggle",
+                             "CycleNextPage", "CyclePreviousPage"})
+
+
+def _preset_file(d, action, hint):
+    """(preset name or None, the .binds file to read) for `action`, or (None, None, why not)."""
     starts = sorted(glob.glob(os.path.join(glob.escape(d), "StartPreset*.start")), key=os.path.getmtime)
     preset = None
     if starts:
         with open(starts[-1], encoding="utf-8", errors="replace") as f:
             lines = [x.strip() for x in f.read().splitlines()]
-        # Odyssey's StartPreset.4.start has one preset per line: General, Ship, SRV, On foot. Primary Fire
-        # is a Ship control; an older file has a single line for everything
-        preset = (lines[1] if len(lines) >= 4 and lines[1] else lines[0] if lines else "") or None
+        line = 0 if action in GENERAL_ACTIONS else 1
+        preset = (lines[line] if len(lines) >= 4 and lines[line] else lines[0] if lines else "") or None
     if preset:
         files = sorted(glob.glob(os.path.join(glob.escape(d), glob.escape(preset) + ".*binds")), key=os.path.getmtime)
         if not files:   # the built-in presets live in the game's install folder, not here
-            return None, (f"the controls preset {preset!r} is a built-in one (no .binds file in the controls folder): "
-                          "bind Primary Fire in a custom preset, or set [autohonk] key")
+            return None, None, (f"the controls preset {preset!r} is a built-in one (no .binds file in the controls folder): "
+                                f"bind {action_label(action)} in a custom preset, or set {hint}")
     else:
         files = sorted(glob.glob(os.path.join(glob.escape(d), "Custom*.binds")), key=os.path.getmtime)
         if not files:
-            return None, "no controls preset found"
-    try:
-        node = ET.parse(files[-1]).getroot().find("PrimaryFire")
-    except ET.ParseError as e:
-        return None, f"{os.path.basename(files[-1])} could not be read ({e})"
+            return None, None, "no controls preset found"
+    return preset, files[-1], None
+
+
+def action_label(action):
+    """'PrimaryFire' -> 'Primary Fire', 'GalaxyMapOpen' -> 'Galaxy Map Open', 'UI_Select' -> 'UI Select'."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(action)).replace("_", " ")
+
+
+def _action_binding(root, action, preset, hint):
+    """`action`'s keyboard binding in a parsed .binds root: (keys with modifiers first, text) or (None, why not)."""
+    node = root.find(action)
+    name = action_label(action)
     mixed = False   # a keyboard key held with a joystick/HOTAS modifier: a virtual keyboard cannot press it
     for slot in ("Primary", "Secondary"):
         b = node.find(slot) if node is not None else None
@@ -147,15 +160,62 @@ def _read_binding(d):
             continue
         modifiers = b.findall("Modifier")
         if any(m.get("Device") != "Keyboard" for m in modifiers):
-            mixed = True   # pressing the bare key would be some other control, not Primary Fire
+            mixed = True   # pressing the bare key would be some other control
             continue
         key = elite_key(b.get("Key"))
         mods = [elite_key(m.get("Key")) for m in modifiers]
         if key and all(mods):
-            return mods + [key], f"{' + '.join(key_label(k) for k in mods + [key])} ({slot.lower()} binding of Primary Fire in {preset or 'your preset'})"
-    return None, (f"Primary Fire has no keyboard binding in {preset or 'your preset'}"
+            return mods + [key], f"{' + '.join(key_label(k) for k in mods + [key])} ({slot.lower()} binding of {name} in {preset or 'your preset'})"
+    return None, (f"{name} has no keyboard binding in {preset or 'your preset'}"
                   + (" (a key with a joystick modifier cannot be pressed from here)" if mixed else "")
-                  + ": give it one as its second binding in Elite's controls, or set [autohonk] key")
+                  + f": give it one as its second binding in Elite's controls, or set {hint}")
+
+
+def _read_action(d, action, hint, parsed):
+    """One action's binding from the controls folder d (OSError passes through); parsed caches each file's root."""
+    preset, path, why = _preset_file(d, action, hint)
+    if why:
+        return None, why
+    if path not in parsed:
+        try:
+            parsed[path] = ET.parse(path).getroot()
+        except ET.ParseError as e:
+            parsed[path] = f"{os.path.basename(path)} could not be read ({e})"
+    root = parsed[path]
+    if isinstance(root, str):
+        return None, root
+    return _action_binding(root, action, preset, hint)
+
+
+def _read_binding(d):
+    """primary_fire_binding for the controls folder d, read from disk (OSError passes through)."""
+    return _read_action(d, "PrimaryFire", "[autohonk] key", {})
+
+
+_bindings_cache = {}   # (controls folder, actions, hint) -> (its files' names and mtimes, keyboard_bindings' answer)
+
+
+def keyboard_bindings(journal_dirs, actions, hint="[highway] autotarget_keys"):
+    """Several actions' keyboard bindings in the active controls preset: {action: (keys or None, text or why)}, read
+    once per change of the controls folder (as primary_fire_binding). Every action gets an answer: a missing folder
+    or an unreadable file is each action's reason."""
+    actions = tuple(actions)
+    d = bindings_dir(journal_dirs)
+    if not d:
+        return {a: (None, "Elite's controls folder was not found") for a in actions}
+    try:
+        stamp = tuple(sorted((p, os.path.getmtime(p)) for p in glob.glob(os.path.join(glob.escape(d), "*.start"))
+                             + glob.glob(os.path.join(glob.escape(d), "*.binds"))))
+        key = (d, actions, hint)
+        hit = _bindings_cache.get(key)
+        if hit and hit[0] == stamp:
+            return hit[1]
+        parsed = {}
+        answer = {a: _read_action(d, a, hint, parsed) for a in actions}
+    except OSError as e:
+        return {a: (None, f"Elite's controls could not be read ({e})") for a in actions}
+    _bindings_cache[key] = (stamp, answer)
+    return answer
 
 
 def key_label(name):
@@ -200,7 +260,10 @@ class Honker:
         self.key, self.hold, self.journal_dirs = key, hold, list(journal_dirs or ())
         self.evdev = _import_evdev() if sys.platform.startswith("linux") else None
         self.ui = None
-        self.lock = threading.Lock()   # held by press() for the whole hold
+        # who wants the device open: "honk" (auto honk and its Test button) and "target" (the Highway's auto-target);
+        # it is closed when the last one lets go
+        self.owners = set()
+        self.lock = threading.Lock()   # held by press() for the whole hold, and by auto-target for its whole sequence
         self.stop = threading.Event()  # close() during a hold: let go now, then close the device
         self.status = ("Linux only for now" if not sys.platform.startswith("linux")
                        else "needs the python evdev package (pip install evdev)" if not self.evdev else "off")
@@ -230,26 +293,43 @@ class Honker:
             return None, f"unknown key {', '.join(bad) or self.key!r} (use evdev names such as KEY_KP0, or KEY_LEFTALT+KEY_K)"
         return keys, " + ".join(key_label(k) for k in keys)
 
-    def open(self):
-        """Create the virtual keyboard (once, with every key, so a changed binding needs no restart)."""
-        if self.ui or not self.evdev:
-            if self.ui and self.stop.is_set():   # reopened while a press was still letting go: keep the device
-                self.stop.clear()
+    def open(self, owner="honk"):
+        """Create the virtual keyboard (once, with every key, so a changed binding needs no restart). `owner` says who
+        wants it; only auto honk's own opening sets its status."""
+        if not self.evdev:
             return bool(self.ui)
+        self.owners.add(owner)
+        if self.ui:
+            if self.stop.is_set():   # reopened while a press was still letting go: keep the device
+                self.stop.clear()
+            if owner == "honk":      # already open for auto-target: auto honk's status still says what it presses
+                keys, what = self.combo()
+                self.status = f"ready: holds {what} for {self.hold:g} s" if keys else f"not ready: {what}"
+            return True
         keys, what = self.combo()
         e = self.evdev.ecodes
         try:
             all_keys = sorted(v for k, v in e.ecodes.items() if k.startswith("KEY_") and isinstance(v, int) and v < 0x2ff)
             self.ui = self.evdev.UInput({e.EV_KEY: all_keys}, name="ED Outrider auto honk")
         except (OSError, self.evdev.UInputError) as err:
-            self.status = f"cannot create the virtual keyboard ({err}); /dev/uinput needs to be writable"
+            self.owners.discard(owner)
+            self.device_error = f"cannot create the virtual keyboard ({err}); /dev/uinput needs to be writable"
+            if owner == "honk":
+                self.status = self.device_error
             return False
-        self.status = f"ready: holds {what} for {self.hold:g} s" if keys else f"not ready: {what}"
+        if owner == "honk":
+            self.status = f"ready: holds {what} for {self.hold:g} s" if keys else f"not ready: {what}"
         return True
 
-    def close(self):
-        """Close the virtual keyboard. Called on the event loop, so it never waits for a press: during a hold it
-        cuts the hold short and press() closes the device once it has let go of the keys."""
+    device_error = None   # why the virtual keyboard could not be created (the last try)
+
+    def close(self, owner="honk"):
+        """Close the virtual keyboard once nobody else wants it. Called on the event loop, so it never waits for a
+        press: during a hold (or an auto-target sequence) it cuts it short, and the one holding the keys closes the
+        device once it has let go of them."""
+        self.owners.discard(owner)
+        if self.owners:
+            return   # still wanted (auto honk off while auto-target is on, or the other way round)
         self.stop.set()
         if not self.lock.acquire(blocking=False):
             return   # press() is holding keys: it sees `stop` and closes after releasing them

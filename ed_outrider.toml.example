@@ -148,9 +148,28 @@
 # The Neutron Highway: a route plotted with Spansh (neutron stars as boosts) that Outrider follows as you fly.
 # clipboard = true          # on arriving at a route system, copy the next system's name to the desktop clipboard
 #                           # (wl-copy under Wayland, xclip under X11; Linux), ready to paste into the galaxy map
-# autotarget = false        # after an FSD supercharge in a route system, target the next system. Not built yet:
-#                           # it only logs "would target ..." and presses nothing
+# Auto-target (Linux, off by default; the Highway tab can switch it): after an FSD supercharge in a route system,
+# press keys in the galaxy map to make the next route system the target (outrider/target.py), through the same
+# virtual keyboard as auto honk. The keys go to whichever window has focus. It is key-press automation of the same
+# kind as auto honk: whether it fits Frontier's rules is your call. python3 -m outrider.target --show prints the steps.
+# autotarget = false
 # autotarget_delay = 5      # seconds after the supercharge (0 to 60)
+# autotarget_entry = "type" # "type" the name (US keyboard layout) or "paste" it (wl-copy/xclip, then Ctrl+V)
+# autotarget_map_wait = 5   # seconds to wait for the galaxy map to open (and to close) before giving up
+# autotarget_search_wait = 2   # seconds after submitting the search for the map to fly to the system
+# autotarget_key_delay = 0.05  # seconds between typed characters
+# autotarget_keys = {}      # override a step's keys (else read from your controls preset), e.g.
+#                           # { GalaxyMapOpen = "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", UI_Select = "KEY_SPACE", Enter = "KEY_KPENTER" }
+#                           # names: GalaxyMapOpen, UI_Right, UI_Left, UI_Up, UI_Down, UI_Select, UI_Back, CycleNextPanel, CamYawLeft, CamYawRight,
+#                           # CamZoomIn, CamZoomOut, CamTranslateLeft/Right/Forward/Backward, Enter, Paste
+# autotarget_search = ["press UI_Up", "press UI_Select"]   # into the galaxy map's search box: UI_Up highlights
+#                                          # "Search the Galaxy", UI_Select puts the cursor in it
+# autotarget_submit = ["wait 0.5", "press Enter", "wait 0.5", "press Enter"]   # select the suggestion: the search
+#                                          # lists it a moment after the name goes in, and an earlier Enter selects nothing
+# autotarget_plot = ["hold CamYawRight 0.3", "hold UI_Select 1"]   # the plot-route step after the search: a short
+#                                          # camera turn gives the focus back to the map, then UI_Select held plots it;
+#                           # "press <key>", "hold <key> <seconds>", "wait <seconds>"
+# autotarget_dry_run = false   # only log the steps it would take (nothing is pressed)
 # efficiency = 60           # the neutron plotter's efficiency (%, 1 to 100): lower goes further out of its way
 #                           # for neutron stars
 # conservative = false      # the plot form starts with "Conservative range" ticked: jumps planned a margin shorter

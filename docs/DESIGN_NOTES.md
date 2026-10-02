@@ -49,8 +49,14 @@ upstream project's choices, not rules of the game.
   start is not one), and arriving at *any* route system resumes it, neutron or not, forwards or back. Said once each.
 - **The Highway's cargo is not remembered.** The form takes the cargo aboard from the journals each time (a
   remembered figure would be stale the next day); only the plotter and its options are per-browser settings.
-- **Auto-target is a stub.** `[highway] autotarget` only logs "would target X" after the delay; the real key
-  sequence (galaxy map, search, paste, plot) is for later, through auto honk's uinput path, opt-in and Linux only.
+- **Auto-target presses keys in the galaxy map** (opt-in, Linux; decided with the author 2026-10-01): open the map,
+  the search box (UI_Up highlights "Search the Galaxy", UI_Select puts the cursor in it; found in game 2026-10-02 — UI_Right, Auto_Neutron's older step, moves along the tab column to Trade Routes, and UI_Select alone opens the current system; `autotarget_search` changes it), type the name (US keymap; a name it cannot type is pasted when a
+  clipboard tool exists), Enter twice after short waits (the search lists its suggestion a moment after the name goes in, and an Enter before that selects nothing; found in game 2026-10-02; `autotarget_submit`), the plot-route step (configurable: the map's focus after a search varies), close the
+  map, then Status.json `Destination.System` must be the next id64. It shares auto honk's virtual keyboard and lock;
+  an auto honk running on the arrival goes first. It checks GuiFocus, the system, a jump and danger before every step
+  and while waiting, and on an abort closes the map only if it opened it and the map is still the focus. One try per
+  supercharge, nothing repeats. Its results are plain spoken lines under their own alerts row (no `speech.json` keys).
+  The toggle and delay are the server's (meta `autotarget`, beating the config once used), not per browser.
 - **Too much fuel for the next jump.** Spansh's exact plotter simulates the fuel, so a long neutron jump may be in
   range only with about the fuel it expects aboard (the Caspian's 487.9 ly ×6 jump: at most about 36 t; a full 160 t
   tank gives 75.3 × 6 = 452 ly). Checked on a live arrival in a route system (or a plot made where you are) and again
@@ -123,3 +129,6 @@ confirmed while playing. Treat reports about them as likely real.
 - The Highway's plots against live Spansh (both plotters send the requests Spansh's site and Auto_Neutron send;
   tested with a mocked Spansh), following a route in game, and whether a name copied by `wl-copy`/`xclip` pastes
   into the galaxy map under Proton. The too-heavy warning and a conservative plot against a real route.
+- Auto-target in game: the default sequence targeted a system end to end with "test now" (2026-10-02, the author's
+  bindings and Linux/Proton). Not yet tried: a run triggered by a real supercharge on a route, other keyboard
+  layouts and presets, and both entry modes side by side.

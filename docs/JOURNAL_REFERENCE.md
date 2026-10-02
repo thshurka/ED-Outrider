@@ -34,7 +34,7 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 | `CodexEntry` | Codex entries, "new to your codex", vouchers. |
 | `Disembark` | Footfall on a planet (`OnPlanet`). |
 | `ApproachBody`, `LeaveBody`, `Touchdown` | Approach briefing, leaving a body mid-run, the body you are at; your ship's landing spot. |
-| `LaunchSRV`, `DockSRV`, `SRVDestroyed`, `SupercruiseExit`, `SupercruiseEntry`, `Liftoff` | Which body your SRV is out on and which SRV (`SRVType` `mev_rhino` is the Rhino); the ship marker; rigs lost with the Rhino. |
+| `LaunchSRV`, `LaunchVessel`, `DockSRV`, `SRVDestroyed`, `SupercruiseExit`, `SupercruiseEntry`, `Liftoff` | Which body your SRV is out on and which SRV (`SRVType` `mev_rhino` is the Rhino); the ship marker; rigs lost with the Rhino. The Nomad launches with `LaunchVessel` (`VesselType` `lander01`, `VesselType_Localised` "Nomad") but docks with `DockSRV`, and Status.json reports it as an SRV (bit 26). |
 | `MiningRefined` | 1 t of a commodity refined by the SRV (`own_mined`, "Mined previously", Rhino collections). |
 | `MultiSellExplorationData`, `SellExplorationData` | Cartographic sales (one row per page, keyed by file:offset), which systems were sold. |
 | `SellOrganicData` | Vista Genomics sales, each `BioData` entry with its `Bonus` (the x5 check). |
@@ -58,11 +58,16 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
   `BodyName`, `Latitude`, `Longitude`, `Altitude`, `PlanetRadius`, `Heading`, `Cargo`, `Destination`,
   `GuiFocus`, `FireGroup`, `timestamp`. Flags used: landed (bit 1), scooping (11), FSD charging (17), in SRV
   (26), HUD analysis mode (27), altitude from average radius (29), in the hyperspace tunnel (30); Flags2
-  bit 0 on foot, bits 3/13/14 on foot in a station, hangar or social space (counted as docked).
+  bit 0 on foot, bits 3/13/14 on foot in a station, hangar or social space (counted as docked). In the SRV, the
+  Nomad or a fighter (bits 25, 26), `Fuel` and `Cargo` are the vehicle's, not the ship's: the fuel tile keeps the
+  ship's last figures and shows the vehicle's separately.
 - **NavRoute.json** (`read_navroute`): `Route[]` of `StarSystem`, `SystemAddress`, `StarPos`, `StarClass`; the
   route strip, star classes and "unreported" systems. An empty route means it was cleared.
 - **Controls bindings** (`outrider/honk.py`): the active preset's `.binds` file in the game's Options/Bindings folder,
-  for Primary Fire's keyboard binding.
+  for Primary Fire's keyboard binding and auto-target's (`GalaxyMapOpen`, `UI_Right`/`Left`/`Up`/`Down`, `UI_Select`,
+  `UI_Back`, `CycleNextPanel`, and the galaxy map camera's `CamYaw*`, `CamZoom*`, `CamTranslate*`). `StartPreset.4.start` names a preset per line (General, Ship, SRV, On foot): the `UI_*`
+  controls are read from the General one, the rest from Ship. Each control has `Primary` and `Secondary` slots; only a
+  `Device="Keyboard"` slot whose `Modifier`s are all keyboard keys can be pressed.
 
 ## Traps and facts learned
 
@@ -76,6 +81,10 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
   `Name: "$SAA_Unknown_Signal:#type=$PlanetaryMiningLocation_Name;:#index=3;"` (`MINING_LOCATION_RE`), with
   `System` and `Body`. Targets selected from an SRV (a rig, a deposit) write nothing at all.
 - The on-foot-in-station bits come from the documented flags and have not been confirmed in a live file.
+- `GuiFocus` values auto-target relies on: 0 the cockpit (no panel), 6 the galaxy map (the full list is
+  `outrider.target.GUI_FOCUS`). `Destination.System` is the targeted system's id64 (the check that auto-target worked).
+  Flags auto-target's guards read: docked (bit 0), landed (1), FSD charging (17), in danger (22), being interdicted
+  (23), in SRV (26), in the hyperspace tunnel (30); Flags2 bit 0 on foot.
 
 **Mining and the Rhino**
 - `MiningRefined` is 1 t and names neither body nor position. The body comes from the SRV state (per game

@@ -599,7 +599,7 @@ tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font
 #hwyConsNote { font-size: 12px; }
 #hwyView { margin-top: 12px; }
 #hwyPanes { display: flex; flex-direction: column; gap: 8px; }
-#hwyHead { order: 1; font-size: 13px; } #hwyMapBox { order: 2; } #hwyPlot { order: 3; } #hwyPane { order: 4; }
+#hwyHead { order: 1; font-size: 13px; } #hwyMapBox { order: 2; } #hwyPlot { order: 3; } #hwyAuto { order: 4; } #hwyPane { order: 5; }
 #hwyHead .hwyttl { font-size: 16px; font-weight: 600; } #hwyHead .hwyttl .unk { font-size: 13px; font-weight: 400; }
 #hwyHead .hwystats b { font-variant-numeric: tabular-nums; }
 #hwyHead .hwystate { margin: 2px 0; } #hwyHead .hwystate b.copy { color: var(--accent); }
@@ -617,6 +617,15 @@ tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font
 #hwyTable tr.hwymore td { font-size: 12px; }
 #hwyPlot { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
 #hwyPlot > summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 2px 0; }
+#hwyAuto { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+#hwyAuto > summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 2px 0; }
+#hwyAuto > summary .unk { font-weight: 400; font-size: 12px; }
+#hwyAuto .srow { gap: 8px 16px; margin: 6px 0; }
+#hwyAuto input[type=number] { width: 4.5em; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 6px; font: inherit; }
+#hwyAuto .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+#hwyAutoSteps { margin: 4px 0; padding-left: 1.2em; font-size: 12px; list-style: none; }
+#hwyAutoStepsBox > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 #hwyForm .srow { gap: 8px 16px; margin: 6px 0; }
 #hwyForm input[type=text], #hwyForm input[type=number], #hwyForm select { background: var(--panel); color: var(--text);
   border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; max-width: 100%; }
@@ -846,11 +855,13 @@ body.app #sBodyPanel { top: 0; max-height: calc(100vh - var(--head-h, 130px) - 4
 body.app #bmTools { margin-top: 0; }
 /* the Highway: the header, the jump list (its pane) and the plot form on the left, the map filling the right */
 body.app #hwyPanes { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px;
-  grid-template-columns: minmax(380px, min(44%, 860px)) minmax(0, 1fr); grid-template-rows: auto minmax(120px, 1fr) auto; }
+  grid-template-columns: minmax(380px, min(44%, 860px)) minmax(0, 1fr); grid-template-rows: auto minmax(120px, 1fr) auto auto; }
 body.app #hwyHead { grid-column: 1; grid-row: 1; }
 body.app #hwyPane { grid-column: 1; grid-row: 2; }
 body.app #hwyPlot { grid-column: 1; grid-row: 3; margin-top: 8px; max-height: 45vh; overflow: auto; }
+body.app #hwyAuto { grid-column: 1; grid-row: 4; margin-top: 8px; max-height: 35vh; overflow: auto; }
 body.app #hwyMapBox { grid-column: 2; grid-row: 1 / -1; min-height: 0; display: flex; flex-direction: column; }
 body.app #hwyMapWrap { flex: 1 1 0; min-height: 0; height: auto; }
-body.app #hwyPanes.noroute { grid-template-rows: auto auto minmax(0, 1fr); }
+body.app #hwyPanes.noroute { grid-template-rows: auto auto auto minmax(0, 1fr); }
 body.app #hwyPanes.noroute #hwyPlot { grid-row: 2; align-self: start; max-height: none; }
+body.app #hwyPanes.noroute #hwyAuto { grid-row: 3; align-self: start; }

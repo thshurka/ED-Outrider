@@ -4022,6 +4022,33 @@ class BatchAIntegrity(unittest.TestCase):
         self.j.twins = {os.path.basename(path): path}
         self.assertEqual(self.j.start_offset(other), 100)   # its own offset lags the twin's: the further one
 
+    def test_vehicle_fuel_is_not_the_ships(self):
+        """In the SRV (the Nomad reports as one) or a fighter, Status.json's Fuel and Cargo are the vehicle's: the
+        ship's last reading stays, marked away; back aboard, the ship's figures return."""
+        d = os.path.join(self.tmp, "veh"); os.makedirs(d)
+        def status(ts, flags, main, cargo):
+            with open(os.path.join(d, "Status.json"), "w") as f:
+                json.dump({"timestamp": ts, "event": "Status", "Flags": flags, "Flags2": 0,
+                           "Fuel": {"FuelMain": main, "FuelReservoir": 0.5}, "Cargo": cargo}, f)
+            self.j.read_status(d)
+        status("2026-10-01T00:00:00Z", 1 << 24, 158.9, 0)
+        status("2026-10-01T00:01:00Z", ed_outrider.FLAG_IN_SRV, 0.0, 12)       # the Nomad / Rhino
+        st = self.j.status_json
+        self.assertEqual((st["fuel_main"], st["cargo"], st["away"], st["vehicle_fuel"]), (158.9, 0, "SRV", 0.5))
+        status("2026-10-01T00:02:00Z", ed_outrider.FLAG_IN_FIGHTER, 0.0, 0)
+        self.assertEqual((self.j.status_json["fuel_main"], self.j.status_json["away"]), (158.9, "fighter"))
+        status("2026-10-01T00:03:00Z", 1 << 24, 150.2, 3)                     # back aboard
+        st = self.j.status_json
+        self.assertEqual((st["fuel_main"], st["cargo"], st["away"]), (150.2, 3, None))
+        self.assertIsNone(st["vehicle_fuel"])
+
+    def test_nomad_launch_names_the_vehicle(self):
+        self.j.handle({"event": "LaunchVessel", "timestamp": "2026-10-01T00:00:00Z", "VesselType": "lander01",
+                       "VesselType_Localised": "Nomad", "ID": 49, "PlayerControlled": True})
+        self.assertEqual((self.j.vehicle["srv_type"], self.j.vehicle["label"]), ("lander01", "Nomad"))
+        self.j.handle({"event": "DockSRV", "timestamp": "2026-10-01T00:05:00Z", "SRVType": "lander01", "ID": 49})
+        self.assertIsNone(self.j.vehicle)
+
     def test_stale_navroute_and_status_in_a_second_folder(self):   # F14
         new, old = os.path.join(self.tmp, "new"), os.path.join(self.tmp, "old")
         hop = lambda i: {"StarSystem": f"S{i}", "SystemAddress": i, "StarPos": [i, 0, 0], "StarClass": "K"}
@@ -10000,51 +10027,6 @@ class HighwayH1(unittest.TestCase):
         self.state.highway_copy_next()
         self.assertEqual(copied, ["Bridge B"])
 
-    # ---- the auto-target stub ----
-
-    def test_autotarget_stub_timing(self):
-        import asyncio, contextlib, io
-        self.plot_exact()
-        self.jump(1, 101, "Neu A", 50)
-        self.state.highway_cfg.update(autotarget=True, autotarget_delay=0.2)
-        out = io.StringIO()
-
-        async def go(move=False):
-            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2 + move), "BoostValue": 4})
-            self.assertTrue(self.state.maybe_autotarget())
-            self.assertFalse(self.state.maybe_autotarget())   # one per supercharge
-            await asyncio.sleep(0.1)
-            early = self.state.autotarget_last
-            if move:
-                self.jump(3 + move, 102, "Bridge B", 80)
-            await asyncio.sleep(0.25)
-            return early
-        with contextlib.redirect_stdout(out):
-            early = asyncio.run(go())
-        self.assertIsNone(early)   # not before the delay
-        last = self.state.autotarget_last
-        self.assertEqual((last["system"], last["done"]), ("Bridge B", True))
-        self.assertIn("would target Bridge B", out.getvalue())
-        # jumped before the delay ran out: nothing targeted
-        self.state.autotarget_last = None
-        with contextlib.redirect_stdout(io.StringIO()):
-            asyncio.run(go(move=True))
-        self.assertEqual(self.state.autotarget_last["done"], False)
-        # off (the default), an old supercharge, or one outside the route: nothing scheduled
-
-        async def none():
-            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(20), "BoostValue": 4})
-            off = self.state.maybe_autotarget()
-            self.state.highway_cfg["autotarget"] = True
-            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(21), "BoostValue": 4})
-            old = self.state.maybe_autotarget(now=self.now + 21 + ed_outrider.HIGHWAY_LIVE_S + 5)
-            self.jump(22, 999, "Elsewhere", 60)
-            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(23), "BoostValue": 4})
-            return off, old, self.state.maybe_autotarget()
-        self.state.highway_cfg["autotarget"] = False
-        self.assertEqual(asyncio.run(none()), (False, False, False))
-        self.assertIs(ed_outrider.HIGHWAY["autotarget"], False)
-
     # ---- too much fuel for the next jump; conservative range ----
 
     # the author's Caspian Explorer (its real Loadout): the SCO Mk II (p 2.5025, multiplier 0.011, x6), an engineered
@@ -10271,7 +10253,10 @@ class HighwayH1(unittest.TestCase):
         args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
         st = ed_outrider.settings_from({}, args, None, ([], []))
         bg = {"background_image": "", "background_extent": [-45000.0, 45000.0, -20000.0, 70000.0], "background_opacity": 0.6,
-              "conservative": False, "conservative_ly": 5.0}
+              "conservative": False, "conservative_ly": 5.0, "autotarget_entry": "type", "autotarget_map_wait": 5.0,
+              "autotarget_search_wait": 2.0, "autotarget_key_delay": 0.05, "autotarget_keys": {},
+              "autotarget_plot": ["hold CamYawRight 0.3", "hold UI_Select 1"], "autotarget_search": ["press UI_Up", "press UI_Select"],
+              "autotarget_submit": ["wait 0.5", "press Enter", "wait 0.5", "press Enter"], "autotarget_dry_run": False}
         self.assertEqual(st["highway"], dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}, **bg))
         back = tomllib.loads(ed_outrider.config_text(st))["highway"]
         self.assertEqual(back, dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5, "efficiency": 60}, **bg))
@@ -10290,7 +10275,9 @@ class HighwayH1(unittest.TestCase):
             example = f.read()
         with open(os.path.join(here, "README.md"), encoding="utf-8") as f:
             readme = f.read()
-        for key in ("clipboard", "autotarget", "autotarget_delay", "efficiency", "conservative", "conservative_ly"):
+        for key in ("clipboard", "autotarget", "autotarget_delay", "efficiency", "conservative", "conservative_ly",
+                    "autotarget_entry", "autotarget_map_wait", "autotarget_search_wait", "autotarget_key_delay",
+                    "autotarget_keys", "autotarget_plot", "autotarget_dry_run"):
             self.assertIn(f"# {key} = ", example[example.index("[highway]"):])
             self.assertIn(f"`{key}`", readme[readme.index("| `[highway]`"):].split("\n")[0])
 
@@ -10460,3 +10447,700 @@ class HighwayMap(unittest.TestCase):
         for key in ("background_image", "background_extent", "background_opacity"):
             self.assertIn(f"# {key} = ", example[example.index("[highway]"):])
             self.assertIn(f"`{key}`", readme[readme.index("| `[highway]`"):].split("\n")[0])
+
+
+# The author's keyboard bindings for auto-target, copied (read only) from the active preset "HCS X56 Attempt 1"
+# (StartPreset.4.start, HCS X56 Attempt 1.4.2.binds): the joystick bindings first, the keyboard ones second, as there
+AUTHOR_BINDS = """<?xml version="1.0" encoding="UTF-8" ?>
+<Root PresetName="HCS X56 Attempt 1" MajorVersion="4" MinorVersion="2">
+	<PrimaryFire>
+		<Primary Device="SaitekX56Joystick" Key="Joy_1" />
+		<Secondary Device="Keyboard" Key="Key_K">
+			<Modifier Device="Keyboard" Key="Key_LeftAlt" />
+			<Modifier Device="Keyboard" Key="Key_RightAlt" />
+		</Secondary>
+	</PrimaryFire>
+	<GalaxyMapOpen>
+		<Primary Device="SaitekX56Throttle" Key="Joy_18" />
+		<Secondary Device="Keyboard" Key="Key_T">
+			<Modifier Device="Keyboard" Key="Key_LeftAlt" />
+			<Modifier Device="Keyboard" Key="Key_RightAlt" />
+		</Secondary>
+	</GalaxyMapOpen>
+	<UI_Up>
+		<Primary Device="SaitekX56Throttle" Key="Joy_24" />
+		<Secondary Device="Keyboard" Key="Key_W" />
+	</UI_Up>
+	<UI_Down>
+		<Primary Device="SaitekX56Throttle" Key="Joy_26" />
+		<Secondary Device="Keyboard" Key="Key_S" />
+	</UI_Down>
+	<UI_Left>
+		<Primary Device="SaitekX56Throttle" Key="Joy_27" />
+		<Secondary Device="Keyboard" Key="Key_A" />
+	</UI_Left>
+	<UI_Right>
+		<Primary Device="SaitekX56Throttle" Key="Joy_25" />
+		<Secondary Device="Keyboard" Key="Key_D" />
+	</UI_Right>
+	<UI_Select>
+		<Primary Device="SaitekX56Joystick" Key="Joy_1" />
+		<Secondary Device="Keyboard" Key="Key_Space" />
+	</UI_Select>
+	<UI_Back>
+		<Primary Device="SaitekX56Joystick" Key="Joy_2" />
+		<Secondary Device="Keyboard" Key="Key_Backspace" />
+	</UI_Back>
+	<CycleNextPanel>
+		<Primary Device="SaitekX56Throttle" Key="Joy_21" />
+		<Secondary Device="Keyboard" Key="Key_W">
+			<Modifier Device="Keyboard" Key="Key_LeftAlt" />
+			<Modifier Device="Keyboard" Key="Key_RightAlt" />
+		</Secondary>
+	</CycleNextPanel>
+	<CamYawRight>
+		<Primary Device="{NoDevice}" Key="" />
+		<Secondary Device="Keyboard" Key="Key_X">
+			<Modifier Device="Keyboard" Key="Key_LeftAlt" />
+			<Modifier Device="Keyboard" Key="Key_RightShift" />
+		</Secondary>
+	</CamYawRight>
+</Root>
+"""
+
+
+def _fake_evdev():
+    """A stand-in evdev with key codes only: no UInput, so nothing here can ever create a real virtual keyboard."""
+    import types
+    import outrider.target
+    names = {"KEY_" + c for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"} | {k for k, _ in outrider.target.US_KEYMAP.values()}
+    names |= {"KEY_LEFTALT", "KEY_RIGHTALT", "KEY_LEFTCTRL", "KEY_RIGHTCTRL", "KEY_LEFTSHIFT", "KEY_RIGHTSHIFT",
+              "KEY_ENTER", "KEY_KPENTER", "KEY_BACKSPACE", "KEY_SPACE", "KEY_HOME", "KEY_ESC"}
+    codes = {n: i + 1 for i, n in enumerate(sorted(names))}
+    return types.SimpleNamespace(ecodes=types.SimpleNamespace(EV_KEY=1, ecodes=codes))
+
+
+class FakeGame:
+    """Stands in for the virtual keyboard's device (honker.ui) AND the game behind it: it records every key event
+    and reacts like the galaxy map as far as the auto-target steps need (Alt+Alt+T toggles the map, which opens on
+    its map; W highlights "Search the Galaxy" and Space then puts the cursor in it, while Space alone opens the
+    current system and A/D move along the tab column; once in the box, typed keys and Ctrl+V fill it, its suggestion shows SUGGEST_S after the last change and Enter
+    selects it (an Enter before then does nothing), Space held 0.5 s plots the route
+    to the system found), writing Status.json's fields into `status`. Nothing reaches a real device."""
+    REVERSE = None
+    SUGGEST_S = 0.15   # s after the name changes before the search lists its suggestion (Enter selects nothing sooner)
+
+    def __init__(self, evdev, status, systems=None):
+        import outrider.target
+        self.names = {v: k for k, v in evdev.ecodes.ecodes.items()}
+        if FakeGame.REVERSE is None:
+            FakeGame.REVERSE = {v: c for c, v in outrider.target.US_KEYMAP.items()}
+        self.status = status
+        self.systems = systems or {}
+        self.down, self.writes, self.closed = set(), [], False
+        self.tab, self.focused, self.text, self.found, self.select_at = 0, False, "", None, None
+        self.search_lit, self.map_focus = False, False
+        self.clipboard, self.text_at = None, 0.0
+        # misbehaviours for the abort paths
+        self.ignore_open = self.ignore_close = self.no_plot = False
+        self.on_type = None   # called after each typed character (a panel opening mid-way, a jump...)
+        self.plot_to = None   # plot this id64 instead of the one found
+
+    def write(self, _type, code, value):
+        if self.closed:
+            raise AttributeError("closed")
+        name = self.names[code]
+        self.writes.append((name, value))
+        if value:
+            self.down.add(name)
+            self.key(name)
+        else:
+            self.down.discard(name)
+            if name == "KEY_SPACE" and self.select_at is not None:
+                held, self.select_at = time.time() - self.select_at, None
+                if held >= 0.5 and self.found is not None and self.map_focus and not self.no_plot:
+                    self.status["destination"] = {"System": self.plot_to or self.found[1], "Body": 0, "Name": self.found[0]}
+
+    def key(self, name):
+        st = self.status
+        alts = {"KEY_LEFTALT", "KEY_RIGHTALT"} <= self.down
+        if name == "KEY_T" and alts:
+            if st.get("gui_focus") == 6 and not self.ignore_close:
+                st["gui_focus"] = 0
+            elif not st.get("gui_focus") and not self.ignore_open:
+                st["gui_focus"], self.tab, self.focused, self.text, self.found = 6, 0, False, "", None
+                self.search_lit = False
+            return
+        if st.get("gui_focus") != 6 or name.endswith(("ALT", "SHIFT", "CTRL")):
+            return
+        if self.focused:
+            if name == "KEY_ENTER":   # selects the suggestion, once listed; the focus stays in the search panel
+                if time.time() - self.text_at < self.SUGGEST_S:
+                    return
+                self.focused, self.map_focus = False, False
+                self.found = (self.text, self.systems.get(self.text)) if self.text in self.systems else None
+            elif name == "KEY_V" and {"KEY_LEFTCTRL"} <= self.down:
+                self.text, self.text_at = self.text + (self.clipboard or ""), time.time()
+            else:
+                self.text, self.text_at = self.text + self.REVERSE[(name, "KEY_LEFTSHIFT" in self.down)], time.time()
+                if self.on_type:
+                    self.on_type(self)
+            return
+        if name == "KEY_X" and {"KEY_LEFTALT", "KEY_RIGHTSHIFT"} <= self.down:   # the camera turns: focus to the map
+            self.map_focus = True
+            return
+        if name in ("KEY_D", "KEY_A"):   # into / along the tab column (Trade Routes, Bookmarks...): not the search box
+            self.tab, self.search_lit = 1, False
+        elif name == "KEY_W":            # straight after opening: highlights "Search the Galaxy"
+            self.search_lit = self.tab == 0
+        elif name == "KEY_SPACE":
+            if self.search_lit and self.found is None and not self.text:   # the cursor goes into the search box
+                self.focused, self.search_lit = True, False
+            else:   # on its own: the current system's details (or, held after a search, plot the route)
+                self.select_at = time.time()
+
+    def syn(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+class HighwayAutoTarget(unittest.TestCase):
+    """The Neutron Highway's auto-target (outrider/target.py): the steps from the author's bindings, the typing keymap,
+    the guards, the runner against a simulated game on a FAKE virtual keyboard (never a uinput device, never a real
+    key), the lock with auto honk, the trigger, the "test now" endpoint and the toggle."""
+
+    def setUp(self):
+        import tempfile
+        import types
+        import outrider.honk
+        import outrider.target
+        import contextlib
+        import io
+        self.T = outrider.target
+        quiet = contextlib.redirect_stdout(io.StringIO())   # the server's "highway auto-target: ..." lines
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.j = ed_outrider.Journals(self.db)
+        self.state = ed_outrider.State(self.db, self.j, types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+        self.now = time.time()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.journals, self.binds = Batch5ConfigCli.controls(self, tmp.name, "HCS X56 Attempt 1\n" * 4)
+        with open(os.path.join(self.binds, "HCS X56 Attempt 1.4.2.binds"), "w") as f:
+            f.write(AUTHOR_BINDS)
+        outrider.honk._bindings_cache.clear()
+        # quick timings for tests (the defaults are for the game)
+        for k, v in (("TAP_S", 0.002), ("VERIFY_WAIT", 0.4), ("POLL_S", 0.01), ("LOCK_WAIT", 2.0)):
+            p = unittest.mock.patch.object(outrider.target, k, v)
+            p.start()
+            self.addCleanup(p.stop)
+        self.evdev = _fake_evdev()
+        self.status = {"live": True, "gui_focus": 0, "flags": 1 << 4, "flags2": 0, "destination": None}
+        self.game = FakeGame(self.evdev, self.status, {"Bridge B": 102, "Col 285 Sector AB-C d13-5": 555})
+        self.honker = outrider.honk.Honker("auto", 1.0, [self.journals])
+        self.honker.evdev, self.honker.ui = self.evdev, self.game   # never open(): there is no UInput here at all
+        self.honker.owners = {"target"}
+        self.here = 101
+        self.cfg = {"map_wait": 0.4, "search_wait": 0.02, "key_delay": 0.0, "plot": ["hold CamYawRight 0.05", "hold UI_Select 0.55"],
+                    "submit": ["wait 0.2", "press Enter", "wait 0.05", "press Enter"]}
+        self.copied = []
+        self.targeter = outrider.target.Targeter(self.honker, [self.journals], self.cfg, log=lambda line: None,
+                                                 copy=lambda t: self.copied.append(t) or setattr(self.game, "clipboard", t) or True)
+
+    def run_target(self, name="Bridge B", id64=102, **kw):
+        return self.targeter.run(name, id64, lambda: self.status, lambda: self.here, **kw)
+
+    def released(self):
+        """Every key pressed was let go, in the end."""
+        down = set()
+        for n, v in self.game.writes:
+            (down.add if v else down.discard)(n)
+        return not down
+
+    # ---- the steps, the keys, the keymap ----
+
+    def test_steps_from_the_authors_bindings(self):
+        steps, missing = self.targeter.plan()
+        self.assertEqual(missing, [])
+        got = [(s["phase"], s["do"], s.get("names") or s.get("value") or s.get("secs")) for s in steps]
+        self.assertEqual(got, [
+            (1, "press", ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"]), (1, "focus", 6),
+            (2, "press", ["KEY_W"]), (2, "press", ["KEY_SPACE"]),
+            (3, "type", None), (4, "wait", 0.2), (4, "press", ["KEY_ENTER"]), (4, "wait", 0.05), (4, "press", ["KEY_ENTER"]),
+            (4, "wait", 0.02),
+            (5, "hold", ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"]), (5, "hold", ["KEY_SPACE"]),
+            (6, "press", ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"]), (6, "focus", None),   # GuiFocus 0
+            (7, "verify", None)])
+        self.assertEqual(steps[13]["value"], 0)
+        words = self.targeter.describe(steps)
+        self.assertEqual(words[0], "1 open the galaxy map: press Left Alt + Right Alt + T (secondary binding of Galaxy Map Open "
+                                   "in HCS X56 Attempt 1)")
+        self.assertIn("hold Space (secondary binding of UI Select in HCS X56 Attempt 1) for 0.55 s", words[11])
+        # the default plot step and the other reads: UI_Back Backspace, CycleNextPanel Alt+Alt+W, the arrows WASD
+        self.assertEqual(self.T.build_steps()[10], {"do": "hold", "keys": "CamYawRight", "secs": 0.3, "phase": 5, "label": "plot the route"})
+        self.assertEqual(self.T.build_steps()[11], {"do": "hold", "keys": "UI_Select", "secs": 1.0, "phase": 5, "label": "plot the route"})
+        # step 2 is configurable too ([highway] autotarget_search): the older layout's UI_Right, then select
+        self.assertEqual([x.get("keys") for x in self.T.build_steps({"search": ["press UI_Right", "press UI_Select"]}) if x["phase"] == 2],
+                         ["UI_Right", "UI_Select"])
+        b = self.targeter.bindings()
+        self.assertEqual({k: v[0] for k, v in b.items() if v[0]}, {
+            "GalaxyMapOpen": ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"], "UI_Right": ["KEY_D"], "UI_Left": ["KEY_A"],
+            "UI_Up": ["KEY_W"], "UI_Down": ["KEY_S"], "UI_Select": ["KEY_SPACE"], "UI_Back": ["KEY_BACKSPACE"],
+            "CycleNextPanel": ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_W"], "CamYawRight": ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"]})
+        # Primary Fire still reads the same (the reader is shared with auto honk)
+        self.assertEqual(outrider_honk().primary_fire_binding([self.journals])[0], ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_K"])
+        # overrides, paste entry, and a step list of your own
+        self.targeter.configure({"keys": {"GalaxyMapOpen": "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", "Enter": "KEY_KPENTER"},
+                                 "entry": "paste", "plot": ["press UI_Up", "wait 0.1", "hold KEY_SPACE 1"]})
+        steps, missing = self.targeter.plan()
+        self.assertEqual(missing, [])
+        self.assertEqual([s.get("names") for s in steps if s["phase"] in (3, 4, 5)],
+                         [["KEY_LEFTCTRL", "KEY_V"], None, ["KEY_KPENTER"], None, ["KEY_KPENTER"], None, ["KEY_W"], None, ["KEY_SPACE"]])
+        self.assertIn("(autotarget_keys)", steps[0]["what"])
+
+    def test_missing_bindings_stop_it(self):
+        with open(os.path.join(self.binds, "HCS X56 Attempt 1.4.2.binds"), "w") as f:
+            f.write(AUTHOR_BINDS.replace('<Secondary Device="Keyboard" Key="Key_Space" />', '<Secondary Device="{NoDevice}" Key="" />'))
+        os.utime(os.path.join(self.binds, "HCS X56 Attempt 1.4.2.binds"), (time.time() + 5, time.time() + 5))
+        steps, missing = self.targeter.plan()
+        self.assertEqual([m[0] for m in missing], ["UI_Select"])
+        self.assertIn("UI Select has no keyboard binding in HCS X56 Attempt 1", missing[0][1])
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"]), (False, 0))
+        self.assertIn("no keyboard binding for UI_Select", r["why"])
+        self.assertEqual(self.game.writes, [])   # nothing pressed
+        # an override fills the gap
+        self.targeter.configure({"keys": {"UI_Select": "KEY_SPACE"}})
+        self.assertEqual(self.targeter.plan()[1], [])
+
+    def test_typing_keymap(self):
+        import re
+        T = self.T
+        # every printable ASCII character, and nothing else
+        self.assertEqual(sorted(T.US_KEYMAP), [chr(c) for c in range(32, 127)])
+        for name in ("Col 285 Sector AB-C d13-5", "Barnard's Star", "BD+47 2112", "Gliese 581.1", "Sagittarius A*",
+                     "2MASS J05405172-0226489", "Hen 2-23", "LP 98-132", "Wolf 359", "Kappa-1 Ceti (B)", "HIP 12345",
+                     "Swoiwns XX-K d8-12", "Eol Prou RS-T d3-94", "V886 Centauri", "Hesperine", "Talvik Reach", "Ossia"):
+            self.assertEqual(T.untypeable(name), [], name)
+            self.assertEqual(len(T.keystrokes(name)), len(name))
+        self.assertEqual(T.keystrokes("Ab-'+.*( )"), [("KEY_A", True), ("KEY_B", False), ("KEY_MINUS", False),
+                                                      ("KEY_APOSTROPHE", False), ("KEY_EQUAL", True), ("KEY_DOT", False),
+                                                      ("KEY_8", True), ("KEY_9", True), ("KEY_SPACE", False), ("KEY_0", True)])
+        self.assertEqual(T.untypeable("Pégase Ünï"), ["é", "Ü", "ï"])
+        with self.assertRaises(ValueError):
+            T.keystrokes("Pégase")
+        # the fixture journals' and route's systems are all typeable
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "journals")
+        names = set()
+        for fn in os.listdir(here):
+            with open(os.path.join(here, fn), encoding="utf-8") as f:
+                for line in f:
+                    for m in re.finditer(r'"StarSystem": ?"([^"]*)"', line):
+                        names.add(m.group(1))
+        self.assertTrue(names)
+        self.assertEqual([n for n in names if T.untypeable(n)], [])
+
+    def test_parse_step(self):
+        P = self.T.parse_step
+        self.assertEqual(P("press UI_Select"), {"do": "press", "keys": "UI_Select"})
+        self.assertEqual(P(" hold  UI_Select 1 "), {"do": "hold", "keys": "UI_Select", "secs": 1.0})
+        self.assertEqual(P("wait 0.5"), {"do": "wait", "secs": 0.5})
+        for bad in ("", "jump", "hold UI_Select", "hold UI_Select 99", "wait soon", "press"):
+            with self.assertRaises(ValueError):
+                P(bad)
+
+    # ---- the guards ----
+
+    def test_guards(self):
+        G = self.T.guard
+        ok = {"live": True, "gui_focus": 0, "flags": 1 << 4, "flags2": 0, "destination": None}
+        self.assertIsNone(G(ok, 102))
+        cases = [({"live": False}, "live"), ({"flags": 1 << 0}, "place"), ({"flags": 1 << 1}, "place"),
+                 ({"flags": 1 << 26}, "place"), ({"flags2": 1}, "place"), ({"flags": 1 << 22}, "danger"),
+                 ({"flags": 1 << 23}, "danger"), ({"flags": 1 << 17}, "jump"), ({"flags": 1 << 30}, "jump"),
+                 ({"gui_focus": 6}, "focus"), ({"gui_focus": 2}, "focus"),
+                 ({"destination": {"System": 102, "Name": "Bridge B"}}, "already")]
+        for change, code in cases:
+            self.assertEqual(G(dict(ok, **change), 102)[0], code, change)
+        self.assertEqual(G(dict(ok, gui_focus=6), 102)[1], "the galaxy map is open (the cockpit must have focus)")
+        self.assertIsNone(G(dict(ok, destination={"System": 999}), 102))
+        self.assertEqual(G(None, 102)[0], "live")
+        # the runner refuses up front, pressing nothing
+        self.status["gui_focus"] = 7
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["code"], self.game.writes), (False, 0, "focus", []))
+
+    # ---- running against the simulated game ----
+
+    def test_success_types_the_name_and_verifies(self):
+        r = self.run_target("Col 285 Sector AB-C d13-5", 555)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((self.status["gui_focus"], self.status["destination"]["System"]), (0, 555))
+        self.assertTrue(self.released())
+        pressed = [n for n, v in self.game.writes if v]
+        self.assertEqual(pressed[:5], ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T", "KEY_W", "KEY_SPACE"])   # W lights the search box
+        self.assertEqual(pressed.count("KEY_LEFTSHIFT"), 5)   # the capitals C, S, A, B, C
+        self.assertEqual(self.game.found, ("Col 285 Sector AB-C d13-5", 555))
+        self.assertEqual(len(r["log"]), 15)   # each step done
+
+    def test_enter_waits_for_the_suggestion(self):
+        # an Enter straight after the name selects nothing (the search lists its suggestion a moment later), so
+        # nothing is plotted and the check fails; the default submit step waits first
+        self.targeter.configure({"submit": ["press Enter"]})
+        r = self.run_target()
+        self.assertFalse(r["ok"], r)
+        self.assertIsNone(self.game.found)
+        self.assertIsNone(self.status.get("destination"))
+        self.assertEqual(self.T.DEFAULT_SUBMIT, ("wait 0.5", "press Enter", "wait 0.5", "press Enter"))
+        self.targeter.configure({"submit": ["wait 0.2", "press Enter"]})
+        self.assertTrue(self.run_target()["ok"])
+
+    def test_paste_entry(self):
+        self.targeter.configure({"entry": "paste"})
+        r = self.run_target()
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.copied, ["Bridge B"])
+        self.assertNotIn("KEY_B", [n for n, _v in self.game.writes])   # pasted, not typed
+        # typing a name the keymap cannot type falls back to pasting it
+        self.targeter.configure({"entry": "type"})
+        self.game.systems["Pégase"] = 777
+        self.status.update(destination=None)
+        r = self.run_target("Pégase", 777)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.copied, ["Bridge B", "Pégase"])
+        # with no clipboard tool it says so
+        self.targeter.copy = None
+        self.status.update(destination=None)
+        r = self.run_target("Pégase", 777)
+        self.assertEqual((r["ok"], r["phase"]), (False, 3))
+        self.assertIn("cannot type 'é'", r["why"])
+
+    def test_map_never_opens(self):
+        self.game.ignore_open = True
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 1, "the galaxy map did not open"))
+        # it never pressed the map key a second time (that would open it late)
+        self.assertEqual([n for n, v in self.game.writes if v].count("KEY_T"), 1)
+        self.assertTrue(self.released())
+
+    def test_wrong_focus_mid_way(self):
+        def panel(game):
+            if len(game.text) == 3:
+                game.status["gui_focus"] = 2   # the external panel came up while typing
+        self.game.on_type = panel
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"]), (False, 3))
+        self.assertEqual(r["why"], "the external panel is open (unexpected)")
+        self.assertEqual(self.status["gui_focus"], 2)   # not Outrider's map any more: left alone
+        self.assertEqual([n for n, v in self.game.writes if v].count("KEY_T"), 1)
+        self.assertTrue(self.released())
+
+    def test_system_changed_closes_the_map_it_opened(self):
+        def jumped(game):
+            if len(game.text) == 2:
+                self.here = 999
+        self.game.on_type = jumped
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 3, "the system changed"))
+        self.assertEqual(self.status["gui_focus"], 0)   # closed again
+        self.assertIn("closed the galaxy map it had opened", r["log"][-1])
+        self.assertTrue(self.released())
+
+    def test_map_never_closes_times_out(self):
+        self.game.ignore_close = True
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 6, "the galaxy map did not close"))
+
+    def test_jump_charging_mid_way(self):
+        def charge(game):
+            if len(game.text) == 4:
+                game.status["flags"] |= 1 << 17
+        self.game.on_type = charge
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 3, "an FSD jump started"))
+
+    def test_destination_verify(self):
+        self.game.no_plot = True   # the plot keys did nothing: no target
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 7, "no system was targeted"))
+        self.game.no_plot, self.game.plot_to = False, 4242   # targeted something else
+        r = self.run_target()
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 7, "the target is Bridge B, not the next system"))
+        # the target shows up late (Status.json lags): still a success within VERIFY_WAIT
+        import threading
+        self.game.plot_to, self.game.no_plot = None, True
+        self.status["destination"] = None
+        threading.Timer(0.6, lambda: self.status.update(destination={"System": 102, "Name": "Bridge B"})).start()
+        r = self.run_target()
+        self.assertTrue(r["ok"], r)
+
+    def test_dry_run_presses_nothing(self):
+        r = self.run_target(dry_run=True)
+        self.assertEqual((r["ok"], r["dry_run"], self.game.writes), (True, True, []))
+        self.assertTrue(r["log"][0].startswith("would press Left Alt + Right Alt + T"))
+        self.assertEqual(len(r["log"]), 15)
+
+    def test_lock_with_honk(self):
+        import threading
+        # auto honk holds the keyboard: the sequence waits for it, then runs; keys never interleave
+        self.honker.lock.acquire()
+        threading.Timer(0.3, self.honker.lock.release).start()
+        start = time.time()
+        r = self.run_target()
+        self.assertTrue(r["ok"], r)
+        self.assertGreaterEqual(time.time() - start, 0.29)
+        # it stays busy: give up after LOCK_WAIT, pressing nothing
+        self.game.writes.clear()
+        self.honker.lock.acquire()
+        try:
+            with unittest.mock.patch.object(self.T, "LOCK_WAIT", 0.1):
+                self.status["destination"] = None
+                r = self.run_target()
+        finally:
+            self.honker.lock.release()
+        self.assertEqual((r["ok"], r["phase"], self.game.writes), (False, 0, []))
+        self.assertIn("busy", r["why"])
+        # and auto honk's press waits for a running sequence (the same lock)
+        self.status["destination"] = None
+        th = threading.Thread(target=self.run_target)
+        th.start()
+        time.sleep(0.05)
+        self.assertFalse(self.honker.lock.acquire(blocking=False))
+        th.join(5)
+        self.assertTrue(self.honker.lock.acquire(blocking=False))
+        self.honker.lock.release()
+
+    def test_device_owners(self):
+        # auto honk off while auto-target wants the keyboard: it stays open; the last one out closes it
+        h = self.honker
+        h.status = "off"
+        self.assertTrue(h.open())   # auto honk on while auto-target already has the keyboard: no new device, its status
+        self.assertEqual((h.owners, h.status, self.game.closed),
+                         ({"honk", "target"}, "ready: holds Left Alt + Right Alt + K (secondary binding of Primary Fire in HCS X56 Attempt 1) for 1 s", False))
+        h.close()             # auto honk off
+        self.assertTrue(h.ready and not self.game.closed)
+        h.close("target")     # auto-target off too
+        self.assertTrue(self.game.closed and h.ui is None)
+
+    # ---- the trigger, the honk first, the spoken results ----
+
+    def wire(self):
+        """The State with the simulated game as its Status.json and the targeter on the fake keyboard, at Neu A."""
+        self.state.honker, self.state.targeter = self.honker, self.targeter
+        HighwayH1.plot_exact(self)
+        HighwayH1.jump(self, 1, 101, "Neu A", 50)
+        self.j.status_json = self.status
+        self.state.highway_cfg.update(autotarget=True, autotarget_delay=0.15)
+
+    ts = HighwayH1.ts
+    jump = HighwayH1.jump
+    EXACT = HighwayH1.EXACT
+
+    def moments(self):
+        return [(m["ok"], m["text"]) for m in self.j.moments if m["kind"] == "autotarget"]
+
+    def test_trigger_after_the_delay_once(self):
+        import asyncio
+        self.wire()
+
+        async def go():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2), "BoostValue": 4})
+            first, second = self.state.maybe_autotarget(), self.state.maybe_autotarget()   # one per supercharge
+            await asyncio.sleep(0.08)
+            early = (list(self.game.writes), self.state.autotarget_last)
+            await self.state.autotarget_task
+            return first, second, early
+        first, second, early = asyncio.run(go())
+        self.assertEqual((first, second, early), (True, False, ([], None)))   # nothing before the delay
+        last = self.state.autotarget_last
+        self.assertEqual((last["system"], last["done"]), ("Bridge B", True))
+        self.assertEqual(self.moments(), [(True, "Successfully targeted neutron jump target Bridge B")])
+        self.assertEqual(self.status["destination"]["System"], 102)
+        # a failure says so (the plot keys did nothing)
+        self.game.no_plot, self.status["destination"] = True, None
+
+        async def again():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(3), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await self.state.autotarget_task
+        asyncio.run(again())
+        self.assertEqual(self.moments()[-1], (False, "Failed to target neutron jump target Bridge B"))
+        last = self.state.autotarget_last
+        self.assertEqual((last["done"], last["phase"], last["why"]), (False, 7, "no system was targeted"))
+        info = self.state.autotarget_info()
+        self.assertEqual((info["status"], info["missing"], len(info["steps"])), ("ready", [], 15))
+
+    def test_trigger_guards(self):
+        import asyncio
+        self.wire()
+
+        async def none():
+            out = []
+            self.state.highway_cfg["autotarget"] = False   # off (the default)
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(20), "BoostValue": 4})
+            out.append(self.state.maybe_autotarget())
+            self.state.highway_cfg["autotarget"] = True
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(21), "BoostValue": 4})   # an old one (catch-up)
+            out.append(self.state.maybe_autotarget(now=self.now + 21 + ed_outrider.HIGHWAY_LIVE_S + 5))
+            self.jump(22, 999, "Elsewhere", 60)   # off the route
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(23), "BoostValue": 4})
+            out.append(self.state.maybe_autotarget())
+            return out
+        self.assertEqual(asyncio.run(none()), [False, False, False])
+        self.assertIs(ed_outrider.HIGHWAY["autotarget"], False)
+        # jumped before the delay ran out: nothing pressed, nothing said
+        self.jump(30, 102, "Bridge B", 80)
+        self.status["destination"] = None
+
+        async def moved():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(31), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await asyncio.sleep(0.05)
+            self.jump(32, 103, "Scoop C", 100)
+            await self.state.autotarget_task
+        asyncio.run(moved())
+        self.assertEqual((self.state.autotarget_last["why"], self.game.writes, self.moments()), ("you had jumped", [], []))
+        # the next system already the target: no keys, nothing said
+        self.status["destination"] = {"System": 104, "Name": "Neu D"}
+
+        async def already():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(33), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await self.state.autotarget_task
+        asyncio.run(already())
+        self.assertEqual((self.state.autotarget_last["why"], self.state.autotarget_last["done"], self.game.writes, self.moments()),
+                         ("already the target", True, [], []))
+        # a panel open at the time: refused, said as a failure
+        self.status.update(destination=None, gui_focus=2)
+        asyncio.run(self._boost_and_wait(34))
+        self.assertEqual(self.moments(), [(False, "Failed to target neutron jump target Neu D")])
+        self.assertIn("the external panel is open", self.state.autotarget_last["why"])
+        self.assertEqual(self.game.writes, [])
+
+    async def _boost_and_wait(self, s):
+        self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(s), "BoostValue": 4})
+        self.assertTrue(self.state.maybe_autotarget())
+        await self.state.autotarget_task
+
+    def test_honk_goes_first(self):
+        import asyncio
+        self.wire()
+        self.state._honk_running = {"id64": 101}   # an auto honk is due on this arrival
+
+        async def go():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await asyncio.sleep(0.4)
+            waiting = list(self.game.writes)
+            self.state._honk_running = None   # the honk is done
+            await self.state.autotarget_task
+            return waiting
+        self.assertEqual(asyncio.run(go()), [])
+        self.assertEqual(self.moments(), [(True, "Successfully targeted neutron jump target Bridge B")])
+        # a honk that never ends: auto-target gives up, pressing nothing
+        self.state._honk_running, self.status["destination"] = {"id64": 101}, None
+        self.game.writes.clear()
+        with unittest.mock.patch.object(ed_outrider, "AUTOTARGET_HONK_WAIT", 0.2):
+            asyncio.run(self._boost_and_wait(5))
+        self.assertEqual((self.state.autotarget_last["why"], self.game.writes), ("auto honk was still running", []))
+
+    # ---- the endpoints ----
+
+    def test_test_endpoint_and_toggle(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        self.state.autotarget_test_countdown = 0.05
+
+        async def go():
+            out = {}
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                post = lambda path, **kw: c.post(path, **kw)
+                r = await post("/api/highway/autotarget/test")   # not started (no targeter)
+                out["none"] = (r.status, await r.json())
+                self.state.honker, self.state.targeter = self.honker, self.targeter
+                r = await post("/api/highway/autotarget/test")
+                out["noroute"] = (r.status, await r.json())
+                HighwayH1.plot_exact(self)
+                HighwayH1.jump(self, 1, 101, "Neu A", 50)
+                # "test now" needs no route: the nearest Nearby system within 90% of the range you have now
+                self.state.range_now = lambda: 40.0
+                self.state.systems = {101: {"id64": 101, "name": "Neu A", "distance": 0},
+                                      555: {"id64": 555, "name": "Col 285 Sector AB-C d13-5", "distance": 39},   # over 36
+                                      102: {"id64": 102, "name": "Bridge B", "distance": 30}}
+                self.j.status_json = self.status
+                self.status["gui_focus"] = 6
+                r = await post("/api/highway/autotarget/test")
+                out["focus"] = (r.status, await r.json())
+                self.status["gui_focus"] = 0
+                os.rename(os.path.join(self.binds, "HCS X56 Attempt 1.4.2.binds"), os.path.join(self.binds, "gone.xml"))
+                r = await post("/api/highway/autotarget/test")
+                out["binds"] = (r.status, await r.json())
+                os.rename(os.path.join(self.binds, "gone.xml"), os.path.join(self.binds, "HCS X56 Attempt 1.4.2.binds"))
+                r = await post("/api/highway/autotarget/test", headers={"Origin": "http://evil.example"})
+                out["guard"] = r.status
+                r = await post("/api/highway/autotarget/test")
+                out["started"] = (r.status, await r.json())
+                r = await post("/api/highway/autotarget/test")
+                out["busy"] = r.status
+                await self.state.autotarget_test_task
+                out["test"] = dict(self.state.autotarget_test)
+                # the toggle and the delay (remembered), and their refusals
+                r = await post("/api/highway/autotarget", json={"enabled": True, "delay": 3})
+                out["toggle"] = (r.status, (await r.json())["enabled"])
+                out["bad"] = [(await post("/api/highway/autotarget", json=b)).status
+                              for b in ({"enabled": "yes"}, {"delay": 61}, {"delay": True}, [1])]
+                r = await c.get("/api/nearby")
+                out["payload"] = (await r.json())["autotarget"]
+            return out
+        out = asyncio.run(go())
+        self.assertEqual(out["none"], (400, {"error": "not started"}))
+        self.assertEqual(out["noroute"][0], 400)   # no position, no Nearby list yet: refused, saying why
+        self.assertEqual(out["focus"], (400, {"error": "the galaxy map is open (the cockpit must have focus)"}))
+        self.assertEqual(out["binds"][0], 400)
+        self.assertIn("no keyboard binding for GalaxyMapOpen", out["binds"][1]["error"])
+        self.assertEqual(out["guard"], 403)
+        self.assertEqual(out["started"], (200, {"system": "Bridge B", "in": 0.05, "seq": 1, "dry_run": False}))
+        self.assertEqual(out["busy"], 409)
+        self.assertEqual((out["test"]["state"], out["test"]["system"]), ("done", "Bridge B"))
+        self.assertEqual(self.moments(), [(True, "Successfully targeted neutron jump target Bridge B")])
+        self.assertEqual(self.honker.owners, {"target"})   # the test's hold on the keyboard was let go
+        self.assertEqual(out["toggle"], (200, True))
+        self.assertEqual(out["bad"], [400, 400, 400, 400])
+        self.assertEqual(ed_outrider.meta_get(self.db, "autotarget"), {"enabled": True, "delay": 3.0})
+        self.assertEqual((out["payload"]["enabled"], out["payload"]["delay"], out["payload"]["last"]["test"]), (True, 3.0, True))
+
+    def test_config_round_trip_and_refusals(self):
+        import contextlib, io, tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        cfg = {"highway": {"autotarget_entry": "paste", "autotarget_map_wait": 8, "autotarget_search_wait": 3.5,
+                           "autotarget_key_delay": 0.1, "autotarget_keys": {"GalaxyMapOpen": "alt+KEY_RIGHTALT+t", "Enter": "KEY_KPENTER"},
+                           "autotarget_plot": ["press UI_Up", "hold UI_Select 1.5"], "autotarget_dry_run": True}}
+        st = ed_outrider.settings_from(cfg, args, None, ([], []))["highway"]
+        want = {"autotarget_entry": "paste", "autotarget_map_wait": 8.0, "autotarget_search_wait": 3.5, "autotarget_key_delay": 0.1,
+                "autotarget_keys": {"GalaxyMapOpen": "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", "Enter": "KEY_KPENTER"},
+                "autotarget_plot": ["press UI_Up", "hold UI_Select 1.5"], "autotarget_dry_run": True}
+        self.assertEqual({k: st[k] for k in want}, want)
+        full = ed_outrider.settings_from(cfg, args, None, ([], []))
+        back = tomllib.loads(ed_outrider.config_text(full))["highway"]
+        self.assertEqual({k: back[k] for k in want}, want)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            st = ed_outrider.settings_from({"highway": {"autotarget_entry": "clipboard", "autotarget_keys": {"Fire": "KEY_A"},
+                                                        "autotarget_plot": ["jump now"], "autotarget_map_wait": 500,
+                                                        "autotarget_dry_run": "no"}}, args, None, ([], []))["highway"]
+        self.assertEqual((st["autotarget_entry"], st["autotarget_keys"], st["autotarget_plot"], st["autotarget_map_wait"],
+                          st["autotarget_dry_run"]), ("type", {}, ["hold CamYawRight 0.3", "hold UI_Select 1"], 30.0, False))
+        for k in ("autotarget_entry", "autotarget_keys", "autotarget_plot", "autotarget_dry_run"):
+            self.assertIn(f"[highway] {k}", err.getvalue())
+        # the State hands them to the Targeter without the prefix
+        self.state.highway_cfg = dict(full["highway"])
+        self.assertEqual(self.state.autotarget_cfg()["entry"], "paste")
+
+
+def outrider_honk():
+    import outrider.honk
+    return outrider.honk

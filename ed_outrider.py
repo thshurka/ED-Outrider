@@ -31,7 +31,9 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              the neutron plotter from a range), followed as you fly (next stop, detour, back on it, complete): the
              jump list, a top-down map on the galactic regions (or your own galaxy image), a line under the tiles on
              Overview / Nearby / Here, the next system put on
-             the desktop clipboard (wl-copy / xclip) and said on arrival; [highway] in the config
+             the desktop clipboard (wl-copy / xclip) and said on arrival; optionally (Linux, off by default) the
+             next system targeted after a supercharge by key presses in the galaxy map (outrider/target.py, the
+             same virtual keyboard as auto honk); [highway] in the config
   History   your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
              each death cost including exobiology), your most valuable finds; exports
@@ -148,6 +150,7 @@ import outrider.materials  # engineering materials and synthesis recipes (no dep
 import outrider.tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
 import outrider.speech     # the words for spoken alerts, per personality (resources/speech.json)
 import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
+import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 try:  # one-line summaries of every journal event, for the Log view
     import outrider.log
@@ -182,7 +185,15 @@ SPANSH_GENERIC_ROUTE = "https://spansh.co.uk/api/generic/route"  # the exact plo
 SPANSH_RESULTS = "https://spansh.co.uk/api/results/{job}"
 SPANSH_SYSTEM_NAMES = "https://spansh.co.uk/api/systems/field_values/system_names"   # system names as you type
 HIGHWAY = {"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60,   # [highway] defaults
-           "conservative": False, "conservative_ly": 5.0}
+           "conservative": False, "conservative_ly": 5.0,
+           # auto-target's key sequence (outrider/target.py): how the name goes in, the waits, per-step key overrides,
+           # the search, submit and plot-route steps (found in game 2026-10-02) and a dry run that only logs
+           "autotarget_entry": "type", "autotarget_map_wait": 5.0, "autotarget_search_wait": 2.0,
+           "autotarget_key_delay": 0.05, "autotarget_keys": {}, "autotarget_plot": list(outrider.target.DEFAULT_PLOT),
+           "autotarget_search": list(outrider.target.DEFAULT_SEARCH), "autotarget_submit": list(outrider.target.DEFAULT_SUBMIT),
+           "autotarget_dry_run": False}
+AUTOTARGET_TEST_COUNTDOWN = 5   # s: the Highway tab's "test now": time to click into the game before the sequence
+AUTOTARGET_HONK_WAIT = 60       # s an auto-target waits for an auto honk on the same arrival to finish (honk first)
 # The Highway map's optional background image ([highway] background_image): only the configured file is served
 # (GET /api/highway/background), and only one of these image types, checked by its first bytes too (no SVG: it can
 # carry script). The extent [xmin, xmax, zmin, zmax] in ly says where its edges are in the galaxy's plane; the
@@ -310,10 +321,7 @@ AUTOHONK_WAIT_MAX = 90  # s: how long the honk waits for you to close the galaxy
 AUTOHONK_TEST_COUNTDOWN = 5   # s: the Test button's time to click into the game before the press
 BACKUP_MIN_GAP = 60     # s: a manual backup is refused this soon after the last one finished
 # Status.json GuiFocus: what has the game's focus other than the cockpit (0). Primary Fire does nothing there.
-GUI_FOCUS = {1: "the internal panel is open", 2: "the external panel is open", 3: "the comms panel is open",
-             4: "the role panel is open", 5: "station services are open", 6: "the galaxy map is open",
-             7: "the system map is open", 8: "the orrery is open", 9: "the FSS is open",
-             10: "the surface scanner is open", 11: "the codex is open"}
+GUI_FOCUS = outrider.target.GUI_FOCUS
 FLAG_FSD_JUMP = 1 << 30   # Status.json Flags: in the hyperspace tunnel
 FLAG_SCOOPING = 1 << 11   # Status.json Flags: fuel scooping
 FLAG_FSD_CHARGING = 1 << 17
@@ -471,6 +479,7 @@ LOCATION_NEAR_M = 2000    # m: a saved site this close to a mining location's ma
 SURFACE_BUMP_M, SURFACE_BUMP_DEG, SURFACE_BUMP_S = 5, 10, 0.5   # the map's position updates: a move, a turn, at most 2/s
 FLAG_LANDED = 1 << 1      # Status.json Flags: landed (the ship on the ground)
 FLAG_IN_SRV = 1 << 26
+FLAG_IN_FIGHTER = 1 << 25   # with FLAG_IN_SRV: Status.json's Fuel and Cargo are the vehicle's, not the ship's
 FLAG_ALT_AVG = 1 << 29    # Altitude is from the average radius (high up: a rough reading)
 RHINO = "mev_rhino"
 # Status.json Destination.Name of a targeted planetary mining location: "...#type=$PlanetaryMiningLocation_Name;:#index=3;"
@@ -551,6 +560,37 @@ def _config_player(v):
     if isinstance(v, str) and v.strip().lower() in outrider.tts.PLAYER_CHOICES:
         return v.strip().lower()
     raise ValueError("not a player: " + ", ".join(outrider.tts.PLAYER_CHOICES))
+
+
+def _config_entry(v):
+    """[highway] autotarget_entry: "type" or "paste"."""
+    if isinstance(v, str) and v.strip().lower() in ("type", "paste"):
+        return v.strip().lower()
+    raise ValueError('not "type" or "paste"')
+
+
+def _config_target_keys(v):
+    """[highway] autotarget_keys: {step key name: "KEY_A+KEY_B"} for the controls auto-target presses (and Enter,
+    Paste); each value as evdev names."""
+    if not isinstance(v, dict):
+        raise TypeError("not a table")
+    names = set(outrider.target.ACTIONS) | set(outrider.target.FIXED_KEYS)
+    out = {}
+    for k, val in v.items():
+        keys = outrider.honk.parse_combo(val) if isinstance(val, str) else []
+        if k not in names or not keys or not all(re.fullmatch(r"KEY_[A-Z0-9_]+", x) for x in keys):
+            raise ValueError(f"{k} = {val!r} (names: {', '.join(sorted(names))}; values like \"KEY_LEFTALT+KEY_T\")")
+        out[k] = "+".join(keys)
+    return out
+
+
+def _config_plot_steps(v):
+    """[highway] autotarget_plot: a list of steps ("press UI_Select", "hold UI_Select 1", "wait 0.5")."""
+    if not isinstance(v, list) or not v or not all(isinstance(x, str) for x in v):
+        raise TypeError("not a list of steps")
+    for x in v:
+        outrider.target.parse_step(x)
+    return [" ".join(x.split()) for x in v]
 
 
 def _config_button(v):
@@ -740,7 +780,22 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                     "background_image": num("highway", hw, "background_image", _config_bg_image, ""),
                     "background_extent": num("highway", hw, "background_extent", _config_extent, list(HIGHWAY_BG_EXTENT)),
                     "background_opacity": min(1.0, max(0.05, num("highway", hw, "background_opacity", float,
-                                                                 HIGHWAY_BG_OPACITY)))},
+                                                                 HIGHWAY_BG_OPACITY))),
+                    "autotarget_entry": num("highway", hw, "autotarget_entry", _config_entry, HIGHWAY["autotarget_entry"]),
+                    "autotarget_map_wait": min(30.0, max(1.0, num("highway", hw, "autotarget_map_wait", float,
+                                                                  HIGHWAY["autotarget_map_wait"]))),
+                    "autotarget_search_wait": min(30.0, max(0.0, num("highway", hw, "autotarget_search_wait", float,
+                                                                     HIGHWAY["autotarget_search_wait"]))),
+                    "autotarget_key_delay": min(1.0, max(0.0, num("highway", hw, "autotarget_key_delay", float,
+                                                                  HIGHWAY["autotarget_key_delay"]))),
+                    "autotarget_keys": num("highway", hw, "autotarget_keys", _config_target_keys, {}),
+                    "autotarget_plot": num("highway", hw, "autotarget_plot", _config_plot_steps,
+                                           list(HIGHWAY["autotarget_plot"])),
+                    "autotarget_search": num("highway", hw, "autotarget_search", _config_plot_steps,
+                                             list(HIGHWAY["autotarget_search"])),
+                    "autotarget_submit": num("highway", hw, "autotarget_submit", _config_plot_steps,
+                                             list(HIGHWAY["autotarget_submit"])),
+                    "autotarget_dry_run": flag("highway", hw, "autotarget_dry_run", HIGHWAY["autotarget_dry_run"])},
     }
 
 
@@ -834,8 +889,21 @@ double_ms = {st["copilot"]["double_ms"]}   # ms between a tap's release and the 
 
 [highway]   # the Neutron Highway: a Spansh route that Outrider follows as you fly
 clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving at a route system, copy the next one's name to the desktop clipboard (wl-copy or xclip)
-autotarget = {"true" if st["highway"]["autotarget"] else "false"}   # after a neutron supercharge on the route, target the next system (not built yet: it only logs "would target")
-autotarget_delay = {st["highway"]["autotarget_delay"]:g}   # seconds after the supercharge
+# Auto-target (Linux, off by default; the Highway tab can switch it): after a neutron supercharge on the route, press keys
+# in the galaxy map to make the next route system the target (outrider/target.py; python3 -m outrider.target --show
+# prints the steps with your keys). The keys go to whichever window has focus. It is key-press automation of the same
+# kind as auto honk: check Frontier's rules for yourself.
+autotarget = {"true" if st["highway"]["autotarget"] else "false"}
+autotarget_delay = {st["highway"]["autotarget_delay"]:g}   # seconds after the supercharge (0 to 60)
+autotarget_entry = {q(st["highway"]["autotarget_entry"])}   # "type" the name on the virtual keyboard (US layout), or "paste" it (wl-copy/xclip, then Ctrl+V)
+autotarget_map_wait = {st["highway"]["autotarget_map_wait"]:g}   # seconds to wait for the galaxy map to open (and close) before giving up
+autotarget_search_wait = {st["highway"]["autotarget_search_wait"]:g}   # seconds after submitting the search for the map to fly to the system
+autotarget_key_delay = {st["highway"]["autotarget_key_delay"]:g}   # seconds between typed characters
+autotarget_keys = {{{", ".join(f"{k} = {q(v)}" for k, v in st["highway"]["autotarget_keys"].items())}}}   # override a step's keys, e.g. {{ GalaxyMapOpen = "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", Enter = "KEY_KPENTER" }}; otherwise read from your controls preset
+autotarget_search = {lst(st["highway"]["autotarget_search"])}   # from the opened galaxy map into its search field (search is on the first tab)
+autotarget_submit = {lst(st["highway"]["autotarget_submit"])}   # select the search's suggestion once the name is in (it lists it after a moment)
+autotarget_plot = {lst(st["highway"]["autotarget_plot"])}   # the "plot route" step after the search (a camera turn gives the map the focus): "press <key>", "hold <key> <s>", "wait <s>"
+autotarget_dry_run = {"true" if st["highway"]["autotarget_dry_run"] else "false"}   # only log the steps it would take (nothing is pressed)
 efficiency = {st["highway"]["efficiency"]}   # the neutron plotter's efficiency (%): lower takes longer neutron detours
 conservative = {"true" if st["highway"]["conservative"] else "false"}   # the plot form starts with "Conservative range" ticked: plot jumps a margin shorter than the ship's range
 conservative_ly = {st["highway"]["conservative_ly"]:g}   # that margin (ly, 0.5 to 50): about this many ly shorter jumps, times the supercharge on a neutron jump
@@ -890,7 +958,7 @@ BODY_EVENTS = ("ApproachBody", "LeaveBody", "Touchdown")
 # The SRV on a body, and what its refinery collects (1 t per MiningRefined): "Mined previously" per body (own_mined).
 # These are read for that alone; the body comes from SRV_TRACKED (see Journals.track_srv).
 # Liftoff: only for the surface map's ship marker (a Liftoff while aboard takes it away).
-SRV_EVENTS = ("LaunchSRV", "DockSRV", "SRVDestroyed", "MiningRefined", "SupercruiseExit", "SupercruiseEntry", "Liftoff")
+SRV_EVENTS = ("LaunchSRV", "LaunchVessel", "DockSRV", "SRVDestroyed", "MiningRefined", "SupercruiseExit", "SupercruiseEntry", "Liftoff")
 SRV_TRACKED = frozenset(SRV_EVENTS) | {"ApproachBody", "LeaveBody", "Touchdown", "Location", "LoadGame",
                                        "FSDJump", "CarrierJump", "Died"}
 MATERIAL_EVENTS = ("Materials", "MaterialCollected", "MaterialDiscarded", "Synthesis", "EngineerCraft",
@@ -2609,12 +2677,14 @@ class Journals:
         own = not (ev.get("Taxi") or ev.get("Multicrew"))
         if ts >= (self.vehicle or {}).get("ts", ""):
             v = self.vehicle
-            if name == "LaunchSRV" and ev.get("PlayerControlled", True):
-                v = {"srv_type": (ev.get("SRVType") or "").lower() or None, "ts": ts}
+            if name in ("LaunchSRV", "LaunchVessel") and ev.get("PlayerControlled", True):   # the Nomad is a "vessel"
+                v = {"srv_type": (ev.get("SRVType") or ev.get("VesselType") or "").lower() or None,
+                     "label": ev.get("SRVType_Localised") or ev.get("VesselType_Localised"), "ts": ts}
             elif name in ("DockSRV", "SRVDestroyed", "Died"):
                 v = None
             elif name == "Location":
-                v = {"srv_type": (self.vehicle or {}).get("srv_type"), "ts": ts} if ev.get("InSRV") else None
+                v = {"srv_type": (self.vehicle or {}).get("srv_type"), "label": (self.vehicle or {}).get("label"),
+                     "ts": ts} if ev.get("InSRV") else None
             if v != self.vehicle:
                 self.vehicle = v
                 meta_set(self.db, "vehicle", v)
@@ -2626,8 +2696,8 @@ class Journals:
                  "lon": ev["Longitude"], "ts": ts}
         elif name == "Liftoff" and own and ev.get("PlayerControlled", True):
             m = None
-        elif name == "LaunchSRV" and live_event(ts):
-            # an SRV leaves from the ship on the ground: its spot when no Touchdown on this body was seen (the
+        elif name in ("LaunchSRV", "LaunchVessel") and live_event(ts):
+            # an SRV (or the Nomad) leaves from the ship on the ground: its spot when no Touchdown on this body was seen (the
             # journals began after it, or the game wrote none)
             st, here = self.status_json or {}, self.body_here
             if here and st.get("live") and st.get("lat") is not None and st.get("body") == here.get("name") and \
@@ -3204,14 +3274,22 @@ class Journals:
         fuel = st.get("Fuel") or {}
         if "FuelMain" in fuel or st.get("Flags2") is not None:   # on foot there is no Fuel block, but the game is live
             prev = self.status_json or {}
+            flags = st.get("Flags") if isinstance(st.get("Flags"), int) else 0
+            # in the SRV (the Nomad counts as one) or a fighter, Fuel and Cargo are the vehicle's: keep the ship's
+            away = "SRV" if flags & FLAG_IN_SRV else "fighter" if flags & FLAG_IN_FIGHTER else None
+            vehicle_fuel = None
+            if away:   # the vehicle's own tank (an SRV's fuel is all in its reservoir)
+                vehicle_fuel = round((fuel.get("FuelMain") or 0) + (fuel.get("FuelReservoir") or 0), 2) if fuel else None
+                fuel = {}
             self.status_json = {"fuel_main": fuel.get("FuelMain", prev.get("fuel_main")),
-                                "fuel_reservoir": fuel.get("FuelReservoir", prev.get("fuel_reservoir")),
+                                "fuel_reservoir": fuel.get("FuelReservoir", prev.get("fuel_reservoir")), "away": away,
+                                "vehicle_fuel": vehicle_fuel,
                                 "ts": st.get("timestamp"), "flags": st.get("Flags"), "flags2": st.get("Flags2"),
                                 # where you are on a body (the on-body strip, sample spacing) and the target
                                 "body": st.get("BodyName"), "lat": st.get("Latitude"), "lon": st.get("Longitude"),
                                 "alt": st.get("Altitude"), "planet_radius": st.get("PlanetRadius"),
                                 "heading": st.get("Heading"),   # degrees (the surface map is heading-up)
-                                "cargo": st.get("Cargo"),   # tonnes aboard (the fuel model's mass)
+                                "cargo": prev.get("cargo") if away else st.get("Cargo"),   # tonnes aboard (the fuel model's mass)
                                 "destination": st.get("Destination"), "gui_focus": st.get("GuiFocus"),
                                 "fire_group": st.get("FireGroup"), "live": True}
         elif self.status_json:  # game closed or at the menu: keep the last reading, mark it stale
@@ -3999,9 +4077,10 @@ class Clipboard:
         why = None if self.tool else "neither wl-copy (Wayland) nor xclip (X11) was found for this desktop session"
         return {"enabled": self.enabled, "available": bool(self.tool), "tool": self.tool, "why": why, "last": self.last}
 
-    def copy(self, text):
-        """Put `text` on the clipboard; True when the tool said it did (blocking, briefly: run it off the loop)."""
-        if not (self.enabled and self.argv and text):
+    def copy(self, text, force=False):
+        """Put `text` on the clipboard; True when the tool said it did (blocking, briefly: run it off the loop). force:
+        even with [highway] clipboard off (auto-target's paste entry asked for it)."""
+        if not ((self.enabled or force) and self.argv and text):
             return False
         err = None
         try:
@@ -4859,7 +4938,7 @@ class State:
         self._location_landing = None
         # the Neutron Highway: [highway] settings, the plot under way ({state: running | failed | done, plotter, from,
         # to, started, error}), the desktop clipboard (an outrider Clipboard, set at start; None in tests), the arrival
-        # whose next system was copied, the auto-target stub (the supercharge it last looked at, its task, what it did)
+        # whose next system was copied, auto-target (the supercharge it last looked at, its task, what it did)
         self.highway_cfg = dict(HIGHWAY, background_image="", background_extent=list(HIGHWAY_BG_EXTENT),
                                 background_opacity=HIGHWAY_BG_OPACITY)
         self.highway_plotting = None
@@ -4868,7 +4947,12 @@ class State:
         self._hw_copied = (meta_get(db, "highway") or {}).get("arrival_ts")   # copied before a restart: not again
         self._autotarget_boost = (journals.boost or {}).get("ts")
         self.autotarget_task = None
-        self.autotarget_last = None
+        self.autotarget_last = None   # {system, ts, done, phase, label, why, dry_run, test}: the latest run's result
+        self.targeter = None          # outrider.target.Targeter, set at start (None in tests)
+        self.autotarget_running = None   # the target a sequence is pressing keys for now
+        self.autotarget_test = None   # the "test now" run: {seq, state: counting | running | done | failed, system, why}
+        self.autotarget_test_task = None
+        self.autotarget_test_countdown = AUTOTARGET_TEST_COUNTDOWN
         self._suggest = collections.OrderedDict()   # typed name -> Spansh's system names (HIGHWAY_SUGGEST_CACHE kept)
         self._hw_near = (None, None)   # ((route id, position id64), the nearest route row) while off the route
         # too much fuel for the next jump (highway_heavy_check): {key: (route id, row, arrival), live, said, t, look,
@@ -4890,6 +4974,7 @@ class State:
             "player": self.player.info() if self.player else None,
             "speech": self.speech.info() if self.speech else None,
             "autohonk": self.autohonk_info(),
+            "autotarget": self.autotarget_info(),
             "hush": self.hush_info(),
             "firsts_watch": self.firsts_watch_info(),
             "copilot": dict(self.copilot, button=self.button.status if self.button else None),
@@ -5962,7 +6047,8 @@ class State:
                     jumps_recent = jumps_left(model, fuel, cargo, d=pace)[0]
         since_scoop = self.db.execute("SELECT count(*) FROM jumps WHERE kind='FSDJump' AND ride IS NULL AND ts > ?",
                                       (j.last_scoop or "",)).fetchone()[0]
-        return {"main": st["fuel_main"], "reservoir": st.get("fuel_reservoir"), "capacity": cap,
+        vehicle = {"label": (j.vehicle or {}).get("label") or st["away"], "fuel": st.get("vehicle_fuel")} if st.get("away") else None
+        return {"main": st["fuel_main"], "reservoir": st.get("fuel_reservoir"), "capacity": cap, "vehicle": vehicle,
                 "pct": round(100 * st["fuel_main"] / cap) if cap else None,
                 "jumps_recent": jumps_recent, "jumps_max": jumps_max, "model": model_out,
                 "since_scoop": since_scoop, "last_scoop": j.last_scoop, "ts": st.get("ts"),
@@ -8413,7 +8499,7 @@ class State:
 
     def highway_view(self):
         """GET /api/highway: the route with its progress (the next HIGHWAY_AHEAD rows and the HIGHWAY_DONE most recent
-        done above them), the plot under way, the fleet, the clipboard and the auto-target stub."""
+        done above them), the plot under way, the fleet, the clipboard and auto-target."""
         hw, rows = self.highway_state()
         route = None
         if hw:
@@ -8433,8 +8519,7 @@ class State:
         return {"route": route, "plotting": self.highway_plotting, "fleet": self.fleet_list(),
                 "ship_id": (self.journals.ship or {}).get("ship_id"), "cargo": (self.journals.cargo or {}).get("count"),
                 "position": with_id(pos), "clipboard": cb,
-                "autotarget": {"enabled": self.highway_cfg["autotarget"], "delay": self.highway_cfg["autotarget_delay"],
-                               "last": self.autotarget_last},
+                "autotarget": self.autotarget_info(),
                 "defaults": {k: self.highway_cfg[k] for k in ("efficiency", "conservative", "conservative_ly")},
                 "background": self.highway_background()}
 
@@ -8624,10 +8709,91 @@ class State:
             cb.copy(name)
         return True
 
+    # ---- auto-target (outrider/target.py): after a supercharge on the route, target the next system with key presses ----
+    def autotarget_target(self):
+        """({name, id64, here}, None) when you are at a route system with a next one, else (None, why not)."""
+        hw, rows = self.highway_state()
+        pos = self.journals.pos
+        if not hw:
+            return None, "no route is plotted"
+        if hw.get("at") is None or not pos or rows[hw["at"]]["id64"] not in (None, pos["id64"]):
+            return None, "you are not at a system on the route"
+        nx = self.highway_next(hw, rows)
+        if nx is None:
+            return None, "you are at the end of the route"
+        r = rows[nx]
+        if r["id64"] is None:
+            return None, f"{r['system']} has no id64 to check the target against"
+        return {"name": r["system"], "id64": r["id64"], "here": pos["id64"]}, None
+
+    def autotarget_test_target(self):
+        """({name, id64, here}, None) for "test now": the nearest system in the Nearby list within 90% of the range
+        you have now (a plain jump, no neutron needed, no route needed), else (None, why not)."""
+        pos = self.journals.pos
+        if not pos or pos.get("id64") is None:
+            return None, "your position is not known yet"
+        rng = self.range_now() or (self.journals.jump_range or {}).get("ly")
+        if not rng:
+            return None, "your jump range is not known yet (no Loadout seen)"
+        best = None
+        for key, row in self.systems.items():
+            d, id64 = row.get("distance"), row.get("id64", key)
+            try:
+                id64 = int(id64)
+            except (TypeError, ValueError):
+                continue
+            if id64 == pos["id64"] or d is None or not 0 < d <= 0.9 * rng or not row.get("name"):
+                continue
+            if best is None or d < best[0]:
+                best = (d, row["name"], id64)
+        if not best:
+            return None, f"no known system within {0.9 * rng:.1f} ly (90% of your {rng:.1f} ly range)"
+        return {"name": best[1], "id64": best[2], "here": pos["id64"]}, None
+
+    def autotarget_cfg(self):
+        """The Targeter's settings from [highway] (autotarget_entry -> entry, ...)."""
+        return {k[len("autotarget_"):]: v for k, v in self.highway_cfg.items()
+                if k.startswith("autotarget_") and k[len("autotarget_"):] in outrider.target.DEFAULTS}
+
+    def autotarget_info(self):
+        """The Highway tab's auto-target block (in the payload, so the result shows as it comes)."""
+        cfg, t, h = self.highway_cfg, self.targeter, self.honker
+        info = {"enabled": bool(cfg["autotarget"]), "delay": cfg["autotarget_delay"], "entry": cfg.get("autotarget_entry"),
+                "dry_run": bool(cfg.get("autotarget_dry_run")), "available": bool(t and t.available),
+                "last": self.autotarget_last, "test": self.autotarget_test, "running": self.autotarget_running is not None,
+                "missing": [], "steps": [], "countdown": self.autotarget_test_countdown}
+        if not t:
+            info["status"] = "not started"
+            return info
+        if not t.available:
+            info["status"] = h.status if h else "not started"
+            return info
+        steps, missing = t.plan()
+        info["missing"] = [{"key": n, "why": w} for n, w in missing]
+        info["steps"] = t.describe(steps)
+        info["status"] = ("off" if not cfg["autotarget"] else "dry run: logs the steps, presses nothing" if info["dry_run"]
+                          else h.device_error or "the virtual keyboard is not open" if not h.ready
+                          else "not ready: a key has no keyboard binding" if missing else "ready")
+        return info
+
+    def set_autotarget(self, enabled=None, delay=None):
+        """The Highway tab's toggle and delay (remembered over restarts, like auto honk's toggle)."""
+        if enabled is not None:
+            self.highway_cfg["autotarget"] = bool(enabled)
+        if delay is not None:
+            self.highway_cfg["autotarget_delay"] = min(60.0, max(0.0, float(delay)))
+        meta_set(self.db, "autotarget", {"enabled": self.highway_cfg["autotarget"], "delay": self.highway_cfg["autotarget_delay"]})
+        self.db.commit()   # now: a failing watcher tick would roll it back
+        if self.honker and self.honker.available and enabled is not None:
+            if enabled and not self.highway_cfg.get("autotarget_dry_run"):   # a dry run presses nothing: no keyboard
+                self.honker.open("target")
+            elif not enabled:
+                self.honker.close("target")
+        self.bump()
+
     def maybe_autotarget(self, now=None):
-        """The auto-target stub: a live FSD supercharge (JetConeBoost) in a route system, [highway] autotarget on: after
-        autotarget_delay s, "target the next system". For now that only logs "would target X" (no key presses: the
-        real sequence comes later through auto honk's uinput path, opt-in)."""
+        """A live FSD supercharge (JetConeBoost) in a route system with [highway] autotarget on: after autotarget_delay
+        s, target the next system (one attempt per supercharge; nothing repeats on its own)."""
         b = self.journals.boost
         if not b or b.get("ts") == self._autotarget_boost:
             return False
@@ -8640,28 +8806,99 @@ class State:
                 return False
         except (KeyError, TypeError, ValueError):
             return False
-        hw, rows = self.highway_state()
-        pos = self.journals.pos
-        if not hw or hw.get("at") is None or not pos or rows[hw["at"]]["id64"] not in (None, pos["id64"]):
+        tgt, _why = self.autotarget_target()
+        if not tgt:
             return False
-        nx = self.highway_next(hw, rows)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:   # no event loop (a test driving tick() by hand): nothing to schedule
             return False
-        if nx is None:
-            return False
-        self.autotarget_task = loop.create_task(self._autotarget(rows[nx]["system"], pos["id64"]))
+        if self.autotarget_task and not self.autotarget_task.done():
+            return False   # one sequence at a time
+        self.autotarget_task = loop.create_task(self._autotarget(tgt))
         return True
 
-    async def _autotarget(self, system, id64):
-        await asyncio.sleep(self.highway_cfg["autotarget_delay"])
-        if (self.journals.pos or {}).get("id64") != id64:   # jumped (or left) meanwhile: nothing to target from here
-            self.autotarget_last = {"system": system, "ts": iso_ts(time.time()), "done": False, "why": "you had jumped"}
-        else:
-            print(f"highway auto-target (stub, no key pressed): would target {system}")
-            self.autotarget_last = {"system": system, "ts": iso_ts(time.time()), "done": True,
-                                    "why": "stub: would target (no key pressed)"}
+    def start_autotarget_test(self):
+        """The Highway tab's "test now": one run against a system a plain jump away (autotarget_test_target) after a countdown (time to click into the
+        game), whether or not auto-target is on. Refused, saying why, when it could not run. (response, HTTP status)."""
+        t, h = self.targeter, self.honker
+        if not t or not t.available:
+            return {"error": (h.status if h else "not started")}, 400
+        if (self.autotarget_test_task and not self.autotarget_test_task.done()) or \
+                (self.autotarget_task and not self.autotarget_task.done()):
+            return {"error": "auto-target is already running"}, 409
+        tgt, why = self.autotarget_test_target()   # a plain jump away: no route or neutron needed to test
+        if not tgt:
+            return {"error": why}, 400
+        _steps, missing = t.plan()
+        if missing:
+            return {"error": "no keyboard binding for " + ", ".join(f"{n} ({w})" for n, w in missing)}, 400
+        g = outrider.target.guard(self.journals.status_json, tgt["id64"])
+        if g:
+            return {"error": g[1]}, 400
+        dry = bool(self.highway_cfg.get("autotarget_dry_run"))
+        if not dry and not h.open("target-test"):
+            return {"error": h.device_error or h.status}, 400
+        test = {"seq": (self.autotarget_test or {}).get("seq", 0) + 1, "state": "counting", "system": tgt["name"], "why": None}
+        self.autotarget_test = test
+        self.autotarget_test_task = asyncio.get_running_loop().create_task(self._autotarget_test(tgt, test, dry))
+        self.bump()
+        return {"system": tgt["name"], "in": self.autotarget_test_countdown, "seq": test["seq"], "dry_run": dry}, 200
+
+    async def _autotarget_test(self, tgt, test, dry):
+        try:
+            await self._autotarget(tgt, test)
+        finally:
+            if not dry and self.honker:
+                self.honker.close("target-test")
+            if test["state"] in ("counting", "running"):
+                test.update(state="failed", why=test.get("why") or "stopped")
+            self.bump()
+
+    async def _autotarget(self, tgt, test=None):
+        """Wait (the delay, or the test's countdown), check again, let a running auto honk finish (honk first), then
+        run the sequence on a worker thread and say how it went."""
+        await asyncio.sleep(self.autotarget_test_countdown if test else self.highway_cfg["autotarget_delay"])
+        if test:
+            test["state"] = "running"
+            self.bump()
+        elif not self.highway_cfg["autotarget"]:
+            return   # switched off meanwhile: nothing to say
+        if (self.journals.pos or {}).get("id64") != tgt["here"]:   # jumped (or left) meanwhile: nothing to target
+            return self._autotarget_done(tgt, {"ok": False, "phase": 0, "label": "wait", "why": "you had jumped"}, test, say=False)
+        end = time.time() + AUTOTARGET_HONK_WAIT
+        while self._honk_running is not None and time.time() < end:   # auto honk is due or holding: it goes first
+            await asyncio.sleep(0.25)
+        if self._honk_running is not None:
+            return self._autotarget_done(tgt, {"ok": False, "phase": 0, "label": "wait for auto honk",
+                                               "why": "auto honk was still running"}, test)
+        self.autotarget_running = tgt
+        self.bump()
+        try:
+            res = await asyncio.get_running_loop().run_in_executor(
+                None, self.targeter.run, tgt["name"], tgt["id64"], lambda: self.journals.status_json,
+                lambda: (self.journals.pos or {}).get("id64"))
+        except Exception as e:  # noqa: BLE001 -- say so on the page rather than lose it in a task
+            res = {"ok": False, "phase": 0, "label": "run", "why": f"{type(e).__name__}: {e}"}
+        finally:
+            self.autotarget_running = None
+        self._autotarget_done(tgt, res, test)
+
+    def _autotarget_done(self, tgt, res, test=None, say=True):
+        name, ok = tgt["name"], bool(res.get("ok"))
+        already = res.get("code") == "already"
+        why = "already the target" if already else res.get("why")
+        self.autotarget_last = {"system": name, "ts": iso_ts(time.time()), "done": ok or already, "phase": res.get("phase"),
+                                "label": res.get("label"), "why": why, "dry_run": bool(res.get("dry_run")), "test": bool(test)}
+        if test:
+            test.update(state="done" if ok or already else "failed", why=why)
+        print(f"highway auto-target{' test' if test else ''}: " + (
+            f"targeted {name}" + (" (dry run, nothing pressed)" if res.get("dry_run") else "") if ok else
+            f"{name} {why}" if already else f"failed to target {name} at step {res.get('phase')} ({res.get('label')}): {why}"))
+        if say and not already and not res.get("dry_run"):
+            self.journals.moment("autotarget", iso_ts(time.time()), ok=ok, system=name, phase=res.get("phase"), why=why,
+                                 text=(f"Successfully targeted neutron jump target {name}" if ok
+                                       else f"Failed to target neutron jump target {name}"))
         self.bump()
 
     async def highway_suggest(self, q):
@@ -9682,6 +9919,25 @@ def make_app(state, hosts=None):
         state.highway_clear()
         return web.json_response({"ok": True})
 
+    async def highway_autotarget_view(request):
+        """The Highway tab's auto-target toggle and delay: {enabled?: bool, delay?: seconds 0-60}."""
+        body = await json_object(request)
+        if body is None:
+            return web.json_response({"error": "expected a JSON object"}, status=400)
+        enabled, delay = body.get("enabled"), body.get("delay")
+        if enabled is not None and not isinstance(enabled, bool):
+            return web.json_response({"error": "enabled must be true or false"}, status=400)
+        if delay is not None and (isinstance(delay, bool) or not isinstance(delay, (int, float))
+                                  or not math.isfinite(delay) or not 0 <= delay <= 60):
+            return web.json_response({"error": "delay must be 0 to 60 seconds"}, status=400)
+        state.set_autotarget(enabled, delay)
+        return web.json_response(state.autotarget_info())
+
+    async def highway_autotarget_test_view(_):
+        """"Test now": one auto-target run against the next system after a countdown, or why it cannot run."""
+        body, status = state.start_autotarget_test()
+        return web.json_response(body, status=status)
+
     async def highway_background_view(_):
         """GET /api/highway/background: the image [highway] background_image names, and only that file (nothing in
         the request picks a path), only an image type checked by its extension and first bytes (highway_bg_file)."""
@@ -9983,6 +10239,8 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/regions", regions_view)
     app.router.add_post("/api/highway/plot", highway_plot_view)
     app.router.add_post("/api/highway/clear", highway_clear_view)
+    app.router.add_post("/api/highway/autotarget", highway_autotarget_view)
+    app.router.add_post("/api/highway/autotarget/test", highway_autotarget_test_view)
     app.router.add_get("/api/defaults", defaults_get)
     app.router.add_post("/api/defaults", defaults_post)
     app.router.add_post("/api/nextstop", next_stop_view)
@@ -10234,12 +10492,22 @@ async def run(args, st):
     print("co-pilot button: " + (f"{st['copilot']['button'] or '?'} on {st['copilot']['device'] or '?'}"
                                  if st["copilot"]["enabled"] else "off ([copilot] enabled)"))
     state.highway_cfg = dict(st["highway"])
+    saved = meta_get(db, "autotarget")   # the Highway tab's toggle and delay beat the config file once used
+    if isinstance(saved, dict):
+        if isinstance(saved.get("enabled"), bool):
+            state.highway_cfg["autotarget"] = saved["enabled"]
+        if isinstance(saved.get("delay"), (int, float)) and not isinstance(saved.get("delay"), bool):
+            state.highway_cfg["autotarget_delay"] = min(60.0, max(0.0, float(saved["delay"])))
     state.clipboard = Clipboard(st["highway"]["clipboard"])
+    state.targeter = outrider.target.Targeter(state.honker, LIVE_DIRS, state.autotarget_cfg(),
+                                              copy=lambda text: state.clipboard.copy(text, force=True))
+    if state.highway_cfg["autotarget"] and state.honker.available and not state.highway_cfg["autotarget_dry_run"]:
+        state.honker.open("target")
     print("highway clipboard: " + (f"{state.clipboard.tool} (the next system is copied on arriving at a route system)"
                                    if state.clipboard.tool and state.clipboard.enabled else
                                    "off ([highway] clipboard)" if not state.clipboard.enabled else
-                                   "neither wl-copy nor xclip found") +
-          ("; auto-target stub on (it only logs)" if st["highway"]["autotarget"] else ""))
+                                   "neither wl-copy nor xclip found"))
+    print("highway auto-target: " + ("off" if not state.highway_cfg["autotarget"] else state.autotarget_info()["status"]))
     bg = state.highway_background()
     if bg["name"]:
         print(f"highway map background: {st['highway']['background_image']}" +
@@ -10281,9 +10549,11 @@ async def run(args, st):
     try:
         await asyncio.Event().wait()
     finally:
+        if state.targeter:
+            state.targeter.cancel.set()   # a sequence pressing keys lets go and stops now
         tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task, state.seller_task,
                              state.carrier_task, state.searcher.task, state.honk_test_task, state.backup_wait_task, button_task,
-                             firsts_task, state.highway_task, state.autotarget_task) if t]
+                             firsts_task, state.highway_task, state.autotarget_task, state.autotarget_test_task) if t]
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

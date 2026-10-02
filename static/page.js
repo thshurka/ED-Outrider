@@ -372,7 +372,9 @@ function renderStrip() {
     tf.className = "tile " + (f.pct == null ? "" : f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");   // null < 15 is true
     const md = f.model, sr = f.scoop_rate, j = fuelJumps(f), hsc = fuelLow(f) ? hereScoopText(f) : "";
     const srWarn = sr && j != null && j < 2 * expectedGap(sr);   // amber: fewer jumps aboard than two usual gaps
-    el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) + hullLine() + moduleLine() +
+    el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) +
+      (f.vehicle ? ln(`Current vehicle: <b>${esc(f.vehicle.label)}</b>${f.vehicle.fuel != null ? ` · ${f.vehicle.fuel.toFixed(2)} t fuel` : ""}` +
+                      ` <span class="unk" title="the figures above are your ship's, as last read before you left it">(ship's tank above)</span>`) : "") + hullLine() + moduleLine() +
       ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (md && md.ly_max ? ` (${Math.round(md.ly_max).toLocaleString("en-US")} ly)` : "") +
          (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
       ln([f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "",
@@ -1317,6 +1319,7 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
   ["scoopstop", "fuel scooping stopped early (not above 90%, nor when you jump)", null],
   ["supercharge", "the frame shift drive supercharged in a neutron star or white dwarf cone", null],
   ["highway", "the Neutron Highway (a route plotted in the Highway tab): the next stop on arriving at a route system (with the boost and refuel stops), off route, back on the highway, and highway complete", null],
+  ["autotarget", "the Neutron Highway's auto-target (when it is on, or a test): whether the next route system was targeted", null],
   ["find", "a valuable body just scanned (over your highlight levels)", "find"],
   ["jumponium", "a landable body just scanned has a material your FSD injections are short of (premium or standard at 2 or fewer): said with the FSS debrief, or alone when the FSS never completes", "find"],
   ["sampling", "leaving a body with exobiology unfinished (untouched genera only if you landed there); a species completed", "alert"],
@@ -1333,7 +1336,7 @@ const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has rep
 const UNSPOKEN = new Set(["discovery"]);   // a target's verdict: the arrival is what gets spoken
 const alertCfg = Object.assign({enabled: false}, Object.fromEntries(ALERTS.map(([k]) => [k, true])),
   // a notification on every jump (or scoop, or FSS) would be noise: these are spoken by default, not notified
-  {jump: false, honk: false, brief: false, fss: false, mapped: false, scoop: false, scoopstop: false, supercharge: false, highway: false,
+  {jump: false, honk: false, brief: false, fss: false, mapped: false, scoop: false, scoopstop: false, supercharge: false, highway: false, autotarget: false,
    sampling: false, approach: false, bodybrief: false, jumponium: false, rigs: false, rigsout: false},
   store.get("alerts", {}));
 // off until you tick them (the whole row): the jumponium call-out
@@ -1485,7 +1488,7 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 // interdiction are said at most once in 30 s, so a flapping condition cannot keep repeating.
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
-const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium", "highway"]);
+const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium", "highway", "autotarget"]);
 // a rig confirmation answers your own press, like a line asked for
 const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" || kind === "rigs" ? 1
   : ["find", "signals", "codex", "bodybrief", "supercharge", "jumponium"].includes(kind) ? 3 : 2;
@@ -4154,8 +4157,70 @@ document.addEventListener("click", e => {
   H.doneOpen = !H.doneOpen; store.set("hwyDoneOpen", H.doneOpen);
   if (H.data) renderHwyList(H.data);
 });
+// ---- auto-target (the server presses the keys; this is its toggle, delay, test and last result) ----
+// data.autotarget: {enabled, delay, available, status, last, test, running, missing: [{key, why}], steps, dry_run, countdown}
+let hwyAutoTest = null;   // the test run this page started: {seq, done}
+const hwyHm = ts => { const d = new Date(ts); return isNaN(d) ? "" : d.toTimeString().slice(0, 5); };
+function hwyAutoLastText(l) {
+  if (!l) return "";
+  const at = hwyHm(l.ts), t = l.test ? "test: " : "";
+  if (l.done && l.why === "already the target") return `${t}${l.system} was already the target (${at})`;
+  if (l.done) return `${t}targeted ${l.system} at ${at}${l.dry_run ? " (dry run: nothing pressed)" : ""}`;
+  return `${t}failed at step ${l.phase ?? "?"}${l.label ? ` (${l.label})` : ""}: ${l.why || "?"} · ${l.system} · ${at}`;
+}
+function drawHwyAuto() {
+  const a = data && data.autotarget, on = hEl("hwyAutoOn"), dl = hEl("hwyAutoDelay");
+  if (!a) return;
+  on.checked = !!a.enabled; on.disabled = !a.available;
+  if (document.activeElement !== dl) dl.value = a.delay ?? "";
+  hEl("hwyAutoTest").disabled = !a.available || !!a.running || !!(a.test && ["counting", "running"].includes(a.test.state));
+  hEl("hwyAutoState").textContent = a.running ? "· pressing keys…" : a.enabled ? `· ${a.status || "on"}` : a.available ? "· off" : `· ${a.status || "not available"}`;
+  const last = hEl("hwyAutoLast"), lt = hwyAutoLastText(a.last);
+  last.textContent = lt ? "Last: " + lt : ""; last.className = a.last && !a.last.done ? "warnc" : "unk";
+  const miss = hEl("hwyAutoMissing"), m = a.missing || [];
+  miss.hidden = !m.length;
+  miss.textContent = m.length ? "Missing keyboard bindings (auto-target will not run): " + m.map(x => `${x.key}: ${x.why}`).join("; ") : "";
+  const steps = (a.steps || []).map(x => `<li>${esc(x)}</li>`).join("");   // "5 plot the route: hold …": the step numbers results use
+  if (hEl("hwyAutoSteps").innerHTML !== steps) hEl("hwyAutoSteps").innerHTML = steps;
+  // the test's outcome comes back in the payload
+  const t = a.test;
+  if (hwyAutoTest && !hwyAutoTest.done && t && t.seq === hwyAutoTest.seq && ["done", "failed"].includes(t.state)) {
+    hwyAutoTest.done = true;
+    hEl("hwyAutoTestMsg").textContent = t.state === "done" ? `test done: ${t.why === "already the target" ? `${t.system} was already the target` : `targeted ${t.system}`}`
+      : `test failed: ${t.why || "?"}`;
+  }
+}
+async function hwyAutoSet(body) {
+  let r;
+  try { r = await apiJson("api/highway/autotarget", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); }
+  catch (err) { r = {error: err.message}; }
+  if (r.error) toast(`could not change auto-target: ${hwyErr(r.error)}`);
+  else if (data) { data.autotarget = r; drawHwyAuto(); }
+}
+hEl("hwyAutoOn").onchange = () => hwyAutoSet({enabled: hEl("hwyAutoOn").checked});
+hEl("hwyAutoDelay").onchange = () => {
+  const v = Number(hEl("hwyAutoDelay").value);
+  if (hEl("hwyAutoDelay").value.trim() === "" || !isFinite(v) || v < 0 || v > 60) { toast("the delay is 0 to 60 seconds"); drawHwyAuto(); return; }
+  hwyAutoSet({delay: v});
+};
+hEl("hwyAutoTest").onclick = async () => {
+  const msg = hEl("hwyAutoTestMsg");
+  let r, j;
+  try { r = await fetch("api/highway/autotarget/test", {method: "POST"}); j = await r.json(); }
+  catch { msg.textContent = "could not reach Outrider"; return; }
+  if (!r.ok) { msg.textContent = `cannot test: ${j.error || "?"}`; return; }
+  const mine = hwyAutoTest = {seq: j.seq, done: false};
+  let n = j.in;
+  const tick = () => {
+    if (mine.done || mine !== hwyAutoTest) return;
+    msg.textContent = n > 0 ? `click into the game: targeting ${j.system} in ${n} s${j.dry_run ? " (dry run)" : ""}` : `targeting ${j.system}…`;
+    if (n-- > 0) setTimeout(tick, 1000);
+  };
+  tick();
+};
 function renderHwy() {
   if (view !== "hwy") return;
+  drawHwyAuto();
   const hd = H.data;
   if (!hd) { hEl("hwyHead").innerHTML = H.error ? `<div class="err">Could not load the highway: ${esc(hwyErr(H.error))}</div>` : "loading…"; drawHwyStatus(); return; }
   const r = hd.route;
@@ -5356,6 +5421,8 @@ function onData() {
       }
       else if (m.kind === "highway" && m.text)   // the Neutron Highway's arrival line, detour, back on it, complete: plain words for now
         alertOut("highway", m.text.replace(/\.$/, ""), "", {tag: "highway", say: m.text});
+      else if (m.kind === "autotarget" && m.text)   // auto-target's result: "Successfully targeted ..." / "Failed to target ..."
+        alertOut("autotarget", m.text, m.ok ? "" : `step ${m.phase ?? "?"}: ${m.why || "?"}`, {tag: m.ok ? "ok" : "failed", say: m.text});
       else if (m.kind === "rig" && m.text)   // the co-pilot's rig marking and a rig's collection: plain words, no personality
         alertOut("rigs", m.text.replace(/\.$/, ""), "", {tag: m.what === "collected" ? "rig_collected" : "rig", say: m.text});
       else if (m.kind === "rig_leash" && m.text)   // a rig past the leash warning, or lost at 5 km: danger
@@ -5486,7 +5553,7 @@ const ALERT_SHORT = {arrival: "Arrival", game: "Game start and quit", jump: "FSD
   leaving: "Leaving", fuel: "Fuel", scoop: "Tank full", scoopstop: "Scooping stopped", supercharge: "Supercharge", find: "Find",
   jumponium: "Jumponium", sampling: "Sampling", approach: "High-g approach", bodybrief: "Body brief", sell: "Selling", saleleft: "Sale left data",
   unsold: "Unsold", hull: "Hull and danger", carrier: "Carrier", codex: "Codex", loss: "Ship lost", rigs: "Rigs", rigleash: "Rig leash",
-  rigsout: "Rigs out", mapped: "Mapped", signals: "Signals", highway: "Neutron Highway", manual: "Asked for"};
+  rigsout: "Rigs out", mapped: "Mapped", signals: "Signals", highway: "Neutron Highway", autotarget: "Auto-target", manual: "Asked for"};
 const speechMuted = new Set();   // kinds turned off from the tally this session (each shows an undo)
 // "This session: Arrival brief 42 🔇 · FSD charge 40 (3 dropped) 🔇 · …": every kind that was said or queued (not the
 // silent ones: a kind already off would only inflate), noisiest first. 🔇 turns that alert's speech off (its 🗣 tick

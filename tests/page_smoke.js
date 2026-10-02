@@ -262,6 +262,34 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
                words === "Next Neutron Highway Stop: Ossia. Boost your FSD to continue.|Off route: detour." && errors.length === before;
     console.log(ok ? "OK" : "FAIL", "| highway moments spoken |", words, JSON.stringify(res), errors.slice(before));
   }
+  // auto-target's results: their own alerts row (spoken, not notified by default; its speech tick can switch them off)
+  {
+    const w = dom.window, before = errors.length, said = [];
+    const realPlay = w.play, realSpeak = w.speak;
+    w.speak = (t, o) => said.push([t, (o || {}).kind]); w.play = () => {};
+    const res = JSON.parse(w.eval(`(() => {
+      const saved = data.moments, flags = [speechOn, isSpeaker, alertSpeak.autotarget, lastMomentSeq];
+      speechOn = true; isSpeaker = true;
+      const s0 = lastMomentSeq, mk = (i, m) => Object.assign({seq: s0 + i, ts: new Date().toISOString(), kind: "autotarget"}, m);
+      const out = {row: ALERTS.some(a => a[0] === "autotarget"), notify: alertCfg.autotarget, speak: alertSpeak.autotarget,
+                   tick: !!document.querySelector('[data-aspeak="autotarget"]'), short: ALERT_SHORT.autotarget,
+                   bound: SPEECH_SYS_BOUND.has("autotarget")};
+      data.moments = [mk(1, {ok: true, system: "Hwy Stop 38", text: "Successfully targeted neutron jump target Hwy Stop 38"}),
+                      mk(2, {ok: false, system: "Hwy Stop 38", phase: 1, why: "the galaxy map did not open", text: "Failed to target neutron jump target Hwy Stop 38"})];
+      onData();
+      alertSpeak.autotarget = false;   // switched off like any other spoken notification: shown, not said
+      data.moments = [mk(3, {ok: true, system: "Hwy Stop 39", text: "Successfully targeted neutron jump target Hwy Stop 39"})];
+      onData();
+      out.seq = lastMomentSeq === s0 + 3;
+      data.moments = saved; [speechOn, isSpeaker, alertSpeak.autotarget] = flags; lastMomentSeq = flags[3];
+      return JSON.stringify(out); })()`));
+    w.speak = realSpeak; w.play = realPlay;
+    const words = said.map(x => x[0]).join("|");
+    const ok = res.row && res.notify === false && res.speak === true && res.tick && res.short === "Auto-target" && res.bound && res.seq &&
+               said.every(x => x[1] === "autotarget") && errors.length === before &&
+               words === "Successfully targeted neutron jump target Hwy Stop 38|Failed to target neutron jump target Hwy Stop 38";
+    console.log(ok ? "OK" : "FAIL", "| auto-target results spoken |", words, JSON.stringify(res), errors.slice(before));
+  }
   // one speaker: a window that is not the speaker still shows the alert but plays and says nothing; the
   // ▶ voice button still speaks; a danger line comes only from business and never swears
   {
@@ -2497,6 +2525,68 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     allOk = allOk && goodHW;
     console.log(goodHW ? "OK" : "FAIL", "| highway tab |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "200 of 400 ahead, done folded and grey, the next highlighted; form from the fleet, range override, plotters' fields; plot body and polled to done; errors; clear; projection; the line in three states with copy", errors.slice(before));
+  }
+  // the Highway tab's auto-target box: the toggle and the delay (POSTed), "test now" with its countdown and a refusal in
+  // its words, the last result, missing bindings, the steps. Every request is answered here: nothing reaches the server
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, calls = [], got = {};
+    const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status, headers: {"Content-Type": "application/json"}}));
+    const at = {enabled: false, delay: 5, available: true, status: "off", entry: "type", dry_run: false, running: false, countdown: 5,
+      last: {system: "Hwy Stop 38", ts: "2026-10-01T21:14:00Z", done: false, phase: 1, label: "open the galaxy map", why: "the galaxy map did not open", test: false},
+      test: null, missing: [{key: "UI_Right", why: "UI Right has no keyboard binding in HCS X56 Attempt 1"}],
+      steps: ["1 open the galaxy map: press Left Alt + Right Alt + T (secondary binding of Galaxy Map Open in HCS X56 Attempt 1)", "7 check the target: Status.json Destination must be the next system"]};
+    let testAnswer = () => json({error: "the galaxy map is open (the cockpit must have focus)"}, 400);
+    w.fetch = (u, o) => {
+      const url = String(u);
+      if (url === "api/highway/autotarget/test") { calls.push([url, o && o.method]); return testAnswer(); }
+      if (url === "api/highway/autotarget") { const b = JSON.parse(o.body); calls.push([url, o.method, b]); return json(Object.assign(at, b)); }
+      if (url.startsWith("api/highway")) return json(hwyPayload(hwyFixture()));
+      return realFetch(u, o);
+    };
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    w.eval(`data.autotarget = ${JSON.stringify(at)}; data.highway = ${JSON.stringify(hwyFixture().summary)}`);
+    d.querySelector('[data-view="hwy"]').click(); await sleep(700);
+    const txt = id => d.getElementById(id).textContent.replace(/\s+/g, " ").trim();
+    got.box = !!d.getElementById("hwyAuto") && !d.getElementById("hwyAuto").hidden;
+    got.off = [d.getElementById("hwyAutoOn").checked, d.getElementById("hwyAutoDelay").value, txt("hwyAutoState")];
+    got.last = txt("hwyAutoLast");
+    got.missing = [d.getElementById("hwyAutoMissing").hidden, txt("hwyAutoMissing")];
+    got.steps = d.querySelectorAll("#hwyAutoSteps li").length;
+    got.hint = /keys go to whichever window has focus/.test(txt("hwyAuto"));
+    const on = d.getElementById("hwyAutoOn");
+    on.checked = true; on.dispatchEvent(new w.Event("change")); await sleep(150);
+    const dl = d.getElementById("hwyAutoDelay");
+    dl.value = "7.5"; dl.dispatchEvent(new w.Event("change")); await sleep(150);
+    dl.value = "99"; dl.dispatchEvent(new w.Event("change")); await sleep(100);   // refused here, never sent
+    got.posts = calls.filter(c => c[0] === "api/highway/autotarget").map(c => JSON.stringify(c[2]));
+    got.onNow = [d.getElementById("hwyAutoOn").checked, w.eval("data.autotarget.delay")];
+    d.getElementById("hwyAutoTest").click(); await sleep(150);
+    got.refused = txt("hwyAutoTestMsg");
+    testAnswer = () => json({system: "Hwy Stop 38", in: 5, seq: 1, dry_run: false});
+    d.getElementById("hwyAutoTest").click(); await sleep(150);
+    got.countdown = txt("hwyAutoTestMsg");
+    w.eval(`data.autotarget = Object.assign({}, data.autotarget, {test: {seq: 1, state: "done", system: "Hwy Stop 38", why: null},
+      last: {system: "Hwy Stop 38", ts: "2026-10-01T21:15:00Z", done: true, phase: 7, label: "check the target", why: null, test: true}, missing: []}); renderHwy()`);
+    got.done = [txt("hwyAutoTestMsg"), txt("hwyAutoLast"), d.getElementById("hwyAutoMissing").hidden];
+    got.testPosts = calls.filter(c => c[0] === "api/highway/autotarget/test").map(c => c[1]);
+    w.fetch = realFetch;
+    w.eval(`data.autotarget = null`);
+    const bad = [];
+    if (!got.box) bad.push("box");
+    if (JSON.stringify(got.off) !== JSON.stringify([false, "5", "· off"])) bad.push("off");
+    if (!/^Last: failed at step 1 \(open the galaxy map\): the galaxy map did not open · Hwy Stop 38 · \d\d:\d\d$/.test(got.last)) bad.push("last");
+    if (!(got.missing[0] === false && /UI_Right: UI Right has no keyboard binding/.test(got.missing[1]))) bad.push("missing");
+    if (got.steps !== 2 || !got.hint) bad.push("steps");
+    if (JSON.stringify(got.posts) !== JSON.stringify(['{"enabled":true}', '{"delay":7.5}'])) bad.push("posts");
+    if (JSON.stringify(got.onNow) !== JSON.stringify([true, 7.5])) bad.push("onNow");
+    if (got.refused !== "cannot test: the galaxy map is open (the cockpit must have focus)") bad.push("refused");
+    if (got.countdown !== "click into the game: targeting Hwy Stop 38 in 5 s") bad.push("countdown");
+    if (!(got.done[0] === "test done: targeted Hwy Stop 38" && /^Last: test: targeted Hwy Stop 38 at \d\d:\d\d$/.test(got.done[1]) && got.done[2])) bad.push("done");
+    if (JSON.stringify(got.testPosts) !== JSON.stringify(["POST", "POST"])) bad.push("testPosts");
+    const goodAT = !bad.length && errors.length === before;
+    allOk = allOk && goodAT;
+    console.log(goodAT ? "OK" : "FAIL", "| highway auto-target box |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "toggle and delay posted (a bad delay refused here), test refused in its words, countdown, done, last result, missing bindings, steps", errors.slice(before));
   }
   // too much fuel for the next jump: the warning in the strip and the Highway header; the Conservative range option
   // (off by default, [highway] defaults when this browser has none, the note, the plot body, saved per browser) and
