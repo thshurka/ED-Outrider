@@ -456,7 +456,6 @@ def analyse(events, args):
     commanders = {c for _ts, c, _ev in events if c}
     deaths = []                     # [ts, resurrect option or None]
     bio_rows = bio_rows_with_bonus = 0
-    paid = base_plus_bonus = 0      # what the game actually paid vs what it valued
 
     for ts, cmdr, ev in events:
         if args.commander and cmdr and cmdr.lower() != args.commander.lower():

@@ -68,7 +68,6 @@ import json
 import math
 import os
 import re
-import sys
 import urllib.request
 from glob import glob, escape as glob_escape
 

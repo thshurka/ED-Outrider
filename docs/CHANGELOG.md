@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-02 · Highway screenshot with refuel stops; two unused lines removed
+- The README's Highway screenshot shows an exact-plotter route: fuel used and left per jump, a ⛽ refuel stop in the
+  list and its ring on the map (the old one was a neutron-plotter route, which has no refuel stops).
+- Removed an unused import (`outrider/bio.py`) and a dead assignment (`outrider/unsold.py`): pyflakes is clean.
+
 ## 2026-10-02 · Here's bio column stays readable; --simulate for screenshots
 - Here: a bio item ("Bacterium 3/3 ✓ 38.9M") no longer breaks inside itself, and a compact table shows a codex
   entry as 📖 ✦ (the name in its tooltip), so a body's row no longer grows to seven lines beside an open panel.
