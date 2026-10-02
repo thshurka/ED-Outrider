@@ -393,7 +393,8 @@ function renderStrip() {
   let dot = "", text = "", tcls = "";
   if (fr && fr.journal) {
     const age = Math.max(0, (Date.now() - Date.parse(fr.journal)) / 60000);
-    const cls = fr.live && age > 10 ? "bad" : fr.live && age > 3 ? "warn" : "";
+    // a quiet journal with the game running is a fault; under --simulate (screenshots) the journal is old by design
+    const stale = fr.live && !fr.simulated, cls = stale && age > 10 ? "bad" : stale && age > 3 ? "warn" : "";
     dot = cls; tcls = cls === "bad" ? "urgent" : cls;
     text = `journal ${esc(fr.journal.slice(11, 16))} UTC` + (age >= 1 ? ` · ${age < 90 ? Math.round(age) + " min" : Math.round(age / 60) + " h"} ago` : "") + (fr.live ? "" : " · game off");
   } else text = fr && !fr.dirs.length ? "no journal folder — pass --journals" : "waiting for a journal";
@@ -2605,7 +2606,8 @@ function renderHere() {
       bio.push((bio.length ? "<br>" : "") + `<span class="unk">${dual(unk.label, unkShort)}</span>` + (gl.length
         ? `<br><span class="unk">${opt ? dual(`${optLabel(unk.n, opt, f)}: `, `${credits(opt.low * f)}–${credits(opt.high * f)}: `) : dual("likely: ", "", {title: false})}</span>${gl.map(x => `<span class="sp" title="${esc(x.species.join(" / "))}">${esc(x.genus)} ≤${credits((x.value || 0) * f)}${codexMark(x, h.region)}</span>`).join(opt ? `<span class="unk"> or </span>` : "")}` : ""));
     }
-    const codex = b.codex.map(c => `<span class="sp" title="codex">📖 ${esc(c.name)}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
+    // the codex name ("Bacterium Volu - Gold") repeats the run's species: a compact table shows only 📖 and its mark
+    const codex = b.codex.map(c => `<span class="sp" title="codex: ${esc(c.name)}">📖 ${dual(esc(c.name), "", {title: false})}${c.voucher ? " 💰" : c.new ? " ✦" : ""}</span>`).join("");
     const firsts = [b.first_discovered && `<span class="fl" title="first discovered">🏁</span>`, b.first_mapped && `<span class="fl" title="first mapped">🗺</span>`,
                     !b.first_mapped && b.mapped && `<span class="fl unk" title="mapped (not first)">🗺</span>`,
                     b.first_footfall && `<span class="fl" title="first footfall">👣</span>`, !b.scanned && `<span class="unk" title="known to Spansh, not scanned by you">—</span>`].filter(Boolean).join("");

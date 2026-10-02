@@ -86,6 +86,12 @@ upstream project's choices, not rules of the game.
   (40 ly per pixel at 2250 px, Sol at pixel 1125, 1750).
 - **Landmarks are fixed:** Sol, Sagittarius A*, Colonia and Beagle Point at EDSM's locked coordinates, and your carrier
   where the journals put it.
+- **`--simulate` is display only.** For screenshots and demos the panels read as if the game were running, with the
+  last known values (fuel from the last reading, else the last jump, else a full tank; the Data tile doesn't flag the
+  old journal). Nothing is invented (a target the game cleared stays cleared), every guard still reads the real
+  Status.json, and the virtual keyboard, the co-pilot button and the clipboard are off whatever the config says.
+- **Here's bio items never break inside themselves,** and a compact table shows a codex entry as 📖 ✦ with the name
+  in its tooltip (the run beside it already names the species), so a row stays one or two lines beside an open panel.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

@@ -98,7 +98,10 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
     `[speech] server_player = "off"`, `[spansh] watch_firsts = false`, `[autohonk] enabled = false`,
     `[copilot] enabled = false`;
   - pick a spare port (`--port 8939 --host 127.0.0.1`) and stop the server by its PID, never with
-    `pkill -f` (which can match your own shell).
+    `pkill -f` (which can match your own shell);
+  - for screenshots add `--simulate`: the panels read as if the game were running, with the last known values
+    (`State.shown_status`, used only by the display: the fuel tile, the range, the Data tile's freshness), and the
+    virtual keyboard, the co-pilot button and the clipboard are off whatever the config or the page says.
 - **Never** point tests or scratch servers at your own running Outrider (port 8025 by default) or at your real
   `data/` (`ed_outrider.sqlite`, backups) / `ed_outrider.toml`. Use copies and a spare port.
 - A scratch server reads journals read-only. If you point it at your real journal folder while the game is

@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-02 · Here's bio column stays readable; --simulate for screenshots
+- Here: a bio item ("Bacterium 3/3 ✓ 38.9M") no longer breaks inside itself, and a compact table shows a codex
+  entry as 📖 ✦ (the name in its tooltip), so a body's row no longer grows to seven lines beside an open panel.
+- `--simulate`: the panels show the last known values as if the game were running (fuel from the last reading,
+  else the last jump, else a full tank), for screenshots and demos. Only the display reads it; the virtual
+  keyboard, the co-pilot button and the clipboard are off. Screenshots regenerated with it.
+
 ## 2026-10-02 · The Highway: auto-target the next system; vehicle fuel; a shorter README
 - **Auto-target** replaces the stub (Linux, off by default): after an FSD supercharge in a route system and
   `autotarget_delay` s, Outrider presses keys through auto honk's virtual keyboard to open the galaxy map, search for

@@ -64,7 +64,7 @@ tr.scoopnext td.name::after { content: " ⛽ nearest scoopable"; color: var(--go
 #hereHead { font-size: 15px; margin: 12px 0 4px; } #hereHead b { color: var(--accent); }
 #hereLeaving { font-size: 13px; margin-bottom: 8px; } #hereLeaving .ok { color: var(--good); } #hereLeaving .todo { color: var(--warn); }
 #hereTable td.bio { white-space: normal; font-size: 12px; max-width: 320px; }
-#hereTable .sp { display: inline-block; margin-right: 6px; } #hereTable .sp.done { color: var(--good); } #hereTable .sp.part { color: var(--warn); }
+#hereTable .sp { display: inline-block; margin-right: 6px; white-space: nowrap; }   /* "Bacterium 3/3 ✓ 38.9M" wraps between items, not inside one */ #hereTable .sp.done { color: var(--good); } #hereTable .sp.part { color: var(--warn); }
 #hereTable .fl { margin-right: 4px; }
 tr.main td { font-weight: 500; }
 #histView { margin-top: 12px; } #histView .exports a { color: var(--info); }

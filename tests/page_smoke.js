@@ -750,6 +750,14 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       // F34: the codex mark names the region it is given
       o.region = bodyPopHtml({name: "B 1", type: "Planet", bio: 1, genera: [], organics: [], bio_guess: [],
         bio_options: {low: 1, high: 2, genera: [{genus: "Bacterium", value: 2, species: ["Aurasus"], codex_new: true}]}}, "Norma Arm").includes("new to your codex in Norma Arm");
+      // --simulate: the game reads as running with an hours-old journal, which is no fault (no red Data tile)
+      const fz = data.freshness, fst = data.status, oldJ = new Date(Date.now() - 5 * 3600000).toISOString();
+      data.status = "";   // offline here: "Spansh failed" would colour the tile whatever the journal's age
+      data.freshness = Object.assign({}, fz, {journal: oldJ, live: true, simulated: true}); renderStrip();
+      const simCls = document.getElementById("tData").className;
+      data.freshness = Object.assign({}, fz, {journal: oldJ, live: true, simulated: false}); renderStrip();
+      o.simFresh = !/urgent/.test(simCls) && /urgent/.test(document.getElementById("tData").className);
+      data.freshness = fz; data.status = fst; renderStrip();
       // F30, F33: a run under way prices the logged species; gravity reds at your high-g level
       const hd = hereData, hk = hereKey, hg = localStorage.getItem("highG");
       if (hd && !hd.error) {
@@ -758,14 +766,19 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
         const fake = Object.assign({}, b0, {name: "Fake 1", type: "Planet", subtype: "Rocky body", gravity: 1.8, bio: 1, genera: ["Stratum"],
           organics: [{genus: "Stratum", species: "Stratum Paleas", samples: 1, done: false, lost: false, value: 1362000}],
           bio_guess: [{genus: "Stratum", best: "Stratum Tectonicas", species: ["Stratum Tectonicas"], value: 19010800}],
-          value_parts: {bio_factor: 1}, codex: [], curiosities: [], geo: 0});
+          value_parts: {bio_factor: 1}, codex: [{name: "Stratum Paleas - Teal", new: true}], curiosities: [], geo: 0});
         hereData = Object.assign({}, hd, {bodies: [fake], tree: null}); renderHere();
         const row = document.querySelector('#hereRows tr[data-body="Fake 1"]');
+        // a bio item never breaks inside itself; the codex name has a short form of just 📖 ✦ for a compact table
+        const sps = row ? [...row.querySelectorAll("td.bio .sp")] : [], cx = sps.find(e => /^codex/.test(e.title));
+        o.hereWrap = sps.length >= 2 && sps.every(e => getComputedStyle(e).whiteSpace === "nowrap") && !!cx
+          && cx.title === "codex: Stratum Paleas - Teal" && cx.querySelector(".lf").textContent === "Stratum Paleas - Teal"
+          && cx.querySelector(".sf").textContent === "" && /✦/.test(cx.textContent);
         o.here = !!row && row.textContent.includes("1.4M") && !row.textContent.includes("Tectonicas?") && !row.textContent.includes("19.0M")
           && row.querySelectorAll("td")[3].classList.contains("noscoop");
         if (hg === null) localStorage.removeItem("highG"); else localStorage.setItem("highG", hg);
         hereData = hd; hereKey = hk; renderHere();
-      } else o.here = "no Here data";
+      } else { o.hereWrap = "no Here data"; o.here = "no Here data"; }
       // F39: injections at cap: nothing is "limiting"; 3 left: the short material is
       const md = matData;
       const mat = craftable => ({rows: [{id: "polonium", name: "Polonium", count: craftable, cap: 150}], snapshot_ts: "2026-01-01T00:00:00Z", ts: "2026-01-01T00:00:00Z",
@@ -845,7 +858,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     w.setTimeout = realST; w.fetch = realFetch;
     w.eval("search = null; searchWant = 0; searchRefused = false; render()");
     w.speak = realSpeak; w.play = realPlay;
-    const want = {unwarned: null, kept: true, outage: true, spacing: true, spacing2: true, region: true, here: true, mat: true,
+    const want = {unwarned: null, kept: true, outage: true, spacing: true, spacing2: true, region: true, simFresh: true, hereWrap: true, here: true, mat: true,
                   streak: 2, nulls: ["{}", "ts"], impNull: "bioSort", saved: true, dock: "2026-01-01T01:00:00Z", hlRender: true, more: true};
     const want2 = {onbody: true, here: true, logError: null};
     const goodH = JSON.stringify(out) === JSON.stringify(want) && JSON.stringify(out2) === JSON.stringify(want2)

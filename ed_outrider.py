@@ -102,7 +102,8 @@ reported to Spansh or EDSM -- almost certainly undiscovered.
 Journal folders are auto-detected (Windows save folder, every Steam library's Proton prefix,
 mounted Windows drives for older journals); --journals / --legacy / ED_JOURNALS override. Files
 are remembered by path and byte offset, so a restart only reads what is new; legacy folders are
-imported once. Pass --rescan to rebuild everything from scratch.
+imported once. Pass --rescan to rebuild everything from scratch. --simulate (screenshots, demos) shows the
+panels as if the game were running, with the last known values, and keeps every key-pressing part off.
 
 Settings come from ed_outrider.toml next to this script (see ed_outrider.toml.example; make one with
 --write-config); flags and ED_JOURNALS override it, and nothing is required. Relative paths in it are
@@ -382,6 +383,18 @@ class ScoopWatch:
 def fire_group_letter(group):
     """Status.json FireGroup (0, 1, ...) as the letter the game shows (A, B, ...); None when unknown."""
     return chr(65 + group) if isinstance(group, int) and not isinstance(group, bool) and 0 <= group < 26 else None
+
+
+def simulate_settings(st):
+    """--simulate (screenshots and demos): the settings with the co-pilot button and the clipboard off."""
+    return dict(st, copilot=dict(st["copilot"], enabled=False), highway=dict(st["highway"], clipboard=False))
+
+
+def simulate_keyboard_off(honker):
+    """--simulate: no virtual keyboard at all, so every open, press, test and auto-target run is refused (the page
+    acts as if the game were running, and nothing may press a key into whatever window has focus)."""
+    honker.evdev, honker.status = None, "off (--simulate)"
+    return honker
 
 
 def status_fresh(status, now):
@@ -4855,6 +4868,7 @@ class State:
         self.sounds = outrider.tts.SoundBank()   # static/sounds.json rendered to WAV for it
         self.speech = None         # outrider.speech.SpeechLines, set at start (None in tests)
         self.honker = None         # outrider.honk.Honker, set at start (None in tests)
+        self.simulate = False      # --simulate: the panels act as if the game were running (shown_status)
         self.button = None         # outrider.button.ButtonWatch when [copilot] enabled (None otherwise and in tests)
         # the voice's hush ({mode, until, sys}): here, not per browser, so the co-pilot button, a tablet and the
         # window that is speaking all see the same one. In memory only: a restart ends it
@@ -5013,7 +5027,8 @@ class State:
             # read: moves with every journal line consumed (the Log tails on it; journal is to the second)
             "freshness": {"journal": self.journals.last_event_ts, "read": sum(self.journals.offsets.values()),
                           "status": (self.journals.status_json or {}).get("ts"),
-                          "live": bool((self.journals.status_json or {}).get("live")),
+                          "live": bool(self.shown_status().get("live")),
+                          "simulated": bool(self.shown_status().get("simulated")),   # --simulate: an old journal is no fault
                           "dirs": LIVE_DIRS, "legacy": LEGACY_DIRS},
             "docked": self.docked_summary(),
             # the last Docked event's ts even while Status.json says you are not docked (out in the SRV at a
@@ -5930,11 +5945,28 @@ class State:
                 "boosts": outrider.materials.boosts(m["counts"]), "count": sum(m["counts"].values()),
                 "stale": materials_stale(m, self.journals.commander)}
 
+    def shown_status(self):
+        """Status.json as the panels show it. With --simulate (screenshots, demos) and the game not running: the last
+        known values as if it were, in the ship's seat, with the fuel of the last reading, else of the last jump, else
+        a full tank. Only the display reads this; auto honk, auto-target, the scoop and surface checks and every other
+        guard read the real Status.json (and --simulate turns the virtual keyboard off besides)."""
+        j = self.journals
+        st = j.status_json or {}
+        if not self.simulate or st.get("live"):
+            return st
+        fuel = st.get("fuel_main")
+        if fuel is None:   # the last jump's FuelLevel: fuel_hist rows are [jump ly, fuel t, fuel left t, cargo t]
+            fuel = next((h[2] for h in reversed(j.fuel_hist) if len(h) > 2 and h[2] is not None), None)
+        if fuel is None:
+            fuel = (j.ship or {}).get("fuel_main")
+        return dict(st, live=True, simulated=True, fuel_main=fuel, away=None, vehicle_fuel=None,
+                    flags=st.get("flags") or (1 << 24))   # InMainShip
+
     def fuel_now(self):
         """(model, fuel t, cargo t) for the fuel model right now, or None: no Loadout mass, no reading, or no cargo
         figure (Status.json's, else the journal's Cargo). The cargo counts, since a hold of 700 t cuts the range."""
         j = self.journals
-        st = j.status_json or {}
+        st = self.shown_status()
         model = fuel_model(j.ship, j.fuel_hist)
         cargo = st.get("cargo") if st.get("cargo") is not None else (j.cargo or {}).get("count")
         if not model or st.get("fuel_main") is None or cargo is None:
@@ -6013,7 +6045,7 @@ class State:
 
     def fuel_summary(self):
         j = self.journals
-        st, ship = j.status_json, j.ship or {}
+        st, ship = self.shown_status(), j.ship or {}
         if not st or st.get("fuel_main") is None:   # no reading yet (or on foot before any)
             return {"live": False}
         cap = ship.get("fuel_main")
@@ -10474,11 +10506,18 @@ async def run(args, st):
         "off ([speech] server_player)" if state.player.choice == "off" else
         f"{st['server_player']} not found" if state.player.choice != "auto" else
         "no player found (pw-play, paplay, aplay or ffplay)")))
+    state.simulate = bool(getattr(args, "simulate", False))
+    if state.simulate:
+        st = simulate_settings(st)
+        print("simulate: the panels show the last known values as if the game were running; auto honk, auto-target, "
+              "the co-pilot button and the clipboard are off")
     state.autohonk = dict(st["autohonk"])
     saved = meta_get(db, "autohonk_enabled")   # the page's toggle beats the config file once used
     if saved is not None:
         state.autohonk["enabled"] = bool(saved)
     state.honker = outrider.honk.Honker(state.autohonk["key"], state.autohonk["hold"], LIVE_DIRS)
+    if state.simulate:
+        simulate_keyboard_off(state.honker)
     if state.autohonk["enabled"]:
         state.honker.open()
     print("auto honk: " + (state.honker.status if state.autohonk["enabled"] else "off")
@@ -10611,6 +10650,9 @@ def main(argv=None):
                    help="Put the database (and browser_defaults.json) back from a backup zip, the newest in "
                         "backup_dir if none is given, and exit. Refuses while Outrider is running; the current "
                         "database is kept as <db>.pre-restore-<stamp>.")
+    p.add_argument("--simulate", action="store_true",
+                   help="For screenshots and demos: the panels show the last known values (fuel...) as if the game "
+                        "were running. Auto honk, auto-target, the co-pilot button and the clipboard are off.")
     p.add_argument("--list-backups", action="store_true",
                    help="List this database's backup zips in backup_dir (name, size, time) and exit.")
     args = p.parse_args(argv)

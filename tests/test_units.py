@@ -4042,6 +4042,47 @@ class BatchAIntegrity(unittest.TestCase):
         self.assertEqual((st["fuel_main"], st["cargo"], st["away"]), (150.2, 3, None))
         self.assertIsNone(st["vehicle_fuel"])
 
+    def test_simulate_shows_the_last_values_as_live(self):
+        """--simulate (screenshots): with the game closed the panels read as live, with the last jump's fuel, while
+        the real Status.json, which every guard reads, still says the game is not running."""
+        state = ed_outrider.State(self.db, self.j, None, 25)
+        self.j.status_json = {"live": False, "ts": "2026-10-02T00:00:00Z"}
+        self.j.ship = {"fuel_main": 160}
+        self.j.fuel_hist = [[40.0, 2.0, 150.5, 0], [42.0, 2.2, 148.3, 0]]
+        self.assertFalse(state.fuel_summary()["live"])                      # off: the truth
+        self.assertFalse(state.payload()["freshness"]["live"])
+        state.simulate = True
+        f = state.fuel_summary()
+        self.assertEqual((f["live"], f["main"], f["pct"], f["in_ship"], f["vehicle"]), (True, 148.3, 93, True, None))
+        self.assertTrue(state.payload()["freshness"]["live"])
+        self.assertTrue(state.payload()["freshness"]["simulated"])   # the page then shows an old journal as no fault
+        self.assertFalse(self.j.status_json["live"])                         # the guards' view is untouched
+        self.j.fuel_hist = []                                                # no jump yet: a full tank
+        self.assertEqual(state.fuel_summary()["main"], 160)
+        self.j.status_json = {"live": False, "fuel_main": 99.0, "ts": "2026-10-02T00:00:00Z"}   # a reading this run
+        self.assertEqual(state.fuel_summary()["main"], 99.0)
+        self.j.status_json = {"live": True, "fuel_main": 12.0, "flags": 1 << 24}           # the game running wins
+        self.assertEqual(state.shown_status(), self.j.status_json)
+
+    def test_simulate_turns_the_keyboard_off(self):
+        """--simulate never presses a key: run() makes the virtual keyboard unavailable before anything opens it, so
+        auto honk, its test, auto-target and its test are all refused."""
+        h = ed_outrider.simulate_keyboard_off(outrider_honk().Honker("auto", 6.0, []))
+        self.assertFalse(h.available)
+        self.assertFalse(h.open())
+        self.assertFalse(h.open("target"))
+        state = ed_outrider.State(self.db, self.j, None, 25)
+        state.honker = h
+        body, status = state.start_honk_test()
+        self.assertEqual((status, body["error"]), (400, "off (--simulate)"))
+        st = {"copilot": {"enabled": True, "device": "x"}, "highway": {"clipboard": True, "autotarget": True}, "port": 1}
+        sim = ed_outrider.simulate_settings(st)
+        self.assertEqual((sim["copilot"]["enabled"], sim["highway"]["clipboard"], sim["port"]), (False, False, 1))
+        self.assertTrue(st["copilot"]["enabled"])   # a copy: the settings passed in are unchanged
+        import subprocess   # the flag is on the command line (--help prints and exits before anything starts)
+        out = subprocess.run([sys.executable, ed_outrider.__file__, "--help"], capture_output=True, text=True, timeout=60)
+        self.assertIn("--simulate", out.stdout)
+
     def test_nomad_launch_names_the_vehicle(self):
         self.j.handle({"event": "LaunchVessel", "timestamp": "2026-10-01T00:00:00Z", "VesselType": "lander01",
                        "VesselType_Localised": "Nomad", "ID": 49, "PlayerControlled": True})

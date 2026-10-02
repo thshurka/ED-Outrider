@@ -524,6 +524,7 @@ Command-line flags override the file for a single run:
 | `--journals PATH`, `--legacy PATH` | Journal folders to follow, or older ones to import once (repeatable) |
 | `--rescan` | Rebuild from the journals, keeping the Spansh cache |
 | `--restore [ZIP]`, `--list-backups` | See Backups |
+| `--simulate` | For screenshots and demos: the panels show the last known values (fuel...) as if the game were running; auto honk, auto-target, the co-pilot button and the clipboard are off |
 
 **Opening the page from another device.** Outrider listens on 127.0.0.1 only unless `[server] host` says
 otherwise (`"0.0.0.0"` for your network). It answers to any IP address, but by name only to `localhost`,
