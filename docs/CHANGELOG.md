@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Target next highway system, Retry, and the Highway in the status report (fix plan, batch 5)
+- 🎯 Target next: in the Highway tab's auto-target box and beside "Next:" in the route line, it targets the next route
+  system (off the route, the closest one) after a 5-second countdown, whether or not auto-target is on. A failed
+  auto-target puts ⟳ Retry on its route row (review Q4). POST /api/highway/target, {countdown: 0-10}; a cleared or
+  replaced route stops it.
+- The co-pilot's status report and the welcome back line say the Highway: boost here, the next stop, the refuel
+  coming up, the too-much-fuel warning first; off the route, the closest route system. "Nearest unvisited" is left
+  out of the report while a route is followed (review S2).
+
 ## 2026-10-03 · Automation safety (fix plan, batch 4)
 - Switching auto-target off stops a run under way, even mid-sequence while auto honk keeps the virtual keyboard
   open; switching auto honk off ends its hold the same way (Codex F1, review F12). Clearing or replacing the Highway

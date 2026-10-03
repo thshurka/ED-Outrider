@@ -1679,7 +1679,7 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual(out["binds"][0], 400)
         self.assertIn("no keyboard binding for GalaxyMapOpen", out["binds"][1]["error"])
         self.assertEqual(out["guard"], 403)
-        self.assertEqual(out["started"], (200, {"system": "Bridge B", "in": 0.05, "seq": 1, "dry_run": False}))
+        self.assertEqual(out["started"], (200, {"system": "Bridge B", "in": 0.05, "seq": 1, "dry_run": False, "kind": "test"}))
         self.assertEqual(out["busy"], 409)
         self.assertEqual((out["test"]["state"], out["test"]["system"]), ("done", "Bridge B"))
         self.assertEqual(self.moments(), [(True, "Successfully targeted neutron jump target Bridge B")])
@@ -1688,6 +1688,83 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual(out["bad"], [400, 400, 400, 400])
         self.assertEqual(ed_outrider.meta_get(self.db, "autotarget"), {"enabled": True, "delay": 3.0})
         self.assertEqual((out["payload"]["enabled"], out["payload"]["delay"], out["payload"]["last"]["test"]), (True, 3.0, True))
+
+    def test_target_next_endpoint(self):   # review Q4: Target next / Retry, whether or not auto-target is on
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+        self.state.honker, self.state.targeter = self.honker, self.targeter
+        self.j.status_json = self.status
+        self.assertFalse(self.state.highway_cfg["autotarget"])
+
+        async def go():
+            out = {}
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                async def post(body=None, **kw):
+                    r = await c.post("/api/highway/target", **({"json": body} if body is not None else {}), **kw)
+                    return r.status, await r.json()
+                out["noroute"] = await post()
+                hwy_plot_exact(self)
+                hwy_jump(self, 1, 101, "Neu A", 50)
+                out["bad"] = [(await post(b))[0] for b in ({"countdown": 11}, {"countdown": True}, {"countdown": "5"})]
+                out["badjson"] = (await c.post("/api/highway/target", data="[1]",
+                                               headers={"Content-Type": "application/json"})).status
+                out["guard"] = (await c.post("/api/highway/target", headers={"Origin": "http://evil.example"})).status
+                out["started"] = await post({"countdown": 0})
+                out["busy"] = (await post())[0]
+                await self.state.autotarget_test_task
+                out["last"] = dict(self.state.autotarget_last)
+                # off the route: the closest route system, passed or not (Neu A, 10 ly away, over Bridge B)
+                self.status["destination"] = None
+                hwy_jump(self, 2, 900, "Detour", 60)
+                self.here = 900
+                self.game.systems["Neu A"] = 101
+                out["near"] = await post({"countdown": 0})
+                await self.state.autotarget_test_task
+                out["near_last"] = dict(self.state.autotarget_last)
+            return out
+        out = asyncio.run(go())
+        self.assertEqual(out["noroute"], (400, {"error": "no route is plotted"}))
+        self.assertEqual((out["bad"], out["badjson"], out["guard"]), ([400, 400, 400], 400, 403))
+        self.assertEqual(out["started"], (200, {"system": "Bridge B", "in": 0, "seq": 1, "dry_run": False, "kind": "next"}))
+        self.assertEqual(out["busy"], 409)
+        last = out["last"]
+        self.assertEqual((last["done"], last["kind"], last["test"], last["index"], last["system"]), (True, "next", False, 2, "Bridge B"))
+        self.assertEqual(self.moments()[0], (True, "Successfully targeted neutron jump target Bridge B"))
+        self.assertEqual(self.honker.owners, {"target"})   # the run's hold on the keyboard was let go
+        self.assertEqual(out["near"][1]["system"], "Neu A")
+        self.assertEqual((out["near_last"]["done"], out["near_last"]["index"]), (True, 1))
+
+    def test_target_next_targets(self):
+        T = self.state.autotarget_target
+        self.assertEqual(T(manual=True), (None, "no route is plotted"))
+        hwy_plot_exact(self)   # at the start (Start, index 0): the next is Neu A
+        self.assertEqual(T(manual=True)[0]["name"], "Neu A")
+        hwy_jump(self, 1, 101, "Neu A", 50)
+        tgt = T(manual=True)[0]
+        self.assertEqual((tgt["name"], tgt["index"], tgt["here"]), ("Bridge B", 2, 101))
+        hwy_jump(self, 2, 900, "Detour", 85)   # off the route, 5 ly past Bridge B: Bridge B, the closest
+        self.assertEqual(T(), (None, "you are not at a system on the route"))   # the automatic run never does this
+        self.assertEqual(T(manual=True)[0]["name"], "Bridge B")
+        last = len(self.EXACT["jumps"]) - 1
+        end = self.EXACT["jumps"][last]
+        hwy_jump(self, 3, end["id64"], end["name"], end["x"])
+        self.assertIn(T(manual=True)[1], ("you are at the end of the route", "the highway is complete"))
+
+    def test_target_next_stops_with_the_route(self):   # the Batch 4 lifecycle: a cleared route stops it too
+        import asyncio
+        self.wire()
+        self.state.highway_cfg["autotarget"] = False
+        self.state.autotarget_test_countdown = 0.2
+
+        async def go():
+            body, status = self.state.start_autotarget_run("next")
+            self.assertEqual(status, 200, body)
+            await asyncio.sleep(0.05)
+            self.state.highway_clear()
+            await self.state.autotarget_test_task
+        asyncio.run(go())
+        self.assertEqual((self.game.writes, self.moments()), ([], []))
+        self.assertEqual((self.state.autotarget_test["state"], self.state.autotarget_test["why"]), ("failed", "stopped"))
 
     def test_config_round_trip_and_refusals(self):
         import contextlib, io, tomllib

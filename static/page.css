@@ -594,6 +594,7 @@ tr.nextstop td.name::after { content: " ⚑ next stop"; color: var(--info); font
    Below app mode the parts stack: the header, the map, the form (folded while a route is followed), the list ---- */
 #hwyLine { margin-top: 4px; font-size: 13px; cursor: pointer; } #hwyLine:empty { display: none; }
 #hwyLine:hover { color: var(--text); } #hwyLine .copy { cursor: copy; }
+#hwyLine .hwyaim, #hwyRows .hwyretry, #hwyDone .hwyretry { margin-left: 6px; padding: 0 6px; font-size: 12px; }
 .hwyoff { color: var(--warn); font-weight: 600; } .hwydone { color: var(--good); font-weight: 600; }
 .hwyn { color: var(--info); } .hwyfuel { color: var(--good); } .hwyheavy { color: var(--warn); font-weight: 600; }
 #hwyConsNote { font-size: 12px; }

@@ -4588,10 +4588,13 @@ class State:
         self._autotarget_boost = (journals.boost or {}).get("ts")
         self.autotarget_task = None
         self._autotarget_cancel = None   # threading.Event: the automatic run's own token (switch-off, route cleared/replaced)
+        self._autotarget_next_cancel = None   # the same for a Target next / Retry run (route cleared/replaced only)
         self.autotarget_last = None   # {system, ts, done, phase, label, why, dry_run, test}: the latest run's result
         self.targeter = None          # outrider.target.Targeter, set at start (None in tests)
         self.autotarget_running = None   # the target a sequence is pressing keys for now
-        self.autotarget_test = None   # the "test now" run: {seq, state: counting | running | done | failed, system, why}
+        # the page's own run ("test now", or Target next / Retry): {seq, kind: test | next, state: counting | running |
+        # done | failed, system, why, in: its countdown}
+        self.autotarget_test = None
         self.autotarget_test_task = None
         self.autotarget_test_countdown = AUTOTARGET_TEST_COUNTDOWN
         self._suggest = collections.OrderedDict()   # typed name -> Spansh's system names (HIGHWAY_SUGGEST_CACHE kept)
@@ -8345,7 +8348,7 @@ class State:
 
     def highway_store(self, rows, meta):
         """A new route replaces the old one: its rows, and its meta with where you are on it now."""
-        self.cancel_autotarget()   # a pending run would target the old route's next system (CX-F2)
+        self.cancel_autotarget(route=True)   # a pending run would target the old route's next system (CX-F2)
         self.db.execute("DELETE FROM highway_route")
         self.db.executemany("INSERT INTO highway_route (idx, system, id64, x, y, z, distance, fuel_used, fuel_left, neutron,"
                             " refuel, jumps, remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -8368,7 +8371,7 @@ class State:
             self.highway_task.cancel()
             if self.highway_plotting:
                 self.highway_plotting.update(state="failed", error="cancelled")
-        self.cancel_autotarget()   # its target belonged to the route just forgotten (CX-F2)
+        self.cancel_autotarget(route=True)   # its target belonged to the route just forgotten (CX-F2)
         self.db.execute("DELETE FROM highway_route")
         meta_set(self.db, "highway", None)
         self.db.commit()
@@ -8407,21 +8410,34 @@ class State:
         return True
 
     # ---- auto-target (outrider/target.py): after a supercharge on the route, target the next system with key presses ----
-    def autotarget_target(self):
-        """({name, id64, here}, None) when you are at a route system with a next one, else (None, why not)."""
+    def autotarget_target(self, manual=False):
+        """({name, id64, here, route, index}, None) when you are at a route system with a next one, else (None, why
+        not). manual (Target next, Retry: review Q4): also off the route, where it is the CLOSEST route system (the
+        line's "nearest", passed or not), and before the route's start, where it is the start."""
         hw, rows = self.highway_state()
         pos = self.journals.pos
         if not hw:
             return None, "no route is plotted"
-        if hw.get("at") is None or not pos or rows[hw["at"]]["id64"] not in (None, pos["id64"]):
-            return None, "you are not at a system on the route"
-        nx = self.highway_next(hw, rows)
-        if nx is None:
-            return None, "you are at the end of the route"
+        if not pos or pos.get("id64") is None:
+            return None, "your position is not known yet"
+        if hw.get("done_ts"):
+            return None, "the highway is complete"
+        if manual and hw.get("off_route"):
+            near = self.highway_nearest(hw, rows)
+            if not near or near.get("index") is None:
+                return None, "no route system to get back to"
+            nx = near["index"]
+        else:
+            at = hw.get("at")
+            if (at is None and not manual) or (at is not None and rows[at]["id64"] not in (None, pos["id64"])):
+                return None, "you are not at a system on the route"
+            nx = self.highway_next(hw, rows)
+            if nx is None:
+                return None, "you are at the end of the route"
         r = rows[nx]
         if r["id64"] is None:
             return None, f"{r['system']} has no id64 to check the target against"
-        return {"name": r["system"], "id64": r["id64"], "here": pos["id64"], "route": hw.get("id")}, None
+        return {"name": r["system"], "id64": r["id64"], "here": pos["id64"], "route": hw.get("id"), "index": nx}, None
 
     def autotarget_test_target(self):
         """({name, id64, here}, None) for "test now": the nearest system in the Nearby list within 90% of the range
@@ -8490,11 +8506,13 @@ class State:
                 self.honker.close("target")
         self.bump()
 
-    def cancel_autotarget(self):
-        """Stop the automatic run, wherever it is: the delay, the wait for auto honk, or between two keys. A "test now"
-        run is the dialog's own and is left alone."""
-        if self._autotarget_cancel is not None:
-            self._autotarget_cancel.set()
+    def cancel_autotarget(self, route=False):
+        """Stop the automatic run, wherever it is: the delay, the wait for auto honk, or between two keys. route: the
+        route was cleared or replaced, which also stops a Target next run (its target was on that route). A "test now"
+        run needs no route and is left alone."""
+        for tok in (self._autotarget_cancel, self._autotarget_next_cancel if route else None):
+            if tok is not None:
+                tok.set()
 
     def maybe_autotarget(self, now=None):
         """A live FSD supercharge (JetConeBoost) in a route system with [highway] autotarget on: after autotarget_delay
@@ -8525,35 +8543,47 @@ class State:
         return True
 
     def start_autotarget_test(self):
-        """The Highway tab's "test now": one run against a system a plain jump away (autotarget_test_target) after a countdown (time to click into the
-        game), whether or not auto-target is on. Refused, saying why, when it could not run. (response, HTTP status)."""
+        """The Highway tab's "test now": one run against the nearest system a plain jump away (autotarget_test_target),
+        whether or not auto-target is on. (response, HTTP status)."""
+        return self.start_autotarget_run("test")
+
+    def start_autotarget_run(self, kind="test", countdown=None):
+        """A run the page asked for, after a countdown (time to click back into the game: the click took the keyboard
+        focus), whether or not auto-target is on. kind "test": "test now", against a system a plain jump away (no
+        route needed); "next": Target next / Retry (review Q4), against the next route system or, off the route, the
+        closest one. Refused, saying why, when it could not run. (response, HTTP status)."""
         t, h = self.targeter, self.honker
         if not t or not t.available:
             return {"error": (h.status if h else "not started")}, 400
         if (self.autotarget_test_task and not self.autotarget_test_task.done()) or \
                 (self.autotarget_task and not self.autotarget_task.done()):
             return {"error": "auto-target is already running"}, 409
-        tgt, why = self.autotarget_test_target()   # a plain jump away: no route or neutron needed to test
+        tgt, why = self.autotarget_test_target() if kind == "test" else self.autotarget_target(manual=True)
         if not tgt:
             return {"error": why}, 400
         _steps, missing = t.plan()
         if missing:
             return {"error": "no keyboard binding for " + ", ".join(f"{n} ({w})" for n, w in missing)}, 400
-        g = outrider.target.guard(self.journals.status_json, tgt["id64"])
-        if g:
+        g = outrider.target.guard(self.journals.status_json, tgt["id64"], lambda: self.journals.navroute_end)
+        if g and g[0] != "already":   # already the target: the run says so (and costs no key)
             return {"error": g[1]}, 400
         dry = bool(self.highway_cfg.get("autotarget_dry_run"))
         if not dry and not h.open("target-test"):
             return {"error": h.device_error or h.status}, 400
-        test = {"seq": (self.autotarget_test or {}).get("seq", 0) + 1, "state": "counting", "system": tgt["name"], "why": None}
+        wait = self.autotarget_test_countdown if countdown is None else countdown
+        test = {"seq": (self.autotarget_test or {}).get("seq", 0) + 1, "kind": kind, "state": "counting",
+                "system": tgt["name"], "why": None, "in": wait}
+        cancel = None
+        if kind == "next":   # a cleared or replaced route stops it (cancel_autotarget)
+            self._autotarget_next_cancel = cancel = threading.Event()
         self.autotarget_test = test
-        self.autotarget_test_task = asyncio.get_running_loop().create_task(self._autotarget_test(tgt, test, dry))
+        self.autotarget_test_task = asyncio.get_running_loop().create_task(self._autotarget_test(tgt, test, dry, cancel))
         self.bump()
-        return {"system": tgt["name"], "in": self.autotarget_test_countdown, "seq": test["seq"], "dry_run": dry}, 200
+        return {"system": tgt["name"], "in": wait, "seq": test["seq"], "dry_run": dry, "kind": kind}, 200
 
-    async def _autotarget_test(self, tgt, test, dry):
+    async def _autotarget_test(self, tgt, test, dry, cancel=None):
         try:
-            await self._autotarget(tgt, test)
+            await self._autotarget(tgt, test, cancel)
         finally:
             if not dry and self.honker:
                 self.honker.close("target-test")
@@ -8577,7 +8607,7 @@ class State:
     async def _autotarget(self, tgt, test=None, cancel=None):
         """Wait (the delay, or the test's countdown), check again, let a running auto honk finish (honk first), then
         run the sequence on a worker thread and say how it went. cancel: the automatic run's token (cancel_autotarget)."""
-        await asyncio.sleep(self.autotarget_test_countdown if test else self.highway_cfg["autotarget_delay"])
+        await asyncio.sleep(test.get("in", self.autotarget_test_countdown) if test else self.highway_cfg["autotarget_delay"])
         if test:
             test["state"] = "running"
             self.bump()
@@ -8615,11 +8645,14 @@ class State:
         name, ok = tgt["name"], bool(res.get("ok"))
         already = res.get("code") == "already"
         why = "already the target" if already else res.get("why")
+        kind = (test.get("kind") or "test") if test else "auto"
+        # route and index: the route row the run was for (its Retry button, while it is still the one to target)
         self.autotarget_last = {"system": name, "ts": iso_ts(time.time()), "done": ok or already, "phase": res.get("phase"),
-                                "label": res.get("label"), "why": why, "dry_run": bool(res.get("dry_run")), "test": bool(test)}
+                                "label": res.get("label"), "why": why, "dry_run": bool(res.get("dry_run")),
+                                "test": kind == "test", "kind": kind, "route": tgt.get("route"), "index": tgt.get("index")}
         if test:
             test.update(state="done" if ok or already else "failed", why=why)
-        print(f"highway auto-target{' test' if test else ''}: " + (
+        print(f"highway auto-target{' test' if kind == 'test' else ' (target next)' if kind == 'next' else ''}: " + (
             f"targeted {name}" + (" (dry run, nothing pressed)" if res.get("dry_run") else "") if ok else
             f"{name} {why}" if already else f"failed to target {name} at step {res.get('phase')} ({res.get('label')}): {why}"))
         if say and not already and not res.get("dry_run"):
@@ -9663,9 +9696,24 @@ def make_app(state, hosts=None):
         return web.json_response(state.autotarget_info())
 
     async def highway_autotarget_test_view(_):
-        """"Test now": one auto-target run against the next system after a countdown, or why it cannot run."""
+        """"Test now": one auto-target run against a system a plain jump away after a countdown, or why it cannot run."""
         body, status = state.start_autotarget_test()
         return web.json_response(body, status=status)
+
+    async def highway_target_view(request):
+        """Target next / Retry (review Q4): the next route system (off the route: the closest one) after a countdown,
+        whether or not auto-target is on. {countdown?: 0-10 s} (default 5: the desktop page; the tablet sends 0)."""
+        body = {}
+        if request.can_read_body:
+            body = await json_object(request)
+            if body is None:
+                return web.json_response({"error": "expected a JSON object"}, status=400)
+        cd = body.get("countdown")
+        if cd is not None and (isinstance(cd, bool) or not isinstance(cd, (int, float)) or not math.isfinite(cd)
+                               or not 0 <= cd <= 10):
+            return web.json_response({"error": "countdown must be 0 to 10 seconds"}, status=400)
+        out, status = state.start_autotarget_run("next", cd)
+        return web.json_response(out, status=status)
 
     async def highway_background_view(_):
         """GET /api/highway/background: the image [highway] background_image names, and only that file (nothing in
@@ -9972,6 +10020,7 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/highway/clear", highway_clear_view)
     app.router.add_post("/api/highway/autotarget", highway_autotarget_view)
     app.router.add_post("/api/highway/autotarget/test", highway_autotarget_test_view)
+    app.router.add_post("/api/highway/target", highway_target_view)
     app.router.add_get("/api/defaults", defaults_get)
     app.router.add_post("/api/defaults", defaults_post)
     app.router.add_post("/api/nextstop", next_stop_view)

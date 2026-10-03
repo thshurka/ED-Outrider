@@ -51,6 +51,10 @@ upstream project's choices, not rules of the game.
   the nearest route system marked is the CLOSEST one, passed or not (the author's rule, 2026-10-03: getting back on
   the highway is the fastest way on). Arrivals count when newer than the position the route was plotted at (its
   journal time, not the wall clock), so a jump read just after the plot finished still moves the route.
+- **The status report and welcome back say the Highway** (review S2): one clause right after the fuel ("Highway: boost
+  here, then Hwy Stop 38, 4.2 light-years, refuel in 3 jumps"), led by the too-much-fuel warning when it is set, the
+  closest route system when off the route; the report's "Nearest unvisited" is left out while a route is followed.
+  No position "38 of 399" (the index and total are easy to say one off).
 - **The Highway's cargo is not remembered.** The form takes the cargo aboard from the journals each time (a
   remembered figure would be stale the next day); only the plotter and its options are per-browser settings.
 - **Auto-target presses keys in the galaxy map** (opt-in, Linux; decided with the author 2026-10-01): open the map,
@@ -64,6 +68,13 @@ upstream project's choices, not rules of the game.
   search starts with a short CamYawRight (a camera move hands the focus back to the map); the first Enter waits
   1.5 s (the suggestion lists late on a long name); the plot step zooms out instead of turning, since a turn after
   the search could swing the cursor onto a neighbouring star and plot to it.
+  Target next and Retry (review Q4) are one action, POST /api/highway/target: a run the page asks for, like "test
+  now" but against the route (the next system; off the route the closest one, as the line's "nearest"; before the
+  start, the start), with or without the toggle; {countdown} 0-10 s, 5 by default for the desktop page (the click
+  took the keyboard focus), 0 for the tablet. Not on the X56 co-pilot button (the author's decision). Clearing or
+  replacing the route stops it like the automatic run; switching the toggle off does not (it is not the toggle's
+  run). Retry shows only while the failed run's row (autotarget_last's route and index) is still the one Target next
+  would aim at.
   Guards (review batch 4): the keyboard's owners (who keeps the device open) and a run's cancel token are separate,
   so switching auto-target or auto honk off stops that feature's run even while the other keeps the device open;
   clearing or replacing the Highway route stops a pending or running auto-target too. Everything is checked again

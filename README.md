@@ -423,6 +423,9 @@ targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own aler
 - **The keys go to whichever window has focus**: stay in the game until it is done.
 - The log gets one line per run ("highway auto-target: targeted Hwy Stop 38"); every step is printed only when it
   fails.
+- **🎯 Target next** (in the box, and beside "Next:" in the route line on Overview, Nearby and Here) does the same
+  on demand, whether or not auto-target is on: the next route system, or off the route the closest one, after a
+  5-second countdown to click back into the game. A failed run puts **⟳ Retry** on its route row.
 - **Test now** in the box targets the nearest known system a plain jump away, after a 5-second countdown.
   `python3 -m outrider.target --show` prints the steps with your keys.
 - Every step can be changed under `[highway]` (`autotarget_search`, `autotarget_submit`, `autotarget_plot`…) if a

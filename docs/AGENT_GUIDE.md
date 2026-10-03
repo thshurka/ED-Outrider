@@ -65,7 +65,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    surface map, speech info and more. Other views fetch their own endpoints: `/api/system/{id64}`,
    `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
    `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/highway` (+ `/systems?q=`, `/background`; POST `/plot`,
-   `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`. The payload carries only the highway line's facts
+   `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`, `/target` {countdown?}: Target next / Retry), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`. The payload carries only the highway line's facts
    (`highway_summary`); the Highway tab fetches the route itself.
 7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
@@ -174,7 +174,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   a running game) or the co-pilot button (reads `/dev/input`) against a real game or device from tests or a
   scratch server, and the same for auto-target (it opens the galaxy map and types): tests use `FakeGame` (a fake
   device that plays the galaxy map) with `_fake_evdev()` (key codes, no `UInput`), never `Honker.open()` on real evdev.
-  Never POST to `/api/highway/autotarget/test` on a server that sees a live game. Use the existing fakes (`FakeHonker`, `FakeUI`, stand-in `evdev` namespaces in
+  Never POST to `/api/highway/autotarget/test` or `/api/highway/target` on a server that sees a live game. Use the existing fakes (`FakeHonker`, `FakeUI`, stand-in `evdev` namespaces in
   `tests/support.py`). Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
 - **No stray side effects.** Don't download Piper voices into the real `data/piper-voices/`, don't let a test
   rewrite `resources/bio_rules.json`, and don't write the real `data/speech_banned.json` (use a speech file in a

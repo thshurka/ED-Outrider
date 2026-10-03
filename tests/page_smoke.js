@@ -2549,8 +2549,8 @@ const settle = async maxMs => {
       exactFields: [true, false], failed: "Could not plot the route: Spansh found no route between those systems.",
       suggest: "Colonia|Col 285 Sector AA-A c1", clearFirst: [0, "Click again to clear"],
       cleared: ["api/highway/clear POST,api/highway GET", "No route yet.", true],
-      lineNext: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 jumps", lineOnMap: "",
-      lineOff: "🛣 Off Route: Detour · nearest Hwy Stop 39 12.0 ly", lineDone: "🛣 Highway complete", opened: "hwy", lineGone: "",
+      lineNext: "🛣 Next: Hwy Stop 38 🎯 target · 4.2 ly · 38 of 399 · refuel in 3 jumps", lineOnMap: "",
+      lineOff: "🛣 Off Route: Detour · nearest Hwy Stop 39 12.0 ly 🎯 target", lineDone: "🛣 Highway complete", opened: "hwy", lineGone: "",
       copied: ["Hwy Stop 38"], exactRefuel: [true, true, false], neutronRefuel: [false, false, true],
       doneTo: [30, 35, 99, -1]};
     got.doneTo = JSON.parse(w.eval(`JSON.stringify([hwyDoneTo({at: 30, furthest: 35}, {complete: false}, 100),
@@ -2715,6 +2715,70 @@ const settle = async maxMs => {
     console.log(goodAT ? "OK" : "FAIL", "| highway auto-target box |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "toggle and delay posted (a bad delay refused here), test refused in its words, countdown, done, last result, missing bindings, steps", errors.slice(before));
   }
+  // Target next (review Q4): the line's button and the box's (POST api/highway/target; the countdown on the button; the
+  // tab not opened, the name not copied), a row's Retry while the failed run's row is still the one to target; and
+  // the Highway in the spoken status report and welcome (S2). Every request is answered here: nothing reaches the server
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, realCopy = w.copyText, calls = [], copied = [], got = {};
+    const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status, headers: {"Content-Type": "application/json"}}));
+    const fx = hwyFixture(), txt = id => d.getElementById(id).textContent.replace(/\s+/g, " ").trim();
+    let answer = () => json({system: "Hwy Stop 38", in: 5, seq: 7, dry_run: false, kind: "next"});
+    w.fetch = (u, o) => {
+      const url = String(u);
+      if (url === "api/highway/target") { calls.push(o && o.method); return answer(); }
+      if (url.startsWith("api/highway")) return json(hwyPayload(fx));
+      return realFetch(u, o);
+    };
+    w.copyText = t => copied.push(t);
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    const at = {enabled: false, delay: 5, available: true, status: "off", running: false, countdown: 5, last: null, test: null, missing: [], steps: []};
+    w.eval(`hwyRun = null; data.autotarget = ${JSON.stringify(at)}; data.highway = ${JSON.stringify(fx.summary)}; view = "overview"; render()`);
+    const aim = () => d.querySelector("#hwyLine [data-aim]");
+    aim().click(); await sleep(150);
+    got.lineRun = [calls.join(), w.eval("view"), copied.length, aim().textContent, aim().disabled];
+    w.eval(`data.autotarget = Object.assign({}, data.autotarget, {test: {seq: 7, kind: "next", state: "done", system: "Hwy Stop 38", why: null}}); render()`);
+    got.lineDone = [aim().textContent, aim().disabled];
+    // the box's button, refused in its words
+    answer = () => json({error: "you are at the end of the route"}, 400);
+    d.querySelector('[data-view="hwy"]').click(); await sleep(700);
+    d.getElementById("hwyAutoNext").click(); await sleep(150);
+    got.boxRefused = txt("hwyAutoTestMsg");
+    // Retry: a Target next that failed on row 38, still the next: that row has the button; it posts and copies nothing
+    const failed = {system: "Hwy Stop 38", ts: "2026-10-03T21:15:00Z", done: false, phase: 7, label: "check the target",
+      why: "no system was targeted", test: false, kind: "next", route: "hwy-test", index: 38};
+    const retryRows = last => { w.eval(`data.autotarget = Object.assign({}, data.autotarget, {last: ${JSON.stringify(last)}}); renderHwy()`);
+      return [...d.querySelectorAll("#hwyTable .hwyretry")].map(b => b.closest("tr").dataset.i); };
+    got.retryRows = retryRows(failed);
+    answer = () => json({system: "Hwy Stop 38", in: 5, seq: 8, dry_run: false, kind: "next"});
+    calls.length = 0; copied.length = 0;
+    d.querySelector("#hwyTable .hwyretry").click(); await sleep(150);
+    got.retried = [calls.join(), copied.length, txt("hwyAutoTestMsg")];
+    w.eval("hwyRun = null");
+    got.noRetry = [retryRows(Object.assign({}, failed, {kind: "test", test: true})), retryRows(Object.assign({}, failed, {index: 37})),
+                   retryRows(Object.assign({}, failed, {route: "older"})), retryRows(Object.assign({}, failed, {done: true}))];
+    // S2: the Highway clause, after the fuel; the nearest unvisited left out mid-route
+    const off = hwyFixture({off: true}).summary, heavy = Object.assign({}, fx.summary, {boost_here: true, heavy: {need_t: 36.4, have_t: 140.2, distance: 400, boost: 4}});
+    got.spoken = JSON.parse(w.eval(`JSON.stringify([hwySpoken(${JSON.stringify(fx.summary)}), hwySpoken(${JSON.stringify(off)}),
+      hwySpoken(${JSON.stringify(heavy)}), hwySpoken(${JSON.stringify(hwyFixture({complete: true}).summary)}), hwySpoken(null)])`));
+    got.report = w.eval("statusReportText()");
+    got.welcome = w.eval(`welcomeText("3 days", false)`);
+    w.fetch = realFetch; w.copyText = realCopy;
+    w.eval(`hwyRun = null; data.autotarget = null; data.highway = null`);
+    const want = {lineRun: ["POST", "overview", 0, "🎯 in 5 s", true], lineDone: ["🎯 target", false],
+      boxRefused: "cannot target: you are at the end of the route", retryRows: ["38"],
+      retried: ["POST", 0, "click into the game: targeting Hwy Stop 38 in 5 s"], noRetry: [[], [], [], []],
+      spoken: ["Highway: then Hwy Stop 38, 4.2 light-years, refuel in 3 jumps",
+               "Highway: off the route, the closest route system is Hwy Stop 39, 12 light-years",
+               "Highway: too much fuel for the next jump, 36 tonnes at most, you have 140, boost here, then Hwy Stop 38, 4.2 light-years, refuel in 3 jumps",
+               "", ""]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    if (!(got.report.includes("Highway: then Hwy Stop 38") && !got.report.includes("Nearest unvisited"))) bad.push("report");
+    if (!got.welcome.includes("Highway: then Hwy Stop 38, 4.2 light-years, refuel in 3 jumps.")) bad.push("welcome");
+    const goodTN = !bad.length && errors.length === before;
+    allOk = allOk && goodTN;
+    console.log(goodTN ? "OK" : "FAIL", "| highway target next |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "line and box buttons post with a countdown (no tab, no copy), refusal in its words, Retry on the failed row only, the Highway spoken in the report and welcome", errors.slice(before));
+  }
   // too much fuel for the next jump: the warning in the strip and the Highway header; the Conservative range option
   // (off by default, [highway] defaults when this browser has none, the note, the plot body, saved per browser) and
   // the header's "conservative −5 ly"
@@ -2757,7 +2821,7 @@ const settle = async maxMs => {
     got.plain = [cons.checked, ly.value, ly.disabled];
     w.fetch = realFetch;
     w.eval(`localStorage.removeItem("highway"); data.highway = null; H.shipSel = null; view = "overview"; render()`);
-    const want = {strip: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 jumps · ⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t",
+    const want = {strip: "🛣 Next: Hwy Stop 38 🎯 target · 4.2 ly · 38 of 399 · refuel in 3 jumps · ⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t",
       off: [false, "5", true, ""], noteX4: "≈ 4 ly shorter jumps, about 16 ly on a ×4 neutron jump",
       noteX6: "≈ 4 ly shorter jumps, about 24 ly on a ×6 neutron jump",
       body: {plotter: "exact", to: "Colonia", ship_id: 3, cargo: 0, injections: true, exclude_secondary: false, supercharged: false,

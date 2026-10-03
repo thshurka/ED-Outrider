@@ -1849,6 +1849,7 @@ function welcomeText(away, dockSays) {
     parts.push(`${credits(u.total)} aboard${d ? `, unsold for ${d} day${d === 1 ? "" : "s"}` : ""}.`);
   }
   if (f && f.pct != null) parts.push(`Fuel ${f.pct} percent.`);
+  const hw = hwySpoken(data.highway); if (hw) parts.push(`${hw}.`);
   const ms = modulesSpoken(); if (ms) parts.push(`${ms}.`);
   if (dk && dk.station) parts.push(`Docked at ${dk.station}.`);
   else if (ob && ob.body) parts.push(`${ob.how === "on foot" ? "On foot" : ob.how === "in the SRV" ? "In the SRV" : "Landed"} on ${ob.body}.`);
@@ -2013,9 +2014,27 @@ function isRoutine(m) {
 }
 // supercruise time in words: "about 40 seconds", "about 6 minutes"
 const spokenTime = sec => sec < 90 ? `about ${Math.max(10, Math.round(sec / 5) * 5)} seconds` : `about ${Math.round(sec / 60)} minutes`;
+// The Highway in a spoken clause (review S2): the too-much-fuel warning first, boost here (or done), the next stop
+// and the refuel coming up; off the route, the closest route system. "" with no route, or once it is complete.
+function hwySpoken(s) {
+  if (!s || s.complete) return "";
+  const ly = v => `${Math.round(v * 10) / 10} light-years`, bits = [], hv = s.heavy;
+  if (hv) bits.push(`too much fuel for the next jump, ${Math.floor(hv.need_t)} tonnes at most, you have ${Math.round(hv.have_t)}`);
+  if (s.off_route) {
+    if (s.nearest) bits.push(`off the route, the closest route system is ${s.nearest.name}, ${ly(s.nearest.distance)}`);
+    else bits.push("off the route");
+  } else if (s.next) {
+    const boosted = data && data.boost;
+    bits.push(`${s.boost_here ? (boosted ? "supercharged, " : "boost here, ") : ""}${s.index === 0 && s.at == null ? "start at" : "then"} ` +
+              `${s.next.name}${s.next.distance != null ? `, ${ly(s.next.distance)}` : ""}`);
+    if (s.refuel_here) bits.push("refuel here");
+    else if (s.refuel_in != null) bits.push(`refuel in ${s.refuel_in} jump${s.refuel_in === 1 ? "" : "s"}`);
+  }
+  return bits.length ? "Highway: " + bits.join(", ") : "";
+}
 // The co-pilot's status report (a tap of the button; the Now bar reuses it): fuel and jumps, the next suggested stop,
 // what is aboard against your rebuy, the nearest known unvisited system. Unknown or zero parts are left out, four
-// clauses at most. On a body with a sample run under way, the sampling instead.
+// clauses at most. On a Highway route its clause comes right after the fuel, and the nearest unvisited is left out. On a body with a sample run under way, the sampling instead.
 // A body targeted in this system that is not the next stop leads, in its own short spoken form (destSpoken); a
 // finished one (nothing to do there: Status.json keeps the target after you leave a body) gets only a short clause
 // after the fuel.
@@ -2031,13 +2050,14 @@ function statusReportText() {
   if (target && target.v !== "none") parts.push(destSpoken(dest, target));
   if (f && f.pct != null) { const j = f.jumps_max ?? f.jumps_recent;
     parts.push(`Fuel ${f.pct} percent${j ? `, ${j} jump${j === 1 ? "" : "s"}` : ""}`); }
+  const hw = data ? hwySpoken(data.highway) : ""; if (hw) parts.push(hw);
   const ms = data ? modulesSpoken() : ""; if (ms) parts.push(ms);   // a core module under your level (S5)
   if (target && target.v === "none") parts.push(`${dest.name}: nothing to do`);
   if (plan.length) { const it = plan[0];
     parts.push(`Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}${it.value ? `, ${credits(it.value)}` : ""}${it.sec != null ? `, ${spokenTime(it.sec)}` : ""}`); }
   const u = data && data.unsold, rebuy = data && data.ship && data.ship.rebuy;
   if (u && !u.error && u.total > 0) parts.push(`${credits(u.total)} aboard${rebuy ? `, ${(u.total / rebuy).toFixed(1)} rebuys` : ""}`);
-  const hz = data ? horizon() : null;
+  const hz = data && !hw ? horizon() : null;   // mid-route the next stop is the Highway's
   if (hz && hz.system) parts.push(`Nearest unvisited: ${hz.system.name}, ${Math.round(hz.system.distance * 10) / 10} light-years`);
   return parts.length ? parts.slice(0, 4).join(". ") + "." : "Nothing to report yet.";
 }
@@ -2294,6 +2314,7 @@ function render() {
   renderSearch(bms);
   document.getElementById("mapView").hidden = view !== "map";
   document.getElementById("hwyView").hidden = view !== "hwy";
+  hwyRunTrack();
   renderHwyLine();
   document.body.classList.toggle("nowmode", view === "now");
   document.getElementById("nowView").hidden = view !== "now";
@@ -3896,10 +3917,11 @@ function hwyLineHtml(s, {short = false, glyph = true} = {}) {
   const g = glyph ? `<span class="hwyg" aria-hidden="true">🛣</span> ` : "";
   if (s.complete) return `${g}<span class="hwydone">Highway complete</span>${short ? "" : ` · you reached ${hwyName(s.destination)}`}`;
   if (s.off_route) return `${g}<span class="hwyoff">Off Route: Detour</span>` +
-    (s.nearest ? ` · nearest${short ? "" : " route system"} ${hwyName(s.nearest.name)} ${Number(s.nearest.distance).toFixed(1)} ly` : "");
+    (s.nearest ? ` · nearest${short ? "" : " route system"} ${hwyName(s.nearest.name)} ${Number(s.nearest.distance).toFixed(1)} ly` +
+                 (short ? hwyAimBtn(s.nearest.name) : "") : "");
   const n = s.next;
   if (!n) return `${g}To ${hwyName(s.destination)}`;
-  const bits = [`${s.index === 0 && s.at == null ? "Start" : "Next"}: ${hwyName(n.name)}`];
+  const bits = [`${s.index === 0 && s.at == null ? "Start" : "Next"}: ${hwyName(n.name)}${short ? hwyAimBtn(n.name) : ""}`];
   if (n.neutron) bits.push(`<span class="hwyn" title="a neutron star: supercharge your FSD there">⚡ neutron</span>`);
   if (n.jumps > 1) bits.push(`${n.jumps} jumps`);
   if (n.distance != null) bits.push(`${Number(n.distance).toFixed(1)} ly`);
@@ -3911,6 +3933,14 @@ function hwyLineHtml(s, {short = false, glyph = true} = {}) {
     `is in range only with at most ${Number(hv.need_t).toFixed(1)} t in the main tank: jettison or burn some">⚠ too much fuel for the next jump: ` +
     `≤ ${Math.floor(hv.need_t)} t, you have ${Math.round(hv.have_t)} t</span>`);
   return g + bits.join(" · ");
+}
+let hwyRun = null;   // the run this page started (test now, Target next, Retry): {seq, kind, system, n, dry, done, msg}
+// Target next (review Q4): beside the line's next system; the run's countdown shows on it while this page's run counts
+function hwyAimBtn(name) {
+  const r = hwyRun, mine = r && r.kind === "next" && !r.done;
+  const label = !mine ? "🎯 target" : r.n > 0 ? `🎯 in ${r.n} s` : "🎯 targeting…";
+  return ` <button type="button" class="mini hwyaim" data-aim="next" ${mine ? "disabled " : ""}` +
+    `title="target ${esc(name)} in the galaxy map, 5 s from now: click back into the game meanwhile">${label}</button>`;
 }
 // the strip under the header: only on Overview, Nearby and Here, only with a route
 function renderHwyLine() {
@@ -3953,9 +3983,11 @@ function hwyPoll() {
   }, HWY_POLL_MS);
 }
 const hwyFuel = v => v == null ? "" : fuelT(v);
-function hwyRowHtml(r, cls) {
+function hwyRowHtml(r, cls, retry = false) {
   return `<tr class="${cls}" data-i="${r.i}"><td class="num">${r.i}</td>` +
-    `<td class="name" data-name="${esc(r.system)}" title="click to copy">${nameWords(r.system)}</td>` +
+    `<td class="name" data-name="${esc(r.system)}" title="click to copy">${nameWords(r.system)}` +
+    (retry ? ` <button type="button" class="mini hwyretry" data-aim="next" title="auto-target failed here: try again, 5 s from now (click back into the game meanwhile)">⟳ Retry</button>` : "") +
+    `</td>` +
     `<td class="num">${r.i > 0 && r.distance != null ? r.distance.toFixed(1) : ""}</td>` +
     `<td class="hwyc">${r.neutron ? `<span class="hwyn" title="a neutron star: supercharge your FSD there">⚡</span>` : ""}</td>` +
     `<td class="num hwy-n">${r.i > 0 && r.jumps != null ? r.jumps : ""}</td>` +
@@ -4002,14 +4034,17 @@ function renderHwyList(hd) {
   // this list is fetched again only when the route position changes); a done one shows even with the done rows folded
   const live = data && data.highway, ls = live && live.id === r.id ? live : s;
   const near = ls.off_route && ls.nearest && ls.nearest.index != null ? ls.nearest.index : null;
-  const doneRow = x => hwyRowHtml(x, "done" + (x.i === r.at ? " at" : "") + (x.i === near ? " nearest" : ""));
+  // Retry: the last auto-target run (not a test) failed on this route, and its row is still the one Target next aims at
+  const la = data && data.autotarget && data.autotarget.last, aim = near != null ? near : ls.index;
+  const retryI = la && !la.done && la.kind !== "test" && la.route === r.id && la.index === aim && !(hwyRun && !hwyRun.done) ? aim : null;
+  const doneRow = x => hwyRowHtml(x, "done" + (x.i === r.at ? " at" : "") + (x.i === near ? " nearest" : ""), x.i === retryI);
   const passed = ahead.length ? ahead[0].i : r.count;   // systems before the next one
   doneEl.innerHTML = !done.length ? "" :
     `<tr class="hwydonehead"><td colspan="${HWY_COLS}"><button type="button" class="mini" id="hwyDoneBtn" aria-expanded="${H.doneOpen}">` +
     `${H.doneOpen ? "▾" : "▸"} ${passed} done${passed > done.length ? ` (the last ${done.length} ${H.doneOpen ? "shown" : "listed"})` : ""}</button></td></tr>` +
-    (H.doneOpen ? done : done.filter(x => x.i === near)).map(doneRow).join("");
+    (H.doneOpen ? done : done.filter(x => x.i === near || x.i === retryI)).map(doneRow).join("");
   const more = r.count - passed - ahead.length;
-  rowsEl.innerHTML = ahead.map(x => hwyRowHtml(x, "ahead" + (x.i === s.index ? " next" : "") + (x.i === near ? " nearest" : ""))).join("") +
+  rowsEl.innerHTML = ahead.map(x => hwyRowHtml(x, "ahead" + (x.i === s.index ? " next" : "") + (x.i === near ? " nearest" : ""), x.i === retryI)).join("") +
     (more > 0 ? `<tr class="hwymore"><td colspan="${HWY_COLS}" class="unk">+${more.toLocaleString()} more after these (the next ${HWY_AHEAD} are listed)</td></tr>` : "") +
     (!ahead.length ? `<tr><td colspan="${HWY_COLS}" class="hwydone">Highway complete: you reached ${esc(r.to)}.</td></tr>` : "");
   // the next row (or, off route, the nearest) in view in the pane when it moves (an arrival, a jump), not on every redraw
@@ -4177,7 +4212,6 @@ document.addEventListener("click", e => {
 });
 // ---- auto-target (the server presses the keys; this is its toggle, delay, test and last result) ----
 // data.autotarget: {enabled, delay, available, status, last, test, running, missing: [{key, why}], steps, dry_run, countdown}
-let hwyAutoTest = null;   // the test run this page started: {seq, done}
 const hwyHm = ts => { const d = new Date(ts); return isNaN(d) ? "" : d.toTimeString().slice(0, 5); };
 function hwyAutoLastText(l) {
   if (!l) return "";
@@ -4191,7 +4225,9 @@ function drawHwyAuto() {
   if (!a) return;
   on.checked = !!a.enabled; on.disabled = !a.available;
   if (document.activeElement !== dl) dl.value = a.delay ?? "";
-  hEl("hwyAutoTest").disabled = !a.available || !!a.running || !!(a.test && ["counting", "running"].includes(a.test.state));
+  const busy = !a.available || !!a.running || !!(a.test && ["counting", "running"].includes(a.test.state));
+  hEl("hwyAutoTest").disabled = busy;
+  hEl("hwyAutoNext").disabled = busy || !(data.highway && !data.highway.complete);
   hEl("hwyAutoState").textContent = a.running ? "· pressing keys…" : a.enabled ? `· ${a.status || "on"}` : a.available ? "· off" : `· ${a.status || "not available"}`;
   const last = hEl("hwyAutoLast"), lt = hwyAutoLastText(a.last);
   last.textContent = lt ? "Last: " + lt : ""; last.className = a.last && !a.last.done ? "warnc" : "unk";
@@ -4200,13 +4236,34 @@ function drawHwyAuto() {
   miss.textContent = m.length ? "Missing keyboard bindings (auto-target will not run): " + m.map(x => `${x.key}: ${x.why}`).join("; ") : "";
   const steps = (a.steps || []).map(x => `<li>${esc(x)}</li>`).join("");   // "5 plot the route: hold …": the step numbers results use
   if (hEl("hwyAutoSteps").innerHTML !== steps) hEl("hwyAutoSteps").innerHTML = steps;
-  // the test's outcome comes back in the payload
-  const t = a.test;
-  if (hwyAutoTest && !hwyAutoTest.done && t && t.seq === hwyAutoTest.seq && ["done", "failed"].includes(t.state)) {
-    hwyAutoTest.done = true;
-    hEl("hwyAutoTestMsg").textContent = t.state === "done" ? `test done: ${t.why === "already the target" ? `${t.system} was already the target` : `targeted ${t.system}`}`
-      : `test failed: ${t.why || "?"}`;
-  }
+  hwyRunTrack();
+  hEl("hwyAutoTestMsg").textContent = hwyRun ? hwyRun.msg : "";
+}
+// the outcome of this page's run comes back in the payload (every render: the line's button follows it too)
+function hwyRunTrack() {
+  const r = hwyRun, t = data && data.autotarget && data.autotarget.test;
+  if (!r || r.done || !t || t.seq !== r.seq || !["done", "failed"].includes(t.state)) return;
+  r.done = true;
+  const w = r.kind === "test" ? "test" : "target next";
+  r.msg = t.state === "done" ? `${w} done: ${t.why === "already the target" ? `${t.system} was already the target` : `targeted ${t.system}`}`
+    : `${w} failed: ${t.why || "?"}`;
+}
+// start a run: "test now" (kind test) or Target next / Retry (kind next), then count down to it on the page
+async function hwyAutoStart(kind) {
+  const url = kind === "test" ? "api/highway/autotarget/test" : "api/highway/target", w = kind === "test" ? "test" : "target";
+  const show = msg => { hwyRun = {seq: null, kind, done: true, msg}; drawHwyAuto(); renderHwyLine(); if (kind !== "test") toast(msg); };
+  let r, j;
+  try { r = await fetch(url, {method: "POST"}); j = await r.json(); }
+  catch { show("could not reach Outrider"); return; }
+  if (!r.ok) { show(`cannot ${w}: ${j.error || "?"}`); return; }
+  const mine = hwyRun = {seq: j.seq, kind, system: j.system, n: j.in, dry: j.dry_run, done: false, msg: ""};
+  const tick = () => {
+    if (mine.done || mine !== hwyRun) return;
+    mine.msg = mine.n > 0 ? `click into the game: targeting ${j.system} in ${mine.n} s${j.dry_run ? " (dry run)" : ""}` : `targeting ${j.system}…`;
+    drawHwyAuto(); renderHwyLine();
+    if (mine.n > 0) { mine.n--; setTimeout(tick, 1000); }
+  };
+  tick();
 }
 async function hwyAutoSet(body) {
   let r;
@@ -4221,21 +4278,15 @@ hEl("hwyAutoDelay").onchange = () => {
   if (hEl("hwyAutoDelay").value.trim() === "" || !isFinite(v) || v < 0 || v > 60) { toast("the delay is 0 to 60 seconds"); drawHwyAuto(); return; }
   hwyAutoSet({delay: v});
 };
-hEl("hwyAutoTest").onclick = async () => {
-  const msg = hEl("hwyAutoTestMsg");
-  let r, j;
-  try { r = await fetch("api/highway/autotarget/test", {method: "POST"}); j = await r.json(); }
-  catch { msg.textContent = "could not reach Outrider"; return; }
-  if (!r.ok) { msg.textContent = `cannot test: ${j.error || "?"}`; return; }
-  const mine = hwyAutoTest = {seq: j.seq, done: false};
-  let n = j.in;
-  const tick = () => {
-    if (mine.done || mine !== hwyAutoTest) return;
-    msg.textContent = n > 0 ? `click into the game: targeting ${j.system} in ${n} s${j.dry_run ? " (dry run)" : ""}` : `targeting ${j.system}…`;
-    if (n-- > 0) setTimeout(tick, 1000);
-  };
-  tick();
-};
+hEl("hwyAutoTest").onclick = () => hwyAutoStart("test");
+// Target next, on the line, in the box and as a row's Retry: before the page's other click handlers (the line opens
+// the tab, a row's name copies)
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-aim]");
+  if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  if (!b.disabled) hwyAutoStart(b.dataset.aim);
+}, true);
 function renderHwy() {
   if (view !== "hwy") return;
   drawHwyAuto();
