@@ -146,8 +146,9 @@ upstream project's choices, not rules of the game.
   jumps, long FSS and SRV stretches).
 - **The long poll is gzipped, never deflated** (review S20): browsers disagree on what "deflate" means.
 - **The jump line waits for the hyperspace tunnel** (review S14): the card shows at the charge (StartJump), the
-  words are held and released by a "hyperspace" moment (Status.json's FSD-jump flag after that StartJump), or after
-  8 s when the flag never comes. Its `speech.json` lines (S15) carry only `{system}`: the scoop and hazard sentences
+  words are held and released by a "hyperspace" moment (Status.json's FSD-jump flag after that StartJump, which
+  comes about 2 s before the countdown ends: the line starts 2.5 s after it, with the tunnel), or after 8 s when the
+  flag never comes. Its `speech.json` lines (S15) carry only `{system}`: the scoop and hazard sentences
   follow outside the template, since check() never requires a placeholder and an edited line must not drop a
   neutron warning.
 - **The next line is synthesised while the current one plays** (review S11), and only once the current line's audio

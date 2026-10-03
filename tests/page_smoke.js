@@ -2905,7 +2905,7 @@ const settle = async maxMs => {
       o.held = !!it && it.notBefore - Date.now() > 5000;
       o.words = it ? it.words : null;
       data.moments = [mk(2, {kind: "hyperspace", system: "Far Away", charge: s0 + 1})]; onData();
-      o.released = !!it && it.notBefore <= Date.now();
+      o.released = !!it && Math.abs(it.notBefore - (Date.now() + JUMP_TUNNEL_DELAY)) < 1000;   // 2.5 s into the tunnel
       hushSpeech(true); data.moments = saved; sayNow = realSay; [speechOn, isSpeaker, alertSpeak.jump, lastMomentSeq] = f;
       // S11: the next line rides with the PC's play request
       speechItems = [{words: "Second line.", prio: 2, at: 1, notBefore: 1, pace: 1}];

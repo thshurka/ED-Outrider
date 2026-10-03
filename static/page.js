@@ -1578,6 +1578,9 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
 const JUMP_LINE_WAIT = 8000;   // ms: the jump line's latest start after the charge, when the tunnel is never seen
+// ms after Status.json says "in the tunnel" (it says so about 2 s before the countdown ends): the line then starts
+// with the tunnel itself (the author's timing, in game 2026-10-03)
+const JUMP_TUNNEL_DELAY = 2500;
 const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium", "highway", "autotarget"]);
 // a rig confirmation answers your own press, like a line asked for
 const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" || kind === "rigs" ? 1
@@ -5574,7 +5577,8 @@ function onData() {
       }
       else if (m.kind === "hyperspace") {   // in the tunnel: the jump line queued at the charge is said now
         const it = speechItems.find(x => x.tag === "fsd_charge");
-        if (it && it.notBefore > Date.now()) { it.notBefore = Date.now(); if (speechWake) speechWake(); }
+        const at = Date.now() + JUMP_TUNNEL_DELAY;
+        if (it && it.notBefore > at) { it.notBefore = at; if (speechWake) speechWake(); }
       }
       else if (m.kind === "region") {   // the first jump into a galactic region this session
         regionFlash = {name: m.region, until: Date.now() + 60000};

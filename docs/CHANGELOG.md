@@ -8,6 +8,7 @@ Newest first, one entry per commit.
   third goes back to the table's default. Here's tree is never sorted (it keeps the orbits' order).
 - Materials: Mining sites beside "Where to find FSD-injection materials" (one above the other on a narrow window).
 - The lost-contact line is two sentences with a clear pause between them.
+- The jump line starts 2.5 s after Status.json says you are entering hyperspace, with the tunnel itself.
 
 ## 2026-10-03 · Codex finds as a reason to stay is a config option; a tab icon
 - `[defaults] codex_interesting` (on by default; also the alerts dialog's tick, per browser): off, a species new to
