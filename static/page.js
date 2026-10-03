@@ -5490,6 +5490,7 @@ function takeCopilot(cp, first) {
   lastCopilotSeq = cp.seq;
   if (fresh && speakerHere()) copilotDo(cp);
   else if (fresh && cp.action === "status") addCaption(statusReportText());   // Now's captions show what was asked for
+  else if (fresh && (cp.action === "say" || cp.action === "caption") && cp.words) addCaption(cp.words);   // a voice answer (api/ask)
 }
 function copilotDo(cp) {
   if (cp.action === "status") {   // a tap while something is being said cuts it short (danger excepted)
@@ -5498,6 +5499,10 @@ function copilotDo(cp) {
     speak(text, {kind: "manual"}); addCaption(text);
   } else if (cp.action === "again") speak(lastSaid ? lastSaid.words : "Nothing said yet.", {kind: "manual", voice: lastSaid && lastSaid.voice, pace: lastSaid ? lastSaid.pace || 1 : 1});
   else if (cp.action === "replay" && cp.words) speak(cp.words, {kind: "manual"});
+  // an answer to a question by voice (POST api/ask): said here, as a line you asked for; "caption": shown only (a hush's
+  // answer: the hush itself is announced)
+  else if (cp.action === "say" && cp.words) { speak(cp.words, {kind: "manual"}); addCaption(cp.words); }
+  else if (cp.action === "caption" && cp.words) addCaption(cp.words);
 }
 function onData() {
   loadOwnSounds();   // your own sound files, decoded before an alert needs one
@@ -6631,7 +6636,8 @@ async function poll(once = false) {
   let ok = false, fresh = false;
   heard(false);   // a request sent long after the last answer: timers were frozen, or the server was unreachable
   try {
-    const r = await fetch(`api/nearby?since=${runId}:${version}`);
+    // a window that speaks says so, so Outrider knows a voice answer will be said on the PC (S24)
+    const r = await fetch(`api/nearby?since=${runId}:${version}${speechOn && speakerHere() ? "&speaker=1" : ""}`);
     if (r.status === 401) return signInAgain();   // the session ended ([server] password changed, signed out)
     if (r.status === 200 || r.status === 204) heard(true);   // an answer long after it was asked: the page slept meanwhile
     if (r.status === 200) { data = await r.json(); version = data.version; fresh = true; }
@@ -6767,6 +6773,9 @@ function tabSetup() {
   };
   document.getElementById("tabStatus").onclick = () => postCopilot({action: "status"}, "ask for a status report");
   document.getElementById("tabSetBtn").onclick = tabOpenSettings;
+  // Ask (the app's voice): only where the app can listen; it shows its own "listening" and posts api/ask, and the
+  // answer comes back as a caption like any other
+  document.getElementById("tabAsk").onclick = () => { const a = window.OutriderApp; if (a && typeof a.listen === "function") { try { a.listen(); } catch {} } };
   document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
   document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
   document.getElementById("tabSignOut").onclick = tabSignOut;
@@ -6789,7 +6798,7 @@ function tabSetup() {
   const hint = document.querySelector("#mapView .hint");   // the galaxy map by touch
   if (hint) hint.textContent = "One finger rotates · two fingers move · pinch to zoom · tap a system for its card. " +
     "The grid is the galactic plane through your position; stalks drop each system onto it.";
-  tabDrawNav(); tabDrawCaption();
+  tabDrawNav(); tabDrawCaption(); tabDrawAsk();
 }
 function tabTheme(name) {
   const t = TB.themes.includes(name) ? name : TB.themes[0];
@@ -6839,7 +6848,9 @@ function tabRender() {
   tabDrawNav();
   tabDrawHush();
   tabDrawRail();
+  tabDrawAsk();
 }
+function tabDrawAsk() { const a = window.OutriderApp; document.getElementById("tabAsk").hidden = !(a && typeof a.listen === "function"); }
 function tabDrawHush() {
   const b = document.getElementById("tabHush"), on = hushed(), h = hushState;
   const left = on && h.end != null ? Math.max(0, Math.ceil((h.end - Date.now()) / 1000)) : 0;

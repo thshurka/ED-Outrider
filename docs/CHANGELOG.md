@@ -2,6 +2,14 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Ask Outrider by voice: POST /api/ask (tablet plan, phase 6, Outrider's side)
+- The tablet app sends a question in words. Outrider answers the fixed ones without any AI: status report, fuel,
+  unsold, next jump, what's left here, nearest unvisited, hush and unhush. Their phrases are in resources/ask.json
+  (editable). The answer is said on the PC by the window that speaks and shown as a caption on every page.
+- The tablet's footer has Ask when the app can listen.
+- An optional AI layer for everything else (`[assistant]`, off by default): any OpenAI-compatible chat endpoint,
+  given the same read-only tools as the MCP bridge. It runs on the PC with your key; nothing is sent while it is off.
+
 ## 2026-10-03 · The tablet's control rail (tablet plan, phase 4)
 - On the tablet's right: up to eight game buttons for where you are (ship, SRV, Nomad, fighter, on foot), each
   pressing that control's keyboard binding on the PC once. A button shows the game's state from Status.json

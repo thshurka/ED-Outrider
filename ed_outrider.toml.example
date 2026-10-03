@@ -207,3 +207,14 @@
 # python3 -m outrider.mcp, which reads the running Outrider (read-only; see the README). Not used by the server.
 # url = "http://127.0.0.1:8025"   # where Outrider runs; default: this PC at [server] port
 # max_rows = 25             # rows in a list a tool answers with (1 to 200); how many were left out is counted
+
+[assistant]
+# The voice's optional AI layer: questions the fixed phrases (resources/ask.json) do not match go to an
+# OpenAI-compatible chat endpoint with Outrider's read-only tools. Nothing is sent anywhere while enabled is false.
+# With a cloud provider, the question and what the tools answer go to it; a local model (Ollama) keeps it all here.
+# enabled = false
+# base_url = "http://localhost:11434/v1"   # Ollama; or "https://api.openai.com/v1", Venice.ai's, ...
+# api_key = ""              # stays on this PC ("" for a local model)
+# model = ""                # one that can call tools (try it with real questions)
+# timeout = 20              # seconds for the whole answer (2 to 120)
+# max_rounds = 4            # tool rounds before it must answer (1 to 8)

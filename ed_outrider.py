@@ -165,6 +165,7 @@ import outrider.target     # the Highway's auto-target: targets the next route s
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
 import outrider.rail       # the tablet's control rail: contexts, default sets, button states
+import outrider.ask        # questions by voice (POST /api/ask): fixed phrases, then an optional AI layer
 import outrider.mcp        # the MCP bridge's [mcp] settings (the bridge itself runs as python3 -m outrider.mcp)
 from outrider.core import iso_ts, ts_seconds   # journal timestamps
 from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
@@ -841,6 +842,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                     "autotarget_dry_run": flag("highway", hw, "autotarget_dry_run", HIGHWAY["autotarget_dry_run"])},
         # [mcp]: read by the MCP bridge (python3 -m outrider.mcp), not the server; here so --write-config writes it
         **outrider.mcp.mcp_settings(cfg),
+        "assistant": outrider.ask.assistant_settings(cfg),   # the voice's optional AI layer (off by default)
     }
 
 
@@ -958,6 +960,14 @@ conservative_ly = {st["highway"]["conservative_ly"]:g}   # that margin (ly, 0.5 
 background_image = {q(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
 background_extent = [{", ".join(f"{x:g}" for x in st["highway"]["background_extent"])}]   # ly: the image's edges, [xmin, xmax, zmin, zmax] (the usual galaxy images: -45000, 45000, -20000, 70000)
 background_opacity = {st["highway"]["background_opacity"]:g}   # 0.05 to 1
+
+[assistant]
+enabled = {"true" if st["assistant"]["enabled"] else "false"}   # the voice's AI layer for questions the fixed phrases do not match (resources/ask.json); nothing is sent anywhere while false
+base_url = {q(st["assistant"]["base_url"])}   # an OpenAI-compatible endpoint, e.g. "http://localhost:11434/v1" (Ollama), "https://api.openai.com/v1"
+api_key = {q(st["assistant"]["api_key"])}   # stays on this PC ("" for a local model)
+model = {q(st["assistant"]["model"])}   # one that can call tools
+timeout = {st["assistant"]["timeout"]:g}   # seconds for the whole answer
+max_rounds = {st["assistant"]["max_rounds"]}   # tool rounds before it must answer
 
 [mcp]
 {"url = " + q(st["mcp_url"]) if st["mcp_url"] else "# url = " + q("http://127.0.0.1:8025")}   # the running Outrider for the MCP bridge (python3 -m outrider.mcp); default: this PC at [server] port
@@ -4648,6 +4658,11 @@ class State:
         # status report, the last line again or a replay. Kept out of Journals.moments, whose checkpoint and
         # rollback during a journal re-read could replay or drop it
         self.copilot = {"seq": 0, "action": None, "words": None}
+        # the voice (POST /api/ask): its phrases, the AI layer's settings (set by run()), and when a window that speaks
+        # last asked for the payload (S24: whether an answer will be said on the PC)
+        self.ask_phrases = outrider.ask.load_phrases()
+        self.assistant = dict(outrider.ask.ASSISTANT)
+        self.speaker_seen = None
         self.autohonk = dict(AUTOHONK)
         self._honk_arrival = None  # the arrival the auto honk last looked at
         self.honk_confirm = 10.0   # s to wait for the journal's discovery scan after the press
@@ -4836,6 +4851,41 @@ class State:
         }
 
     # ---- the voice's hush and the co-pilot channel ----
+
+    SPEAKER_SEEN_S = 60   # a window that speaks asks for the payload at least every 25 s (the long poll)
+
+    def speaker_present(self, now=None):
+        """Whether a window with speech on speaks now (it says so in its long poll): an answer will be said."""
+        now = time.monotonic() if now is None else now
+        return self.speaker_seen is not None and now - self.speaker_seen < self.SPEAKER_SEEN_S
+
+    async def ask(self, text, get):
+        """POST /api/ask: a question in words -> (answer, status). A fixed command first (resources/ask.json), then the
+        AI layer when [assistant] enabled. The answer goes to every window through the co-pilot channel: the window
+        that speaks says it (an asked line: it speaks through a hush), the others (the tablet) show it as a caption.
+        get: the in-process GET for the read-only tools."""
+        cmd = outrider.ask.match(text, self.ask_phrases)
+        matched, action = "fixed", "say"
+        if cmd in ("hush", "unhush"):
+            self.set_hush("30m" if cmd == "hush" else "off")
+            words, action = ("Quiet for 30 minutes." if cmd == "hush" else "Voice back on."), "caption"   # the page says these
+        elif cmd:
+            words = await outrider.ask.fixed_answer(cmd, get)
+        elif self.assistant.get("enabled"):
+            matched = "ai"
+            try:
+                async with ClientSession(timeout=ClientTimeout(total=self.assistant["timeout"] + 5),
+                                         headers={"User-Agent": USER_AGENT}) as session:
+                    words = await outrider.ask.ai_answer(text, self.assistant, get, session)
+            except outrider.ask.AIError as e:
+                return {"error": e.why, "code": e.code}, {"ai_timeout": 504, "ai_off": 503}.get(e.code, 502)
+        else:
+            matched = "none"
+            words = ("I only know a few questions so far: a status report, fuel, unsold data, the next jump, what's left "
+                     "here, the nearest unvisited system, hush and unhush.")
+        words = outrider.tts.clip_text(words)
+        self.copilot_action(action, words)
+        return {"answer": words, "spoken": self.speaker_present(), "matched": matched, "command": cmd}, 200
 
     def set_hush(self, mode):
         """Hush the voice ("10m", "30m", "jump": until the position changes) or end it ("off"). Danger lines and
@@ -10131,6 +10181,8 @@ def make_app(state, hosts=None):
     async def nearby(request):
         # Long poll: a page that already has the current version waits here until something changes
         # (or 25 s pass: 204, and it asks again), so a target verdict reaches it in well under a second.
+        if request.query.get("speaker") == "1":   # a window with speech on that speaks: answers will be said (S24)
+            state.speaker_seen = time.monotonic()
         if request.query.get("since") == f"{RUN_ID}:{state.version}":
             changed = state.changed
             try:
@@ -10601,6 +10653,39 @@ def make_app(state, hosts=None):
         state.set_hush(body["mode"])
         return web.json_response({"ok": True, "hush": state.hush_info()})
 
+    def local_get():
+        """The read-only tools' `get` inside the server: the GET route's own handler, called in-process (no HTTP back to
+        this server, no session needed; outrider.tools allows only its READ_ROUTES)."""
+        from aiohttp.test_utils import make_mocked_request
+
+        async def get(path, params):
+            url = outrider.tools.query(path, params)
+            probe = make_mocked_request("GET", url, app=app)
+            match = await app.router.resolve(probe)
+            if match.http_exception is not None:
+                return {"error": f"no route {path}"}
+            req = make_mocked_request("GET", url, app=app, match_info=dict(match))
+            resp = await match.handler(req)
+            try:
+                return json.loads(resp.body if isinstance(resp.body, (bytes, str)) else resp.text)
+            except (TypeError, ValueError):
+                return {"error": f"{path} answered no JSON"}
+        return get
+
+    async def ask_view(request):
+        """POST /api/ask {text, source?} (the tablet app's voice; native-facing contract): {answer, spoken, matched,
+        command}; errors {error, code}: bad_request, app_too_old, ai_off / ai_timeout / ai_error."""
+        old = app_too_old(request)
+        if old:
+            return old
+        body = await json_object(request)
+        text = body.get("text") if body else None
+        if not isinstance(text, str) or not text.strip() or len(text) > outrider.ask.TEXT_MAX:
+            return web.json_response({"error": f"expected {{text}}: the question, 1 to {outrider.ask.TEXT_MAX} characters",
+                                      "code": "bad_request"}, status=400)
+        out, status = await state.ask(" ".join(text.split()), local_get())
+        return web.json_response(out, status=status)
+
     async def copilot_view(request):
         """{action: "status" | "again" | "hush" | "replay", words?}: the speaking window does it (the button and a
         tablet's Now bar post here, so a tap anywhere speaks through the window that is speaking)."""
@@ -10724,6 +10809,7 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/backup", backup_view)
     app.router.add_get("/api/highway", highway_view)
     app.router.add_get("/api/rail", rail_view)
+    app.router.add_post("/api/ask", ask_view)
     app.router.add_post("/api/rail/press", rail_press_view)
     app.router.add_post("/api/rail/sets", rail_sets_view)
     app.router.add_get("/api/highway/systems", highway_systems_view)
@@ -11025,6 +11111,7 @@ async def run(args, st):
     usable = chosen and radius_flag is None and float(chosen) in RADIUS_CHOICES   # the config may have dropped it
     state = State(db, journals, spansh, float(chosen) if usable else args.radius)
     state.password = st["password"]
+    state.assistant = st["assistant"]
     state.searcher = Searcher(state)
     state.db_path = args.db
     state.speech_path, state.config_path = st["speech_file"], args.config

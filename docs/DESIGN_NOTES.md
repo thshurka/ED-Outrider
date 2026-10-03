@@ -51,6 +51,13 @@ upstream project's choices, not rules of the game.
 - **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in
   `static/fonts/` with their licences. Fonts like "Euro Caps" or LCARS fan fonts have unclear redistribution terms:
   the player may drop one into `data/fonts/` (served at `/userfonts/`), and the theme uses it first.
+- **A question by voice is answered on the PC and captioned everywhere** (tablet plan phase 6). `/api/ask` sends the
+  answer through the co-pilot channel: the window that speaks says it (a line you asked for, so it speaks through a
+  hush, as the status report does), every other window, the tablet's included, shows it as a caption. `spoken` says
+  whether a window that speaks has asked for the payload in the last minute (S24: its long poll says `speaker=1`).
+  Vespa's "status report" is composed on the server (system, fuel, unsold, the Highway's next stop), not the page's
+  report: that one depends on each browser's thresholds (S23). The AI layer is off by default and sees only the
+  read-only tools; hush and unhush are fixed commands, never AI tools.
 - **Outrider presses keys for three things now:** auto honk, auto-target and the tablet's rail. The rail is one key
   per tap, only for signed-in devices (or this PC), only while the game is live, never while one of the other two is
   pressing, and only the binding the game itself has for that control; there are no macros or sequences on it (Board

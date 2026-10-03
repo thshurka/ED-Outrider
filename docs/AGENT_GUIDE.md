@@ -33,6 +33,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
 | `outrider/rail.py` | The tablet's control rail, pure: `CONTEXTS` and `context_of(status, vehicle_type)`, `CATALOGUE` (each context's buttons: action, Status.json state spec, amber) and `DEFAULT_IDS` (the agreed sets), `state_of`, `check_set` (the editor's input). `State.rail_info`/`rail_press`/`rail_save`/`rail_device` and `/api/rail*` use it; `Honker.tap` presses; `keyboard_bindings(..., category=)` reads the SRV and on-foot presets |
 | `outrider/tools.py` | The AI's read-only tools, defined once: `TOOLS` (name, description, JSON-schema params, an async handler `(get, args, rows)`), `READ_ROUTES` (the GETs a handler may read; `guarded()` refuses the rest), `listing()`, `call(name, args, get, rows)`, `Unavailable` -> `NOT_RUNNING` |
+| `outrider/ask.py` | The voice (`POST /api/ask`, `State.ask`): `load_phrases`/`match` (resources/ask.json, in its order), `fixed_answer` (from the tools registry, in-process through `make_app`'s `local_get`), `assistant_settings` and `ai_answer` (OpenAI-compatible chat with the registry as tools; `AIError` codes `ai_off`/`ai_timeout`/`ai_error`). The answer goes out as a co-pilot action (`say`, or `caption` for hush/unhush) |
 | `outrider/mcp.py` | The MCP bridge (`python3 -m outrider.mcp`): MCP's stdio JSON-RPC written directly (`handle`, `serve`; no SDK), `http_get` to the running server on 127.0.0.1, `mcp_settings` (`[mcp]`, also read by `settings_from`) |
 | `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
@@ -212,8 +213,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   (`capped`, the fields that answer the question).
 - **The Android app's contract** (`project/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
   `{outrider, api, min_app, password, signed_in}`; `POST /api/auth/signin` {password} gives `{ok, token}` and the
-  cookie; `POST /api/auth/signout`; errors are `{error, code}` (`signin_required`, `bad_password`, `rate_limited`,
-  `bad_request`, `app_too_old`, `server_error`). Bump `API_VERSION` when an endpoint the app uses changes shape
+  cookie; `POST /api/auth/signout`; `POST /api/ask` {text, source?} gives exactly `{answer, spoken, matched, command}`;
+  errors are `{error, code}` (`signin_required`, `bad_password`, `rate_limited`,
+  `bad_request`, `app_too_old`, `server_error`, `ai_off`, `ai_timeout`, `ai_error`). Bump `API_VERSION` when an endpoint the app uses changes shape
   incompatibly, `MIN_APP_VERSION` when an older app can no longer work (426 `app_too_old` for its
   `X-Outrider-App` header), and `outrider.__version__` with each release. The app's tests depend on these shapes.
 - **Devices.** Never exercise auto honk (uinput key presses: they go to whatever window has focus, including

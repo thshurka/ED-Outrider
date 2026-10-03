@@ -227,6 +227,20 @@ signs in once: see "Opening the page from another device" under Settings. The fo
 both under the SIL Open Font License and shipped with Outrider. If you have an LCARS font of your own, save it as
 `data/fonts/lcars-display.ttf` and the theme uses it for its headings. It stays in your git-ignored `data/` folder.
 
+## 🎙️ Ask Outrider by voice
+
+The tablet app can ask Outrider a question out loud (Ask in its footer). The answer is said on the PC in your Piper
+voice, by the window that speaks, and shown as a caption on every open page. Outrider knows these without any AI:
+**status report, fuel, unsold, next jump, what's left here, nearest unvisited, hush** and **unhush**. Their phrases
+are in `resources/ask.json`; edit them freely.
+
+Anything else goes to an optional AI layer, off by default (`[assistant] enabled = false`). It sends nothing anywhere
+until you set it up: an OpenAI-compatible endpoint (`base_url`: Ollama on your PC, Venice.ai, OpenAI...), a `model`
+that can call tools, and an `api_key` that never leaves the PC. The AI gets the same read-only tools as the MCP
+bridge, so it can look things up but never act. Privacy: with a cloud provider, your question and what the tools
+answer go to that provider; a local model keeps everything on your PC. Try your model with real questions: tool calling
+varies.
+
 ## 🤖 Ask an AI about your game
 
 An AI client you already use (Claude Code, the Claude desktop app, or any other MCP client) can ask Outrider questions
@@ -596,6 +610,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC**; `sound_dir`, your own alert sounds |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
+| `[assistant]` | `enabled`, `base_url`, `api_key`, `model`, `timeout`, `max_rounds`: the voice's optional AI layer |
 | `[mcp]` | `url`, `max_rows`: for the MCP bridge (see Ask an AI) |
 | `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
@@ -647,6 +662,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `outrider/button.py` | The co-pilot button (Linux, optional); `--listen` |
 | `outrider/auth.py` | Sign-in for other devices: `[server] password`, session tokens, the sign-in rate limit |
 | `outrider/tools.py` | The read-only questions an AI may ask (one registry, used by the MCP bridge and the voice) |
+| `outrider/ask.py`, `resources/ask.json` | Questions by voice (`POST /api/ask`): the fixed phrases, then the optional AI layer |
 | `outrider/mcp.py` | The MCP bridge for AI clients: `python3 -m outrider.mcp` (stdio); `--list` shows the tools |
 | `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
 | `outrider/target.py` | The Highway's auto-target (Linux, optional); `--show` |

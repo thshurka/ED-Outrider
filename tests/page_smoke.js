@@ -3403,6 +3403,13 @@ const settle = async maxMs => {
       tw.fetch = real;
       return o;
     })();
+    // a voice answer (POST api/ask): the tablet shows it as its caption (it never speaks); Ask only where the app listens
+    got.ask = JSON.parse(tw.eval(`(() => { const o = [document.getElementById("tabAsk").hidden];
+      takeCopilot({seq: lastCopilotSeq + 1, action: "say", words: "Fuel at 41 percent."}, false);
+      o.push(document.getElementById("tabCaption").textContent, speechItems.length);
+      let heard = 0; window.OutriderApp = {listen() { heard++; }}; tabRender(); o.push(document.getElementById("tabAsk").hidden);
+      document.getElementById("tabAsk").click(); o.push(heard); delete window.OutriderApp; tabRender(); o.push(document.getElementById("tabAsk").hidden);
+      return JSON.stringify(o); })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3422,6 +3429,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
+      ask: [true, "Fuel at 41 percent.", 0, false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],
       reload: [true, true, false, false, 0, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
