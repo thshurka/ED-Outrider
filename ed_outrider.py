@@ -205,6 +205,7 @@ SPANSH_ROUTE = "https://spansh.co.uk/api/route"                  # the neutron p
 SPANSH_GENERIC_ROUTE = "https://spansh.co.uk/api/generic/route"  # the exact plotter: the ship's figures, fuel too
 SPANSH_RESULTS = "https://spansh.co.uk/api/results/{job}"
 SPANSH_SYSTEM_NAMES = "https://spansh.co.uk/api/systems/field_values/system_names"   # system names as you type
+SPANSH_SYSTEM_SEARCH = "https://spansh.co.uk/api/search/systems"   # ?q=name: {results: [{id64, name, x, y, z}]}
 HIGHWAY = {"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60,   # [highway] defaults
            "conservative": False, "conservative_ly": 5.0,
            # auto-target's key sequence (outrider/target.py): how the name goes in, the waits, per-step key overrides,
@@ -4152,6 +4153,11 @@ def cached_base(db, id64):
     return (row["updated_at"], base) if base.get("v") == CACHE_VERSION else (None, None)
 
 
+def highway_not_yet(name):
+    """The plot error for a start system Spansh has not heard of yet (a system new to the galaxy's maps)."""
+    return f"Spansh has not received {name} yet (a new system takes a minute or two to reach it): try again in a minute"
+
+
 class Spansh:
     def __init__(self, db):
         self.db = db
@@ -4279,6 +4285,21 @@ class Spansh:
                 r.raise_for_status()
                 d = await r.json(content_type=None)
         return [v for v in (d.get("values") or []) if isinstance(v, str)][:20] if isinstance(d, dict) else []
+
+    async def system_id64(self, name):
+        """A system's id64 from Spansh's search by name (the exact name, any case), or None when Spansh has none:
+        the exact plotter takes id64s, not names (found 2026-10-03)."""
+        if self.session is None:
+            raise HighwayError("Spansh cannot be reached (no network session)")
+        async with self.sem_fast:
+            async with self.session.get(SPANSH_SYSTEM_SEARCH, params={"q": name}) as r:
+                r.raise_for_status()
+                d = await r.json(content_type=None)
+        for x in (d.get("results") or []) if isinstance(d, dict) else []:
+            if isinstance(x, dict) and str(x.get("name") or "").lower() == name.lower() \
+                    and isinstance(x.get("id64"), int) and not isinstance(x.get("id64"), bool):
+                return x["id64"]
+        return None
 
     def cached(self, id64):
         return cached_base(self.db, id64)
@@ -8544,10 +8565,51 @@ class State:
         self.bump()
         return {"ok": True, "plotting": self.highway_plotting}, 202
 
+    async def highway_id64(self, name, spansh_only=False):
+        """A system's id64 for Spansh's exact plotter: where you are, a system known here (find_local), else Spansh's
+        own search; None when nobody knows it. spansh_only: Spansh's search alone (does Spansh know it yet?)."""
+        if not spansh_only:
+            pos = self.journals.pos or {}
+            if pos.get("id64") and (pos.get("name") or "").lower() == name.lower():
+                return int(pos["id64"])
+            hit = self.find_local(name)
+            if hit:
+                return int(hit[0])
+        try:
+            return await self.spansh.system_id64(name)
+        except (ClientError, asyncio.TimeoutError, ValueError) as e:
+            raise HighwayError(f"Spansh cannot be reached ({type(e).__name__}): try again later") from e
+
+    async def _highway_exact_ids(self, params):
+        """The exact plotter's source and destination as id64s (Spansh's exact plotter answers "Unable to find route"
+        to names, found in game 2026-10-03; the neutron plotter still takes names)."""
+        frm, to = params["source"], params["destination"]
+        src, dst = await self.highway_id64(frm), await self.highway_id64(to)
+        if src is None:
+            raise HighwayError(highway_not_yet(frm))
+        if dst is None:
+            raise HighwayError(f"Spansh knows no system called {to}")
+        return dict(params, source=src, destination=dst)
+
     async def _highway_plot(self, url, params, plotter, meta):
         p = self.highway_plotting
         try:
-            result = await self.spansh.plot(url, params)
+            if plotter == "exact":
+                start = params["source"]
+                params = await self._highway_exact_ids(params)
+                try:
+                    result = await self.spansh.plot(url, params)
+                except HighwayError as e:
+                    # the start known here but not to Spansh yet (its data comes from EDDN, a minute or two late)
+                    try:
+                        known = await self.highway_id64(start, spansh_only=True)
+                    except HighwayError:
+                        raise e from None   # Spansh's own answer says more than "cannot be reached" now
+                    if known is None:
+                        raise HighwayError(highway_not_yet(start)) from None
+                    raise
+            else:
+                result = await self.spansh.plot(url, params)
             rows = highway_rows(plotter, result)
             self.highway_store(rows, meta)
             p.update(state="done")

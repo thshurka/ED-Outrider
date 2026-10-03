@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Exact plots work again
+- The Highway's Exact plots always failed with "Spansh: Unable to find route": Spansh's exact plotter now takes
+  systems by id64, not by name (found in game). Outrider sends the id64 of where you are, of a system it already
+  knows, or of the one Spansh's search finds by the exact name. The neutron plotter still takes names.
+- A start system Spansh has not received yet (a new one; it reaches Spansh a minute or two after your visit) now says
+  so: "Spansh has not received ... yet: try again in a minute".
+
 ## 2026-10-03 · A password for devices on your network (tablet plan, phase 1)
 - `[server] password`: a tablet or phone signs in once on a small sign-in page and stays signed in, across Outrider
   restarts, until the password changes or it signs out. This PC itself never needs it. Empty (the default) asks
