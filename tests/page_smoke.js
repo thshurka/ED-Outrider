@@ -1791,13 +1791,20 @@ const settle = async maxMs => {
   {
     const w = dom.window, before = errors.length;
     const got = JSON.parse(w.eval(`(() => {
-      const keep = codexNewCounts, o = {};
+      const keep = localStorage.getItem("codexNewCounts"), o = {};
+      const setCodex = v => v === null ? localStorage.removeItem("codexNewCounts") : localStorage.setItem("codexNewCounts", JSON.stringify(v));
       const b = {body: "A 3", signals: 1, genera: ["Bacterium"], partial: {}, potential: 1000000, factor: 5, codex_new: true, dist_ls: 50};
       const l = {body_count: 8, scanned: 8, unscanned: 0, honked: true, all_found: true, unmapped_valuable: [], unmapped: [], bio_pending: [b]};
-      codexNewCounts = true; o.said = leavingSaid(l); o.worth = worthSaying(l);
-      codexNewCounts = false; o.saidOff = leavingSaid(l);
+      setCodex(true); o.said = leavingSaid(l); o.worth = worthSaying(l);
+      setCodex(false); o.saidOff = leavingSaid(l);
+      o.planOff = planItems(l).length;   // off: not one of Now's next stops either
+      // nothing set in this browser: [defaults] codex_interesting decides
+      const d0 = data.defaults; setCodex(null);
+      data.defaults = Object.assign({}, d0, {codex_interesting: false}); o.cfgOff = [codexNewCounts(), planItems(l).length];
+      data.defaults = Object.assign({}, d0, {codex_interesting: true}); o.cfgOn = [codexNewCounts(), planItems(l).length];
+      data.defaults = d0;
       // the spoken list says "biology" once and what every bio body shares once after them
-      codexNewCounts = true;
+      setCodex(true);
       const bb = (body, potential, extra) => Object.assign({body, signals: 1, genera: ["Bacterium"], partial: {}, potential, factor: 5, codex_new: true, dist_ls: 50}, extra);
       const L = (bio, maps) => ({...l, bio_pending: bio, unmapped: maps || []});
       const b8 = bb("8", 7780000), b5 = bb("5", 1680000), elw = {body: "A 2", subtype: "Earth-like world", terraformable: false, increment: 1400000, special: true};
@@ -1807,12 +1814,13 @@ const settle = async maxMs => {
       o.maps = worthSaying(L([b8, b5], [elw]));
       o.three = worthSaying(L([b8, b5, bb("3", 1000000)]));
       o.run = leavingSaid(L([b8, bb("5", 1680000, {partial: {Stratum: 1}})]));
-      codexNewCounts = keep;
+      if (keep === null) localStorage.removeItem("codexNewCounts"); else localStorage.setItem("codexNewCounts", keep);
       render(); o.hz = document.getElementById("horizonLn").textContent;
       return JSON.stringify(o);
     })()`));
     const want = [/biology on A 3, new to your codex here, up to 5\.0M with first footfall/.test(got.said),
       /biology on A 3, new to your codex here/.test(got.worth), got.saidOff === "", !got.hz.includes(" — "),
+      got.planOff === 0, JSON.stringify(got.cfgOff) === "[false,0]", JSON.stringify(got.cfgOn) === "[true,1]",
       got.two === "biology on 8, up to 38.9M, and on 5, up to 8.4M; both new to your codex here, with first footfall",
       got.twoSaid === "biology on 8, up to 38.9 million, and on 5, up to 8.4 million; both new to your codex here, with first footfall",
       got.mixed === "biology on 8, up to 100.0M, and on 5, new to your codex here, up to 8.4M; both with first footfall",

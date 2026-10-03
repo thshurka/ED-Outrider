@@ -532,7 +532,7 @@ function worthLeavingFor(l) {
   if (!l) return null;
   // a body the rules cannot price (potential null) is kept: unknown is not the same as worthless
   const bio = l.bio_pending.filter(b => Object.keys(b.partial || {}).length || b.potential == null || b.potential >= bioMinNow()
-    || (codexNewCounts && b.codex_new));   // a species new to your codex here is worth stopping for (vouchers)
+    || (codexNewCounts() && b.codex_new));   // a species new to your codex here is worth stopping for (vouchers)
   // mapping only counts when it would add at least the green-row level (bonus-free, like the highlight),
   // or the body is special: a first-discovered / first-map ELW, water world, ammonia world or terraformable.
   // Unscanned bodies and a missing honk stay on Here's to-do line; they never sound the alert on their own.
@@ -558,7 +558,7 @@ function leavingText(l) {
     const parts = Object.entries(b.partial).map(([g, n]) => `${esc(g)} ${n}/3`).concat(unstarted(b).map(esc));
     bits.push(`bio on <b>${esc(b.body)}</b>${b.genera === null ? ` (${noDssText(b, parts)})` : parts.length ? ` (${parts.join(", ")})` : ""}` +
               (b.potential ? ` up to ${credits(pendingWorth(b))}${ffMark(b)}` : b.potential == null && !Object.keys(b.partial || {}).length ? " (value unknown)" : "") +
-              (b.codex_new ? " ✦ new to your codex here" : ""));
+              (codexNewCounts() && b.codex_new ? " ✦ new to your codex here" : ""));
   }
   return `Leaving with unfinished work: ${bits.join(" · ")}`;
 }
@@ -589,7 +589,7 @@ function planItems(l) {
   if (!w) return [];
   const items = [...w.maps.map(u => ({kind: "map", body: u.body, dist: u.dist_ls, value: u.increment, keep: u.special, u})),
                  ...w.bio_pending.map(b => ({kind: "bio", body: b.body, dist: b.dist_ls, value: b.potential == null ? null : pendingWorth(b),
-                                             keep: !!Object.keys(b.partial || {}).length || !!b.codex_new, b}))];
+                                             keep: !!Object.keys(b.partial || {}).length || (codexNewCounts() && !!b.codex_new), b}))];
   for (const it of items) {
     it.sec = scSeconds(it.dist);
     it.perMin = it.sec && it.value ? it.value / (it.sec / 60) : null;
@@ -1804,6 +1804,10 @@ const speechNames = () => String(store.get("speechNames", null) ?? (data && data
 const outVolume = () => { const raw = store.get("volume", null), v = Number(raw);
   return raw !== null && raw !== "" && isFinite(v) ? Math.min(1, Math.max(0, v / 100)) : 1; };
 const speechSpeed = () => Math.min(2, Math.max(0.5, Number(store.get("speechSpeed", null) ?? (data && data.defaults && data.defaults.speech_speed) ?? 1) || 1));
+// codex finds as a reason to stay (✦): per browser, else [defaults] codex_interesting, else on
+function codexNewCounts() {
+  return !!(store.get("codexNewCounts", null) ?? (data && data.defaults && data.defaults.codex_interesting) ?? true);
+}
 // the "mapped" call-out after each planet's DSS mapping: off unless ticked ([defaults] speak_mapped, or per browser)
 const sayMapped = () => !!(store.get("sayMapped", null) ?? (data && data.defaults && data.defaults.speak_mapped) ?? false);
 // say signal counts as the FSS finds them: "bio" and "geo", each its own tick
@@ -1988,7 +1992,7 @@ const nBodies = n => `${n} bod${n === 1 ? "y" : "ies"}`;
 const spokenClass = (sub, tf) => `${tf ? "terraformable " : ""}${String(sub || "planet").replace(/^(?!Earth)\w/, c => tf ? c.toLowerCase() : c)}`;
 // the spoken reason a body with a species new to your codex here is on the list: said whenever it is, so a body
 // under your bio threshold that the ✦ tick keeps is heard as a codex find, not as money
-const codexWhy = b => codexNewCounts && b.codex_new ? ", new to your codex here" : "";
+const codexWhy = b => codexNewCounts() && b.codex_new ? ", new to your codex here" : "";
 // The spoken work list shared by the FSS debrief and the leaving alert: three items at most (the two best maps,
 // then the best bio bodies; either takes a slot the other leaves free), then "and N more". "biology" is said
 // once for the bio bodies, and what every bio body said shares is said once after them ("both new to your codex
@@ -5957,6 +5961,7 @@ function drawSpeechStyles() {
   document.getElementById("sayBio").checked = saySignals("bio"); document.getElementById("sayGeo").checked = saySignals("geo");
   document.getElementById("sayHazard").checked = sayHazard();
   document.getElementById("sayMapped").checked = sayMapped();
+  document.getElementById("codexNewCounts").checked = codexNewCounts();   // the config's default once the payload says it
   document.getElementById("routineQuiet").checked = routineQuiet();
   speedBox.value = speechSpeed(); speedOut.textContent = speechSpeed().toFixed(2) + "×";
   const pr = document.getElementById("speechProfanity");
@@ -6180,7 +6185,6 @@ const codexMark = (x, region) => {
 // The colour the likeliest species should show, muted after the guess ("Teal", "Lime or Green"); "" when unsure.
 const variantTxt = x => x && (x.variants || []).length
   ? ` <span class="unk" title="expected colour variant">${esc(x.variants.map(v => v.split(" - ").pop()).join(" or "))}</span>` : "";
-let codexNewCounts = store.get("codexNewCounts", true);
 // The range as laden now (the fuel and cargo aboard, from the fuel model), else the Loadout's best case.
 const plainRange = () => data && (data.jump_range_now || data.jump_range) || null;
 // Jump range with a jet-cone charge applied (neutron x4, white dwarf x1.5; the journal gives the exact value).
@@ -6209,8 +6213,8 @@ for (const [id, key] of [["rebuyWarn", "rebuyWarn"], ["rebuyUrgent", "rebuyUrgen
   };
 }
 const codexNewEl = document.getElementById("codexNewCounts");
-codexNewEl.checked = codexNewCounts;
-codexNewEl.onchange = () => { codexNewCounts = codexNewEl.checked; store.set("codexNewCounts", codexNewCounts); render(); };
+codexNewEl.checked = codexNewCounts();
+codexNewEl.onchange = () => { store.set("codexNewCounts", codexNewEl.checked); render(); };
 const maxBonusEl = document.getElementById("maxBonus");
 const showMaxBonus = () => { maxBonusEl.checked = maxBonus(); };
 maxBonusEl.onchange = () => { maxBonusCfg = maxBonusEl.checked; store.set("maxBonus", maxBonusCfg); renderHere(); };

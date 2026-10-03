@@ -97,6 +97,10 @@
 # speak_geo_signals = true        # and the geological ones
 # speak_mapped = false            # after mapping a planet: "A 2 mapped efficiently, 3.4M. Next: biology on
 #                                 # C 2, up to 19M." (a card and a spoken line; also a tick in the alerts dialog)
+# codex_interesting = true        # a body whose likeliest species is new to your codex in this region (✦) is worth
+#                                 # stopping for whatever its value: on Now's next stops and in the leaving warnings.
+#                                 # false: codex finds are only marked (✦), never a reason to stay (also a tick in the
+#                                 # alerts dialog, per browser)
 # speech_speed = 1.0              # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 # speech_names = "Boss, Hefay, Sir"   # what the voice calls you, comma separated; one is picked at random
 #                                    # each time (commander names are often unpronounceable)

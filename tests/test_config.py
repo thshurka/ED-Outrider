@@ -92,6 +92,14 @@ class Config(unittest.TestCase):
         self.assertIn("aiohttp must then be installed for that `python3` too", readme)
         self.assertNotIn("is found even when you start Outrider with plain", readme)
 
+    def test_codex_interesting(self):   # a codex find as a reason to stay: on unless the config says otherwise
+        import tomllib
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        self.assertTrue(ed_outrider.settings_from({}, args, None, ([], []))["codex_interesting"])
+        st = ed_outrider.settings_from({"defaults": {"codex_interesting": False}}, args, None, ([], []))
+        self.assertFalse(st["codex_interesting"])
+        self.assertIs(tomllib.loads(ed_outrider.config_text(st))["defaults"]["codex_interesting"], False)
+
     def test_precedence_flag_env_file_detect(self):
         cfg = {"journals": {"live": ["/from/file"]}, "server": {"port": 9000}, "defaults": {"bio_min": 5}}
         args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)

@@ -370,6 +370,20 @@ class ReviewBatchF(unittest.TestCase):
         r = self.search({"source": "local", "mining": True, "mining_mineral": "Platinum"})
         self.assertEqual([h["t"] for h in r["results"][0]["matches"]["mining"]], ["A 2 · Platinum 2 t mined here before"])
 
+    def test_favicon(self):   # an original drawing in the HUD's orange, served with the page
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def go():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                page = await (await c.get("/")).text()
+                r = await c.get("/static/favicon.svg")
+                return page, r.status, r.content_type, await r.text()
+        page, status, ctype, svg = asyncio.run(go())
+        self.assertIn('<link rel="icon" type="image/svg+xml" href="static/favicon.svg">', page)
+        self.assertEqual((status, ctype), (200, "image/svg+xml"))
+        self.assertIn("<svg", svg)
+
     # ---- S5: core module health ----
     def loadout(self, ts, sid, fsd=0.884, extra=()):
         mods = [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii", "Health": fsd},

@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Codex finds as a reason to stay is a config option; a tab icon
+- `[defaults] codex_interesting` (on by default; also the alerts dialog's tick, per browser): off, a species new to
+  your codex here (✦) no longer puts a body on Now's next stops or in the leaving warnings, nor in the leaving card's
+  text, nor exempts it from "skip?"; the ✦ marks stay as facts.
+- A tab icon (static/favicon.svg): a ship's arrowhead in a scanner ring, in the HUD's orange; an original drawing.
+
 ## 2026-10-03 · Here's sort reverses; "lost contact" in your own voice
 - Here's Dist, Grav, Now and Max headings: a second click reverses the order (▴), a third goes back to the default,
   Max (found in game).

@@ -477,6 +477,7 @@ def honk_learn(record, group, ok):
 
 
 SPEAK_BIO_SIGNALS = SPEAK_GEO_SIGNALS = True   # say "2 Biological Signals on body A 3" as the FSS finds them
+CODEX_INTERESTING = True   # a body whose likeliest species is new to your codex here is worth stopping for, whatever its value
 SPEAK_MAPPED = False   # the "mapped" call-out after each planet's DSS mapping (what it pays, the efficiency, what is next)
 SPEECH_SPEED = 1.0   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 # the player for the page's "Play speech and sounds on this PC" tick: auto (the first found), one by name, or off
@@ -769,6 +770,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "speak_bio_signals": flag("defaults", df, "speak_bio_signals", SPEAK_BIO_SIGNALS),
         "speak_geo_signals": flag("defaults", df, "speak_geo_signals", SPEAK_GEO_SIGNALS),
         "speak_mapped": flag("defaults", df, "speak_mapped", SPEAK_MAPPED),
+        "codex_interesting": flag("defaults", df, "codex_interesting", CODEX_INTERESTING),
         "speech_speed": min(2.0, max(0.5, num("defaults", df, "speech_speed", float, SPEECH_SPEED))),
         "speech_names": ", ".join(str(x) for x in df["speech_names"]) if isinstance(df.get("speech_names"), list)
                         else str(df.get("speech_names", SPEECH_NAMES)),
@@ -888,6 +890,7 @@ speech_danger_business = {"true" if st["speech_danger_business"] else "false"}  
 speak_bio_signals = {"true" if st["speak_bio_signals"] else "false"}   # say biological signal counts as the FSS finds them
 speak_geo_signals = {"true" if st["speak_geo_signals"] else "false"}   # and geological ones
 speak_mapped = {"true" if st["speak_mapped"] else "false"}   # after mapping a planet: what it pays, whether the efficiency bonus landed, what is next
+codex_interesting = {"true" if st["codex_interesting"] else "false"}   # a codex find (✦) makes a body worth stopping for: on Now's next stops and in the leaving warnings
 speech_speed = {st["speech_speed"]:g}   # spoken alerts' pace: 1 is the voice's own, 1.3 is 30% faster (0.5 to 2)
 speech_names = {q(st["speech_names"])}   # what the voice calls you, comma separated: one is picked at random each time
 
@@ -4779,7 +4782,7 @@ class State:
                          "speech_profanity_pct": SPEECH_PROFANITY_PCT, "speech_danger_business": SPEECH_DANGER_BUSINESS,
                          "speech_names": SPEECH_NAMES, "speech_speed": SPEECH_SPEED,
                          "speak_bio_signals": SPEAK_BIO_SIGNALS, "speak_geo_signals": SPEAK_GEO_SIGNALS,
-                         "speak_mapped": SPEAK_MAPPED,
+                         "speak_mapped": SPEAK_MAPPED, "codex_interesting": CODEX_INTERESTING,
                          "surface_alt": SURFACE_ALT, "rig_spacing": RIG_SPACING, "surface_map_min": SURFACE_MAP_MIN,
                          "surface_map_strip": SURFACE_MAP_STRIP, "rig_warn": RIG_WARN},
             "bio_rules": outrider.bio.rules_info() if outrider.bio else None,
@@ -10523,7 +10526,7 @@ def restore_backup(zip_path, db_path, host, port, now=None):
 async def run(args, st):
     global LIVE_DIRS, LEGACY_DIRS, UNSOLD_WARN, UNSOLD_URGENT, BIO_MIN, SOUNDS_DEFAULT, BODY_HIGHLIGHT, BIO_HIGHLIGHT, MAX_INCLUDE_BONUS, RADIUS_CHOICES, VOICE, VOICE_FALLBACK, BACKUP_DIR
     global SPEECH_STYLES, SPEECH_PROFANITY, SPEECH_NAMES, SPEECH_SPEED, SPEAK_BIO_SIGNALS, SPEAK_GEO_SIGNALS, SPEECH_PROFANITY_PCT
-    global SPEAK_MAPPED
+    global SPEAK_MAPPED, CODEX_INTERESTING
     global SPEECH_DANGER_BUSINESS, HIGH_GRAVITY, MODULE_WARN, BACKUP_KEEP, BACKUP_EVERY_DAYS
     global SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES
     global SURFACE_ALT, RIG_SPACING, SURFACE_MAP_MIN, SURFACE_MAP_STRIP, RIG_WARN
@@ -10543,7 +10546,7 @@ async def run(args, st):
     SPEECH_SPEED, SPEECH_PROFANITY_PCT = st["speech_speed"], st["speech_profanity_pct"]
     SPEECH_DANGER_BUSINESS = st["speech_danger_business"]
     SPEAK_BIO_SIGNALS, SPEAK_GEO_SIGNALS = st["speak_bio_signals"], st["speak_geo_signals"]
-    SPEAK_MAPPED = st["speak_mapped"]
+    SPEAK_MAPPED, CODEX_INTERESTING = st["speak_mapped"], st["codex_interesting"]
     BACKUP_DIR, BACKUP_KEEP, BACKUP_EVERY_DAYS = st["backup_dir"], st["backup_keep"], st["backup_every_days"]
     SPANSH_CONCURRENCY, MAP_MAX_RADIUS, MAP_MAX_PAGES = st["concurrency"], st["map_max_radius"], st["map_max_pages"]
     radius_flag = args.radius   # --radius on the command line beats a radius chosen on the page
