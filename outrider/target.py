@@ -50,16 +50,22 @@ ACTIONS = ("GalaxyMapOpen", "UI_Right", "UI_Left", "UI_Up", "UI_Down", "UI_Selec
            "CamYawLeft", "CamYawRight", "CamZoomIn", "CamZoomOut", "CamTranslateLeft", "CamTranslateRight",
            "CamTranslateForward", "CamTranslateBackward")
 FIXED_KEYS = {"Enter": ["KEY_ENTER"], "Paste": ["KEY_LEFTCTRL", "KEY_V"]}
-# step 5: a short camera turn hands the focus from the search panel back to the map (no key does; a mouse click
-# does), then UI_Select held plots the route to the system the search selected. Found in game 2026-10-02.
-DEFAULT_PLOT = ("hold CamYawRight 0.3", "hold UI_Select 1")
+# step 5: a short camera move hands the focus from the search panel back to the map (no key does; a mouse click
+# does), then UI_Select held plots the route to the system under the crosshair. The move is a zoom (found in game
+# 2026-10-03): it keeps the found system under the crosshair, where a yaw (the 2026-10-02 step) turns about a pivot
+# and once swung it onto a close neighbour, which was then plotted.
+DEFAULT_PLOT = ("hold CamZoomOut 0.2", "hold UI_Select 1")
 # step 2: from the opened galaxy map into its search field. Found in game (2026-10-02): UI_Up straight after the map
 # opens highlights "Search the Galaxy" and UI_Select puts the cursor in it; UI_Select alone opens the current system's
 # details, and UI_Right (Auto_Neutron's older sequence) moves along the tab column (Trade Routes, Bookmarks...).
-DEFAULT_SEARCH = ("press UI_Up", "press UI_Select")
+# 2026-10-03: the map remembers its last side panel (Display Options, say), and with one open UI_Up moves inside it;
+# a short camera yaw first closes any panel (nothing is selected yet, so the turn moves nothing that matters)
+DEFAULT_SEARCH = ("hold CamYawRight 0.3", "press UI_Up", "press UI_Select")
 # step 4: the search lists its suggestion a moment after the name goes in, and an Enter before that selects nothing
 # (found in game 2026-10-02); a second Enter in case the first only highlighted it
-DEFAULT_SUBMIT = ("wait 0.5", "press Enter", "wait 0.5", "press Enter")
+# 2026-10-03: with the name pasted, the single suggestion lists about a second later; an Enter at 0.5 s selected while
+# the search was still running and the wrong system was plotted. 1.5 s
+DEFAULT_SUBMIT = ("wait 1.5", "press Enter", "wait 0.5", "press Enter")
 DEFAULTS = {"entry": "type", "map_wait": 5.0, "search_wait": 2.0, "key_delay": 0.05, "keys": {}, "plot": list(DEFAULT_PLOT),
             "search": list(DEFAULT_SEARCH), "submit": list(DEFAULT_SUBMIT),
             "dry_run": False}
@@ -141,12 +147,16 @@ def build_steps(cfg=None):
     return s
 
 
-def guard(status, next_id64):
+def guard(status, next_id64, route_end=None):
     """Why auto-target must not start now: None, or (code, why). code "already" is no failure (the next system is the
-    target already); everything else is."""
+    target already: Status.json's Destination, or the end of the route the game plotted, NavRoute.json's last hop when
+    the next system is several jumps away); it comes first, whatever the flags or focus (review F11). Everything else
+    is a reason not to press."""
     st = status or {}
     if not st.get("live"):
         return "live", "the game is not live"
+    if targeted(st, next_id64, route_end):
+        return "already", "the next system is already the target"
     flags, flags2 = st.get("flags") or 0, st.get("flags2") or 0
     for bit, why in ((FLAG_DOCKED, "you are docked"), (FLAG_LANDED, "you are landed"), (FLAG_IN_SRV, "you are in the SRV")):
         if flags & bit:
@@ -160,16 +170,26 @@ def guard(status, next_id64):
     focus = st.get("gui_focus") or 0
     if focus:
         return "focus", GUI_FOCUS.get(focus, f"GuiFocus is {focus}") + " (the cockpit must have focus)"
-    dest = st.get("destination")
-    if isinstance(dest, dict) and next_id64 is not None and dest.get("System") == next_id64:
-        return "already", "the next system is already the target"
     return None
 
 
+def targeted(status, next_id64, route_end=None):
+    """Whether the game's target is the next system: Status.json's Destination is it, or the route the game plotted
+    ends at it (a waypoint several jumps away: the Destination is then the first hop, review F2). route_end: a callable
+    giving NavRoute.json's last hop id64, or None."""
+    if next_id64 is None:
+        return False
+    dest = (status or {}).get("destination")
+    if isinstance(dest, dict) and dest.get("System") == next_id64:
+        return True
+    end = route_end() if route_end else None
+    return end is not None and end == next_id64
+
+
 class Abort(Exception):
-    def __init__(self, step, why):
+    def __init__(self, step, why, code=None, **extra):
         super().__init__(why)
-        self.step, self.why = step, why
+        self.step, self.why, self.code, self.extra = step, why, code, extra
 
 
 class Targeter:
@@ -182,11 +202,26 @@ class Targeter:
         self.configure(cfg or {})
         self.copy = copy   # copy(text) -> bool: the desktop clipboard, for the paste entry
         self.log = log
-        self.cancel = threading.Event()   # set to stop a run (shutdown): checked between keys and while waiting
+        self.cancel = threading.Event()   # set to stop any run (shutdown): checked between keys and while waiting
+        self.run_cancel = None   # the current run's own token (switched off, the route cleared): set by its owner
         # time, injectable so tests can run on a fake clock that moves only when something waits (the defaults are
         # the real ones): clock() for deadlines, wait(secs) an interruptible pause (True once cancelled), sleep(secs)
-        # the short gaps between the keys of one combination
-        self.clock, self.wait, self.sleep = time.monotonic, self.cancel.wait, time.sleep
+        # an uninterruptible one (the gaps between the keys of one combination, a hold that must complete)
+        self.clock, self.wait, self.sleep = time.monotonic, self._wait, time.sleep
+
+    def cancelled(self):
+        """Shutdown, or the current run's own token."""
+        return self.cancel.is_set() or (self.run_cancel is not None and self.run_cancel.is_set())
+
+    def _wait(self, secs):
+        """Pause `secs`, returning early (True) once cancelled by either token."""
+        end = time.monotonic() + max(0.0, secs or 0)
+        while not self.cancelled():
+            left = end - time.monotonic()
+            if left <= 0:
+                return False
+            self.cancel.wait(min(0.05, left))
+        return True
 
     def configure(self, cfg):
         self.cfg.update({k: v for k, v in cfg.items() if k in DEFAULTS})
@@ -253,34 +288,71 @@ class Targeter:
         return out
 
     # ---- running ----
-    def run(self, name, id64, status, system, dry_run=None):
+    def run(self, name, id64, status, system, dry_run=None, cancel=None, origin=None, route_end=None):
         """Target `name` (id64) now: status() gives Status.json's reading ({gui_focus, flags, flags2, destination,
-        live}), system() the current system's id64. -> {"ok", "phase", "label", "why", "log", "dry_run"}."""
+        live}), system() the current system's id64. cancel: this run's own token (a threading.Event its owner sets:
+        auto-target switched off, the route cleared or replaced); origin: the system the run was decided in (default:
+        where you are when it starts), so a jump while it waited for the keyboard aborts it instead of becoming its new
+        baseline; route_end: a callable giving the last hop of the route the game plotted (NavRoute.json), so a waypoint
+        several jumps away counts as targeted. -> {"ok", "phase", "label", "why", "code", "log", "dry_run"}; code
+        "already" (nothing to do) or "wrong" (a different system was targeted: `wrong` names it).
+        The step log is printed only when the run fails, or throughout a dry run: a success is the caller's one line."""
         dry = self.cfg.get("dry_run") if dry_run is None else dry_run
+        result = {"ok": False, "phase": None, "label": None, "why": None, "code": None, "log": [], "dry_run": bool(dry)}
+        tag = f"auto-target{' (dry run)' if dry else ''}: "
+
+        def say(line):
+            result["log"].append(line)
+            if dry:
+                self.log(tag + line)
+        self.run_cancel = cancel
+        try:
+            self._run(result, say, name, id64, status, system, dry, origin, route_end)
+        except BaseException:
+            for line in result["log"]:   # an unexpected error: the steps so far are the debugging detail
+                self.log(tag + line)
+            raise
+        finally:
+            self.run_cancel = None
+        if not result["ok"] and not dry:
+            for line in result["log"]:
+                self.log(tag + line)
+        return result
+
+    def _run(self, result, say, name, id64, status, system, dry, origin, route_end):
         steps, missing = self.plan()
-        result = {"ok": False, "phase": None, "label": None, "why": None, "log": [], "dry_run": bool(dry)}
-        say = lambda line: (result["log"].append(line), self.log(f"auto-target{' (dry run)' if dry else ''}: {line}"))
         if missing:
             result.update(phase=0, label="read the bindings",
                           why="no keyboard binding for " + ", ".join(f"{n} ({w})" for n, w in missing))
-            return result
-        start = guard(status(), id64)
+            return
+        start = guard(status(), id64, route_end)
         if start:
             result.update(phase=0, label="check before starting", why=start[1], code=start[0])
-            return result
+            return
         if dry:
             for st in steps:
                 say("would " + self.describe([st])[0].split(": ", 1)[1] + f"  [{st['phase']} {st['label']}]")
             result.update(ok=True, why="dry run: nothing pressed")
-            return result
+            return
         h = self.honker
         if not h.lock.acquire(timeout=LOCK_WAIT):
             result.update(phase=0, label="wait for the keyboard", why="the virtual keyboard stayed busy (auto honk)")
-            return result
-        here, expect, opened, cur = system(), {GUI_COCKPIT}, False, None
+            return
+        here = origin if origin is not None else system()
+        expect, opened, cur = {GUI_COCKPIT}, False, None
         try:
             if h.ui is None or h.stop.is_set():
                 raise Abort(None, "the virtual keyboard is not open")
+            # the wait for the keyboard can be long: everything again, under the lock, before the first key (review
+            # CX-F3): cancelled meanwhile, a jump away from where the run was decided, docked, landed, a panel open...
+            if self.cancelled():
+                raise Abort(None, "stopped")
+            if system() != here:
+                raise Abort(None, "the system changed while it waited for the keyboard")
+            again = guard(status(), id64, route_end)
+            if again:
+                result.update(phase=0, label="check before the first key", why=again[1], code=again[0])
+                return
             for st in steps:
                 cur = st
                 self._check(st, status, system, here, expect)
@@ -315,12 +387,13 @@ class Targeter:
                 elif d == "wait":
                     self._sleep(st["secs"], st, status, system, here, expect)
                 elif d == "verify":
-                    self._verify(st, id64, status, system, here, expect)
+                    self._verify(st, id64, status, system, here, expect, route_end)
                 say(f"{st['phase']} {st['label']}: done")
             result.update(ok=True)
         except Abort as e:
             st = e.step or cur
-            result.update(phase=st["phase"] if st else 0, label=st["label"] if st else "start", why=e.why)
+            result.update(phase=st["phase"] if st else 0, label=st["label"] if st else "start", why=e.why,
+                          code=e.code, **e.extra)
             say(f"stopped at step {result['phase']} ({result['label']}): {e.why}")
             # close the map only if this run opened it and it is still open (pressing it otherwise would open it)
             if opened and (status() or {}).get("gui_focus") == GUI_GALAXY_MAP and h.ui is not None and not h.stop.is_set():
@@ -335,10 +408,9 @@ class Targeter:
             if h.stop.is_set() and not h.owners:
                 h._close_now()   # close() came during the run: the device is closed now that the keys are up
             h.lock.release()
-        return result
 
     def _check(self, st, status, system, here, expect):
-        if self.cancel.is_set() or self.honker.stop.is_set():
+        if self.cancelled() or self.honker.stop.is_set():
             raise Abort(st, "stopped")
         s = status() or {}
         if not s.get("live"):
@@ -368,8 +440,11 @@ class Targeter:
                 ui.syn()
                 down.append(n)
                 self.sleep(gap if n != names[-1] else 0)
-            if (self.wait(secs) or h.stop.is_set()) and check:
-                raise Abort(st, "stopped")
+            if check:
+                if self.wait(secs) or h.stop.is_set():
+                    raise Abort(st, "stopped")
+            else:
+                self.sleep(secs)   # a hold that must complete (closing the map on the way out: review F13)
         finally:
             for n in reversed(down):
                 ui.write(e.EV_KEY, honk.key_code(ev, n), 0)
@@ -395,16 +470,18 @@ class Targeter:
                             else "the galaxy map did not close")
             self.wait(POLL_S)
 
-    def _verify(self, st, id64, status, system, here, expect):
+    def _verify(self, st, id64, status, system, here, expect, route_end=None):
         end = self.clock() + VERIFY_WAIT
         while True:
-            dest = (status() or {}).get("destination")
-            if isinstance(dest, dict) and dest.get("System") == id64:
+            if targeted(status(), id64, route_end):   # the next system, or a plotted route ending there (review F2)
                 return
             self._check(st, status, system, here, expect)
             if self.clock() >= end:
-                got = dest.get("Name") if isinstance(dest, dict) else None
-                raise Abort(st, f"the target is {got}, not the next system" if got else "no system was targeted")
+                dest = (status() or {}).get("destination")
+                if isinstance(dest, dict) and dest.get("System") is not None:
+                    got = dest.get("Name") or str(dest.get("System"))
+                    raise Abort(st, f"targeted the wrong system: {got}", code="wrong", wrong=got)
+                raise Abort(st, "no system was targeted")
             self.wait(POLL_S)
 
 

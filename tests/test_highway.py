@@ -780,8 +780,9 @@ class HighwayH1(unittest.TestCase):
         bg = {"background_image": "", "background_extent": [-45000.0, 45000.0, -20000.0, 70000.0], "background_opacity": 0.6,
               "conservative": False, "conservative_ly": 5.0, "autotarget_entry": "type", "autotarget_map_wait": 5.0,
               "autotarget_search_wait": 2.0, "autotarget_key_delay": 0.05, "autotarget_keys": {},
-              "autotarget_plot": ["hold CamYawRight 0.3", "hold UI_Select 1"], "autotarget_search": ["press UI_Up", "press UI_Select"],
-              "autotarget_submit": ["wait 0.5", "press Enter", "wait 0.5", "press Enter"], "autotarget_dry_run": False}
+              "autotarget_plot": ["hold CamZoomOut 0.2", "hold UI_Select 1"],
+              "autotarget_search": ["hold CamYawRight 0.3", "press UI_Up", "press UI_Select"],
+              "autotarget_submit": ["wait 1.5", "press Enter", "wait 0.5", "press Enter"], "autotarget_dry_run": False}
         self.assertEqual(st["highway"], dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5.0, "efficiency": 60}, **bg))
         back = tomllib.loads(ed_outrider.config_text(st))["highway"]
         self.assertEqual(back, dict({"clipboard": True, "autotarget": False, "autotarget_delay": 5, "efficiency": 60}, **bg))
@@ -1013,7 +1014,7 @@ class HighwayAutoTarget(unittest.TestCase):
         self.honker.evdev, self.honker.ui = self.evdev, self.game   # never open(): there is no UInput here at all
         self.honker.owners = {"target"}
         self.here = 101
-        self.cfg = {"map_wait": 0.4, "search_wait": 0.02, "key_delay": 0.0, "plot": ["hold CamYawRight 0.05", "hold UI_Select 0.55"],
+        self.cfg = {"map_wait": 0.4, "search_wait": 0.02, "key_delay": 0.0, "plot": ["hold CamZoomOut 0.05", "hold UI_Select 0.55"],
                     "submit": ["wait 0.2", "press Enter", "wait 0.05", "press Enter"]}
         self.copied = []
         self.targeter = outrider.target.Targeter(self.honker, [self.journals], self.cfg, log=lambda line: None,
@@ -1042,20 +1043,22 @@ class HighwayAutoTarget(unittest.TestCase):
         got = [(s["phase"], s["do"], s.get("names") or s.get("value") or s.get("secs")) for s in steps]
         self.assertEqual(got, [
             (1, "press", ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"]), (1, "focus", 6),
-            (2, "press", ["KEY_W"]), (2, "press", ["KEY_SPACE"]),
+            # the yaw first: the map opens on the panel it last showed, and a camera move hands focus back to the map
+            (2, "hold", ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"]), (2, "press", ["KEY_W"]), (2, "press", ["KEY_SPACE"]),
             (3, "type", None), (4, "wait", 0.2), (4, "press", ["KEY_ENTER"]), (4, "wait", 0.05), (4, "press", ["KEY_ENTER"]),
             (4, "wait", 0.02),
-            (5, "hold", ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"]), (5, "hold", ["KEY_SPACE"]),
+            (5, "hold", ["KEY_RIGHTALT", "KEY_COMPOSE", "KEY_2"]), (5, "hold", ["KEY_SPACE"]),
             (6, "press", ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"]), (6, "focus", None),   # GuiFocus 0
             (7, "verify", None)])
-        self.assertEqual(steps[13]["value"], 0)
+        self.assertEqual(steps[14]["value"], 0)
         words = self.targeter.describe(steps)
         self.assertEqual(words[0], "1 open the galaxy map: press Left Alt + Right Alt + T (secondary binding of Galaxy Map Open "
                                    "in HCS X56 Attempt 1)")
-        self.assertIn("hold Space (secondary binding of UI Select in HCS X56 Attempt 1) for 0.55 s", words[11])
+        self.assertIn("hold Space (secondary binding of UI Select in HCS X56 Attempt 1) for 0.55 s", words[12])
         # the default plot step and the other reads: UI_Back Backspace, CycleNextPanel Alt+Alt+W, the arrows WASD
-        self.assertEqual(self.T.build_steps()[10], {"do": "hold", "keys": "CamYawRight", "secs": 0.3, "phase": 5, "label": "plot the route"})
-        self.assertEqual(self.T.build_steps()[11], {"do": "hold", "keys": "UI_Select", "secs": 1.0, "phase": 5, "label": "plot the route"})
+        # (zoom, not yaw: a yaw there can swing the camera onto a neighbouring star and plot to it, 2026-10-03)
+        self.assertEqual(self.T.build_steps()[11], {"do": "hold", "keys": "CamZoomOut", "secs": 0.2, "phase": 5, "label": "plot the route"})
+        self.assertEqual(self.T.build_steps()[12], {"do": "hold", "keys": "UI_Select", "secs": 1.0, "phase": 5, "label": "plot the route"})
         # step 2 is configurable too ([highway] autotarget_search): the older layout's UI_Right, then select
         self.assertEqual([x.get("keys") for x in self.T.build_steps({"search": ["press UI_Right", "press UI_Select"]}) if x["phase"] == 2],
                          ["UI_Right", "UI_Select"])
@@ -1063,7 +1066,8 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual({k: v[0] for k, v in b.items() if v[0]}, {
             "GalaxyMapOpen": ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T"], "UI_Right": ["KEY_D"], "UI_Left": ["KEY_A"],
             "UI_Up": ["KEY_W"], "UI_Down": ["KEY_S"], "UI_Select": ["KEY_SPACE"], "UI_Back": ["KEY_BACKSPACE"],
-            "CycleNextPanel": ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_W"], "CamYawRight": ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"]})
+            "CycleNextPanel": ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_W"], "CamYawRight": ["KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X"],
+            "CamZoomOut": ["KEY_RIGHTALT", "KEY_COMPOSE", "KEY_2"]})
         # Primary Fire still reads the same (the reader is shared with auto honk)
         self.assertEqual(outrider_honk().primary_fire_binding([self.journals])[0], ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_K"])
         # overrides, paste entry, and a step list of your own
@@ -1156,10 +1160,12 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual((self.status["gui_focus"], self.status["destination"]["System"]), (0, 555))
         self.assertTrue(self.released())
         pressed = [n for n, v in self.game.writes if v]
-        self.assertEqual(pressed[:5], ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T", "KEY_W", "KEY_SPACE"])   # W lights the search box
+        self.assertEqual(pressed[:8], ["KEY_LEFTALT", "KEY_RIGHTALT", "KEY_T",            # the map
+                                       "KEY_LEFTALT", "KEY_RIGHTSHIFT", "KEY_X",          # the yaw: focus to the map
+                                       "KEY_W", "KEY_SPACE"])                             # W lights the search box
         self.assertEqual(pressed.count("KEY_LEFTSHIFT"), 5)   # the capitals C, S, A, B, C
         self.assertEqual(self.game.found, ("Col 285 Sector AB-C d13-5", 555))
-        self.assertEqual(len(r["log"]), 15)   # each step done
+        self.assertEqual(len(r["log"]), 16)   # each step done
 
     def test_enter_waits_for_the_suggestion(self):
         self.fake_time()
@@ -1170,7 +1176,7 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertFalse(r["ok"], r)
         self.assertIsNone(self.game.found)
         self.assertIsNone(self.status.get("destination"))
-        self.assertEqual(self.T.DEFAULT_SUBMIT, ("wait 0.5", "press Enter", "wait 0.5", "press Enter"))
+        self.assertEqual(self.T.DEFAULT_SUBMIT, ("wait 1.5", "press Enter", "wait 0.5", "press Enter"))
         self.targeter.configure({"submit": ["wait 0.2", "press Enter"]})
         self.assertTrue(self.run_target()["ok"])
 
@@ -1251,7 +1257,8 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 7, "no system was targeted"))
         self.game.no_plot, self.game.plot_to = False, 4242   # targeted something else
         r = self.run_target()
-        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 7, "the target is Bridge B, not the next system"))
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 7, "targeted the wrong system: Bridge B"))
+        self.assertEqual((r["code"], r["wrong"]), ("wrong", "Bridge B"))
         # the target shows up late (Status.json lags): 0.2 s after the map closes, inside VERIFY_WAIT (0.4 s here)
         self.game.plot_to, self.game.no_plot = None, True
         self.status["destination"] = None
@@ -1269,7 +1276,97 @@ class HighwayAutoTarget(unittest.TestCase):
         r = self.run_target(dry_run=True)
         self.assertEqual((r["ok"], r["dry_run"], self.game.writes), (True, True, []))
         self.assertTrue(r["log"][0].startswith("would press Left Alt + Right Alt + T"))
-        self.assertEqual(len(r["log"]), 15)
+        self.assertEqual(len(r["log"]), 16)
+
+    # ---- review batch 4: cancelling, the checks under the lock, multi-hop plots, the wrong system ----
+
+    def test_run_token_stops_it_mid_way(self):   # CX-F1, F12: auto-target switched off while auto honk keeps the device open
+        import threading
+        self.fake_time()
+        cancel = threading.Event()
+        self.game.on_type = lambda g: len(g.text) == 3 and cancel.set()
+        r = self.run_target(cancel=cancel)
+        self.assertEqual((r["ok"], r["phase"], r["why"]), (False, 3, "stopped"))
+        self.assertTrue(self.released())
+        self.assertEqual(self.game.text, "Bri")                 # nothing typed after the switch-off
+        self.assertEqual(self.status["gui_focus"], 0)           # the map it opened was closed on the way out
+        self.assertIsNone(self.status["destination"])
+        self.assertIsNone(self.targeter.run_cancel)             # the token belongs to that run only
+        self.assertTrue(self.run_target()["ok"])                # the next run is not stopped by it
+
+    def test_close_tap_held_when_stopped(self):   # F13: the closing Alt+Alt+T is a whole tap, even on the way out
+        self.fake_time()
+        times = []
+        write = self.game.write
+        self.game.write = lambda t, c, v: (times.append((self.game.names[c], v, self.clock())), write(t, c, v))[1]
+        self.game.on_type = lambda g: len(g.text) == 2 and self.targeter.cancel.set()   # shutdown mid-way
+        with unittest.mock.patch.object(self.T, "TAP_S", 0.05):
+            r = self.run_target()
+        self.assertEqual(r["why"], "stopped")
+        t_down = [t for n, v, t in times if n == "KEY_T" and v == 1][-1]
+        t_up = [t for n, v, t in times if n == "KEY_T" and v == 0][-1]
+        self.assertGreaterEqual(t_up - t_down, 0.049)   # held, not cut to nothing
+        self.assertEqual(self.status["gui_focus"], 0)
+
+    def test_checks_again_under_the_lock(self):   # CX-F3: what changed while it waited for the keyboard
+        import threading
+        cases = [("system", lambda: setattr(self, "here", 999), "the system changed while it waited for the keyboard"),
+                 ("docked", lambda: self.status.update(flags=1 << 4 | 1 << 0), None),
+                 ("landed", lambda: self.status.update(flags=1 << 4 | 1 << 1), None),
+                 ("panel", lambda: self.status.update(gui_focus=2), None),
+                 ("cancel", None, "stopped")]
+        for what, change, why in cases:
+            self.here, self.status["flags"], self.status["gui_focus"] = 101, 1 << 4, 0
+            self.game.writes.clear()
+            cancel = threading.Event()
+            self.honker.lock.acquire()
+
+            def later(change=change, cancel=cancel):
+                (change or cancel.set)()
+                self.honker.lock.release()
+            threading.Timer(0.1, later).start()
+            r = self.run_target(cancel=cancel, origin=101)
+            self.assertEqual((r["ok"], r["phase"], self.game.writes), (False, 0, []), what)
+            if why:
+                self.assertEqual(r["why"], why, what)
+            else:
+                self.assertEqual(r["label"], "check before the first key", what)
+        # origin: a run decided at 101 that only gets going after a jump does not target from the new system
+        self.here, self.status["flags"], self.status["gui_focus"] = 202, 1 << 4, 0
+        r = self.run_target(origin=101)
+        self.assertEqual((r["ok"], r["why"], self.game.writes), (False, "the system changed while it waited for the keyboard", []))
+
+    def test_already_comes_first(self):   # F11: already targeted is not an error, whatever else is going on
+        G = self.T.guard
+        self.assertEqual(G({"live": True, "gui_focus": 6, "flags": 1 << 4, "destination": {"System": 102}}, 102)[0], "already")
+        self.assertEqual(G({"live": True, "gui_focus": 0, "flags": 1 << 4 | 1 << 17, "destination": {"System": 102}}, 102)[0],
+                         "already")
+        # a route the game plotted that ends at the next system (its first hop is the target): already done too (F2)
+        self.assertEqual(G({"live": True, "gui_focus": 0, "flags": 1 << 4, "destination": {"System": 7}}, 102, lambda: 102)[0],
+                         "already")
+        self.assertIsNone(G({"live": True, "gui_focus": 0, "flags": 1 << 4, "destination": {"System": 7}}, 102, lambda: 8))
+
+    def test_multi_hop_plot_counts(self):   # F2: a waypoint beyond plain jump range plots a route whose first hop differs
+        self.fake_time()
+        self.game.plot_to = 4242   # the destination is the route's first hop
+        plotted = lambda: 102 if self.status.get("destination") else None   # NavRoute.json follows the plot
+        r = self.run_target(route_end=plotted)
+        self.assertTrue(r["ok"], r)
+        self.status["destination"] = None
+        r = self.run_target(route_end=lambda: 4243)   # a route to somewhere else: the wrong system, by name
+        self.assertEqual((r["ok"], r["code"], r["wrong"]), (False, "wrong", "Bridge B"))
+
+    def test_success_logs_nothing(self):   # Q6: a success is the caller's one line; a failure prints its steps
+        self.fake_time()
+        lines = []
+        self.targeter.log = lines.append
+        self.assertTrue(self.run_target()["ok"])
+        self.assertEqual(lines, [])
+        self.game.no_plot, self.status["destination"] = True, None
+        r = self.run_target()
+        self.assertFalse(r["ok"])
+        self.assertEqual(len(lines), len(r["log"]))
+        self.assertTrue(lines[-1].startswith("auto-target: stopped at step 7"), lines[-1])
 
     def test_lock_with_honk(self):
         import threading
@@ -1359,7 +1456,7 @@ class HighwayAutoTarget(unittest.TestCase):
         last = self.state.autotarget_last
         self.assertEqual((last["done"], last["phase"], last["why"]), (False, 7, "no system was targeted"))
         info = self.state.autotarget_info()
-        self.assertEqual((info["status"], info["missing"], len(info["steps"])), ("ready", [], 15))
+        self.assertEqual((info["status"], info["missing"], len(info["steps"])), ("ready", [], 16))
 
     def test_trigger_guards(self):
         import asyncio
@@ -1412,6 +1509,98 @@ class HighwayAutoTarget(unittest.TestCase):
         self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(s), "BoostValue": 4})
         self.assertTrue(self.state.maybe_autotarget())
         await self.state.autotarget_task
+
+    def test_switch_off_stops_a_run_under_way(self):   # CX-F1, F12: the device stays open for auto honk, the run stops
+        import asyncio
+        self.wire()
+        self.honker.owners = {"target", "honk"}
+
+        async def go():
+            loop = asyncio.get_running_loop()
+            self.game.on_type = lambda g: len(g.text) == 3 and loop.call_soon_threadsafe(self.state.set_autotarget, False)
+            await self._boost_and_wait(2)
+        asyncio.run(go())
+        self.assertIsNotNone(self.honker.ui)                     # auto honk still has its keyboard
+        self.assertIsNone(self.status["destination"])            # nothing plotted after the switch-off
+        self.assertTrue(self.released())
+        self.assertEqual(self.status["gui_focus"], 0)
+        self.assertEqual((self.state.autotarget_last["done"], self.state.autotarget_last["why"]), (False, "stopped"))
+        self.assertEqual(self.moments(), [])                     # stopped on purpose: nothing said
+
+    def test_switch_off_while_waiting_for_auto_honk(self):
+        import asyncio
+        self.wire()
+        self.state._honk_running = {"id64": 101}
+
+        async def go():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await asyncio.sleep(0.4)
+            self.state.set_autotarget(False)
+            self.state._honk_running = None   # the honk ends after the switch-off
+            await self.state.autotarget_task
+        asyncio.run(go())
+        self.assertEqual((self.game.writes, self.state.autotarget_last, self.moments()), ([], None, []))
+
+    def test_route_cleared_or_replaced_stops_it(self):   # CX-F2
+        import asyncio
+        self.wire()
+
+        async def cleared():
+            self.j.handle({"event": "JetConeBoost", "timestamp": self.ts(2), "BoostValue": 4})
+            self.assertTrue(self.state.maybe_autotarget())
+            await asyncio.sleep(0.05)
+            self.state.highway_clear()   # during the countdown
+            await self.state.autotarget_task
+        asyncio.run(cleared())
+        self.assertEqual((self.game.writes, self.state.autotarget_last, self.moments()), ([], None, []))
+        # replaced mid-run: the run for the old route stops between two keys
+        hw = hwy_plot_exact(self)
+        hwy_jump(self, 3, 101, "Neu A", 50)
+        rows = ed_outrider.highway_rows("exact", self.EXACT)
+
+        async def replaced():
+            loop = asyncio.get_running_loop()
+            self.game.on_type = lambda g: len(g.text) == 2 and loop.call_soon_threadsafe(
+                self.state.highway_store, rows, {"plotter": "exact", "options": {}, "ship": None})
+            await self._boost_and_wait(4)
+        asyncio.run(replaced())
+        self.assertNotEqual((ed_outrider.meta_get(self.state.db, "highway") or {}).get("id"), hw["id"])
+        self.assertIsNone(self.status["destination"])
+        self.assertEqual((self.state.autotarget_last["why"], self.moments()), ("stopped", []))
+
+    def test_wrong_system_said_by_name(self):   # Q3
+        import asyncio
+        self.wire()
+        self.game.no_plot = True
+        self.game.on_close = lambda g: self.status.update(destination={"System": 555, "Name": "Col 285 Sector AB-C d13-5"})
+        asyncio.run(self._boost_and_wait(2))
+        self.assertEqual(self.moments(), [(False, "Targeted the wrong system: Col 285 Sector AB-C d13-5. Check before you jump.")])
+
+    def test_multi_hop_plot_via_navroute(self):   # F2: the game's NavRoute.json ends at the next system
+        import asyncio
+        self.wire()
+        self.game.plot_to = 4242   # the first hop of a plotted route
+
+        def closed(g):
+            self.j.navroute_end = 102
+        self.game.on_close = closed
+        asyncio.run(self._boost_and_wait(2))
+        self.assertEqual(self.moments(), [(True, "Successfully targeted neutron jump target Bridge B")])
+
+    def test_navroute_end_follows_the_route(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            hop = lambda n, a: {"StarSystem": n, "SystemAddress": a, "StarPos": [a, 0, 0], "StarClass": "K"}
+            with open(os.path.join(d, "NavRoute.json"), "w") as f:
+                json.dump({"timestamp": self.ts(5), "event": "NavRoute", "Route": [hop("Here", 101), hop("Hop", 4242),
+                                                                                    hop("Bridge B", 102)]}, f)
+            self.j.read_navroute(d)
+        self.assertEqual(self.j.navroute_end, 102)
+        self.j.reload()   # a rolled-back tick or a restart: from the database
+        self.assertEqual(self.j.navroute_end, 102)
+        self.j.handle({"event": "NavRouteClear", "timestamp": self.ts(6)})
+        self.assertIsNone(self.j.navroute_end)
 
     def test_honk_goes_first(self):
         import asyncio
@@ -1520,7 +1709,7 @@ class HighwayAutoTarget(unittest.TestCase):
                                                         "autotarget_plot": ["jump now"], "autotarget_map_wait": 500,
                                                         "autotarget_dry_run": "no"}}, args, None, ([], []))["highway"]
         self.assertEqual((st["autotarget_entry"], st["autotarget_keys"], st["autotarget_plot"], st["autotarget_map_wait"],
-                          st["autotarget_dry_run"]), ("type", {}, ["hold CamYawRight 0.3", "hold UI_Select 1"], 30.0, False))
+                          st["autotarget_dry_run"]), ("type", {}, ["hold CamZoomOut 0.2", "hold UI_Select 1"], 30.0, False))
         for k in ("autotarget_entry", "autotarget_keys", "autotarget_plot", "autotarget_dry_run"):
             self.assertIn(f"[highway] {k}", err.getvalue())
         # the State hands them to the Targeter without the prefix

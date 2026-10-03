@@ -253,6 +253,12 @@ def key_code(evdev, name):
     return code if isinstance(code, int) else None
 
 
+class NotNow(Exception):
+    """press(): the check made under the lock, just before the first key, gave a reason not to press now (the cockpit
+    lost the focus, a jump started, auto honk was switched off while it waited for the keyboard). Nothing was pressed;
+    the caller may wait and try again."""
+
+
 class Honker:
     """A virtual keyboard; press() holds Primary Fire's key (with its modifiers) for `hold` seconds."""
 
@@ -349,10 +355,14 @@ class Honker:
         self.ui = None
         self.stop.clear()
 
-    def press(self):
+    def press(self, check=None, cancel=None):
         """Hold Primary Fire's keys for `hold` seconds (blocking: run it on a worker thread). Returns the
-        description of what was pressed, or None when close() cut the hold short; raises ValueError when there
-        is nothing to press."""
+        description of what was pressed, or None when the hold was cut short (close(), or `cancel`); raises
+        ValueError when there is nothing to press. check: a callable run under the lock just before the first key
+        (the wait for the lock can be long: auto-target holds it for its whole sequence) returning a reason not to
+        press, or None; a reason raises NotNow and nothing is pressed. cancel: this press's own token (a
+        threading.Event: auto honk switched off while auto-target keeps the device open); it ends the hold early
+        without closing the device."""
         if not self.ready:
             raise ValueError("the virtual keyboard is not open")
         keys, what = self.combo()
@@ -367,6 +377,9 @@ class Honker:
                 if ui is not None:
                     self._close_now()
                 raise ValueError("the virtual keyboard is not open")
+            why = (("switched off" if cancel is not None and cancel.is_set() else None) or (check() if check else None))
+            if why:
+                raise NotNow(why)
             done = []
             try:
                 for c in codes:            # modifiers first, the key last, as a person would
@@ -374,7 +387,7 @@ class Honker:
                     ui.syn()
                     done.append(c)
                     time.sleep(0.03)
-                self.stop.wait(self.hold)  # close() ends the hold early
+                self._hold(cancel)         # close() or `cancel` ends the hold early
             finally:
                 for c in reversed(done):   # always let go, whatever happened
                     ui.write(e.EV_KEY, c, 0)
@@ -382,13 +395,22 @@ class Honker:
                 stopped = self.stop.is_set()
                 if stopped:
                     self._close_now()
-        if stopped:
+        if stopped or (cancel is not None and cancel.is_set()):
             return None
         if self.stop.is_set():   # close() came just after the check above, while the lock was still held
             self.close()
             return None
         self.status = f"ready: holds {what} for {self.hold:g} s"
         return what
+
+    def _hold(self, cancel=None):
+        """Wait `hold` seconds, or until close() (stop) or this press's `cancel` is set."""
+        end = time.monotonic() + self.hold
+        while not self.stop.is_set() and not (cancel is not None and cancel.is_set()):
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            self.stop.wait(min(0.05, left))
 
 
 def main(argv=None):

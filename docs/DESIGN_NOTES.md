@@ -60,6 +60,20 @@ upstream project's choices, not rules of the game.
   an auto honk running on the arrival goes first. It checks GuiFocus, the system, a jump and danger before every step
   and while waiting, and on an abort closes the map only if it opened it and the map is still the focus. One try per
   supercharge, nothing repeats. Its results are plain spoken lines under their own alerts row (no `speech.json` keys).
+  The default sequence is what worked in game on 2026-10-03: the map reopens on the panel it last showed, so the
+  search starts with a short CamYawRight (a camera move hands the focus back to the map); the first Enter waits
+  1.5 s (the suggestion lists late on a long name); the plot step zooms out instead of turning, since a turn after
+  the search could swing the cursor onto a neighbouring star and plot to it.
+  Guards (review batch 4): the keyboard's owners (who keeps the device open) and a run's cancel token are separate,
+  so switching auto-target or auto honk off stops that feature's run even while the other keeps the device open;
+  clearing or replacing the Highway route stops a pending or running auto-target too. Everything is checked again
+  under the keyboard's lock before the first key (the wait for it can be long: one feature holds it for its whole
+  sequence), against the system the run was decided in rather than wherever you are when it starts. "Already
+  targeted" is checked before anything else (a panel open does not make it an error), and the check after the plot
+  also accepts NavRoute.json ending at the next system (a waypoint beyond a plain jump plots a route whose first
+  hop differs). A wrong target is said by name. A cancelled run still holds its closing map tap for the full
+  TAP_S. Auto honk's miss is not held against the fire group when your own jump started during the hold or the
+  wait for the scan.
   The toggle and delay are the server's (meta `autotarget`, beating the config once used), not per browser.
 - **Too much fuel for the next jump.** Spansh's exact plotter simulates the fuel, so a long neutron jump may be in
   range only with about the fuel it expects aboard (the Caspian's 487.9 ly ×6 jump: at most about 36 t; a full 160 t

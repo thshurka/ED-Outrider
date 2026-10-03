@@ -86,7 +86,7 @@ class Speech(unittest.TestCase):
             def __init__(self, game_answers):
                 self.game_answers = game_answers
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 self.presses.append(j.jump_arrival["id64"])
                 if self.game_answers:   # the game writes FSSDiscoveryScan (set directly: sqlite is per thread)
                     j.last_honk = {"id64": j.jump_arrival["id64"], "ts": now(), "bodies": 12,
@@ -142,7 +142,7 @@ class Speech(unittest.TestCase):
         class FakeHonker:
             ready, available, status = True, True, "ready"
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 presses.append(time.time())
                 return True
         self.state.honker = FakeHonker()
@@ -994,7 +994,7 @@ class PlausibleFixes(unittest.TestCase):
             got = []
             async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
                 for path in ("/api/nextstop", "/api/autohonk"):
-                    for body in ([1], "x", 5, None):
+                    for body in ([1], "x", 5, None) + (({"enabled": "false"}, {"enabled": 1}, {}) if path == "/api/autohonk" else ()):
                         r = await c.post(path, data=json.dumps(body), headers={"Content-Type": "application/json"})
                         got.append((path, body, r.status))
             return got

@@ -162,12 +162,15 @@
 #                           # { GalaxyMapOpen = "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", UI_Select = "KEY_SPACE", Enter = "KEY_KPENTER" }
 #                           # names: GalaxyMapOpen, UI_Right, UI_Left, UI_Up, UI_Down, UI_Select, UI_Back, CycleNextPanel, CamYawLeft, CamYawRight,
 #                           # CamZoomIn, CamZoomOut, CamTranslateLeft/Right/Forward/Backward, Enter, Paste
-# autotarget_search = ["press UI_Up", "press UI_Select"]   # into the galaxy map's search box: UI_Up highlights
-#                                          # "Search the Galaxy", UI_Select puts the cursor in it
-# autotarget_submit = ["wait 0.5", "press Enter", "wait 0.5", "press Enter"]   # select the suggestion: the search
+# autotarget_search = ["hold CamYawRight 0.3", "press UI_Up", "press UI_Select"]   # into the galaxy map's search
+#                                          # box: the map reopens on the panel it last showed, and a short camera
+#                                          # turn hands the focus back to the map; UI_Up highlights "Search the
+#                                          # Galaxy", UI_Select puts the cursor in it
+# autotarget_submit = ["wait 1.5", "press Enter", "wait 0.5", "press Enter"]   # select the suggestion: the search
 #                                          # lists it a moment after the name goes in, and an earlier Enter selects nothing
-# autotarget_plot = ["hold CamYawRight 0.3", "hold UI_Select 1"]   # the plot-route step after the search: a short
-#                                          # camera turn gives the focus back to the map, then UI_Select held plots it;
+# autotarget_plot = ["hold CamZoomOut 0.2", "hold UI_Select 1"]   # the plot-route step after the search: a short
+#                                          # zoom gives the focus back to the map (a turn could swing the cursor onto
+#                                          # a neighbouring star), then UI_Select held plots it;
 #                           # "press <key>", "hold <key> <seconds>", "wait <seconds>"
 # autotarget_dry_run = false   # only log the steps it would take (nothing is pressed)
 # efficiency = 60           # the neutron plotter's efficiency (%, 1 to 100): lower goes further out of its way

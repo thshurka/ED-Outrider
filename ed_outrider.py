@@ -124,6 +124,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import functools
 import hashlib
 import json
 import math
@@ -132,6 +133,7 @@ import random
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.parse
 from glob import glob, escape as glob_escape
@@ -916,9 +918,9 @@ autotarget_map_wait = {st["highway"]["autotarget_map_wait"]:g}   # seconds to wa
 autotarget_search_wait = {st["highway"]["autotarget_search_wait"]:g}   # seconds after submitting the search for the map to fly to the system
 autotarget_key_delay = {st["highway"]["autotarget_key_delay"]:g}   # seconds between typed characters
 autotarget_keys = {{{", ".join(f"{k} = {q(v)}" for k, v in st["highway"]["autotarget_keys"].items())}}}   # override a step's keys, e.g. {{ GalaxyMapOpen = "KEY_LEFTALT+KEY_RIGHTALT+KEY_T", Enter = "KEY_KPENTER" }}; otherwise read from your controls preset
-autotarget_search = {lst(st["highway"]["autotarget_search"])}   # from the opened galaxy map into its search field (search is on the first tab)
+autotarget_search = {lst(st["highway"]["autotarget_search"])}   # from the opened galaxy map into its search field (a camera turn first: the map reopens on its last panel)
 autotarget_submit = {lst(st["highway"]["autotarget_submit"])}   # select the search's suggestion once the name is in (it lists it after a moment)
-autotarget_plot = {lst(st["highway"]["autotarget_plot"])}   # the "plot route" step after the search (a camera turn gives the map the focus): "press <key>", "hold <key> <s>", "wait <s>"
+autotarget_plot = {lst(st["highway"]["autotarget_plot"])}   # the "plot route" step after the search (a short zoom gives the map the focus): "press <key>", "hold <key> <s>", "wait <s>"
 autotarget_dry_run = {"true" if st["highway"]["autotarget_dry_run"] else "false"}   # only log the steps it would take (nothing is pressed)
 efficiency = {st["highway"]["efficiency"]}   # the neutron plotter's efficiency (%): lower takes longer neutron detours
 conservative = {"true" if st["highway"]["conservative"] else "false"}   # the plot form starts with "Conservative range" ticked: plot jumps a margin shorter than the ship's range
@@ -2166,6 +2168,9 @@ class Journals:
         self.vehicle = meta_get(db, "vehicle")
         self.body_here = meta_get(db, "body_here")
         self.ship_marker = meta_get(db, "ship_marker")
+        # the last hop of the route the game plotted (NavRoute.json): a plain attribute, so auto-target's worker thread
+        # can read it (it counts a multi-hop plot to the next Highway system as targeted, review F2)
+        self.navroute_end = route_end(meta_get(db, "route"))
 
     def import_legacy(self):
         for d in LEGACY_DIRS:
@@ -2976,6 +2981,7 @@ class Journals:
         if name == "NavRouteClear":
             if self.fresh("route", ts, (meta_get(self.db, "route") or {}).get("ts")):
                 meta_set(self.db, "route", None)
+                self.navroute_end = None
             return
         if name == "JetConeBoost":
             if self.fresh("boost", ts, (self.boost or {}).get("ts")):
@@ -3293,6 +3299,7 @@ class Journals:
                  "x": h["StarPos"][0], "y": h["StarPos"][1], "z": h["StarPos"][2]} for h in raw]
         # the plotted route in order (the route strip); an empty file means the route was cleared
         meta_set(self.db, "route", {"ts": route.get("timestamp"), "hops": hops} if hops else None)
+        self.navroute_end = hops[-1]["id64"] if hops else None
         for hop in raw:
             x, y, z = hop["StarPos"]
             self.db.execute(
@@ -3302,6 +3309,12 @@ class Journals:
             if hop.get("StarClass"):
                 self.db.execute("INSERT OR REPLACE INTO star_classes VALUES (?, ?)",
                                 (hop["SystemAddress"], hop["StarClass"]))
+
+
+def route_end(route):
+    """The id64 of the last hop of a stored NavRoute ({"ts", "hops"}), or None."""
+    hops = (route or {}).get("hops") or []
+    return hops[-1].get("id64") if hops and isinstance(hops[-1], dict) else None
 
 
 def materials_stale(materials, commander):
@@ -4543,6 +4556,7 @@ class State:
         self.startup_target_key = t and (t["id64"], t["ts"])
         self.scoop = ScoopWatch()  # fuel scooping: "tank full" / "scooping stopped at 64 percent"
         self._honk_running = None  # the arrival an auto honk is working on (the briefing waits for it)
+        self._honk_cancel = None   # threading.Event: the running auto honk's own token (set by switching it off)
         self._honk_done = None     # (arrival, time.time()) the last auto honk task ended
         self._fss_focus = None     # Status.json GuiFocus at the last tick (9 = the FSS)
         self._fss_closed = None    # (id64, arrival ts, time) the FSS was closed: judged FSS_SETTLE s later
@@ -4573,6 +4587,7 @@ class State:
         self._hw_copied = (meta_get(db, "highway") or {}).get("arrival_ts")   # copied before a restart: not again
         self._autotarget_boost = (journals.boost or {}).get("ts")
         self.autotarget_task = None
+        self._autotarget_cancel = None   # threading.Event: the automatic run's own token (switch-off, route cleared/replaced)
         self.autotarget_last = None   # {system, ts, done, phase, label, why, dry_run, test}: the latest run's result
         self.targeter = None          # outrider.target.Targeter, set at start (None in tests)
         self.autotarget_running = None   # the target a sequence is pressing keys for now
@@ -7594,6 +7609,8 @@ class State:
         self.autohonk["enabled"] = bool(enabled)
         meta_set(self.db, "autohonk_enabled", bool(enabled))
         self.db.commit()   # now: a failing watcher tick would roll it back, and it must survive a restart
+        if not enabled and self._honk_cancel is not None:
+            self._honk_cancel.set()   # a hold under way ends now, though auto-target may keep the device open
         if self.honker:
             if enabled:
                 self.honker.open()
@@ -7656,68 +7673,96 @@ class State:
 
     async def honk_task(self, a):
         self._honk_running = a
+        self._honk_cancel = cancel = threading.Event()
         try:
-            await self._honk(a)
+            await self._honk(a, cancel)
         finally:
             self._honk_done = (a, time.time())   # a honk that gave up late still leaves time for the briefing
             if self._honk_running is a:
                 self._honk_running = None
+            if self._honk_cancel is cancel:
+                self._honk_cancel = None
 
-    async def _honk(self, a):
+    async def _honk(self, a, cancel=None):
         honked = lambda: (self.journals.last_honk or {}).get("id64") == a["id64"] \
             and self.journals.last_honk["ts"] >= a["ts"]
-        # switched off meanwhile (the toggle closed the device and set the status): drop it quietly
-        switched_off = lambda: not (self.autohonk["enabled"] and self.honker and self.honker.ready)
+        # switched off meanwhile (the toggle closed the device and set the status, or set this honk's token while
+        # auto-target keeps the device open): drop it quietly
+        switched_off = lambda: (cancel is not None and cancel.is_set()) or \
+            not (self.autohonk["enabled"] and self.honker and self.honker.ready)
         await asyncio.sleep(self.autohonk["delay"])
         if switched_off():
             return
         # wait for the cockpit: pressing with the galaxy map, FSS or a panel open does nothing
         deadline, shown, ready_status = time.time() + AUTOHONK_WAIT_MAX, None, self.honker.status
         while True:
-            if switched_off():
-                return
-            if honked() or self.journals.jump_arrival is not a:   # you beat it to it, or already elsewhere
-                if shown:
+            while True:
+                if switched_off():
+                    return
+                if honked() or self.journals.jump_arrival is not a:   # you beat it to it, or already elsewhere
+                    if shown:
+                        self.honker.status = ready_status
+                        self.bump()
+                    return
+                groups = self.honk_groups()
+                action, why = honk_decision(self.journals.status_json, time.time(), groups)
+                if action == "press":
+                    break
+                if time.time() > deadline:
                     self.honker.status = ready_status
+                    self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=f"gave up waiting: {why}")
                     self.bump()
-                return
-            action, why = honk_decision(self.journals.status_json, time.time(), self.honk_groups())
-            if action == "press":
+                    return
+                if why != shown:
+                    shown = why
+                    self.honker.status = f"waiting: {why}"
+                    self.bump()
+                await asyncio.sleep(0.25)
+            # what was selected at the press (a fresh reading only), for the miss message and the fire-group record
+            press_st, ship_id = dict(self.journals.status_json or {}), (self.journals.ship or {}).get("ship_id")
+            group = fire_group_letter(press_st.get("fire_group")) if status_fresh(press_st, time.time()) else None
+
+            def check(groups=groups):
+                """Again under the keyboard's lock, just before the key (auto-target may have held it for its whole
+                sequence meanwhile, review CX-F3): on a worker thread, so attributes only, no database."""
+                if not self.autohonk["enabled"]:
+                    return "switched off"
+                if honked() or self.journals.jump_arrival is not a:
+                    return "nothing to do now"
+                act, w = honk_decision(self.journals.status_json, time.time(), groups)
+                return w if act != "press" else None
+            try:
+                pressed = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(self.honker.press, check=check, cancel=cancel))
+                if pressed is None or switched_off():   # switched off during the hold: cut short, nothing to report
+                    return
                 break
-            if time.time() > deadline:
-                self.honker.status = ready_status
-                self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=f"gave up waiting: {why}")
+            except outrider.honk.NotNow:   # it changed while the keyboard was busy: nothing pressed, wait again
+                await asyncio.sleep(0.25)
+                continue
+            except ValueError as e:   # nothing to press: Primary Fire has no keyboard binding, say
+                if switched_off():
+                    return
+                self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=str(e))
                 self.bump()
                 return
-            if why != shown:
-                shown = why
-                self.honker.status = f"waiting: {why}"
+            except Exception as e:  # noqa: BLE001 -- say so on the page rather than die quietly
+                self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=f"{type(e).__name__}: {e}")
                 self.bump()
-            await asyncio.sleep(0.25)
-        # what was selected at the press (a fresh reading only), for the miss message and the fire-group record
-        press_st, ship_id = dict(self.journals.status_json or {}), (self.journals.ship or {}).get("ship_id")
-        group = fire_group_letter(press_st.get("fire_group")) if status_fresh(press_st, time.time()) else None
-        try:
-            pressed = await asyncio.get_running_loop().run_in_executor(None, self.honker.press)
-            if pressed is None or switched_off():   # switched off during the hold: cut short, nothing to report
                 return
-        except ValueError as e:   # nothing to press: Primary Fire has no keyboard binding, say
-            if switched_off():
-                return
-            self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=str(e))
-            self.bump()
-            return
-        except Exception as e:  # noqa: BLE001 -- say so on the page rather than die quietly
-            self.journals.moment("honk", a["ts"], ok=False, system=a["name"], why=f"{type(e).__name__}: {e}")
-            self.bump()
-            return
         deadline = time.time() + self.honk_confirm   # the journal confirms a discovery scan within a few seconds
         focus_seen = None   # a screen that opened during the press would explain a miss better than the fire group
+        # your own jump started during the hold or the wait for the scan (review F42): the miss is nobody's fault
+        jumped = lambda: (self.journals.jump_arrival is not a or (self.journals.last_start_jump or "") > a["ts"]
+                          or bool(((self.journals.status_json or {}).get("flags") or 0) & FLAG_FSD_JUMP))
+        cut = False
         while not honked() and time.time() < deadline:
+            cut = cut or bool(jumped())
             action, why = honk_decision(self.journals.status_json, time.time())
             if action == "wait" and why != "still in the jump":
                 focus_seen = why
             await asyncio.sleep(0.1)
+        cut = cut or bool(jumped())
         info, all_found = self.journals.last_honk or {}, False
         if honked():   # a honk that finds everything is followed by FSSAllBodiesFound (a lone star, say)
             found = lambda: (self.journals.last_all_found or {}).get("id64") == a["id64"] \
@@ -7726,6 +7771,9 @@ class State:
             while not (all_found := found()) and time.time() < end:
                 await asyncio.sleep(0.1)
         ok = honked()
+        if not ok and cut:   # you jumped before the scan could land: no failure to report, no mark against the group
+            self.bump()
+            return
         # a miss only counts against the group when nothing else explains it: the cockpit had focus and the HUD
         # was in analysis mode at the press (honk_decision saw to both), and no screen opened during it
         if ok or (not focus_seen and isinstance(press_st.get("flags"), int) and press_st["flags"] & FLAG_HUD_ANALYSIS
@@ -8297,6 +8345,7 @@ class State:
 
     def highway_store(self, rows, meta):
         """A new route replaces the old one: its rows, and its meta with where you are on it now."""
+        self.cancel_autotarget()   # a pending run would target the old route's next system (CX-F2)
         self.db.execute("DELETE FROM highway_route")
         self.db.executemany("INSERT INTO highway_route (idx, system, id64, x, y, z, distance, fuel_used, fuel_left, neutron,"
                             " refuel, jumps, remaining) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -8319,6 +8368,7 @@ class State:
             self.highway_task.cancel()
             if self.highway_plotting:
                 self.highway_plotting.update(state="failed", error="cancelled")
+        self.cancel_autotarget()   # its target belonged to the route just forgotten (CX-F2)
         self.db.execute("DELETE FROM highway_route")
         meta_set(self.db, "highway", None)
         self.db.commit()
@@ -8371,7 +8421,7 @@ class State:
         r = rows[nx]
         if r["id64"] is None:
             return None, f"{r['system']} has no id64 to check the target against"
-        return {"name": r["system"], "id64": r["id64"], "here": pos["id64"]}, None
+        return {"name": r["system"], "id64": r["id64"], "here": pos["id64"], "route": hw.get("id")}, None
 
     def autotarget_test_target(self):
         """({name, id64, here}, None) for "test now": the nearest system in the Nearby list within 90% of the range
@@ -8431,12 +8481,20 @@ class State:
             self.highway_cfg["autotarget_delay"] = min(60.0, max(0.0, float(delay)))
         meta_set(self.db, "autotarget", {"enabled": self.highway_cfg["autotarget"], "delay": self.highway_cfg["autotarget_delay"]})
         self.db.commit()   # now: a failing watcher tick would roll it back
+        if enabled is False:
+            self.cancel_autotarget()   # a run under way stops now (the device may stay open for auto honk, CX-F1)
         if self.honker and self.honker.available and enabled is not None:
             if enabled and not self.highway_cfg.get("autotarget_dry_run"):   # a dry run presses nothing: no keyboard
                 self.honker.open("target")
             elif not enabled:
                 self.honker.close("target")
         self.bump()
+
+    def cancel_autotarget(self):
+        """Stop the automatic run, wherever it is: the delay, the wait for auto honk, or between two keys. A "test now"
+        run is the dialog's own and is left alone."""
+        if self._autotarget_cancel is not None:
+            self._autotarget_cancel.set()
 
     def maybe_autotarget(self, now=None):
         """A live FSD supercharge (JetConeBoost) in a route system with [highway] autotarget on: after autotarget_delay
@@ -8462,7 +8520,8 @@ class State:
             return False
         if self.autotarget_task and not self.autotarget_task.done():
             return False   # one sequence at a time
-        self.autotarget_task = loop.create_task(self._autotarget(tgt))
+        self._autotarget_cancel = cancel = threading.Event()
+        self.autotarget_task = loop.create_task(self._autotarget(tgt, cancel=cancel))
         return True
 
     def start_autotarget_test(self):
@@ -8502,34 +8561,55 @@ class State:
                 test.update(state="failed", why=test.get("why") or "stopped")
             self.bump()
 
-    async def _autotarget(self, tgt, test=None):
+    def _autotarget_stale(self, tgt, test, cancel):
+        """Why an automatic run decided earlier should not go ahead now, or None: switched off, its token set, or the
+        route it was decided on cleared or replaced. A test run only stops for its own token."""
+        if cancel is not None and cancel.is_set():
+            return "stopped"
+        if test:
+            return None
+        if not self.highway_cfg["autotarget"]:
+            return "switched off"
+        if (meta_get(self.db, "highway") or {}).get("id") != tgt.get("route"):
+            return "the route changed"
+        return None
+
+    async def _autotarget(self, tgt, test=None, cancel=None):
         """Wait (the delay, or the test's countdown), check again, let a running auto honk finish (honk first), then
-        run the sequence on a worker thread and say how it went."""
+        run the sequence on a worker thread and say how it went. cancel: the automatic run's token (cancel_autotarget)."""
         await asyncio.sleep(self.autotarget_test_countdown if test else self.highway_cfg["autotarget_delay"])
         if test:
             test["state"] = "running"
             self.bump()
-        elif not self.highway_cfg["autotarget"]:
-            return   # switched off meanwhile: nothing to say
+        if self._autotarget_stale(tgt, test, cancel):
+            return   # switched off or the route changed meanwhile: nothing to say
         if (self.journals.pos or {}).get("id64") != tgt["here"]:   # jumped (or left) meanwhile: nothing to target
             return self._autotarget_done(tgt, {"ok": False, "phase": 0, "label": "wait", "why": "you had jumped"}, test, say=False)
         end = time.time() + AUTOTARGET_HONK_WAIT
         while self._honk_running is not None and time.time() < end:   # auto honk is due or holding: it goes first
+            if self._autotarget_stale(tgt, test, cancel):
+                return
             await asyncio.sleep(0.25)
+        if self._autotarget_stale(tgt, test, cancel):
+            return
         if self._honk_running is not None:
             return self._autotarget_done(tgt, {"ok": False, "phase": 0, "label": "wait for auto honk",
                                                "why": "auto honk was still running"}, test)
+        if (self.journals.pos or {}).get("id64") != tgt["here"]:   # jumped during the honk wait
+            return self._autotarget_done(tgt, {"ok": False, "phase": 0, "label": "wait", "why": "you had jumped"}, test, say=False)
         self.autotarget_running = tgt
         self.bump()
         try:
-            res = await asyncio.get_running_loop().run_in_executor(
-                None, self.targeter.run, tgt["name"], tgt["id64"], lambda: self.journals.status_json,
-                lambda: (self.journals.pos or {}).get("id64"))
+            res = await asyncio.get_running_loop().run_in_executor(None, functools.partial(
+                self.targeter.run, tgt["name"], tgt["id64"], lambda: self.journals.status_json,
+                lambda: (self.journals.pos or {}).get("id64"), cancel=cancel, origin=tgt["here"],
+                route_end=lambda: self.journals.navroute_end))
         except Exception as e:  # noqa: BLE001 -- say so on the page rather than lose it in a task
             res = {"ok": False, "phase": 0, "label": "run", "why": f"{type(e).__name__}: {e}"}
         finally:
             self.autotarget_running = None
-        self._autotarget_done(tgt, res, test)
+        # stopped on purpose (switched off, the route cleared or replaced): recorded, not spoken
+        self._autotarget_done(tgt, res, test, say=not self._autotarget_stale(tgt, test, cancel))
 
     def _autotarget_done(self, tgt, res, test=None, say=True):
         name, ok = tgt["name"], bool(res.get("ok"))
@@ -8543,8 +8623,10 @@ class State:
             f"targeted {name}" + (" (dry run, nothing pressed)" if res.get("dry_run") else "") if ok else
             f"{name} {why}" if already else f"failed to target {name} at step {res.get('phase')} ({res.get('label')}): {why}"))
         if say and not already and not res.get("dry_run"):
+            wrong = res.get("wrong") if res.get("code") == "wrong" else None   # said by name: you must not jump to it (Q3)
             self.journals.moment("autotarget", iso_ts(time.time()), ok=ok, system=name, phase=res.get("phase"), why=why,
                                  text=(f"Successfully targeted neutron jump target {name}" if ok
+                                       else f"Targeted the wrong system: {wrong}. Check before you jump." if wrong
                                        else f"Failed to target neutron jump target {name}"))
         self.bump()
 
@@ -9794,7 +9876,9 @@ def make_app(state, hosts=None):
             return web.json_response({"error": "expected JSON"}, status=400)
         if not isinstance(body, dict):
             return web.json_response({"error": "expected a JSON object"}, status=400)
-        state.set_autohonk(bool(body.get("enabled")))
+        if not isinstance(body.get("enabled"), bool):   # "false" (a string) would switch it on (CX-F10)
+            return web.json_response({"error": "enabled must be true or false"}, status=400)
+        state.set_autohonk(body["enabled"])
         return web.json_response(state.autohonk_info())
 
     async def voice_view(request):

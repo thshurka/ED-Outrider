@@ -131,9 +131,11 @@ class BatchGHonkBackups(unittest.TestCase):
         class FakeHonker:
             ready, available, status = True, True, "ready"
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 presses.append(id64)
-                if during:
+                if callable(during):
+                    during()
+                elif during:
                     j.status_json = dict(j.status_json, **during)
                 if answers:
                     j.last_honk = {"id64": id64, "ts": now_ts(), "bodies": 5, "progress": 0.3}
@@ -191,7 +193,7 @@ class BatchGHonkBackups(unittest.TestCase):
         class FakeHonker:
             ready, available, status = True, True, "ready"
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 presses.append(1)
                 return True
         self.state.honker = FakeHonker()
@@ -211,6 +213,92 @@ class BatchGHonkBackups(unittest.TestCase):
         self.assertEqual(waiting, ([], "waiting: fire group C selected; honks missed there before (worked on A)"))
         self.assertEqual(presses, [1])
 
+    def test_own_jump_cuts_the_honk_short(self):   # F42: not held against the fire group, and no failure reported
+        jumping = self.live(fire_group=2, flags=self.live()["flags"] | 1 << 30)
+        presses, m = self.honk(121, False, self.live(fire_group=2), during={"flags": jumping["flags"]})
+        self.assertEqual((presses, m), ([121], None))
+        presses, m = self.honk(122, False, self.live(fire_group=2), during={"flags": jumping["flags"]})
+        self.assertEqual((presses, m), ([122], None))
+        self.assertIsNone(self.state.honk_groups())   # two such presses: group C is not marked bad
+        # a hyperspace StartJump after the arrival (the FSD charging for the next jump) says the same
+        later = lambda: setattr(self.j, "last_start_jump", "9999-01-01T00:00:00Z")
+        presses, m = self.honk(123, False, self.live(fire_group=2), during=later)
+        self.assertEqual((presses, m), ([123], None))
+        self.assertIsNone(self.state.honk_groups())
+        # a plain miss still counts
+        self.j.last_start_jump = None
+        presses, m = self.honk(124, False, self.live(fire_group=2))
+        self.assertFalse(m["ok"])
+        self.assertEqual(self.state.honk_groups(), {"good": [], "bad": [], "miss": {"C": 1}})
+
+    def test_honk_checks_again_under_the_lock(self):   # CX-F3: what changed while auto-target held the keyboard
+        import asyncio
+        import outrider.honk
+        calls, presses, j, live = [], [], self.j, self.live
+
+        class FakeHonker:
+            ready, available, status = True, True, "ready"
+
+            def press(self, check=None, cancel=None):
+                calls.append(1)
+                if len(calls) == 1:   # auto-target opened the map while the honk waited for the keyboard
+                    j.status_json = live(gui_focus=6)
+                why = check() if check else None
+                if why:
+                    raise outrider.honk.NotNow(why)
+                presses.append(1)
+                return True
+        self.state.honker = FakeHonker()
+        self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
+        self.state.honk_confirm = 0.2
+        self.j.handle({"event": "FSDJump", "timestamp": self.now_ts(), "StarSystem": "S131", "SystemAddress": 131,
+                       "StarPos": [1, 0, 0]})
+        self.j.status_json = self.live()
+
+        async def go():
+            self.state.maybe_honk()
+            await asyncio.sleep(0.5)
+            waiting = (len(calls), list(presses), self.state.honker.status)
+            self.j.status_json = self.live()   # the map closed again
+            await asyncio.sleep(0.8)
+            return waiting
+        self.assertEqual(asyncio.run(go()), (1, [], "waiting: the galaxy map is open"))
+        self.assertEqual((len(calls), presses), (2, [1]))
+
+    def test_switch_off_ends_the_hold_with_auto_target_on(self):   # CX-F1, F12: the device stays open for auto-target
+        import asyncio
+        ended = []
+
+        class FakeHonker:
+            ready, available, status = True, True, "ready"
+
+            def press(self, check=None, cancel=None):
+                start = time.time()
+                cut = cancel.wait(3) if cancel is not None else time.sleep(1.5)   # no token: the full hold
+                ended.append(time.time() - start)
+                return None if cut else True
+
+            def open(self, owner="honk"):
+                return True
+
+            def close(self, owner="honk"):
+                pass   # auto-target still owns the virtual keyboard: closing it is not what ends the hold
+        self.state.honker = FakeHonker()
+        self.state.autohonk = dict(ed_outrider.AUTOHONK, enabled=True, delay=0)
+        self.j.handle({"event": "FSDJump", "timestamp": self.now_ts(), "StarSystem": "S141", "SystemAddress": 141,
+                       "StarPos": [1, 0, 0]})
+        self.j.status_json = self.live()
+
+        async def go():
+            self.state.maybe_honk()
+            await asyncio.sleep(0.3)
+            self.state.set_autohonk(False)
+            await asyncio.sleep(0.4)
+        asyncio.run(go())
+        self.assertEqual(len(ended), 1)
+        self.assertLess(ended[0], 1)
+        self.assertEqual([m for m in self.state.moments_summary() if m["kind"] == "honk"], [])
+
     def test_combat_mode_waits_then_gives_up(self):
         import asyncio
         presses = []
@@ -218,7 +306,7 @@ class BatchGHonkBackups(unittest.TestCase):
         class FakeHonker:
             ready, available, status = True, True, "ready"
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 presses.append(1)
                 return True
         self.state.honker = FakeHonker()

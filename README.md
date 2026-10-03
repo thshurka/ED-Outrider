@@ -412,11 +412,17 @@ in a route system it waits 5 s, then presses keys to make the next route system 
 map, searches for the system, plots the route, closes the map and checks the target took. It says "Successfully
 targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own alerts row.
 
-- **Keyboard bindings:** Galaxy Map Open, UI Up, UI Select and the galaxy map's Camera Yaw Right need one (the
-  box lists any missing; a built-in preset can't be read). It shares auto honk's virtual keyboard; honk goes first.
+- **Keyboard bindings:** Galaxy Map Open, UI Up, UI Select and the galaxy map's Camera Yaw Right and Camera Zoom
+  Out need one (the box lists any missing; a built-in preset can't be read). It shares auto honk's virtual keyboard;
+  honk goes first.
+- Switching it off, clearing the route or plotting a new one stops a run at once, even mid-way. If the game targets
+  a different system it says so by name ("Targeted the wrong system: …. Check before you jump."). A waypoint the
+  game reaches by a plotted route of several jumps counts as targeted.
 - It never runs docked, landed, in a vehicle or on foot, in danger, with the FSD charging or a panel open. It stops
   if anything unexpected happens, closing the map only if it opened it.
 - **The keys go to whichever window has focus**: stay in the game until it is done.
+- The log gets one line per run ("highway auto-target: targeted Hwy Stop 38"); every step is printed only when it
+  fails.
 - **Test now** in the box targets the nearest known system a plain jump away, after a 5-second countdown.
   `python3 -m outrider.target --show` prints the steps with your keys.
 - Every step can be changed under `[highway]` (`autotarget_search`, `autotarget_submit`, `autotarget_plot`…) if a

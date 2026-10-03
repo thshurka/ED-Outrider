@@ -2,6 +2,22 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Automation safety (fix plan, batch 4)
+- Switching auto-target off stops a run under way, even mid-sequence while auto honk keeps the virtual keyboard
+  open; switching auto honk off ends its hold the same way (Codex F1, review F12). Clearing or replacing the Highway
+  route stops a pending or running auto-target (Codex F2).
+- Both check everything again under the keyboard's lock, just before the first key: a jump, docking, landing, a
+  panel opening or the switch-off while they waited for the other to finish means nothing is pressed (Codex F3).
+  Auto honk goes back to waiting instead.
+- Auto-target: "already targeted" is checked first (F11); a waypoint plotted as a route of several jumps counts when
+  NavRoute.json ends at it (F2); a wrong target is said by name: "Targeted the wrong system: X. Check before you
+  jump." (Q3); the map-closing tap of a stopped run is held in full (F13); the log has one line per run unless it
+  fails (Q6).
+- New default sequence, from the in-game tests: a camera turn before the search, 1.5 s before the first Enter, a
+  zoom instead of a turn in the plot step (Q2). Camera Zoom Out needs a keyboard binding.
+- Auto honk no longer blames the fire group when your own jump cut the honk short (F42).
+- POST /api/autohonk takes only a JSON boolean: `"false"` used to switch it on (Codex F10).
+
 ## 2026-10-03 · The drive maths and the Highway's helpers in their own modules (fix plan, batch 3)
 - outrider/fsd.py: the frame shift drive's maths (drive tables, range, fuel per jump, the fuel model, a fleet ship's
   plotter inputs, the conservative range); outrider/highway.py: the route helpers, HighwayError and the desktop

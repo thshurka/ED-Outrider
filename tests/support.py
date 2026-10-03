@@ -265,6 +265,13 @@ AUTHOR_BINDS = """<?xml version="1.0" encoding="UTF-8" ?>
 			<Modifier Device="Keyboard" Key="Key_RightShift" />
 		</Secondary>
 	</CamYawRight>
+	<CamZoomOut>
+		<Primary Device="{NoDevice}" Key="" />
+		<Secondary Device="Keyboard" Key="Key_2">
+			<Modifier Device="Keyboard" Key="Key_RightAlt" />
+			<Modifier Device="Keyboard" Key="Key_Apps" />
+		</Secondary>
+	</CamZoomOut>
 </Root>
 """
 
@@ -275,7 +282,7 @@ def _fake_evdev():
     import outrider.target
     names = {"KEY_" + c for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"} | {k for k, _ in outrider.target.US_KEYMAP.values()}
     names |= {"KEY_LEFTALT", "KEY_RIGHTALT", "KEY_LEFTCTRL", "KEY_RIGHTCTRL", "KEY_LEFTSHIFT", "KEY_RIGHTSHIFT",
-              "KEY_ENTER", "KEY_KPENTER", "KEY_BACKSPACE", "KEY_SPACE", "KEY_HOME", "KEY_ESC"}
+              "KEY_ENTER", "KEY_KPENTER", "KEY_BACKSPACE", "KEY_SPACE", "KEY_HOME", "KEY_ESC", "KEY_COMPOSE"}
     codes = {n: i + 1 for i, n in enumerate(sorted(names))}
     return types.SimpleNamespace(ecodes=types.SimpleNamespace(EV_KEY=1, ecodes=codes))
 
@@ -335,7 +342,7 @@ class FakeGame:
                 st["gui_focus"], self.tab, self.focused, self.text, self.found = 6, 0, False, "", None
                 self.search_lit = False
             return
-        if st.get("gui_focus") != 6 or name.endswith(("ALT", "SHIFT", "CTRL")):
+        if st.get("gui_focus") != 6 or name.endswith(("ALT", "SHIFT", "CTRL")) or name == "KEY_COMPOSE":   # modifiers
             return
         if self.focused:
             if name == "KEY_ENTER":   # selects the suggestion, once listed; the focus stays in the search panel
@@ -351,6 +358,9 @@ class FakeGame:
                     self.on_type(self)
             return
         if name == "KEY_X" and {"KEY_LEFTALT", "KEY_RIGHTSHIFT"} <= self.down:   # the camera turns: focus to the map
+            self.map_focus = True
+            return
+        if name == "KEY_2" and {"KEY_RIGHTALT", "KEY_COMPOSE"} <= self.down:   # the camera zooms: focus to the map too
             self.map_focus = True
             return
         if name in ("KEY_D", "KEY_A"):   # into / along the tab column (Trade Routes, Bookmarks...): not the search box
@@ -558,8 +568,10 @@ class FakeClock:
     of outrider.target's Targeter takes no real time. at(delay, fn) calls fn once the clock has passed delay seconds
     from now (an event arriving late). Install it with `use_fake_time(targeter, game)`."""
 
-    def __init__(self, start=1000.0, cancel=None):
-        self.t, self.cancel, self.due = float(start), cancel, []
+    def __init__(self, start=1000.0, cancel=None, cancelled=None):
+        self.t, self.due = float(start), []
+        # an Event, or a callable (Targeter.cancelled: shutdown or the run's own token)
+        self.cancelled = cancelled or ((lambda: cancel.is_set()) if cancel is not None else (lambda: False))
 
     def __call__(self):
         return self.t
@@ -575,15 +587,15 @@ class FakeClock:
 
     def wait(self, secs):
         """An interruptible pause, like threading.Event.wait: True when cancelled."""
-        if self.cancel is not None and self.cancel.is_set():
+        if self.cancelled():
             return True
         self.sleep(secs)
-        return bool(self.cancel is not None and self.cancel.is_set())
+        return bool(self.cancelled())
 
 
 def use_fake_time(targeter, game=None):
     """Run a Targeter (and the FakeGame behind it) on a FakeClock; returns the clock."""
-    clock = FakeClock(cancel=targeter.cancel)
+    clock = FakeClock(cancelled=targeter.cancelled)
     targeter.clock, targeter.wait, targeter.sleep = clock, clock.wait, clock.sleep
     if game is not None:
         game.clock = clock

@@ -252,7 +252,7 @@ class Batch0Security(unittest.TestCase):
             available, status = True, "ready"
             ready = True
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 presses.append(1)
                 return "K"
 
@@ -294,7 +294,7 @@ class Batch0Security(unittest.TestCase):
                 self.ready = False
                 log.append("close")
 
-            def press(self):
+            def press(self, check=None, cancel=None):
                 time.sleep(0.1)
                 log.append("press")
                 if self.fail:
@@ -365,6 +365,50 @@ class Batch0Security(unittest.TestCase):
         h.ui = ui2 = FakeUI()
         h.close()
         self.assertTrue(ui2.closed and h.ui is None)
+
+
+    def test_honker_check_and_cancel(self):   # review CX-F3, CX-F1: a check under the lock, and a press's own token
+        import threading
+        import types
+        import outrider.honk
+        writes = []
+
+        class FakeUI:
+            closed = False
+
+            def write(self, _type, code, value):
+                writes.append((code, value))
+
+            def syn(self):
+                pass
+
+            def close(self):
+                self.closed = True
+        h = outrider.honk.Honker("KEY_K", hold=5)
+        h.evdev = types.SimpleNamespace(ecodes=types.SimpleNamespace(EV_KEY=1, ecodes={"KEY_K": 37}))
+        h.ui = ui = FakeUI()
+        seen = []
+
+        def check():
+            seen.append(h.lock.locked())   # run under the lock, just before the key
+            return "the galaxy map is open"
+        with self.assertRaises(outrider.honk.NotNow) as cm:
+            h.press(check=check)
+        self.assertEqual((str(cm.exception), seen, writes), ("the galaxy map is open", [True], []))
+        self.assertFalse(h.lock.locked())
+        # an already-set token: nothing pressed
+        gone = threading.Event()
+        gone.set()
+        with self.assertRaises(outrider.honk.NotNow):
+            h.press(cancel=gone)
+        self.assertEqual(writes, [])
+        # set during the hold: the hold ends at once, the key is let go, and the device stays open (auto-target's)
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        start = time.time()
+        self.assertIsNone(h.press(check=lambda: None, cancel=cancel))
+        self.assertLess(time.time() - start, 1)
+        self.assertEqual((writes, ui.closed, h.ui is ui), ([(37, 1), (37, 0)], False, True))
 
 
 class Batch5ConfigCli(unittest.TestCase):
