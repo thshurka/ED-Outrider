@@ -2,6 +2,22 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Speech, voice, wording and page details (fix plan, batch 8)
+- A map's "Next" says the body's whole mapped value, without and with your bonuses: "Next: map 7 (771k/2.2M)",
+  spoken "771 thousand, 2.2 million with bonuses" (one number when no bonus applies), on Now, in the mapped call-out
+  and in the status report (review Q5).
+- A speech file with valid JSON but the wrong shapes inside keeps the last good lines and says what is wrong; bans
+  keep working (Codex F7).
+- Voice Lab: Stop drops a line still being synthesised (Codex F6); "Call me" starts from `[defaults] speech_names`
+  (F38).
+- A browser-voice error is not logged as said, nor repeated by "say again" (F44); a heat or interdiction line that
+  was dropped unsaid no longer holds back the next one for 30 s (F46).
+- "Your carrier departs in under a minute" instead of "in 1 minutes" (F37).
+- The ship-loss card's "My firsts (lost)" link also enables the "within N ly" box (F23).
+- Retargeting while reading the schematic no longer scrolls Here to the top (F17); a system whose stars sit under
+  nested barycentres, (A+B)+(C+D), gets its star rows (F40).
+- Systems are compared by their exact id strings in the speech queue and Nearby (Codex C2).
+
 ## 2026-10-03 · Sales, history and unsold estimates (fix plan, batch 7)
 - A Vista Genomics visit sold in several goes is checked as one against the x5 prediction: History's trip note no
   longer counts an x5 run twice, or reports a miss when the x1 run was sold first (review F21).

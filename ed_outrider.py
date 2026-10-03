@@ -6225,12 +6225,18 @@ class State:
                                 f"{', first map' if rec.get('was_mapped') is False and rec.get('was_discovered') else ''})")
             # what mapping would add, bonus-free (the green-row level is bonus-free too); the page keeps
             # only the ones over that level, so ordinary bodies never sound the leaving alert
-            inc = None
+            inc = total = total_bonus = None
             if rec.get("ed") and outrider.unsold:
                 plain = dict(rec["ed"], first_discovered=False, first_mapped=False)
-                inc = outrider.unsold.body_value(plain, True, False, True) - outrider.unsold.body_value(plain, False, False, True)
+                total = outrider.unsold.body_value(plain, True, False, True)
+                inc = total - outrider.unsold.body_value(plain, False, False, True)
+                # what the page says (the author's choice, review Q5): the body's whole mapped value, without and with
+                # your own first-discovery / first-mapped bonuses (never the efficiency bonus, as everywhere)
+                mine = dict(rec["ed"], first_discovered=rec.get("was_discovered") is False, first_mapped=rec.get("was_mapped") is False)
+                total_bonus = outrider.unsold.body_value(mine, True, False, True)
             unmapped_all.append({"body": name_of(bid), "subtype": rec["subtype"], "terraformable": bool(rec.get("terraformable")),
-                                 "increment": inc, "special": special, "dist_ls": rec.get("dist_ls")})   # the suggested order
+                                 "increment": inc, "value_mapped": total, "value_mapped_bonus": total_bonus,
+                                 "special": special, "dist_ls": rec.get("dist_ls")})   # the suggested order (by increment)
         unmapped_all.sort(key=lambda u: -(u["increment"] or 0))
         return {"body_count": count, "scanned": len(bodies), "unscanned": unscanned,
                 "honked": bool(sysrow), "all_found": bool(sysrow and sysrow["all_found"]),

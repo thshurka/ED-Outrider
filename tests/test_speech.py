@@ -1056,6 +1056,34 @@ class PlausibleFixes(unittest.TestCase):
         lab.current_text = lambda: "My own words."                           # typed over the line: the lab's voice
         self.assertEqual(vl.Lab.synth_args(lab)[0], "en_GB-x-low")
 
+    def test_voice_lab_stop_drops_a_pending_synthesis(self):   # Codex F6
+        import tempfile, types
+        vl = self.voice_lab()
+        events, pending = [], []
+        lab = types.SimpleNamespace(current_text=lambda: "Hello.", synth_args=lambda: ("v", None, 1.0, None, None),
+                                    voices=types.SimpleNamespace(PiperVoice=object, synth=lambda *a: b""),
+                                    player=types.SimpleNamespace(play=lambda p: events.append("play"), stop=lambda: events.append("stop")),
+                                    run=lambda work, done, status=None: pending.append(done), set_status=lambda *a, **k: None,
+                                    tmp=tempfile.mkdtemp(), say_gen=0, audition_run=None)
+        vl.Lab.speak(lab)
+        vl.Lab.stop(lab)
+        pending.pop()(b"")                 # the synthesis finishes after Stop
+        self.assertEqual(events, ["stop"])
+        vl.Lab.speak(lab)                   # a newer Speak replaces an older one still synthesising
+        vl.Lab.speak(lab)
+        pending[1](b"")
+        pending[0](b"")
+        self.assertEqual(events, ["stop", "play"])
+
+    def test_voice_lab_calls_you_what_outrider_does(self):   # F38
+        vl = self.voice_lab()
+        with unittest.mock.patch.object(vl, "_config", lambda: {"defaults": {"speech_names": ["Captain", "Skipper"]}}):
+            self.assertEqual(vl.configured_names(), "Captain, Skipper")
+        with unittest.mock.patch.object(vl, "_config", lambda: {"defaults": {"speech_names": "Boss"}}):
+            self.assertEqual(vl.configured_names(), "Boss")
+        with unittest.mock.patch.object(vl, "_config", lambda: {}):
+            self.assertEqual(vl.configured_names(), outrider.speech.DEFAULT_NAMES)
+
     def test_two_downloads_of_one_voice_do_not_collide(self):   # F69
         import hashlib, io, tempfile, threading
         import outrider.tts

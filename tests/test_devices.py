@@ -816,6 +816,23 @@ class BatchBVoiceControl(unittest.TestCase):
         self.state.copilot_action("again")
         self.assertEqual((self.state.copilot["seq"], self.state.copilot["action"]), (5, "again"))
 
+    def test_malformed_speech_file_keeps_the_last_good_one(self):   # Codex F7
+        path = self.speech_file()
+        sl = outrider.speech.SpeechLines(path)
+        self.assertEqual(sl.set_ban("hull", "Hull {pct}.")[0], 200)
+        good = sl.lines()["lines"]
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        doc["lines"]["hull"]["business"].append({"oops": "an object"})   # valid JSON, a wrong inner shape
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        os.utime(path, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
+        out = sl.lines()   # no TypeError in the bans
+        self.assertEqual(out["lines"], good)
+        self.assertIn("must be a list of strings", out["error"])
+        self.assertIn("the last good copy is still in use", out["error"])
+        self.assertEqual(sl.set_ban("hull", "Hull damage.")[0], 200)   # bans still work
+
     # ---- banned lines ----
     def test_ban_validation(self):
         path = self.speech_file()

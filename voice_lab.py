@@ -75,6 +75,15 @@ def configured_speed():
         return 1.0
 
 
+def configured_names():
+    """[defaults] speech_names from ed_outrider.toml (a string, or a list), as Outrider calls you; else the default
+    names (review F38)."""
+    v = _config().get("defaults", {}).get("speech_names") if isinstance(_config().get("defaults"), dict) else None
+    if isinstance(v, list):
+        v = ", ".join(str(x) for x in v)
+    return v.strip() if isinstance(v, str) and v.strip() else outrider.speech.DEFAULT_NAMES
+
+
 def configured_speech_file():
     """The lines file Outrider speaks from: [server] speech_file in ed_outrider.toml, resolved as the server
     does (~ expanded, relative to the repository folder), else the shipped resources/speech.json."""
@@ -240,6 +249,7 @@ class Lab:
         self.line_pace = None   # (text, personality speed) of the last random line: see speak()
         self.line_voice = None  # (text, personality's own voice, personality) of the last random line: see synth_args()
         self.audition_run = None   # the audition playing (a fresh object per run): Stop, Speak and the rest end it
+        self.say_gen = 0           # the latest Speak; Stop moves it on, so a synthesis still running never plays (Codex F6)
         self.speech_file = configured_speech_file()   # [server] speech_file: the lines Outrider speaks
         try:
             self.styles, self.lines = load_lines(self.speech_file)
@@ -333,7 +343,7 @@ class Lab:
         self.style.bind("<<ComboboxSelected>>", lambda e: self.style_changed())
         ttk.Label(lf, text="Call me").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.names = ttk.Entry(lf)
-        self.names.insert(0, outrider.speech.DEFAULT_NAMES)
+        self.names.insert(0, configured_names())
         self.names.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
         ttk.Label(lf, text="comma separated; each {name} is a random one", foreground="#777").grid(row=1, column=2, columnspan=2, sticky="w", pady=(6, 0))
         self.when = ttk.Label(lf, text="", foreground="#777", wraplength=680)
@@ -583,10 +593,12 @@ class Lab:
     def end_audition(self):
         if self.audition_run is not None:
             self.audition_run = None
+            self.say_gen += 1
             self.player.stop()
 
     def stop(self):
         self.audition_run = None
+        self.say_gen += 1   # a synthesis still running is dropped when it finishes
         self.player.stop()
 
     # ---- speaking ----
@@ -620,7 +632,12 @@ class Lab:
             self.set_status("No voice to speak with: install Piper and download a voice below.", error=True)
             return
 
+        self.say_gen += 1
+        gen = self.say_gen
+
         def play(audio):
+            if gen != self.say_gen:
+                return   # stopped, or a newer Speak, while it was synthesising
             path = os.path.join(self.tmp, f"say-{time.time_ns()}.wav")
             with open(path, "wb") as f:
                 f.write(audio)

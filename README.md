@@ -292,7 +292,8 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
   of ("B 4 has polonium, 1.3 percent.").
 - **Mapped** (off by default: **Say when a planet is mapped**, or `speak_mapped`): after each DSS mapping,
   "A 2 mapped efficiently, 3.4 million. Next: biology on C 2, up to 19 million." It says so when you went
-  over the probe target, and "Nothing else here over your levels" when the system is done.
+  over the probe target, and "Nothing else here over your levels" when the system is done. A map to do next gives
+  the body's value without and with your bonuses: "Next: map 7, 771 thousand, 2.2 million with bonuses".
 - **Ship-loss debrief:** what went down with the ship and the nearest lost system to go back to.
 - **System names said properly:** "Drojau LL-O b26-3" is said "Drojau L L O, b 26 3".
 

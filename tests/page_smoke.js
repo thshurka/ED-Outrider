@@ -190,9 +190,9 @@ const settle = async maxMs => {
     const goodT = th.join() === "123,456";
     asked.length = 0; w.fetch = (u, o) => { asked.push(String(u).split("?")[0]); return realFetch(u, o); };
     d.querySelector('[data-view="mat"]').click(); await settle(1500);
-    const saved = w.eval("data.position.id64");
-    w.eval("data.position.id64 = 42; render()"); await sleep(800);
-    w.eval(`data.position.id64 = ${JSON.stringify(saved)}; render()`); await sleep(800);
+    const saved = w.eval("JSON.stringify([data.position.id64, data.position.id])");
+    w.eval(`data.position.id64 = 42; data.position.id = "42"; render()`); await sleep(800);
+    w.eval(`[data.position.id64, data.position.id] = ${saved}; render()`); await sleep(800);
     w.fetch = realFetch;
     const goodM = asked.filter(x => x === "api/materials").length >= 2;
     const goodR = goodS && goodP && goodT && goodM && errors.length === before;
@@ -203,7 +203,7 @@ const settle = async maxMs => {
   // you have left is dropped, heat is said once per cooldown; the pure pick/expire rules too
   {
     const w = dom.window, before = errors.length, spoken = [], stopped = [];
-    const realSay = w.sayNow, savedPos = w.eval("data.position && data.position.id64");
+    const realSay = w.sayNow, savedPos = w.eval("data.position && JSON.stringify([data.position.id64, data.position.id])");
     const savedFlags = w.eval("[speechOn, isSpeaker]");
     w.eval("speechOn = true; isSpeaker = true");   // the worker drops alert lines while speech is off (F25)
     w.sayNow = async item => {   // a stand-in voice: records the line and 'speaks' for 60 ms
@@ -216,7 +216,7 @@ const settle = async maxMs => {
     let goodPrio = false, goodStale = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const d0 = w.eval("data"); spoken.length = stopped.length = 0;
-      w.eval("speechItems = []; speechLast = {}; data.position.id64 = 42");
+      w.eval(`speechItems = []; speechLast = {}; data.position.id64 = 42; data.position.id = "42"`);
       for (const t of ["Find one.", "Find two.", "Find three."]) w.eval(`speak(${JSON.stringify(t)}, {kind: "find"})`);
       w.eval('speak("Hull at 40 percent.", {kind: "hull", tag: "hull"})');
       await sleep(400);
@@ -224,7 +224,7 @@ const settle = async maxMs => {
       spoken.length = 0;
       w.eval('speak("Something you asked for.")');                  // holds the voice while the ship moves
       w.eval('speak("Find on the old system.", {kind: "find"})');
-      w.eval("data.position.id64 = 43");
+      w.eval(`data.position.id64 = 43; data.position.id = "43"`);
       await sleep(300);
       goodStale = spoken.join("|") === "Something you asked for.";
       if (w.eval("data") === d0) break;
@@ -233,7 +233,7 @@ const settle = async maxMs => {
     w.eval('speak("Heat damage.", {kind: "hull", tag: "heat"}); speak("Heat damage.", {kind: "hull", tag: "heat"})');
     await sleep(300);
     const goodCool = spoken.length === 1;
-    w.sayNow = realSay; w.eval(`if ([42, 43].includes(data.position.id64)) data.position.id64 = ${JSON.stringify(savedPos)}; speechLast = {}`);
+    w.sayNow = realSay; w.eval(`if ([42, 43].includes(data.position.id64)) [data.position.id64, data.position.id] = ${savedPos}; speechLast = {}`);
     w.eval(`[speechOn, isSpeaker] = ${JSON.stringify(savedFlags)}`);
     const pure = w.eval(`(() => {
       const now = 100000, it = (prio, at, extra) => Object.assign({prio, at, notBefore: at, sys: null}, extra);
@@ -1342,7 +1342,7 @@ const settle = async maxMs => {
     const fuel = (pct, j, extra) => JSON.stringify(Object.assign({live: true, pct, main: pct / 2, capacity: 50, jumps_recent: j, jumps_max: j, since_scoop: 5,
       scoop_rate: {scoopable: 6, of: 20, dry_run: 3}, here_scoop: null, low_flag: false, in_ship: true}, extra || {}));
     const target = (name, sc) => `data.target = {seq: (lastSeq || 0) + 1, fresh: true, id64: 7001, id: "7001", name: "${name}", star_class: "${sc}", status: "partial", sound: null, leaving: null}`;
-    const at = (id, star) => `data.position = Object.assign({}, data.position || {x: 0, y: 0, z: 0}, {id64: ${id}, id: "${id}", name: "Sys ${id}"}); lastPosId = ${id}; data.here_star = "${star}"`;
+    const at = (id, star) => `data.position = Object.assign({}, data.position || {x: 0, y: 0, z: 0}, {id64: ${id}, id: "${id}", name: "Sys ${id}"}); lastPosId = "${id}"; data.here_star = "${star}"`;
     w.eval("lineKey = null");
     // a scoopable star, 3 jumps aboard, 6 of the last 20 scoopable (gap 3.3, so under max(4, 6.7)): top up, spoken as fuel_topup
     got.topup = run(`${at(5001, "K")}; data.fuel = ${fuel(60, 3)}; ${target("Dry Target", "K")}`);
@@ -2039,6 +2039,15 @@ const settle = async maxMs => {
       const b = mappedText({body: "A 2", value: 3.4e6, probes: 8, target: 6, leaving: {honked: true, unscanned: 0, bio_pending: [], unmapped: []}});
       const c = mappedText({body: "A 2", value: null, probes: 7, target: 6, leaving: {honked: true, unscanned: 2, bio_pending: [], unmapped: []}});
       return JSON.stringify([a.say, a.title, b.say, c.say]); })()`));
+    // Q5: a map's Next gives the body's whole mapped value, without and with your bonuses (one number when equal)
+    got.q5 = JSON.parse(w.eval(`(() => {
+      const u = b => ({body: "A 5", subtype: "High metal content body", increment: 5e6, value_mapped: 771000, value_mapped_bonus: b,
+                       special: false, dist_ls: 10});
+      const l = b => ({honked: true, unscanned: 0, bio_pending: [], unmapped: [u(b)]});
+      const m = mappedText({body: "A 2", value: 3.4e6, probes: 5, target: 6, leaving: l(2.2e6)});
+      const one = mappedText({body: "A 2", value: 3.4e6, probes: 5, target: 6, leaving: l(771000)});
+      return JSON.stringify([m.next, spokenText(m.say), one.next, planText(planItems(l(2.2e6))[0], true).replace(/<[^>]+>/g, ""),
+                             planText(planItems(l(2.2e6))[0]).replace(/<[^>]+>/g, "")]); })()`));
     got.mappedRow = w.eval(`(() => { const row = ALERTS.find(a => a[0] === "mapped"); return [!!row, alertCfg.mapped, !!document.getElementById("sayMapped"), sayMapped()]; })()`);
     w.eval(`speechLog.length = 0; data = Object.assign({}, data, {moments: [{seq: lastMomentSeq + 1, kind: "mapped", system: "1", body: "Q 9", probes: 3, target: 6, value: 1e6,
       leaving: {honked: true, unscanned: 0, bio_pending: [], unmapped: []}}]}); onData()`);
@@ -2078,6 +2087,8 @@ const settle = async maxMs => {
                "A 2 mapped, 2 probes over target, no efficiency bonus, 3.4M. Nothing else here over your levels.",
                "A 2 mapped, 1 probe over target, no efficiency bonus. 2 bodies still to find in the FSS."],
       mappedRow: [true, false, true, false], mappedOff: false, mappedOn: "mapped",
+      q5: ["Next: map A 5 (771k/2.2M)", "A 2 mapped efficiently, 3.4 million. Next: map A 5, 771 thousand, 2.2 million with bonuses.",
+           "Next: map A 5 (771k)", "map A 5 (High metal content body · 771k/2.2M)", "map A 5 (High metal content body, +5.0M)"],
       tally: "This session: FSD charge 2 🔇 · Codex 1 🔇 · Asked for 1", gridBefore: true, mutes: "codex,jump",
       muted: [false, false, false, true], undone: [true, true, true]};
     for (const k of Object.keys(want)) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
@@ -2769,6 +2780,80 @@ const settle = async maxMs => {
     allOk = allOk && goodB6;
     console.log(goodB6 ? "OK" : "FAIL", "| batch 6 page fixes |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "Here follows the in-game target, the fuel tile on foot / in the SRV, no stale undock call-out after a sale", errors.slice(before));
+  }
+  // review batch 8 on the page: the carrier's last minute (F37), the loss card's My firsts link (F23), no scroll to a
+  // hidden row (F17), a browser-voice error not "said" (F44), a dropped heat line does not cool the next (F46), the
+  // (A+B)+(C+D) schematic (F40), exact string ids (Codex C2)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, saved = {carrier: data.carrier, position: data.position, systems: data.systems};
+      const realAO = alertOut, cards = []; alertOut = (k, t, b, opt) => cards.push([t, typeof opt.say === "function" ? opt.say() : opt.say]);
+      const cw = carrierWarned; carrierWarned = null;
+      data.carrier = {name: "Out Of The Blue", system: "Far", distance: 10, aboard: false, here: false,
+                      planned: {system: "Elsewhere", departure: new Date(Date.now() + 50000).toISOString()}};
+      renderCarrier();
+      o.carrier = cards.map(c => c.join(" | ")).join(" / ");
+      alertOut = realAO; carrierWarned = cw;
+      // F23
+      fShowLost.checked = false; fWithin.disabled = true;
+      const a = document.createElement("a"); a.href = "#"; a.setAttribute("data-lossfirsts", ""); document.body.appendChild(a);
+      a.click(); a.remove();
+      o.loss = [fWithin.disabled, view];
+      // F17: a row in a hidden table is not looked at, so nothing scrolls
+      const t = document.createElement("table"); t.hidden = true; t.innerHTML = "<tbody><tr><td>x</td></tr></tbody>";
+      document.getElementById("hereMain").appendChild(t);
+      let looked = 0; const tr = t.querySelector("tr"); tr.getBoundingClientRect = () => { looked++; return {top: 0, bottom: 0}; };
+      revealIn(tr); t.remove();
+      o.hidden = looked;
+      // F40: (A+B)+(C+D), with planet A 1 and AB 1 around the A+B pair
+      const body = (name, type) => ({name, type, body_id: name.length, subtype: type === "Star" ? "K (Yellow-Orange) Star" : "Rocky body",
+                                     genera: [], organics: [], bio_guess: [], codex: [], curiosities: [], belts: [], scanned: true});
+      const node = (name, children = []) => ({kind: "body", name, children});
+      const bary = (label, children) => ({kind: "barycentre", label, children});
+      const h = {bodies: [body("A", "Star"), body("B", "Star"), body("C", "Star"), body("D", "Star"), body("A 1", "Planet"), body("AB 1", "Planet")],
+                 tree: [bary("(A+B)+(C+D)", [bary("A+B", [node("A", [node("A 1")]), node("B"), node("AB 1")]), bary("C+D", [node("C"), node("D")])])]};
+      const div = document.createElement("div"); div.innerHTML = schematicHtml(h);
+      const a1 = div.querySelector('[data-body="A 1"]');
+      o.schem = [div.querySelectorAll(".srowS .sstar:not(.sround)").length, !!a1 && !a1.closest(".smoons")];
+      // Codex C2: two id64s above 2^53 that round to the same number are still two systems
+      data.position = Object.assign({}, data.position, {id64: 9007199254740992, id: "9007199254740992"});
+      data.systems = [{id64: 9007199254740993, id: "9007199254740993", name: "Twin", distance: 1, visited: false}];
+      o.ids = [sysId(data.systems[0]) === posId(), sysId({id64: 5}), sysId(null)];
+      const sf = [speechOn, isSpeaker]; speechOn = isSpeaker = true; speechItems = [];
+      speak("Find.", {kind: "find", delay: 99999}); o.sys = speechItems[0] && speechItems[0].sys;   // tied to the exact id
+      hushSpeech(true); [speechOn, isSpeaker] = sf;
+      Object.assign(data, saved);
+      return JSON.stringify(o);
+    })()`));
+    // F44: the browser's voice fails: not said; Outrider's own cancel is not a failure
+    const realSS = w.speechSynthesis, realU = w.SpeechSynthesisUtterance;
+    let fail = "synthesis-failed";
+    w.SpeechSynthesisUtterance = function (t) { this.text = t; };
+    w.speechSynthesis = {speak: u => setTimeout(() => u.onerror({error: fail}), 10), cancel() {}, speaking: false, pending: false};
+    const sayItem = async () => w.eval(`(async () => { const it = {words: "Test line.", pace: 1}; await sayNow(it); return it.unsaid || "said"; })()`);
+    got.voice = [await sayItem()];
+    fail = "interrupted"; got.voice.push(await sayItem());
+    w.speechSynthesis = realSS; w.SpeechSynthesisUtterance = realU;
+    // F46: a heat line dropped unsaid does not hold back the next one
+    got.cool = w.eval(`(() => { const f = [speechOn, isSpeaker]; speechOn = isSpeaker = true; speechItems = []; speechLast = {};
+      const e1 = logSpeech({kind: "hull", tag: "heat"}); speak("Heat damage.", {kind: "hull", tag: "heat", delay: 5000, log: e1});
+      hushSpeech(true);
+      const e2 = logSpeech({kind: "hull", tag: "heat"}); speak("Heat damage.", {kind: "hull", tag: "heat", delay: 5000, log: e2});
+      const out = [e1.fate, e2.fate || "queued"]; hushSpeech(true); speechLast = {}; [speechOn, isSpeaker] = f; return out.join(" / "); })()`);
+    const bad = [];
+    if (!/departs in under a minute/.test(got.carrier) || /\b1 minutes\b/.test(got.carrier)) bad.push("carrier");
+    if (JSON.stringify(got.loss) !== JSON.stringify([false, "firsts"])) bad.push("loss");
+    if (got.hidden !== 0) bad.push("hidden");
+    if (JSON.stringify(got.schem) !== JSON.stringify([4, true])) bad.push("schem");
+    if (JSON.stringify(got.ids) !== JSON.stringify([false, "5", null]) || got.sys !== "9007199254740992") bad.push("ids");
+    if (!/^the browser voice failed \(synthesis-failed\)$/.test(got.voice[0]) || got.voice[1] !== "said") bad.push("voice");
+    if (!/^dropped/.test(got.cool.split(" / ")[0]) || /refused/.test(got.cool)) bad.push("cool");
+    const goodB8 = !bad.length && errors.length === before;
+    allOk = allOk && goodB8;
+    console.log(goodB8 ? "OK" : "FAIL", "| batch 8 page fixes |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "carrier's last minute, loss link, hidden row, browser voice error, heat cooldown, nested star pairs, exact ids", errors.slice(before));
+    if (w.eval("view") === "firsts") { d.querySelector('[data-view="overview"]').click(); await sleep(300); }
   }
   // F45: the unsold pop-up's headings: a ship loss with no sale before it counts from the loss; bio from any death
   {

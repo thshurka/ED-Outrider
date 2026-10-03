@@ -294,6 +294,16 @@ class Batch1Server(unittest.TestCase):
         self.assertEqual(u["body"], "4")
         self.assertFalse(u["special"])
         self.assertGreater(u["increment"], 0)
+        # the Next lines' totals (Q5): mapped, without and with your bonuses; discovered by someone else, so the
+        # first-mapped bonus alone separates them, and the plain total is more than what mapping adds
+        self.assertGreater(u["value_mapped"], u["increment"])
+        self.assertGreater(u["value_mapped_bonus"], u["value_mapped"])
+        ev = scan("2026-01-01T00:06:00Z", "Sys", 1, 5, "Sys 5", disc=True)[2]
+        ev.update(PlanetClass="Sudarsky class II gas giant", MassEM=300, WasMapped=True)   # no bonus of yours: equal
+        self.j.handle(ev)
+        self.db.commit()
+        u5 = next(x for x in self.state.leaving_summary(1)["unmapped"] if x["body"] == "5")
+        self.assertEqual(u5["value_mapped_bonus"], u5["value_mapped"])
 
 
 class Batch2Server(unittest.TestCase):

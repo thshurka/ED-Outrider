@@ -33,6 +33,9 @@ let data = null, version = -1;
 // Where you are, as the exact id64 string (position.id). The JSON number position.id64 loses the last digits above
 // 2^53, so string comparisons with the server's exact ids (arrival, Here, moments) must use this.
 const posId = () => data && data.position ? data.position.id ?? String(data.position.id64) : null;
+// any system-like object's exact id: its id string, else its id64 as a string (never compare the JSON numbers: two
+// id64s above 2^53 can round to the same number; Codex C2)
+const sysId = x => !x ? null : x.id != null ? String(x.id) : x.id64 != null ? String(x.id64) : null;
 // Each sortable table keeps its own sort (a value sort chosen in My firsts must not re-sort Nearby).
 const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search"};
 const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance"},
@@ -272,9 +275,11 @@ function renderCarrier() {
       (pl.jump_ly ? ` <span class="unk">(${fmtLy(pl.jump_ly)} ly jump${pl.distance_from_you != null ? `, then ${fmtLy(pl.distance_from_you)} ly from you` : ""})</span>` : "");
     if (urgent && carrierWarned !== pl.departure) {   // once per booking, only if you are not aboard
       carrierWarned = pl.departure;
-      alertOut("carrier", `${c.name} departs in ${Math.ceil(left / 60)} minutes`, `for ${pl.system}; you are not aboard`,
-               {sound: "alert", tag: "carrier_departs", say: () => line("carrier_departs", {minutes: Math.ceil(left / 60), carrier: c.name},
-                                                `Your carrier departs in ${Math.ceil(left / 60)} minutes, and you are not aboard.`)});
+      // the last minute: one plain line (speech.json's lines say "{minutes} minutes", which cannot be singular: F37)
+      const mins = Math.ceil(left / 60), last = mins <= 1;
+      alertOut("carrier", `${c.name} departs in ${last ? "under a minute" : `${mins} minutes`}`, `for ${pl.system}; you are not aboard`,
+               {sound: "alert", tag: "carrier_departs", say: () => last ? `Your carrier departs in under a minute, and you are not aboard.`
+                 : line("carrier_departs", {minutes: mins, carrier: c.name}, `Your carrier departs in ${mins} minutes, and you are not aboard.`)});
     }
   }
   cl.innerHTML = val(esc(c.name), esc(c.callsign || "")) + ln(where) + ln(meet) + ln(plan) +
@@ -332,7 +337,7 @@ function horizon() {
   const p = data && data.position;
   if (!p || /^(starting|asking|Spansh search failed|refresh failed)/.test(data.status || "")) return null;
   const cut = data.sphere_cut, r = cut != null ? Math.min(cut, data.radius) : data.radius;
-  const n = (Array.isArray(data.systems) ? data.systems : []).filter(s => s.id64 !== p.id64 && !s.visited && s.source !== "route")
+  const n = (Array.isArray(data.systems) ? data.systems : []).filter(s => sysId(s) !== sysId(p) && !s.visited && s.source !== "route")
     .sort((a, b) => a.distance - b.distance)[0];
   const ly = x => `${Number(x).toLocaleString("en-US", {maximumFractionDigits: 1})} ly`;
   const why = "Systems on the galaxy map that are not in this list have never been reported to Spansh or EDSM (the game itself may still know them).";
@@ -560,8 +565,21 @@ function planItems(l) {
   return items.map((it, i) => [it, i]).sort(([a, i], [b, j]) => (a.dist == null) - (b.dist == null) || (a.dist || 0) - (b.dist || 0)
     || (b.perMin ?? -1) - (a.perMin ?? -1) || i - j).map(([it]) => it);
 }
-function planText(it) {
-  if (it.kind === "map") { const u = it.u; return `map <b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}${u.increment ? `, +${credits(u.increment)}` : ""})`; }
+// A body's mapped value as the "Next" lines give it (the author's choice, review Q5): the whole value once mapped,
+// without and with your first-discovery / first-mapped bonuses; one number when no bonus applies. Screen "771k/2.2M",
+// spoken "771 thousand, 2.2 million with bonuses" (spokenText reads the k and M). "" when unknown.
+function mapTotals(u, spoken = false) {
+  const a = u && u.value_mapped, b = u && u.value_mapped_bonus;
+  if (!a) return "";
+  if (!b || Math.round(b) === Math.round(a) || credits(b) === credits(a)) return credits(a);
+  return spoken ? `${credits(a)}, ${credits(b)} with bonuses` : `${credits(a)}/${credits(b)}`;
+}
+// the Next line's value: the map totals (Q5), the bio as before ("up to" for an estimate)
+const nextValue = (it, spoken, upTo) => it.kind === "map" && mapTotals(it.u) ? mapTotals(it.u, spoken)
+  : it.value ? `${upTo && it.kind === "bio" ? "up to " : ""}${credits(it.value)}` : "";
+function planText(it, totals = false) {
+  if (it.kind === "map") { const u = it.u, t = totals && mapTotals(u);
+    return `map <b>${esc(u.body)}</b> (${esc(u.subtype)}${u.terraformable ? " T" : ""}${t ? ` · ${t}` : u.increment ? `, +${credits(u.increment)}` : ""})`; }
   const b = it.b, parts = Object.entries(b.partial || {}).map(([g, n]) => `${esc(g)} ${n}/3`).concat(unstarted(b).map(esc));
   // gravity and atmosphere: whether the landing is worth it is decided before the supercruise, not at the approach
   const g = b.gravity != null ? ` · <span class="${b.gravity >= highGravity() ? "warnc" : ""}" title="surface gravity${b.gravity >= highGravity() ? ": at or over your high-gravity level" : ""}">${b.gravity.toFixed(1)} g</span>` : "";
@@ -691,7 +709,7 @@ function renderNow() {
   // landed: what is left on this body (and the sample spacing); otherwise what is left in the system
   if (data.on_body) lines.push(`<div class="now-line now-body">${document.getElementById("onbody").innerHTML}</div>`);
   else {
-    const here = data.systems.find(s => s.id64 === p.id64);
+    const here = data.systems.find(s => sysId(s) === sysId(p));
     // the all-clear only once Here's data is for this system and the honk has found every body: before that
     // (just after a jump, a failed lookup, an unhonked system) there is nothing to be clear about yet
     const hd = hereData && !hereData.error && hereData.id64 === posId() ? hereData : null, l = hd && hd.leaving;
@@ -699,7 +717,7 @@ function renderNow() {
     const plan = w && !w.clean ? planItems(l) : [];
     const dest = hd && data.destination ? hd.bodies.find(b => b.body_id === data.destination.body_id) : null;
     const destIsNext = !!(dest && plan.length && plan[0].body === dest.name);
-    lines.push(`<div class="now-line">${plan.length ? `<span class="warnc">Next: ${destIsNext ? `<span title="the body you have targeted">➜</span> ` : ""}${planText(plan[0])}${plan[0].sec != null ? ` <span class="unk">${scText(plan[0].sec)}</span>` : ""}` +
+    lines.push(`<div class="now-line">${plan.length ? `<span class="warnc">Next: ${destIsNext ? `<span title="the body you have targeted">➜</span> ` : ""}${planText(plan[0], true)}${plan[0].sec != null ? ` <span class="unk">${scText(plan[0].sec)}</span>` : ""}` +
       `${plan.length > 1 ? ` <span class="unk">· ${plan.length - 1} more</span>` : ""}</span>`
       : !hd ? `<span class="unk">checking…</span>`
       : !l || !l.honked ? `<span class="warnc">Next: honk</span> <span class="unk">(FSS discovery scan)</span>`
@@ -1212,7 +1230,7 @@ const paneOf = el => appOn() && el && el.closest ? el.closest(".pane") : null;
 // Bring an element into view: in app mode inside its pane, under the pane's sticky table heading, never by scrolling
 // the window; otherwise the window, as before. block: "nearest" (only if it is out of view) or "start".
 function revealIn(el, block = "nearest") {
-  if (!el) return;
+  if (!el || el.closest("[hidden]")) return;   // in a hidden table (Here's schematic mode): no box to scroll to (F17)
   const p = paneOf(el);
   if (!p) { if (el.scrollIntoView) el.scrollIntoView({block}); return; }
   const table = el.closest("tbody") && el.closest("table"), head = table && table.tHead ? table.tHead.offsetHeight : 0;
@@ -1376,11 +1394,12 @@ function mappedText(m) {
   const how = over == null ? "" : over <= 0 ? " efficiently" : `, ${over} probe${over === 1 ? "" : "s"} over target, no efficiency bonus`;
   const plan = m.leaving ? planItems(m.leaving).filter(it => !(it.kind === "map" && it.body === m.body)) : [];
   const it = plan[0];
-  const next = it ? `Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}${it.value ? `, ${it.kind === "bio" ? "up to " : ""}${credits(it.value)}` : ""}`
+  const nextOf = spoken => it ? `Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}` +
+      (it.kind === "map" && mapTotals(it.u) && !spoken ? ` (${mapTotals(it.u)})` : nextValue(it, spoken, true) ? `, ${nextValue(it, spoken, true)}` : "")
     : m.leaving && m.leaving.unscanned > 0 ? `${nBodies(m.leaving.unscanned)} still to find in the FSS`
     : "Nothing else here over your levels";
-  const head = `${m.body} mapped${how}`;
-  return {title: `${head}${m.value ? ` · ${credits(m.value)} cr` : ""}`, next, say: `${head}${m.value ? `, ${credits(m.value)}` : ""}. ${next}.`};
+  const head = `${m.body} mapped${how}`, next = nextOf(false);
+  return {title: `${head}${m.value ? ` · ${credits(m.value)} cr` : ""}`, next, say: `${head}${m.value ? `, ${credits(m.value)}` : ""}. ${nextOf(true)}.`};
 }
 // ---- one speaker: with the page open in several windows (the second screen at ?mode=now, a forgotten tab),
 // only one of them speaks and plays the alert sounds; every window still shows the cards and notifications.
@@ -1459,7 +1478,12 @@ function setFate(entry, fate) {
 }
 // the queued lines a step took out, each given its fate (a string, or a function of the item)
 function dropFates(before, after, fate) {
-  for (const it of before) if (!after.includes(it)) setFate(it.log, typeof fate === "function" ? fate(it) : fate);
+  for (const it of before) if (!after.includes(it)) { setFate(it.log, typeof fate === "function" ? fate(it) : fate); uncool(it); }
+}
+// a heat or interdiction line that was never said does not hold back the next one (review F46): the cooldown goes
+// back to what it was before this line was queued
+function uncool(it) {
+  if (it && it.tag && it.tag in SPEECH_COOLDOWN && speechLast[it.tag] === it.at) speechLast[it.tag] = it.prevLast;
 }
 // how long each sound plays before the voice starts (the fanfare's held chord runs to 1.7 s); others 900 ms
 const SOUND_LEAD = {fanfare: 1700, chime: 1000};
@@ -1546,9 +1570,10 @@ function speak(text, {delay = 0, kind = "manual", tag = null, still = null, voic
   if (!words) return setFate(entry, "nothing to say");
   const now = Date.now();
   if (tag && !speechCooled(speechLast, tag, now)) return setFate(entry, `refused: said under ${SPEECH_COOLDOWN[tag] / 1000} s ago`);
+  const prevLast = tag ? speechLast[tag] : undefined;
   if (tag) speechLast[tag] = now;
-  const item = {words, kind, tag, still, voice, pace, prio: speechPrio(kind, tag), at: now, notBefore: now + delay,
-                sys: SPEECH_SYS_BOUND.has(kind) && data && data.position ? data.position.id64 : null, log: entry};
+  const item = {words, kind, tag, still, voice, pace, prio: speechPrio(kind, tag), at: now, notBefore: now + delay, prevLast,
+                sys: SPEECH_SYS_BOUND.has(kind) && data && data.position ? posId() : null, log: entry};
   const before = speechItems;
   speechItems = speechAdd(speechItems, item);
   dropFates(before, speechItems, `replaced by a newer ${tag}`);
@@ -1599,7 +1624,7 @@ async function speechWorker() {
         dropFates(before, speechItems, "dropped: hushed");
       }
       // speechExpire stays pure (the smoke test calls it): what it took out is told apart here
-      const before = speechItems, now = Date.now(), pos = data && data.position && data.position.id64;
+      const before = speechItems, now = Date.now(), pos = posId();
       speechItems = speechExpire(speechItems, now, pos);
       dropFates(before, speechItems, it => now - it.notBefore > SPEECH_MAX_AGE ? `dropped: waited over ${SPEECH_MAX_AGE / 1000} s`
         : it.sys != null && it.sys !== pos ? "dropped: you left the system" : "dropped: no longer true");
@@ -1621,6 +1646,7 @@ async function speechWorker() {
           : item.capped ? "cut short: the PC's player ran past the line's length" : "said");
         if (e.fate === "said") lastSaid = {words: item.words, voice: item.voice, pace: item.pace};   // "say again"
       }
+      if (item.unsaid || item.timedOut) uncool(item);
     }
   } finally { speechBusy = false; }
 }
@@ -1681,7 +1707,11 @@ async function sayNow(item) {
     await new Promise(res => {
       let done = false; const finish = () => { if (!done) { done = true; res(); } };
       const rate = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
-      const u = new SpeechSynthesisUtterance(item.words); u.rate = rate; u.onend = u.onerror = finish;
+      const u = new SpeechSynthesisUtterance(item.words); u.rate = rate; u.onend = finish;
+      // an error is not "said" (nor the line "say again" repeats: review F44), unless Outrider's own cancel() caused it
+      u.onerror = ev => { const why = ev && ev.error;
+        if (!cur.stopped && !item.timedOut && why !== "interrupted" && why !== "canceled") item.unsaid = `the browser voice failed (${why || "?"})`;
+        finish(); };
       cur.halt = () => { speechSynthesis.cancel(); finish(); };
       speechSynthesis.speak(u);
       // The end event does not always come (Chrome drops it on long lines). After 15 s go by what the browser
@@ -2060,7 +2090,7 @@ function statusReportText() {
   const ms = data ? modulesSpoken() : ""; if (ms) parts.push(ms);   // a core module under your level (S5)
   if (target && target.v === "none") parts.push(`${dest.name}: nothing to do`);
   if (plan.length) { const it = plan[0];
-    parts.push(`Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}${it.value ? `, ${credits(it.value)}` : ""}${it.sec != null ? `, ${spokenTime(it.sec)}` : ""}`); }
+    parts.push(`Next: ${it.kind === "map" ? `map ${it.body}` : `biology on ${it.body}`}${nextValue(it, true) ? `, ${nextValue(it, true)}` : ""}${it.sec != null ? `, ${spokenTime(it.sec)}` : ""}`); }
   const u = data && data.unsold, rebuy = data && data.ship && data.ship.rebuy;
   if (u && !u.error && u.total > 0) parts.push(`${credits(u.total)} aboard${rebuy ? `, ${(u.total / rebuy).toFixed(1)} rebuys` : ""}`);
   const hz = data && !hw ? horizon() : null;   // mid-route the next stop is the Highway's
@@ -2273,7 +2303,7 @@ function render() {
   const bms = bmMap();
   renderUnsold();
   const p = data.position;
-  const here = p && data.systems.find(s => s.id64 === p.id64), known = !!here;
+  const here = p && data.systems.find(s => sysId(s) === sysId(p)), known = !!here;
   // distances to the two hubs: Sol, and Colonia (Eol Prou RS-T d3-94)
   const lyTo = (x, y, z) => p && Math.hypot(p.x - x, p.y - y, p.z - z).toLocaleString("en-US", {maximumFractionDigits: 0});
   const rg = data.region;
@@ -2333,7 +2363,7 @@ function render() {
   if (view === "hwy") loadHwy();
   refreshPop();
   const jr = effRange();
-  let rows = data.systems.filter(s => s.id64 !== (p && p.id64))
+  let rows = data.systems.filter(s => sysId(s) !== sysId(p))
     .filter(s => showVisited.checked || !s.visited)
     .filter(s => showExplored.checked || s.status !== "explored")
     .filter(s => !oneJump.checked || !jr || s.distance <= jr);
@@ -2343,7 +2373,7 @@ function render() {
     : (a, b) => a.distance - b.distance);
   // Fuel: the nearest scoopable star you can reach (visited or not) gets a tag when the tank is low.
   const fuel = data.fuel, lowFuel = fuel && fuel.live && fuel.pct != null && fuel.pct < 30;
-  const scoopNext = lowFuel && data.systems.filter(s => s.id64 !== (p && p.id64) && s.main_scoopable && (!jr || s.distance <= jr))
+  const scoopNext = lowFuel && data.systems.filter(s => sysId(s) !== sysId(p) && s.main_scoopable && (!jr || s.distance <= jr))
     .sort((a, b) => a.distance - b.distance)[0];
   const prev = data.previous;
   const unvisited = data.systems.filter(s => !s.visited).length;
@@ -2370,7 +2400,7 @@ function render() {
     const label = {"unreported": "never reported — new discovery!", "no bodies": "no scan data",
       "partial": "partly scanned", "explored": "fully scanned", "visited": "you've been here",
       "lookup failed": "Spansh lookup failed"}[t.status] || t.status;
-    const row = data.systems.find(s => s.id64 === t.id64);
+    const row = data.systems.find(s => sysId(s) === sysId(t));
     const sc = t.star_class ? ` · <span class="mono">${esc(t.star_class)}</span>` +
       (/^[OBAFGKM](_|$)/.test(t.star_class) ? ` <span class="scoop" title="scoopable">⛽</span>`
                                            : ` <span class="noscoop" title="not scoopable">✕</span>`) : "";
@@ -2394,13 +2424,13 @@ function render() {
       : `<span class="no">already discovered by someone` + (a.announced === "unreported" ? " — Spansh just hadn't heard of it" : "") + `</span>`);
   const fkRows = focusKey("rows");
   document.getElementById("rows").innerHTML = rows.map(s => {
-    const isPrev = prev && s.id64 === prev.id64;
+    const isPrev = prev && sysId(s) === sysId(prev);
     const far = jr && s.distance > jr;
     const jumps = jr ? jumpsFor(s.distance) : null;
-    const cls = [s.visited && "visited", far && "far", isPrev && "prev", scoopNext && s.id64 === scoopNext.id64 && "scoopnext",
+    const cls = [s.visited && "visited", far && "far", isPrev && "prev", scoopNext && sysId(s) === sysId(scoopNext) && "scoopnext",
                  data.next_stop && s.id === data.next_stop.id && "nextstop",
                  pinnedSystem === s.id && "pinned",
-                 data.target && s.id64 === data.target.id64 && "target"]
+                 data.target && sysId(s) === sysId(data.target) && "target"]
       .filter(Boolean).join(" ");
     const known = s.body_count ? `${s.bodies_known}/${s.body_count}` : (s.bodies_known || "");
     // compact2 merges: the status badges go under the name, the notable tags under the bodies
@@ -2423,7 +2453,7 @@ function render() {
   if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
 }
 function emptyMessage(rows) {
-  const others = data.systems.filter(s => s.id64 !== (data.position && data.position.id64)).length;
+  const others = data.systems.filter(s => sysId(s) !== posId()).length;
   if (/^asking|^fetching/.test(data.status)) return "loading…";
   if (/failed/.test(data.status)) return "Spansh lookup failed — the list is incomplete, so no conclusions about undiscovered systems yet.";
   if (others > rows.length) return `${others - rows.length} system${others - rows.length === 1 ? "" : "s"} hidden by the filters above.`;
@@ -2787,6 +2817,8 @@ function discHtml(b, depth) {
 function schematicHtml(h) {
   const by = Object.fromEntries(h.bodies.map(b => [b.name, b]));
   const isStar = n => n.kind === "body" && by[n.name] && by[n.name].type === "Star";
+  // a barycentre with a star anywhere under it, (A+B)+(C+D) too: it gets star rows, not one flat column (review F40)
+  const hasStar = n => isStar(n) || (n.kind === "barycentre" && n.children.some(hasStar));
   // a column: a body with its moons stacked beneath it, or a barycentre box with its members side by side
   const col = (n, depth) => {
     if (n.kind === "body" && by[n.name]) {
@@ -2800,7 +2832,7 @@ function schematicHtml(h) {
   const starRow = n => {
     const b = by[n.name];
     // a pair of stars circling this one is drawn as its own nested group, not in the planet row
-    const pairOfStars = c => c.kind === "barycentre" && c.children.some(isStar);
+    const pairOfStars = c => c.kind === "barycentre" && c.children.some(hasStar);
     const planets = n.children.filter(c => !isStar(c) && !pairOfStars(c)), stars = n.children.filter(isStar);
     const groups = n.children.filter(pairOfStars);
     return `<div class="srowS"><div class="sstar">${discHtml(b, 0)}</div><div class="splanets">${planets.map(c => col(c, 1)).join("") || `<span class="unk">no planets known</span>`}</div></div>` +
@@ -2808,8 +2840,8 @@ function schematicHtml(h) {
   };
   const top = n => {
     if (isStar(n)) return starRow(n);
-    if (n.kind === "barycentre" && n.children.some(isStar)) {
-      const starGroupOf = c => c.kind === "barycentre" && c.children.some(isStar);   // a nested star pair: drawn as its own group
+    if (n.kind === "barycentre" && n.children.some(hasStar)) {
+      const starGroupOf = c => c.kind === "barycentre" && c.children.some(hasStar);   // a nested star pair: drawn as its own group
       const stars = n.children.filter(isStar), other = n.children.filter(c => !isStar(c) && !starGroupOf(c));
       return `<div class="sgroupTop"><div class="sblabel">⊕ ${esc(n.label)}</div>${stars.map(starRow).join("")}` +
         (other.length ? `<div class="srowS"><div class="sstar sround">around ${esc(n.label)}</div><div class="splanets">${other.map(c => col(c, 1)).join("")}</div></div>` : "") +
@@ -3117,7 +3149,7 @@ const lbRadius = document.getElementById("lbRadius");
 lbRadius.value = store.get("lbRadius", "100");
 lbRadius.onchange = () => { store.set("lbRadius", lbRadius.value); leftKey = null; loadLeft(); };
 async function loadLeft() {
-  const key = `${lbRadius.value}|${data && data.scan_version}|${data && data.position && data.position.id64}`;
+  const key = `${lbRadius.value}|${data && data.scan_version}|${posId()}`;
   if (key === leftKey) return renderLeft();
   leftKey = key;
   const g = newRequest("left");
@@ -3168,7 +3200,7 @@ mFilter.oninput = () => renderMat();
 async function loadMat() {
   // the sources list depends on where you are and what you have scanned; the stale note on the materials snapshot
   const m0 = data && data.materials;
-  const key = `${m0 && m0.version}|${m0 && m0.stale}|${data && data.scan_version}|${data && data.position && data.position.id64}|${data && data.run_id}`;
+  const key = `${m0 && m0.version}|${m0 && m0.stale}|${data && data.scan_version}|${posId()}|${data && data.run_id}`;
   if (key === matKey) return;
   matKey = key;
   document.getElementById("matStatus").textContent = "loading…";
@@ -4965,6 +4997,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-rigsclose]")) { e.preventDefault(); rigsCard = null; return renderStrip(); }
   if (e.target.closest("[data-lossfirsts]")) {   // the systems to rescan: My firsts with the lost ones shown
     e.preventDefault(); fShowLost.checked = true; store.set("fShowLost", true);
+    fWithin.disabled = false;   // as ticking it by hand does (a scripted tick fires no change event: F23)
     return document.querySelector('[data-view="firsts"]').click();
   }
   const cell = e.target.closest("#rows td.bodies[data-id]");
@@ -5183,7 +5216,7 @@ const hullBand = h => !h || h.pct == null ? 0 : h.pct < 25 ? 2 : h.pct < 50 ? 1 
 // so the absence of a known one is not a reason to panic, and the text says so
 function scoopHint() {
   const p = data.position, jr = effRange(), sr = data.fuel && data.fuel.scoop_rate;
-  const s = (data.systems || []).filter(x => x.id64 !== (p && p.id64) && x.main_scoopable).sort((a, b) => a.distance - b.distance)[0];
+  const s = (data.systems || []).filter(x => sysId(x) !== sysId(p) && x.main_scoopable).sort((a, b) => a.distance - b.distance)[0];
   return s ? `nearest known scoopable: ${s.name} · ${s.distance.toFixed(1)} ly${jr && s.distance > jr ? " (beyond one jump)" : ""}`
            : `no known scoopable star nearby (${sr ? scoopRateText(sr) : "most unreported stars are scoopable"}: check the galaxy map)`;
 }
@@ -5283,7 +5316,7 @@ function onData() {
     lastDockTs = data.docked ? data.docked.ts : data.docked_ts ?? null;   // docked_ts: a dock Status.json hides for now
     lastMomentSeq = Math.max(0, ...(data.moments || []).map(m => m.seq));
     lastSaleTs = data.last_sale && data.last_sale.ts;
-    lastPosId = data.position && data.position.id64; lastLowFlag = !!(data.fuel && data.fuel.low_flag);
+    lastPosId = posId(); lastLowFlag = !!(data.fuel && data.fuel.low_flag);
     lastUnderJumps = !!(data.fuel && data.fuel.live && fuelUnderJumps(data.fuel));
     hullLatch = hullBand(data.hull);
     clearAnnounced = data.sampling && data.sampling.clear ? `${data.sampling.species}|${data.sampling.samples}` : null;
@@ -5315,7 +5348,7 @@ function onData() {
   }
   // arrival: low fuel at a star you cannot scoop (the target-time warning only covers plotted jumps)
   const pos = data.position, f0 = data.fuel;
-  if (pos && pos.id64 !== lastPosId) {
+  if (pos && sysId(pos) !== lastPosId) {
     const hs = data.here_star;
     if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && (f0.pct < 30 || fuelUnderJumps(f0)) && hs && !/^[OBAFGKM](_|$)/.test(hs)) {
       // another star here that scoops, when one is known already (Spansh, the honk): shown, and said; its absence
@@ -5324,7 +5357,7 @@ function onData() {
       alertOut("fuel", `Fuel ${f0.pct}%${jn} at a ${hs} star you cannot scoop`, other || scoopHint(),
                {tag: "fuel_star", say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`) + (other ? " " + other : "")});
     }
-    lastPosId = pos.id64;
+    lastPosId = sysId(pos);
     // back in a system: what you were warned about leaving its bodies last time is unfinished news again
     const here = posId();
     for (const k of [...leftWarned.keys()]) if (k.startsWith(here + "|")) leftWarned.delete(k);

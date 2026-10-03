@@ -186,6 +186,24 @@ def read_bans(path):
     return {k: [t for t in v if isinstance(t, str)] for k, v in doc.items() if isinstance(v, list)}
 
 
+def shape_ok(doc):
+    """Whether a speech document can be used at all: "styles" an object of labels or objects, "lines" an object of
+    alert objects whose lists hold strings only. A placeholder or an unknown alert is a problem to report, not a reason
+    to refuse it; a list holding an object would break the bans and the page (Codex F7)."""
+    if not (isinstance(doc, dict) and isinstance(doc.get("styles"), dict) and isinstance(doc.get("lines"), dict)):
+        return False
+    if not all(isinstance(v, (str, dict)) for v in doc["styles"].values()):
+        return False
+    for entry in doc["lines"].values():
+        if not isinstance(entry, dict):
+            return False
+        for style, versions in entry.items():
+            if not style.startswith("_") and style != "when" and not (
+                    isinstance(versions, list) and all(isinstance(v, str) for v in versions)):
+                return False
+    return True
+
+
 def _is_list(style, versions):
     """A personality's list of lines in an alert's entry (not "_comment" or "when")."""
     return isinstance(versions, list) and not style.startswith("_") and style != "when"
@@ -252,10 +270,11 @@ class SpeechLines:
                 ("the last good copy is still in use" if self.doc else "plain wording is used")
             return
         self.problems = check(doc)
-        if isinstance(doc, dict) and isinstance(doc.get("styles"), dict) and isinstance(doc.get("lines"), dict):
+        if shape_ok(doc):
             self.doc, self.error = doc, None
-        else:
-            self.error = "; ".join(self.problems)
+        else:   # the last good document stays in use, and the bans keep working on it
+            self.error = "; ".join(self.problems or ["the file's shape is not a speech document"]) + \
+                ("; the last good copy is still in use" if self.doc else "; plain wording is used")
 
     def version(self):
         self.refresh()

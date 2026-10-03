@@ -134,6 +134,12 @@ upstream project's choices, not rules of the game.
 - **A Vista Genomics visit is one x5 check** (sales under 5 minutes apart): the runs aboard before its first sale
   against everything it sold; each sale stores what it adds, so the ledger's sum is the visit's check whatever order
   the entries came in (review F21).
+- **A map's "Next" gives the body's whole mapped value, without and with your bonuses** (the author's choice,
+  review Q5): "Next: map 7 (771k/2.2M)", spoken "771 thousand, 2.2 million with bonuses", one number when no bonus
+  of yours applies; on Now's Next line, the mapped call-out and the status report. Which bodies make the list and
+  their order still go by the bonus-free increment (what mapping adds), as the green-row level does.
+- **A malformed speech file is not installed** (Codex F7): valid JSON whose lists hold anything but strings keeps
+  the last good document in use, with the problem shown; bans keep working.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits
