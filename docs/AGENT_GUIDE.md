@@ -31,6 +31,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding (`keyboard_bindings` reads any controls) and presses it through a uinput virtual keyboard (`Honker`: its `owners`, "honk", "target" and "target-test", keep it open; its `lock` is held for a whole press or auto-target sequence; `press(check, cancel)` runs `check` under the lock just before the first key (a reason raises `NotNow`, nothing pressed) and `cancel` is that feature's own token, so switching one feature off stops its run while the other keeps the device open) |
 | `outrider/target.py` | The Highway's auto-target: `build_steps` (the sequence; its configurable parts are `DEFAULT_SEARCH`, `DEFAULT_SUBMIT` and `DEFAULT_PLOT`, lists of `parse_step` strings found in game, see `DESIGN_NOTES.md`), `guard` (when it must not start) / `targeted` (already the target: Status.json's `Destination.System`, or NavRoute.json ending at it for a waypoint several jumps away), `Targeter` (resolves keys from the preset and `autotarget_keys`, `run`: the step runner on honk's device and lock, aborts, a cancel token, dry run), `US_KEYMAP` (typing), `ACTIONS` (the controls it may read, galaxy map camera included) |
 | `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
+| `outrider/rail.py` | The tablet's control rail, pure: `CONTEXTS` and `context_of(status, vehicle_type)`, `CATALOGUE` (each context's buttons: action, Status.json state spec, amber) and `DEFAULT_IDS` (the agreed sets), `state_of`, `check_set` (the editor's input). `State.rail_info`/`rail_press`/`rail_save`/`rail_device` and `/api/rail*` use it; `Honker.tap` presses; `keyboard_bindings(..., category=)` reads the SRV and on-foot presets |
 | `outrider/tools.py` | The AI's read-only tools, defined once: `TOOLS` (name, description, JSON-schema params, an async handler `(get, args, rows)`), `READ_ROUTES` (the GETs a handler may read; `guarded()` refuses the rest), `listing()`, `call(name, args, get, rows)`, `Unavailable` -> `NOT_RUNNING` |
 | `outrider/mcp.py` | The MCP bridge (`python3 -m outrider.mcp`): MCP's stdio JSON-RPC written directly (`handle`, `serve`; no SDK), `http_get` to the running server on 127.0.0.1, `mcp_settings` (`[mcp]`, also read by `settings_from`) |
 | `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
@@ -199,6 +200,11 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   one, 401 `signin_required` for `/api/`, `/static/` and the app's User-Agent (`OutriderApp/`), else a redirect to
   `/signin`. Don't add to `AUTH_OPEN`. Tests reach "another device" by patching `outrider.auth.is_loopback`
   (`tests/test_auth.py`).
+- **The rail presses keys** (like auto honk and auto-target): one tap of one bound key combination per press
+  (`Honker.tap`), only for a button in the CURRENT context's set, only while the game is live, never with --simulate,
+  and refused (not queued) while auto honk or auto-target hold the keyboard. Never a sequence. Tests use
+  `_fake_evdev()` and a recording UI (`tests/test_rail.py`), never `Honker.open()`. Its sets are live-only meta
+  (`rail_sets`), out of `RESET_JOURNAL_DATA`.
 - **The AI's tools are read-only, by rule** (`outrider/tools.py`). A handler reads only through the `get` it is given,
   and only `READ_ROUTES` (GET routes that change nothing; `/api/find` is out because it can store a system). Never add
   a POST route or a tool that acts (presses, plots, bookmarks, hushes): `test_mcp.py` walks every tool and checks.

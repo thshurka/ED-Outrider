@@ -26,7 +26,10 @@
   --tb-fill: var(--lc-lavender);
   --tb-btn-bg: var(--lc-periwinkle); --tb-btn-fg: #0A0A1E; --tb-btn-on-bg: var(--lc-amber); --tb-btn-on-fg: var(--lc-ink); --tb-btn-radius: 14px;
   --tb-link-ok: var(--lc-periwinkle); --tb-link-stale: var(--lc-amber); --tb-link-none: var(--lc-red);
-  --tb-rail-border: #4A4054; --tb-sheet-bg: #07060C; --tb-sheet-border: var(--lc-periwinkle); --tb-sheet-radius: 18px;
+  --tb-rail-border: #4A4054;
+  --tb-rb-on-bg: var(--lc-orange); --tb-rb-on-fg: var(--lc-ink); --tb-rb-off-bg: var(--lc-lavender); --tb-rb-off-fg: #1A0E1A;
+  --tb-rb-high-bg: var(--lc-peach); --tb-rb-pend-bg: #1E1830; --tb-rb-pend-fg: var(--lc-peach); --tb-rb-unk-border: var(--lc-periwinkle);
+  --tb-rb-unk-fg: #CFC3E0; --tb-rb-dim: #6E5F7A; --tb-rb-dim-fg: #B9A6C6; --tb-rb-amber: var(--lc-amber); --tb-rb-radius: 33px; --tb-sheet-bg: #07060C; --tb-sheet-border: var(--lc-periwinkle); --tb-sheet-radius: 18px;
   --tb-banner-bg: #07060C; --tb-banner-fg: #F4E9DA; --tb-banner-border: var(--lc-orange); --tb-danger: var(--lc-red);
   color-scheme: dark;
 }

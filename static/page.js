@@ -38,7 +38,7 @@ const TABLET = typeof document !== "undefined" && !!document.body && document.bo
 // (null: you were on Now already, or chose a page since); mapWas: whether the map showed at the last draw
 const TB = {group: null, beforeMap: null, mapWas: false, bannerTimer: null, bannerKey: null,
             groups: {explore: ["now", "near", "here", "bio"], navigate: ["bm", "search", "map", "hwy"], records: ["hist", "log", "mat", "firsts"]},
-            themes: ["lcars"]};
+            themes: ["lcars"], railPending: {}, railEdit: null};
 // Where you are, as the exact id64 string (position.id). The JSON number position.id64 loses the last digits above
 // 2^53, so string comparisons with the server's exact ids (arrival, Here, moments) must use this.
 const posId = () => data && data.position ? data.position.id ?? String(data.position.id64) : null;
@@ -6777,6 +6777,13 @@ function tabSetup() {
     else if (b.dataset.act === "bm") openBookmark(b.dataset.id, b.dataset.name);
   });
   document.getElementById("tabBanner").onclick = () => tabBannerHide();
+  document.getElementById("tabRailList").addEventListener("click", e => { const b = e.target.closest("[data-rail]"); if (b && !b.disabled) tabRailPress(b.dataset.rail); });
+  document.getElementById("tabRailEditBtn").onclick = tabRailEditOpen;
+  document.getElementById("tabRailCtx").onchange = e => { tabRailEditShow(e.target.value); };
+  document.getElementById("tabRailRows").addEventListener("click", tabRailRowsClick);
+  document.getElementById("tabRailAddBtn").onclick = tabRailAdd;
+  document.getElementById("tabRailSave").onclick = () => tabRailSave(false);
+  document.getElementById("tabRailReset").onclick = () => tabRailSave(true);
   // before the page's own handlers (a name's click copies it, which means nothing on a tablet)
   document.addEventListener("click", tabRowTap, true);
   const hint = document.querySelector("#mapView .hint");   // the galaxy map by touch
@@ -6831,6 +6838,7 @@ function tabRender() {
   set("tabUnsoldV", u && u.total != null ? `${lvl === "urgent" ? "⚠ " : ""}${credits(u.total)} cr` : "—", lvl === "urgent" || lvl === "warn" ? lvl : "");
   tabDrawNav();
   tabDrawHush();
+  tabDrawRail();
 }
 function tabDrawHush() {
   const b = document.getElementById("tabHush"), on = hushed(), h = hushState;
@@ -6923,5 +6931,120 @@ async function tabSignOut() {
   try { await fetch("api/auth/signout", {method: "POST"}); } catch {}
   tabClose(document.getElementById("tabSettings"));
   signInAgain();
+}
+// ---- the control rail (tablet plan phase 4): the game's buttons for where you are (ship, SRV, Nomad, fighter, on
+// foot), each one tap of its key binding on the PC (POST api/rail/press). The state is Status.json's (the payload's
+// rail, on the long poll): a press shows SENT until it changes, "not confirmed" if it does not within confirm_s, then
+// the real state again. Unbound: disabled, "bind a key". No vibration motor on the author's tablet: the look is the
+// feedback (OutriderApp.haptic where a device has one).
+const RAIL_STATE_WORDS = {on: "On", off: "Off", high: "High"};
+function tabRailMode(b, r, now = Date.now()) {
+  const p = TB.railPending[b.id];
+  if (disconnected) return "nolink";
+  if (!b.bound) return "bind";
+  if (p && p.ctx === r.context) {
+    if (p.until && now < p.until) return "pending";
+    if (p.notUntil && now < p.notUntil) return "notconf";
+  }
+  return !b.reported || b.state == null ? "unknown" : b.state === "off" ? "off" : "on";
+}
+function tabRailTick(now = Date.now()) {   // confirmed, or past its time: SENT ends
+  const r = data && data.rail;
+  let changed = false;
+  for (const [id, p] of Object.entries(TB.railPending)) {
+    const b = r && r.context === p.ctx && (r.buttons || []).find(x => x.id === id);
+    if (!b) { delete TB.railPending[id]; changed = true; continue; }
+    if (p.until && b.reported && b.state !== p.before) { delete TB.railPending[id]; changed = true; continue; }   // confirmed
+    if (p.until && now >= p.until) { p.until = 0; if (b.reported) p.notUntil = now + 2000; else delete TB.railPending[id]; changed = true; }
+    else if (!p.until && p.notUntil && now >= p.notUntil) { delete TB.railPending[id]; changed = true; }
+  }
+  return changed;
+}
+function tabDrawRail() {
+  const r = data && data.rail, list = document.getElementById("tabRailList");
+  document.getElementById("tabRailTitle").textContent = r && r.label ? r.label : "Game controls";
+  tabRailTick();
+  const sub = !r ? "" : !r.context ? `no rail: ${r.why}` : !r.can_press ? `presses off: ${r.why_not}` : "set follows Status.json";
+  document.getElementById("tabRailSub").textContent = sub;
+  if (!r || !r.context) { if (list.innerHTML) list.innerHTML = ""; return; }
+  const html = (r.buttons || []).map(b => {
+    const mode = tabRailMode(b, r), dis = mode === "bind" || mode === "nolink" || mode === "pending" || !r.can_press;
+    const state = {pending: "Sent", notconf: "Not confirmed", unknown: "Not reported", bind: b.reported && b.state ? RAIL_STATE_WORDS[b.state] : "—",
+                   nolink: "No link"}[mode] || RAIL_STATE_WORDS[b.state] || "";
+    const sub = mode === "bind" ? `Bind a key: ${b.action_label}` : mode === "pending" ? "waiting for the game" : mode === "nolink" ? "Outrider not reachable" : "";
+    return `<button type="button" class="tb-rb ${mode}${b.amber ? " amber" : ""}${b.states === 3 && b.state === "high" ? " high" : ""}" data-rail="${esc(b.id)}"` +
+      `${dis ? " disabled" : ""} aria-label="${esc(`${b.label}, ${state}${sub ? ", " + sub : ""}`)}" title="${esc(b.keys || b.why || "")}">` +
+      `<span class="tb-rbl"><b>${esc(b.label)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span><span class="tb-rbs"><i></i>${esc(state)}</span></button>`;
+  }).join("");
+  if (list.innerHTML !== html) list.innerHTML = html;
+}
+async function tabRailPress(id) {
+  const r = data && data.rail, b = r && (r.buttons || []).find(x => x.id === id);
+  if (!b) return;
+  const app = window.OutriderApp;
+  if (app && typeof app.haptic === "function") { try { app.haptic(20); } catch {} }
+  else if (navigator.vibrate) { try { navigator.vibrate(20); } catch {} }
+  TB.railPending[id] = {ctx: r.context, before: b.state, until: Date.now() + (r.confirm_s || 4) * 1000};
+  tabDrawRail();
+  let res;
+  try { res = await apiJson("api/rail/press", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({context: r.context, id})}); }
+  catch (err) { res = {error: "Outrider not reachable"}; }
+  if (res && res.error) { delete TB.railPending[id]; toast(`${b.label}: ${res.error}`); }
+  tabDrawRail();
+}
+setInterval(() => { if (TABLET && Object.keys(TB.railPending).length && tabRailTick()) tabDrawRail(); }, 250);
+// the editor: a context's buttons (up to max), relabel, reorder, add from its catalogue; stored on the PC
+async function tabRailEditOpen() {
+  let r;
+  try { r = await apiJson("api/rail"); } catch { r = {error: "Outrider not reachable"}; }
+  if (!r || r.error || !r.edit) { toast(`Cannot edit the rail: ${(r && r.error) || "?"}`); return; }
+  TB.railEdit = {edit: r.edit, max: r.max || 8, ctx: r.context || "ship", rows: null};
+  const sel = document.getElementById("tabRailCtx");
+  sel.innerHTML = Object.entries(r.edit).map(([c, e]) => `<option value="${esc(c)}">${esc(e.label)}</option>`).join("");
+  tabRailEditShow(TB.railEdit.ctx);
+  tabShow(document.getElementById("tabRailEdit"));
+}
+function tabRailEditShow(ctx) {
+  const E = TB.railEdit; E.ctx = ctx; E.rows = E.edit[ctx].set.map(b => ({id: b.id, label: b.label}));
+  document.getElementById("tabRailCtx").value = ctx;
+  tabRailEditDraw();
+}
+function tabRailEditDraw() {
+  const E = TB.railEdit, cat = E.edit[E.ctx].catalogue, name = id => (cat.find(c => c.id === id) || {}).label || id;
+  document.getElementById("tabRailRows").innerHTML = E.rows.map((b, i) => `<li data-i="${i}"><input type="text" maxlength="24" value="${esc(b.label)}" aria-label="label for ${esc(name(b.id))}" data-label="${i}">` +
+    `<span class="unk">${esc(name(b.id))}</span><button type="button" class="tb-btn" data-up="${i}" aria-label="up"${i ? "" : " disabled"}>▲</button>` +
+    `<button type="button" class="tb-btn" data-down="${i}" aria-label="down"${i < E.rows.length - 1 ? "" : " disabled"}>▼</button>` +
+    `<button type="button" class="tb-btn" data-del="${i}" aria-label="remove">✕</button></li>`).join("");
+  const free = cat.filter(c => !E.rows.some(b => b.id === c.id));
+  document.getElementById("tabRailAdd").innerHTML = free.map(c => `<option value="${esc(c.id)}">${esc(c.label)} (${esc(c.action)})</option>`).join("");
+  document.getElementById("tabRailAddBtn").disabled = !free.length || E.rows.length >= E.max;
+}
+function tabRailKeepLabels() {
+  document.querySelectorAll("#tabRailRows [data-label]").forEach(inp => { const b = TB.railEdit.rows[+inp.dataset.label]; if (b) b.label = inp.value; });
+}
+function tabRailRowsClick(e) {
+  const E = TB.railEdit, t = e.target.closest("[data-up], [data-down], [data-del]"); if (!t || !E) return;
+  tabRailKeepLabels();
+  const i = +(t.dataset.up ?? t.dataset.down ?? t.dataset.del), j = t.dataset.up != null ? i - 1 : i + 1;
+  if (t.dataset.del != null) E.rows.splice(i, 1);
+  else if (j >= 0 && j < E.rows.length) [E.rows[i], E.rows[j]] = [E.rows[j], E.rows[i]];
+  tabRailEditDraw();
+}
+function tabRailAdd() {
+  const E = TB.railEdit, id = document.getElementById("tabRailAdd").value; if (!E || !id || E.rows.length >= E.max) return;
+  tabRailKeepLabels();
+  const c = E.edit[E.ctx].catalogue.find(x => x.id === id);
+  E.rows.push({id, label: c ? c.label : id});
+  tabRailEditDraw();
+}
+async function tabRailSave(reset) {
+  const E = TB.railEdit; if (!E) return;
+  tabRailKeepLabels();
+  let r;
+  try { r = await apiJson("api/rail/sets", {method: "POST", headers: {"Content-Type": "application/json"},
+                                             body: JSON.stringify(reset ? {context: E.ctx, reset: true} : {context: E.ctx, buttons: E.rows})}); }
+  catch { r = {error: "Outrider not reachable"}; }
+  if (r.error) { toast(`Not saved: ${r.error}`); return; }
+  E.edit = r.edit; tabRailEditShow(E.ctx); toast(reset ? "Back to the default buttons" : "Rail saved");
 }
 if (TABLET) tabSetup();

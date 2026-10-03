@@ -123,14 +123,19 @@ GENERAL_ACTIONS = frozenset({"UI_Up", "UI_Down", "UI_Left", "UI_Right", "UI_Sele
                              "CycleNextPage", "CyclePreviousPage"})
 
 
-def _preset_file(d, action, hint):
-    """(preset name or None, the .binds file to read) for `action`, or (None, None, why not)."""
+# the preset category an action is bound in: StartPreset.4.start's line for it (the rail's SRV and on-foot buttons)
+PRESET_LINE = {"general": 0, "ship": 1, "srv": 2, "foot": 3}
+
+
+def _preset_file(d, action, hint, category=None):
+    """(preset name or None, the .binds file to read) for `action`, or (None, None, why not). category: the preset the
+    action is bound in ("ship", "srv", "foot"; default: General for the UI_* keys, else Ship)."""
     starts = sorted(glob.glob(os.path.join(glob.escape(d), "StartPreset*.start")), key=os.path.getmtime)
     preset = None
     if starts:
         with open(starts[-1], encoding="utf-8", errors="replace") as f:
             lines = [x.strip() for x in f.read().splitlines()]
-        line = 0 if action in GENERAL_ACTIONS else 1
+        line = PRESET_LINE.get(category, 0 if action in GENERAL_ACTIONS else 1)
         preset = (lines[line] if len(lines) >= 4 and lines[line] else lines[0] if lines else "") or None
     if preset:
         files = sorted(glob.glob(os.path.join(glob.escape(d), glob.escape(preset) + ".*binds")), key=os.path.getmtime)
@@ -171,9 +176,9 @@ def _action_binding(root, action, preset, hint):
                   + f": give it one as its second binding in Elite's controls, or set {hint}")
 
 
-def _read_action(d, action, hint, parsed):
+def _read_action(d, action, hint, parsed, category=None):
     """One action's binding from the controls folder d (OSError passes through); parsed caches each file's root."""
-    preset, path, why = _preset_file(d, action, hint)
+    preset, path, why = _preset_file(d, action, hint, category)
     if why:
         return None, why
     if path not in parsed:
@@ -195,10 +200,10 @@ def _read_binding(d):
 _bindings_cache = {}   # (controls folder, actions, hint) -> (its files' names and mtimes, keyboard_bindings' answer)
 
 
-def keyboard_bindings(journal_dirs, actions, hint="[highway] autotarget_keys"):
+def keyboard_bindings(journal_dirs, actions, hint="[highway] autotarget_keys", category=None):
     """Several actions' keyboard bindings in the active controls preset: {action: (keys or None, text or why)}, read
     once per change of the controls folder (as primary_fire_binding). Every action gets an answer: a missing folder
-    or an unreadable file is each action's reason."""
+    or an unreadable file is each action's reason. category: the preset they are bound in (see _preset_file)."""
     actions = tuple(actions)
     d = bindings_dir(journal_dirs)
     if not d:
@@ -206,12 +211,12 @@ def keyboard_bindings(journal_dirs, actions, hint="[highway] autotarget_keys"):
     try:
         stamp = tuple(sorted((p, os.path.getmtime(p)) for p in glob.glob(os.path.join(glob.escape(d), "*.start"))
                              + glob.glob(os.path.join(glob.escape(d), "*.binds"))))
-        key = (d, actions, hint)
+        key = (d, actions, hint, category)
         hit = _bindings_cache.get(key)
         if hit and hit[0] == stamp:
             return hit[1]
         parsed = {}
-        answer = {a: _read_action(d, a, hint, parsed) for a in actions}
+        answer = {a: _read_action(d, a, hint, parsed, category) for a in actions}
     except OSError as e:
         return {a: (None, f"Elite's controls could not be read ({e})") for a in actions}
     _bindings_cache[key] = (stamp, answer)
@@ -402,6 +407,45 @@ class Honker:
             return None
         self.status = f"ready: holds {what} for {self.hold:g} s"
         return what
+
+    TAP_HOLD_S = 0.1   # a tap's key-down time (the game misses shorter presses now and then)
+
+    def tap(self, keys, check=None, hold=None):
+        """One short press of `keys` (modifiers first, released in reverse): a rail button. Blocking (a worker thread).
+        Refused, never queued, while auto honk or auto-target hold the keyboard: NotNow with the reason, as is a reason
+        from `check` (run under the lock just before the first key). ValueError when the device is not open or a key
+        has no evdev code."""
+        if not self.ready:
+            raise ValueError("the virtual keyboard is not open")
+        codes = [key_code(self.evdev, k) for k in keys or ()]
+        if not codes or None in codes:
+            raise ValueError(f"no evdev key for {' + '.join(map(str, keys or ())) or 'nothing'}")
+        e = self.evdev.ecodes
+        if not self.lock.acquire(blocking=False):
+            raise NotNow("auto honk or auto-target is pressing keys: try again in a moment")
+        try:
+            ui = self.ui
+            if ui is None or self.stop.is_set():
+                raise ValueError("the virtual keyboard is not open")
+            why = check() if check else None
+            if why:
+                raise NotNow(why)
+            done = []
+            try:
+                for c in codes:
+                    ui.write(e.EV_KEY, c, 1)
+                    ui.syn()
+                    done.append(c)
+                    time.sleep(0.03)
+                time.sleep(self.TAP_HOLD_S if hold is None else hold)
+            finally:
+                for c in reversed(done):
+                    ui.write(e.EV_KEY, c, 0)
+                    ui.syn()
+                if self.stop.is_set():   # closed while the key was down: close now that it is let go
+                    self._close_now()
+        finally:
+            self.lock.release()
 
     def _hold(self, cancel=None):
         """Wait `hold` seconds, or until close() (stop) or this press's `cancel` is set."""

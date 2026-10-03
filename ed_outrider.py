@@ -164,6 +164,7 @@ import outrider.honk       # auto honk: holds Primary Fire on arrival (optional;
 import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
+import outrider.rail       # the tablet's control rail: contexts, default sets, button states
 import outrider.mcp        # the MCP bridge's [mcp] settings (the bridge itself runs as python3 -m outrider.mcp)
 from outrider.core import iso_ts, ts_seconds   # journal timestamps
 from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
@@ -3352,7 +3353,8 @@ class Journals:
                                 "heading": st.get("Heading"),   # degrees (the surface map is heading-up)
                                 "cargo": prev.get("cargo") if away else st.get("Cargo"),   # tonnes aboard (the fuel model's mass)
                                 "destination": st.get("Destination"), "gui_focus": st.get("GuiFocus"),
-                                "fire_group": st.get("FireGroup"), "live": True}
+                                "fire_group": st.get("FireGroup"), "selected_weapon": st.get("SelectedWeapon"),   # the rail's Bio Scanner
+                                "live": True}
         elif self.status_json:  # game closed or at the menu: keep the last reading, mark it stale
             self.status_json = dict(self.status_json, live=False)
         else:
@@ -4764,7 +4766,7 @@ class State:
             "player": self.player.info() if self.player else None,
             "speech": self.speech.info() if self.speech else None,
             "autohonk": self.autohonk_info(),
-            "autotarget": self.autotarget_info(),
+            "autotarget": self.autotarget_info(), "rail": self.rail_info(),   # the tablet's game buttons
             "hush": self.hush_info(),
             "firsts_watch": self.firsts_watch_info(),
             "copilot": dict(self.copilot, button=self.button.status if self.button else None),
@@ -8774,6 +8776,119 @@ class State:
                           else "not ready: a key has no keyboard binding" if missing else "ready")
         return info
 
+    # ---- the tablet's control rail (outrider/rail.py; tablet plan phase 4) ----
+    def rail_sets(self):
+        """Each context's buttons, [{id, label}], as edited on the tablet (meta "rail_sets", live-only), else the
+        agreed defaults."""
+        saved = meta_get(self.db, "rail_sets") or {}
+        out = {}
+        for c in outrider.rail.CONTEXTS:
+            ok, _ = outrider.rail.check_set(c, saved.get(c)) if c in saved else (None, None)
+            out[c] = ok if ok is not None else outrider.rail.default_set(c)
+        return out
+
+    def rail_save(self, context, buttons=None, reset=False):
+        """POST /api/rail/sets: a context's edited set (or its defaults back): (answer, status)."""
+        if context not in outrider.rail.CONTEXTS:
+            return {"error": "unknown context"}, 400
+        saved = dict(meta_get(self.db, "rail_sets") or {})
+        if reset:
+            saved.pop(context, None)
+        else:
+            ok, why = outrider.rail.check_set(context, buttons)
+            if why:
+                return {"error": why}, 400
+            saved[context] = ok
+        meta_set(self.db, "rail_sets", saved)
+        self.db.commit()
+        self.bump()
+        return self.rail_info(full=True), 200
+
+    def rail_why_not(self):
+        """Why no button can be pressed now (None: they can), whatever the context: the keyboard's side."""
+        if self.simulate:
+            return "not with --simulate (nothing is pressed)"
+        h = self.honker
+        if not h or not h.available:
+            return (h.status if h else "the virtual keyboard is not available") + " (the rail presses keys through it)"
+        return None
+
+    def rail_info(self, full=False):
+        """The rail as the tablet draws it: the context you are in (or why there is no rail), its buttons with their
+        bindings and the state Status.json gives each, and whether a press can be sent now. full: also every
+        context's set and catalogue, for the editor (GET /api/rail)."""
+        st = self.journals.status_json or {}
+        ctx, why = outrider.rail.context_of(st, (self.journals.vehicle or {}).get("srv_type"))
+        out = {"context": ctx, "label": outrider.rail.CONTEXT_LABEL.get(ctx), "why": why, "buttons": [],
+               "can_press": False, "why_not": None, "confirm_s": outrider.rail.RAIL_CONFIRM_S, "max": outrider.rail.RAIL_MAX}
+        if ctx:
+            sets = self.rail_sets()
+            items = [dict(outrider.rail.catalogue_entry(ctx, b["id"]), label=b["label"]) for b in sets[ctx]]
+            dirs = self.honker.journal_dirs if self.honker else LIVE_DIRS
+            binds = outrider.honk.keyboard_bindings(dirs, [b["action"] for b in items], hint="the tablet's rail",
+                                                    category=outrider.rail.CATEGORY[ctx])
+            for b in items:
+                keys, text = binds.get(b["action"], (None, "not read"))
+                out["buttons"].append({"id": b["id"], "label": b["label"], "action": b["action"],
+                                       "action_label": outrider.honk.action_label(b["action"]), "bound": bool(keys),
+                                       "keys": text if keys else None, "why": None if keys else text,
+                                       "state": outrider.rail.state_of(b, st), "reported": b["state"] is not None,
+                                       "states": 3 if b["state"] == "headlights" else 2, "amber": b["amber"]})
+            out["why_not"] = self.rail_why_not()
+            out["can_press"] = out["why_not"] is None
+        if full:
+            sets = self.rail_sets()
+            out["edit"] = {c: {"label": outrider.rail.CONTEXT_LABEL[c], "set": sets[c],
+                               "catalogue": [{"id": b["id"], "label": b["label"], "action": b["action"]}
+                                             for b in outrider.rail.CATALOGUE[c]]} for c in outrider.rail.CONTEXTS}
+        return out
+
+    def rail_device(self):
+        """The virtual keyboard is kept open for the rail while the game is live (a device created at the moment of a
+        press can be missed by the game), and let go when it is not. Never with --simulate."""
+        h = self.honker
+        if not h or not h.available or self.simulate:
+            return
+        live = bool((self.journals.status_json or {}).get("live"))
+        if live and "rail" not in h.owners:
+            h.open("rail")
+        elif not live and "rail" in h.owners:
+            h.close("rail")
+
+    async def rail_press(self, context, id_):
+        """POST /api/rail/press: one tap of that button's binding, only if it is in the CURRENT context's set, bound,
+        and the game is live; refused with words otherwise (a press while auto honk or auto-target hold the keyboard
+        too: never queued). (answer, status); the answer says the state before, for the tablet's SENT."""
+        why = self.rail_why_not()
+        if why:
+            return {"error": why}, 409
+        st = self.journals.status_json or {}
+        ctx, why = outrider.rail.context_of(st, (self.journals.vehicle or {}).get("srv_type"))
+        if not ctx:
+            return {"error": f"no rail now: {why}"}, 409
+        if ctx != context:
+            return {"error": f"you are not in the {context} now ({outrider.rail.CONTEXT_LABEL[ctx]})"}, 409
+        b = next((x for x in self.rail_info()["buttons"] if x["id"] == id_), None)
+        if not b:
+            return {"error": "no such button in this set"}, 404
+        if not b["bound"]:
+            return {"error": b["why"]}, 409
+        keys, _ = outrider.honk.keyboard_bindings(self.honker.journal_dirs, [b["action"]], hint="the tablet's rail",
+                                                  category=outrider.rail.CATEGORY[ctx])[b["action"]]
+        if not self.honker.ready and not self.honker.open("rail"):
+            return {"error": self.honker.device_error or "the virtual keyboard could not be opened"}, 409
+
+        def still():   # under the keyboard's lock, just before the key: still in that context, game still live
+            c, w = outrider.rail.context_of(self.journals.status_json, (self.journals.vehicle or {}).get("srv_type"))
+            return None if c == context else f"no longer in the {context}" + (f" ({w})" if w else "")
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, lambda: self.honker.tap(keys, check=still))
+        except outrider.honk.NotNow as e:
+            return {"error": str(e)}, 409
+        except ValueError as e:
+            return {"error": str(e)}, 409
+        return {"ok": True, "id": id_, "label": b["label"], "before": b["state"], "confirm_s": outrider.rail.RAIL_CONFIRM_S}, 200
+
     def set_autotarget(self, enabled=None, delay=None):
         """The Highway tab's toggle and delay (remembered over restarts, like auto honk's toggle)."""
         if enabled is not None:
@@ -9086,7 +9201,8 @@ class State:
                     before = self.journals.status_json
                     self.journals.read_status(d)
                     gist = lambda st: st and (round(st.get("fuel_main") or 0, 1), st.get("flags"), st.get("flags2"),
-                                              st.get("body"), json.dumps(st.get("destination")), st.get("live"))
+                                              st.get("body"), json.dumps(st.get("destination")), st.get("live"),
+                                              st.get("selected_weapon"))
                     if gist(self.journals.status_json) != gist(before):
                         self.bump()
                     sm = self.sampling_summary()
@@ -9098,6 +9214,7 @@ class State:
                         self.bump()
             if self.journals.settle_carrier(time.time()):
                 self.bump()
+            self.rail_device()
             self.db.commit()
             committed = True
             # after the commit: its moments (scoop ended, FSS closed early) are live only and it consumes what
@@ -10205,6 +10322,26 @@ def make_app(state, hosts=None):
     async def highway_view(_):
         return web.json_response(state.highway_view())
 
+    async def rail_view(_):
+        """GET /api/rail: the tablet's rail now, with every context's set and catalogue for its editor."""
+        return web.json_response(state.rail_info(full=True))
+
+    async def rail_press_view(request):
+        """POST /api/rail/press {context, id}: one tap of that button's key binding (see State.rail_press)."""
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("context"), str) or not isinstance(body.get("id"), str):
+            return web.json_response({"error": "expected {context, id}"}, status=400)
+        out, status = await state.rail_press(body["context"], body["id"])
+        return web.json_response(out, status=status)
+
+    async def rail_sets_view(request):
+        """POST /api/rail/sets {context, buttons: [{id, label?}]} or {context, reset: true}: the editor's save."""
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("context"), str):
+            return web.json_response({"error": "expected {context, buttons} or {context, reset: true}"}, status=400)
+        out, status = state.rail_save(body["context"], body.get("buttons"), reset=body.get("reset") is True)
+        return web.json_response(out, status=status)
+
     async def highway_plot_view(request):
         """Plot a Neutron Highway route with Spansh (in the background: GET /api/highway shows how it went)."""
         body = await json_object(request)
@@ -10586,6 +10723,9 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/copilot", copilot_view)
     app.router.add_post("/api/backup", backup_view)
     app.router.add_get("/api/highway", highway_view)
+    app.router.add_get("/api/rail", rail_view)
+    app.router.add_post("/api/rail/press", rail_press_view)
+    app.router.add_post("/api/rail/sets", rail_sets_view)
     app.router.add_get("/api/highway/systems", highway_systems_view)
     app.router.add_get("/api/highway/background", highway_background_view)
     app.router.add_get("/api/regions", regions_view)

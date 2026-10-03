@@ -213,6 +213,14 @@ the same pages in a cockpit layout, here with its first theme, LCARS.
 - **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
   honk, auto-target's switch and test, backups and the voice settings stay on the PC.
 - **Settings** (bottom right) has the theme, a dim switch, the screen size in CSS pixels and Sign out.
+- **The control rail** on the right: up to eight game buttons for where you are (ship, SRV, Nomad, fighter, on
+  foot), each pressing that control's keyboard binding on the PC once. The defaults are landing gear, cargo scoop,
+  night vision, ship lights, flight assist, silent running, hardpoints and analysis mode; the SRV, the Nomad and
+  fighters, and on foot have their own. A button shows the game's state (Status.json), SENT until the game confirms
+  a press, and "not confirmed" if it doesn't. A control with no keyboard binding says "bind a key" (give it a second,
+  keyboard binding in Elite's controls). Edit chooses, renames and orders each set (stored on the PC). The rail
+  presses keys only while the game runs, through auto honk's virtual keyboard (Linux), and never while auto honk or
+  auto-target is pressing; one tap per button, never a sequence.
 
 Outrider must listen on your network for this (`[server] host = "0.0.0.0"`). With `[server] password` set, the tablet
 signs in once: see "Opening the page from another device" under Settings. The fonts are Antonio and Barlow Condensed,

@@ -3377,6 +3377,32 @@ const settle = async maxMs => {
       lastInputAt = Date.now(); o.push(pageStampTick(), n);   // touched just now: waits
       lastInputAt = 0; o.push(pageStampTick(), n);   // a quiet minute: reloads
       data.page_stamp = keep; return JSON.stringify(o); })()`));
+    // the rail (phase 4): drawn from the payload's rail; a press is SENT until Status.json shows the change, "not
+    // confirmed" when it does not in time; an unbound button is disabled; no link: every button says so
+    got.rail = await (async () => {
+      const real = tw.fetch; const sent = [];
+      tw.fetch = (u, o) => { if (/api\/rail\/press/.test(String(u))) { sent.push(JSON.parse(o.body)); return Promise.resolve({ok: true, status: 200, headers: {get: () => "application/json"}, json: async () => ({ok: true})}); } return real(u, o); };
+      const o = JSON.parse(tw.eval(`(() => {
+        const B = (id, state, bound = true) => ({id, label: id, action: "A_" + id, action_label: "A " + id, bound, keys: bound ? "K" : null,
+          why: bound ? null : "no binding", state, reported: true, states: 2, amber: id === "silent"});
+        data.rail = {context: "ship", label: "Ship controls", why: null, can_press: true, why_not: null, confirm_s: 4, max: 8,
+                     buttons: [B("gear", "off"), B("nv", "off", false), B("silent", "off")]};
+        tabDrawRail();
+        const q = id => document.querySelector('#tabRail [data-rail="' + id + '"]');
+        return JSON.stringify([document.querySelectorAll("#tabRail .tb-rb").length, q("gear").className, q("nv").disabled, q("silent").classList.contains("amber"),
+                               document.getElementById("tabRailTitle").textContent]); })()`));
+      tw.eval(`document.querySelector('#tabRail [data-rail="gear"]').click()`);
+      await sleep(50);
+      o.push(tw.eval(`document.querySelector('#tabRail [data-rail="gear"]').className`), JSON.stringify(sent));
+      o.push(tw.eval(`data.rail.buttons[0].state = "on"; tabDrawRail(); document.querySelector('#tabRail [data-rail="gear"]').className`));   // confirmed
+      o.push(tw.eval(`TB.railPending.gear = {ctx: "ship", before: "on", until: Date.now() + 4000}; tabRailTick(Date.now() + 5000); tabDrawRail();
+                      document.querySelector('#tabRail [data-rail="gear"]').className`));   // never confirmed
+      o.push(tw.eval(`TB.railPending = {}; disconnected = "12:00"; tabDrawRail(); const t = document.querySelector('#tabRail [data-rail="gear"]').className;
+                      disconnected = null; data.rail = {context: null, why: "docked", buttons: []}; tabDrawRail();
+                      [t, document.getElementById("tabRailSub").textContent, document.querySelectorAll("#tabRail .tb-rb").length].join("|")`));
+      tw.fetch = real;
+      return o;
+    })();
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3396,6 +3422,8 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
+      rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
+             "tb-rb nolink|no rail: docked|0"],
       reload: [true, true, false, false, 0, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',

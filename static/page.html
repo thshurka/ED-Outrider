@@ -437,7 +437,11 @@
   <div class="tb-navfill" aria-hidden="true"></div>
 </nav>
 <div id="tabMain" class="tb-main" hidden></div>
-<aside id="tabRail" class="tb-rail" aria-label="Game controls" hidden><div class="tb-railnote">Game controls<br><span>come with the next phase</span></div></aside>
+<aside id="tabRail" class="tb-rail" aria-label="Game controls" hidden>
+  <div class="tb-railhead"><div><div id="tabRailTitle" class="tb-railtitle">Game controls</div><div id="tabRailSub" class="tb-railsub"></div></div>
+    <button type="button" id="tabRailEditBtn" class="tb-btn" title="choose this rail's buttons">Edit</button></div>
+  <div id="tabRailList" class="tb-raillist"></div>
+</aside>
 <div id="tabFoot" class="tb-foot" hidden>
   <div class="tb-corner" aria-hidden="true"></div>
   <div class="tb-bar">
@@ -454,6 +458,16 @@
     <div class="tb-sheethead"><h2 id="tabSheetTitle"></h2><button value="close" class="tb-btn" aria-label="close">✕</button></div>
     <dl id="tabSheetList" class="tb-facts"></dl>
     <div id="tabSheetActs" class="tb-acts"></div>
+  </form>
+</dialog>
+<dialog id="tabRailEdit" class="tb-sheet" aria-labelledby="tabRailEditTitle">
+  <form method="dialog">
+    <div class="tb-sheethead"><h2 id="tabRailEditTitle">Rail buttons</h2><button value="close" class="tb-btn" aria-label="close">✕</button></div>
+    <label class="tb-row">For <select id="tabRailCtx"></select></label>
+    <ol id="tabRailRows" class="tb-railrows"></ol>
+    <div class="tb-row"><select id="tabRailAdd" aria-label="a button to add"></select><button type="button" id="tabRailAddBtn" class="tb-btn">Add</button></div>
+    <div class="tb-acts"><button type="button" id="tabRailSave" class="tb-btn">Save</button><button type="button" id="tabRailReset" class="tb-btn">Back to the defaults</button></div>
+    <p class="tb-note" id="tabRailNote">One key per button, up to 8, stored on the PC. A button needs a keyboard binding in your controls preset.</p>
   </form>
 </dialog>
 <dialog id="tabSettings" class="tb-sheet" aria-labelledby="tabSetTitle">

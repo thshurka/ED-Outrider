@@ -2,6 +2,17 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · The tablet's control rail (tablet plan, phase 4)
+- On the tablet's right: up to eight game buttons for where you are (ship, SRV, Nomad, fighter, on foot), each
+  pressing that control's keyboard binding on the PC once. A button shows the game's state from Status.json
+  (headlights OFF, ON or HIGH), SENT until the game confirms a press, and "not confirmed" if it doesn't. An unbound
+  control says which binding to add. Silent running has an amber ring.
+- The agreed default sets, editable on the tablet (choose, rename, order; stored on the PC).
+- Presses only while the game runs, through auto honk's virtual keyboard; never while auto honk or auto-target is
+  pressing, never with --simulate.
+- Bindings for SRV and on-foot controls are now read from those presets (StartPreset.4.start's third and fourth
+  lines), not the ship's.
+
 ## 2026-10-03 · Ask an AI about your game: the MCP bridge (tablet plan, phase 2)
 - `python3 -m outrider.mcp`: an AI client (Claude Code, the Claude desktop app) can ask your running Outrider
   questions through ten read-only tools: current status, this system, nearby systems, the nearest unvisited

@@ -51,6 +51,11 @@ upstream project's choices, not rules of the game.
 - **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in
   `static/fonts/` with their licences. Fonts like "Euro Caps" or LCARS fan fonts have unclear redistribution terms:
   the player may drop one into `data/fonts/` (served at `/userfonts/`), and the theme uses it first.
+- **Outrider presses keys for three things now:** auto honk, auto-target and the tablet's rail. The rail is one key
+  per tap, only for signed-in devices (or this PC), only while the game is live, never while one of the other two is
+  pressing, and only the binding the game itself has for that control; there are no macros or sequences on it (Board
+  ship and Disembark were dropped for that reason). Status.json is the only confirmation; a press that is not
+  confirmed says so rather than guessing.
 - **The MCP bridge reads the running server, never the database** (PLAN-mcp): every summary lives in `State`, so the
   bridge asks the read-only GET routes over 127.0.0.1 and reuses them; the password never applies to it (loopback).
   Its tools are defined once in `outrider/tools.py`, so the voice's AI layer offers the same ones. MCP's stdio
