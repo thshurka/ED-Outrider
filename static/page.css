@@ -339,6 +339,7 @@ th[data-sort] { cursor: pointer; user-select: none; }
 th[data-sort]:hover { color: var(--text); }
 th[data-sort].on { color: var(--accent); }
 th[data-sort].on::after { content: " ▾"; }
+th[data-sort].on.rev::after { content: " ▴"; }
 .ovmenu { position: relative; font-size: 13px; }
 .ovmenu summary { cursor: pointer; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
 .ovmenu summary::-webkit-details-marker { display: none; }

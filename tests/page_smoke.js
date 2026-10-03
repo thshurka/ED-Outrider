@@ -2860,7 +2860,8 @@ const settle = async maxMs => {
   {
     const w = dom.window, before = errors.length;
     const got = w.eval(`(() => {
-      const realSpeak = speak, realToast = toast, realNow = Date.now, said = [], f = [speechOn, isSpeaker];
+      const realSpeak = speak, realToast = toast, realNow = Date.now, said = [], f = [speechOn, isSpeaker], realLost = sayLost;
+      sayLost = () => { said.push("lost"); return "piper"; };   // played from the line made in advance, never speak()
       const keep = [disconnected, disconnectedAt, lostSaid];
       let t = realNow(); Date.now = () => t;
       speak = (text, o) => said.push(text + " [" + o.kind + "]"); toast = () => {}; speechOn = isSpeaker = true;
@@ -2868,10 +2869,13 @@ const settle = async maxMs => {
       const early = said.length;
       t += 25000; setConnected(false); t += 5000; setConnected(false); // past it: said once
       setConnected(true);
-      speak = realSpeak; toast = realToast; Date.now = realNow; [speechOn, isSpeaker] = f;
+      speak = realSpeak; toast = realToast; Date.now = realNow; [speechOn, isSpeaker] = f; sayLost = realLost;
+      // with no line made in advance and no audio allowed: nothing robotic, nothing at all
+      const lb = lostLine.buf; lostLine.buf = null; const spoke = []; speak = t => spoke.push(t);
+      speechOn = isSpeaker = true; const how = sayLost(); speak = realSpeak; [speechOn, isSpeaker] = f; lostLine.buf = lb;
       [disconnected, disconnectedAt, lostSaid] = keep; setConnected(true);
-      return JSON.stringify([early, said]); })()`);
-    const want = JSON.stringify([0, ["Lost contact with Outrider: no alerts until it is back. [connection]", "Back in contact with Outrider. [connection]"]]);
+      return JSON.stringify([early, said, spoke.length, how !== "piper"]); })()`);
+    const want = JSON.stringify([0, ["lost", "Back in contact with Outrider. [connection]"], 0, true]);
     const goodS13 = got === want && errors.length === before;
     allOk = allOk && goodS13;
     console.log(goodS13 ? "OK" : "FAIL", "| lost contact |", goodS13 ? "said once after the grace, and again when back" : got, errors.slice(before));
@@ -2930,6 +2934,11 @@ const settle = async maxMs => {
       // S19: the sort key and the order it gives
       const h0 = hereData, s0 = sortKeys.here;
       o.sortTh = [...document.querySelectorAll("#hereTable th[data-sort]")].map(t => t.dataset.sort);
+      // a click sorts, a second reverses, a third goes back to the default (Max)
+      const dth = document.querySelector('#hereTable th[data-sort="dist"]'), seq = [];
+      sortKeys.here = "max";
+      for (let i = 0; i < 3; i++) { dth.click(); seq.push(sortKeys.here + (dth.classList.contains("rev") ? " rev" : "")); }
+      o.sortCycle = seq;
       // S41
       const lh = lastHeard, dc = disconnected;
       lastHeard = Date.now() - 2000; disconnected = null; o.link = [linkState().text, linkState().state];
@@ -2956,7 +2965,7 @@ const settle = async maxMs => {
                 titleCutLines(); o.cut = !!ln.title && ln.dataset.autoTitle === "1" && ln.textContent.includes(ln.title.slice(0, 5)); }
       sortKeys.here = s0; hereData = h0;
       return JSON.stringify(o); })()`));
-    const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], link: ["linked · 2 s", "linked"],
+    const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], sortCycle: ["dist", "-dist rev", "max"], link: ["linked · 2 s", "linked"],
       stale: ["stale · 48 s", "stale"], none: ["no link · retrying since 14:02", "none"], pill: true,
       chips: ["Alerts", "Voice", "Auto honk", "Sounds", "Thresholds", "Settings", "Spoken lines"],
       autoSmall: true, autoBig: false, line: true, cut: true};

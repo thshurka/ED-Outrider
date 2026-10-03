@@ -2455,8 +2455,11 @@ function render() {
     (data.boost ? ` <b class="boosted" title="jet-cone charge: your next jump reaches this far">boosted ×${data.boost} → ${jr.toFixed(0)} ly</b>` : "") : "") +
     (prev && p ? `${jr ? " · " : ""}came from ${esc(prev.name)} (${Math.hypot(prev.x - p.x, prev.y - p.y, prev.z - p.z).toFixed(1)} ly)` : "");
   document.body.classList.toggle("disconnected", !!disconnected);
-  document.querySelectorAll("table th[data-sort]").forEach(b =>
-    b.classList.toggle("on", b.dataset.sort === sortKeys[SORT_TABLES[b.closest("table").id]]));
+  document.querySelectorAll("table th[data-sort]").forEach(b => {   // "-key": that column reversed (Here's table)
+    const k = String(sortKeys[SORT_TABLES[b.closest("table").id]] || "");
+    b.classList.toggle("on", b.dataset.sort === k.replace(/^-/, ""));
+    b.classList.toggle("rev", k === "-" + b.dataset.sort);
+  });
   const t = data.target, tEl = document.getElementById("target");
   if (!t) tEl.innerHTML = "";
   else {
@@ -2757,12 +2760,13 @@ function renderHere() {
   document.getElementById("hereMaxTh").title = maxBonus()
     ? "the most it could pay once scanned, mapped and sampled, including first-discovery, first-mapped and first-footfall (×5 bio) bonuses where they apply"
     : "the most it could pay once scanned, mapped and sampled, with no bonuses: plain Universal Cartographics and Vista Genomics payouts";
-  document.getElementById("hereMaxTh").title += " (click to sort, the most first)";
+  document.getElementById("hereMaxTh").title += " (click to sort, the most first; again to reverse; the default order)";
   // the list's order (review S19): Max (the default), Now, distance or gravity; a body with no figure goes last. Bio
   // has no single value to sort by (and sorting by guesses would present them as facts). Tree and text keep the orbits.
-  const hs = sortKeys.here || "max", asc = hs === "dist" || hs === "grav";
+  const hs0 = sortKeys.here || "max", rev = hs0.startsWith("-"), hs = hs0.replace(/^-/, "");
+  const asc = (hs === "dist" || hs === "grav") !== rev;   // reversed: the other way round; no figure still goes last
   const sortVal = {dist: b => b.dist_ls, grav: b => b.gravity, now: b => b.value_now || null}[hs] || (b => maxOf(b) || null);
-  const byMax = hs === "max" && maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => { const x = sortVal(a), y = sortVal(b);
+  const byMax = hs0 === "max" && maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => { const x = sortVal(a), y = sortVal(b);
     return x == null ? (y == null ? 0 : 1) : y == null ? -1 : asc ? x - y : y - x; });
   const fk = focusKey("hereRows");
   document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
@@ -5037,7 +5041,10 @@ pollSearch();  // show the last search's results after a reload
 
 document.querySelectorAll("th[data-sort]").forEach(b => b.onclick = () => {
   const t = SORT_TABLES[b.closest("table").id]; if (!t) return;
-  sortKeys[t] = b.dataset.sort; store.set("sorts", sortKeys);
+  // Here's table: a second click on the same heading reverses it, a third goes back to the default (Max, most first)
+  const k = b.dataset.sort, cur = sortKeys[t];
+  sortKeys[t] = t !== "here" ? k : cur === k ? "-" + k : cur === "-" + k ? "max" : k;
+  store.set("sorts", sortKeys);
   if (t === "firsts") renderFirsts();
   if (t === "here" && hereData) renderHere();
   render();
@@ -5387,6 +5394,7 @@ function copilotDo(cp) {
 }
 function onData() {
   loadOwnSounds();   // your own sound files, decoded before an alert needs one
+  prepareLostLine();   // "lost contact", made in your voice while Outrider can still make it
   drawTts();
   const sv = data.speech && data.speech.version;
   if (sv && sv !== speechLib.version && sv !== speechLibWanted) { speechLibWanted = sv; loadSpeechLib(); }
@@ -6415,9 +6423,38 @@ function drawLinkPill() {
 }
 setInterval(drawLinkPill, 1000);
 // Outrider gone quiet (stopped, crashed, the network down): after LOST_SAY_MS without it, the speaking window says
-// so once, in the browser's own voice (Piper is the server's), and again when it is back (review S13). A restart of
-// Outrider is over well within the grace. The journal-silence half was left out: the game is often quiet that long.
-const LOST_SAY_MS = 30000;
+// so once, and again when it is back (review S13). A restart of Outrider is over well within the grace. The
+// journal-silence half was left out: the game is often quiet that long.
+// Piper is the server's, so the "lost" line is made in advance while the link is up (lostLine: your voice and speed)
+// and played from the page; without it, the alert sound, never the browser's robotic voice. "Back" is said as usual.
+const LOST_SAY_MS = 30000, LOST_TEXT = "Lost contact with Outrider: no alerts until it is back.";
+const lostLine = {key: null, buf: null};
+async function prepareLostLine() {
+  const t = data && data.tts, ctx = actx;
+  if (!t || t.engine !== "piper" || !ctx) return;
+  const speed = speechSpeed(), key = `${t.voice || ""}|${speed}`;
+  if (lostLine.key === key) return;
+  lostLine.key = key;
+  try {
+    const r = await fetch(`api/say?text=${encodeURIComponent(spokenText(LOST_TEXT))}&speed=${speed}`);
+    if (!r.ok) throw new Error(r.status);
+    lostLine.buf = await ctx.decodeAudioData(await r.arrayBuffer());
+  } catch { lostLine.key = null; }   // asked again with the next payload
+}
+// -> what was played: "piper", "sound" or "" (speech off, another window speaks, or the audio not allowed yet)
+function sayLost() {
+  toast(LOST_TEXT);
+  if (!(speechOn && isSpeaker)) return "";
+  const ctx = actx;
+  if (lostLine.buf && ctx && ctx.state === "running") {
+    const src = ctx.createBufferSource(), vol = ctx.createGain(); src.buffer = lostLine.buf;
+    vol.gain.value = outVolume(); src.connect(vol); vol.connect(ctx.destination); src.start();
+    addCaption(LOST_TEXT);
+    return "piper";
+  }
+  if (soundOn && ctx && ctx.state === "running") { playHere("alert"); return "sound"; }
+  return "";
+}
 function sayConnection(text) {
   toast(text);
   if (speechOn && isSpeaker) speak(text, {kind: "connection"});
@@ -6434,7 +6471,7 @@ function setConnected(ok) {
     if (data) render();
   }
   else if (!ok && !lostSaid && Date.now() - disconnectedAt >= LOST_SAY_MS) {
-    lostSaid = true; sayConnection("Lost contact with Outrider: no alerts until it is back.");
+    lostSaid = true; sayLost();
   }
 }
 // A payload the page fails to draw is not a lost connection: the error shows in the Data tile, and polling

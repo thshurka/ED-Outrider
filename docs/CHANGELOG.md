@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Here's sort reverses; "lost contact" in your own voice
+- Here's Dist, Grav, Now and Max headings: a second click reverses the order (▴), a third goes back to the default,
+  Max (found in game).
+- "Lost contact with Outrider" plays in your Piper voice: the page makes the line in advance while Outrider can, and
+  plays it when the link drops; without it, the alert sound, never the browser's robotic voice (found in game).
+
 ## 2026-10-03 · Docs and screenshots refreshed; the Rhino no longer forgotten at launch
 - Launching the Rhino no longer loses track of it: Status.json written while the SRV deploys from the bay lacks the
   SRV flag, and a fallback took that for "back in the ship", so the co-pilot button gave the status report instead
