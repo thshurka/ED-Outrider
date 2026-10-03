@@ -49,6 +49,11 @@ async function apiJson(url, opts) {
   if (ct.includes("application/json")) { const j = await r.json(); if (!r.ok && j && !j.error) j.error = `HTTP ${r.status}`; return j; }
   return {error: r.ok ? "unexpected non-JSON response" : `HTTP ${r.status} — see the terminal`};
 }
+// Only the newest request of a kind may change the page: an older answer (or error) arriving late, after a newer
+// request went out, is dropped. const g = newRequest("hwy"); ... await ...; if (!isNewest("hwy", g)) return;
+const REQ_GEN = {};
+const newRequest = kind => (REQ_GEN[kind] = (REQ_GEN[kind] || 0) + 1);
+const isNewest = (kind, g) => REQ_GEN[kind] === g;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 // ---- Compact forms for the screen tables (never for speech or notifications) ----
 // A table that does not fit its box gets the class compact (and, if that is not enough, compact2 too: see fitTable).
@@ -2452,6 +2457,7 @@ document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
   if (b.dataset.view !== view && pinnedSystem) { pinnedSystem = null; if (selectedBody) closeBody(); }  // a pin belongs to the view it was made in
   if (b.dataset.view === "now" && view !== "now") viewBeforeNow = view;
   if (b.dataset.view === "hist" && view !== "hist") histKey = null;   // fresh numbers each time the tab opens
+  if (b.dataset.view === "hwy" && view !== "hwy") H.key = null;   // the fleet, ship and cargo afresh (review F3)
   keepPanes(() => { view = b.dataset.view; store.set("view", view); render(); });
 });
 
@@ -3082,7 +3088,11 @@ async function loadLeft() {
   const key = `${lbRadius.value}|${data && data.scan_version}|${data && data.position && data.position.id64}`;
   if (key === leftKey) return renderLeft();
   leftKey = key;
-  try { leftData = await apiJson(`api/left?radius=${lbRadius.value}`); } catch (err) { leftData = {error: err.message}; }
+  const g = newRequest("left");
+  let d;
+  try { d = await apiJson(`api/left?radius=${lbRadius.value}`); } catch (err) { d = {error: err.message}; }
+  if (!isNewest("left", g)) return;   // a newer radius was asked for meanwhile (Codex F11)
+  leftData = d;
   if (leftData.error) leftKey = null;
   renderLeft();
 }
@@ -3912,14 +3922,19 @@ hEl("hwyLine").addEventListener("click", e => {   // the name copies (the page's
   if (e.target.closest(".copy[data-name]")) return;
   document.querySelector('[data-view="hwy"]').click();
 });
-const hwyKey = () => { const s = data && data.highway;
-  return JSON.stringify(s ? [s.id, s.index, s.at, s.furthest, s.off_route, s.complete] : null); };
+// what the tab shows from api/highway: the route's progress, and for the plot form the current ship, its Loadout and
+// the cargo aboard (a ship swap, a refit or new cargo refetches: review F3)
+const hwyKey = () => { const s = data && data.highway, sh = data && data.ship, fm = data && data.fuel && data.fuel.model;
+  return JSON.stringify([s ? [s.id, s.index, s.at, s.furthest, s.off_route, s.complete] : null,
+                         sh ? [sh.ship_id, sh.ts] : null, fm ? fm.cargo : null]); };
 async function loadHwy(force = false) {
   const key = hwyKey();
   if (!force && (key === H.key || H.loading)) return renderHwy();
   H.key = key; H.loading = true;
+  const g = newRequest("hwy");
   let d;
   try { d = await apiJson("api/highway"); } catch (err) { d = {error: err.message}; }
+  if (!isNewest("hwy", g)) return;   // a newer request went out meanwhile: its answer is the one to show (Codex F11)
   H.loading = false;
   if (d.error) { H.error = d.error; H.key = null; }
   else { H.error = null; H.data = d; }
@@ -4284,14 +4299,21 @@ const HWY_LANDMARKS = [["Sol", 0, 0], ["Sagittarius A*", 25.21875, 25899.96875],
                        ["Beagle Point", -1111.5625, 65269.75]];
 const HWY_LAYER_ZOOM = 1.6, HWY_LAYER_MAX = 4096;
 const hwyLayers = Object.assign({regions: true, labels: true, image: true}, (v => isObj(v) ? v : {})(store.get("hwyLayers", {})));
-const RG = {data: null, cells: null, segs: null, labels: null, loading: false, failed: false, base: null, layer: null};
+const RG = {data: null, cells: null, segs: null, labels: null, loading: false, failedAt: 0, gone: false, base: null, layer: null};
+const RG_RETRY_MS = 30000;   // a failed fetch (Outrider restarting, a dropped link) is asked again after this (review F14)
 async function loadRegions() {
-  if (RG.data || RG.loading || RG.failed) return;
+  if (RG.data || RG.loading || RG.gone || (RG.failedAt && Date.now() - RG.failedAt < RG_RETRY_MS)) return;
   RG.loading = true;
-  let d;
-  try { d = await apiJson("api/regions"); } catch (err) { d = {error: err.message}; }
+  let d, status = 0;
+  try {
+    const r = await fetch("api/regions");
+    status = r.status;
+    d = await r.json().catch(() => ({error: `HTTP ${status}`}));
+  } catch (err) { d = {error: err.message}; }
   RG.loading = false;
-  if (d.error || !Array.isArray(d.rows) || !(d.size > 0)) { RG.failed = true; return; }
+  if (status === 404) { RG.gone = true; return; }   // no region map on this server (no bio_rules.json): for good
+  if (d.error || !Array.isArray(d.rows) || !(d.size > 0)) { RG.failedAt = Date.now(); return; }
+  RG.failedAt = 0;
   hwyRegionsSet(d);
   drawHwyMap();
 }

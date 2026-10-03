@@ -2576,6 +2576,83 @@ const settle = async maxMs => {
     console.log(goodHW ? "OK" : "FAIL", "| highway tab |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "200 of 400 ahead, done folded and grey, the next highlighted; form from the fleet, range override, plotters' fields; plot body and polled to done; errors; clear; projection; the line in three states with copy", errors.slice(before));
   }
+  // the plot form follows the current ship and cargo (review F3); only the newest answer of a loader counts (Codex F11:
+  // Highway and Left behind); a failed region map is asked again after a back-off, a missing one never (review F14).
+  // Every request is answered here: nothing reaches the server
+  {
+    const w = dom.window, before = errors.length, realFetch = w.fetch, got = {};
+    const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status, headers: {"Content-Type": "application/json"}}));
+    let calls = 0, payload = Object.assign(hwyPayload(null), {ship_id: 7, cargo: 4});
+    w.fetch = (u, o) => { const url = String(u);
+      if (url.startsWith("api/highway")) { calls++; return json(payload); }
+      return realFetch(u, o); };
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    w.eval(`H.shipSel = null; H.cargoAuto = true; H.rangeAuto = true; H.fleetSig = null; H.key = null; data.highway = null;
+      data.ship = Object.assign({}, data.ship, {ship_id: 7, ts: "2026-09-20T19:00:05Z"});
+      data.fuel = Object.assign({}, data.fuel, {model: Object.assign({}, data.fuel && data.fuel.model, {cargo: 4})});
+      view = "overview"; render()`);
+    const form = () => [d.getElementById("hwyShip").value, d.getElementById("hwyCargo").value];
+    d.querySelector('[data-view="hwy"]').click(); await settle(1500);
+    got.first = [calls, ...form()];
+    // a ship swap and 60 t loaded while on the tab: the payload says so, the next render refetches, the form follows
+    payload = Object.assign(hwyPayload(null), {ship_id: 3, cargo: 60});
+    w.eval(`data.ship = Object.assign({}, data.ship, {ship_id: 3, ts: "2026-10-03T09:00:00Z"}); data.fuel.model.cargo = 60; render()`);
+    await settle(1500);
+    got.swapped = [calls, ...form()];
+    // leaving the tab and coming back asks again
+    d.querySelector('[data-view="overview"]').click(); await settle(500);
+    d.querySelector('[data-view="hwy"]').click(); await settle(1500);
+    got.reentered = calls;
+    // an older Highway answer arriving after a newer one changes nothing (the route was cleared meanwhile)
+    let release, n = 0; const held = new Promise(r => { release = r; });
+    w.fetch = (u, o) => { const url = String(u);
+      if (url.startsWith("api/highway")) { n++; return n === 1 ? held.then(() => json(hwyPayload(hwyFixture()))) : json(hwyPayload(null)); }
+      return realFetch(u, o); };
+    w.eval("H.key = null; H.loading = false; loadHwy(true); loadHwy(true)");
+    await settle(800);
+    release(); await sleep(300);
+    got.hwyLate = w.eval("[H.data && H.data.route === null, H.loading]");
+    // the same for Left behind: 200 ly asked after 100 ly, the 100 ly answer arriving last
+    let releaseL, m = 0; const heldL = new Promise(r => { releaseL = r; });
+    const leftAnswer = radius => ({radius, systems: [], more: 0});
+    w.fetch = (u, o) => { const url = String(u);
+      if (url.startsWith("api/left")) { m++; const radius = Number(new URL(url, "http://x/").searchParams.get("radius"));
+        return m === 1 ? heldL.then(() => json(leftAnswer(radius))) : json(leftAnswer(radius)); }
+      return realFetch(u, o); };
+    w.eval(`leftKey = null; lbRadius.value = "100"; loadLeft(); lbRadius.value = "200"; loadLeft()`);
+    await settle(800);
+    releaseL(); await sleep(300);
+    got.leftLate = w.eval("leftData && leftData.radius");
+    // the region map: a failure is asked again after the back-off (not before); a 404 is for good
+    let asks = 0, mode = "fail";
+    w.fetch = (u, o) => { const url = String(u);
+      if (url.startsWith("api/regions")) { asks++;
+        if (mode === "fail") return Promise.reject(new TypeError("Failed to fetch"));
+        if (mode === "404") return json({error: "no bio_rules.json"}, 404);
+        return realFetch(u, o); }
+      return realFetch(u, o); };
+    w.eval("RG.data = null; RG.failedAt = 0; RG.gone = false; RG.loading = false");
+    await w.eval("loadRegions()");
+    mode = "ok";
+    await w.eval("loadRegions()");   // inside the back-off: not asked
+    got.backoff = [asks, w.eval("!!RG.data")];
+    w.eval("RG.failedAt = Date.now() - RG_RETRY_MS - 1");
+    await w.eval("loadRegions()");
+    got.retried = [asks, w.eval("!!RG.data")];
+    w.eval("RG.data = null; RG.failedAt = 0"); mode = "404"; asks = 0;
+    await w.eval("loadRegions()"); w.eval("RG.failedAt = 0"); await w.eval("loadRegions()");
+    got.gone = [asks, w.eval("RG.gone")];
+    w.eval("RG.gone = false; RG.data = null"); mode = "ok"; await w.eval("loadRegions()");
+    w.fetch = realFetch;
+    w.eval(`H.key = null; H.shipSel = null; data.highway = null; view = "overview"; render()`);
+    const want = {first: [1, "7", "4"], swapped: [2, "3", "60"], reentered: 3, hwyLate: [true, false], leftLate: 200,
+                  backoff: [1, false], retried: [2, true], gone: [1, true]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const good = !bad.length && errors.length === before;
+    allOk = allOk && good;
+    console.log(good ? "OK" : "FAIL", "| highway form and late answers |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "the form follows a ship swap and new cargo; an older Highway or Left answer is dropped; the region map retries after a failure, never after a 404", errors.slice(before));
+  }
   // the Highway tab's auto-target box: the toggle and the delay (POSTed), "test now" with its countdown and a refusal in
   // its words, the last result, missing bindings, the steps. Every request is answered here: nothing reaches the server
   {

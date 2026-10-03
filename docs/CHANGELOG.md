@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Highway page state and requests (fix plan, batch 2)
+- The Highway plot form follows the current ship, its Loadout and the cargo aboard: it used to keep its first
+  answer and plot with the old ship and cargo after a swap or new cargo (review F3, Codex F4). Opening the tab asks
+  again.
+- An older Highway or Left behind answer arriving after a newer one is dropped (a cleared route could come back, a
+  smaller radius could replace a larger one): a small newest-request guard (Codex F11).
+- A failed region-map fetch is asked again after 30 s instead of never; only a missing map (404) is final (review
+  F14, Codex F12).
+
 ## 2026-10-03 · Highway data fixes (fix plan, batch 1)
 - A ship whose Loadout's MaxJumpRange leaves out the Guardian booster (booster off, or an outfitting Loadout) keeps
   its real FSD optimal mass: the exact plotter planned about 1.5x the real fuel per jump and too many refuel stops

@@ -146,6 +146,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   `scrollMark`/`keepPlace` (rows added above) and `paneOf(el)`, never `window.scrollTo`/`scrollIntoView` directly;
   size things to their box in app mode, not to `innerHeight` (only Now and page mode use the window). App-mode CSS is
   the `body.app` block at the end of `page.css`; below the size nothing of it applies, so check both.
+- **Loaders that can overlap** (a forced refetch, a new radius while the last answer is still on its way) take a
+  `newRequest(kind)` token and drop their answer unless `isNewest(kind, token)`: a late older answer must never
+  overwrite a newer one (`loadHwy`, `loadLeft`).
 - **Compact tables.** The tables in `FIT_TABLES` get `compact` (then `compact2`) when they do not fit their box
   (`fitTable`, decided by `compactLevel` from the min-content width at each level; ResizeObserver plus a
   MutationObserver on the rows). A cell holds both forms: `dual(full, short, {s2})` / `sfText(kind, text)` give
