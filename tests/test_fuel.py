@@ -8,6 +8,7 @@ from support import (  # also puts the repository root on sys.path
     MANDALAY, MANDALAY_JUMPS,
 )
 import ed_outrider  # noqa: E402
+import outrider.fsd  # noqa: E402
 
 
 class BatchDFuel(unittest.TestCase):
@@ -44,7 +45,7 @@ class BatchDFuel(unittest.TestCase):
         for d, used, left, cargo in self.PANTHER_JUMPS:
             self.assertAlmostEqual(ed_outrider.hop_fuel(p, d, p["unladen"] + left + used + cargo) / used, 1, delta=0.01)
         # a wrong exponent would not fit: at p 2.30 the estimates drift with the distance
-        e = ed_outrider._fit_estimates(m, self.MANDALAY_JUMPS, 2.30)
+        e = outrider.fsd._fit_estimates(m, self.MANDALAY_JUMPS, 2.30)
         self.assertGreater((max(e) - min(e)) / min(e), 0.3)
         # an engineered drive that says its MaxFuelPerJump is taken as said
         self.assertEqual(ed_outrider.fuel_model(dict(self.MANDALAY, max_fuel=6.1), self.MANDALAY_JUMPS)["max_fuel"], 6.1)
@@ -198,7 +199,7 @@ class ReviewFuel(unittest.TestCase):
 
     # ---- R3: every drive's power constant, the Mk II's own included ----
     def test_power_constant_per_drive(self):   # R3
-        p = ed_outrider.fsd_power
+        p = outrider.fsd.fsd_power
         self.assertEqual(p(self.NX), 2.5025)
         self.assertEqual(p({"fsd": "int_hyperdrive_overcharge_size8_class5", "fsd_size": 8}), 2.90)
         self.assertEqual(p({"fsd": "int_hyperdrive_overcharge_size8_class1", "fsd_size": 8}), 2.90)

@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · The drive maths and the Highway's helpers in their own modules (fix plan, batch 3)
+- outrider/fsd.py: the frame shift drive's maths (drive tables, range, fuel per jump, the fuel model, a fleet ship's
+  plotter inputs, the conservative range); outrider/highway.py: the route helpers, HighwayError and the desktop
+  clipboard; outrider/core.py: the shared timestamp helpers. ed_outrider.py imports them (about 400 lines lighter).
+- No behaviour change: the 533 tests pass unchanged (four test references now point at outrider.fsd). The Highway's
+  state and auto-target stay in ed_outrider.State, where verify.sh's offline patches reach their constants.
+
 ## 2026-10-03 · Highway page state and requests (fix plan, batch 2)
 - The Highway plot form follows the current ship, its Loadout and the cargo aboard: it used to keep its first
   answer and plot with the old ship and cargo after a swap or new cargo (review F3, Codex F4). Opening the tab asks

@@ -153,6 +153,15 @@ import outrider.speech     # the words for spoken alerts, per personality (resou
 import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
 import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
+from outrider.core import iso_ts, ts_seconds   # journal timestamps
+from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
+    FSD_RANGE_MODS, GUARDIAN_BOOST, conservative_optimal_mass, conservative_range, fleet_figures, fleet_range, fsd_range,
+    fsd_supercharge, fuel_model, hop_fuel, jumps_left, max_fuel_for_jump,
+)
+from outrider.highway import (   # the Neutron Highway's route helpers and the desktop clipboard
+    HIGHWAY_BG_TYPES, Clipboard, HighwayError, highway_bg_file, highway_match, highway_refuel_in, highway_rows,
+    highway_text,
+)
 try:  # one-line summaries of every journal event, for the Log view
     import outrider.log
 except ImportError:
@@ -200,19 +209,13 @@ AUTOTARGET_HONK_WAIT = 60       # s an auto-target waits for an auto honk on the
 # carry script). The extent [xmin, xmax, zmin, zmax] in ly says where its edges are in the galaxy's plane; the
 # default is the bounds the community's top-down galaxy images use (EDAstro's charts, the galaxy map texture):
 # X -45000 to 45000, Z -20000 to 70000 (40 ly per pixel at 2250 px, Sol at pixel 1125, 1750).
-HIGHWAY_BG_TYPES = {".png": ("image/png", (b"\x89PNG\r\n\x1a\n",)), ".jpg": ("image/jpeg", (b"\xff\xd8\xff",)),
-                    ".jpeg": ("image/jpeg", (b"\xff\xd8\xff",)), ".gif": ("image/gif", (b"GIF87a", b"GIF89a")),
-                    ".webp": ("image/webp", (b"RIFF",))}
 HIGHWAY_BG_EXTENT = [-45000.0, 45000.0, -20000.0, 70000.0]
 HIGHWAY_BG_OPACITY = 0.6
-HIGHWAY_BG_MAX_BYTES = 64 * 1024 * 1024   # a bigger file is refused (a galaxy image is a few MB)
 HIGHWAY_POLL_S = 1.5        # s between two asks for a plot job's result (Spansh politeness: 1-2 s)
 HIGHWAY_PLOT_TIMEOUT = 180  # s a plot may take before we give up on it
 HIGHWAY_AHEAD = 200         # route rows GET /api/highway lists ahead of you...
 HIGHWAY_DONE = 20           # ...and done rows above them (the most recent)
-HIGHWAY_REFUEL_WARN = 5     # the arrival line says "with three jumps left to refuel" this many jumps ahead or fewer
 HIGHWAY_LIVE_S = 120        # s: an arrival or a supercharge older than this is catch-up (no clipboard, no auto-target)
-HIGHWAY_MAX_ROWS = 50000    # a route longer than this is refused (Spansh's own cap is far lower)
 HIGHWAY_SUGGEST_CACHE = 200  # system-name suggestions kept (per typed prefix)
 HIGHWAY_HEAVY_SLACK = 0.5    # t: fuel over the most the next jump allows by more than this is "too heavy" (Spansh plans
 #                              some jumps right at the limit, so a hair over is the model's error, not yours)
@@ -999,44 +1002,6 @@ SCOOPABLE = set("OBAFGKM")
 ON_FOOT_DOCKED = (1 << 3) | (1 << 13) | (1 << 14)   # Status.json Flags2: on foot in a station, hangar, social space
 HEAT_QUIET = 30            # s: at most one heat alert in this long
 FUEL_HISTORY = 20          # recent jumps used to estimate fuel per jump
-# The fuel model (fuel_model): a jump of d ly burns MaxFuelPerJump × (d / range at this mass)^p, where p is the game's
-# power constant for the drive's size (standard and SCO drives alike, every class), and a Guardian booster adds its
-# light years. The Caspian Explorer's Mk II SCO drive has a p of its own. Checked 2026-09-30 against EDCD
-# coriolis-data (modules/standard/frame_shift_drive.json "fuelpower", modules/internal/guardian_fsd_booster.json
-# "jumpboost") and EDDiscovery's EliteDangerousCore (FrontierData/Items/ModuleList.cs "PowerConstant", which rounds
-# the Mk II's 2.5025 to 2.503). Replayed on the author's journals, 2.5025 fits the Mk II's jumps to within 0.2%
-# (and its 6.8 t MaxFuelPerJump, as both tables say); a size's p fits every other drive there.
-FSD_POWER = {2: 2.00, 3: 2.15, 4: 2.30, 5: 2.45, 6: 2.60, 7: 2.75, 8: 2.90}
-FSD_RANGE_MODS = ("FSDOptimalMass", "MaxFuelPerJump", "Mass")   # engineering modifiers that move the range
-FSD_POWER_ITEM = {"int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii": 2.5025}
-FSD_STANDARD = re.compile(r"int_hyperdrive(?:_overcharge)?_size(\d)_class\d(?:_free)?")   # the size's p holds
-GUARDIAN_BOOST = {1: 4.0, 2: 6.0, 3: 7.75, 4: 9.25, 5: 10.5}
-# The drives' stock figures for Spansh's exact plotter (fleet_figures): (optimal mass t, MaxFuelPerJump t, fuel multiplier)
-# per Loadout item, classes 1-5 being E-A. From EDCD coriolis-data modules/standard/frame_shift_drive.json ("optmass",
-# "maxfuel", "fuelmul"), checked 2026-10-01. The multiplier is the class's linear constant / 1000 (E 11, D 10, C 8, B 10,
-# A 12; SCO drives E 8, D-B 12, A 13). An engineered drive's FSDOptimalMass and MaxFuelPerJump come from its Modifiers.
-FSD_STOCK = {
-    "int_hyperdrive_size{}_class{}": ((0.011, 0.010, 0.008, 0.010, 0.012), {
-        2: ((48, 54, 60, 75, 90), (0.6, 0.6, 0.6, 0.8, 0.9)), 3: ((80, 90, 100, 125, 150), (1.2, 1.2, 1.2, 1.5, 1.8)),
-        4: ((280, 315, 350, 437.5, 525), (2.0, 2.0, 2.0, 2.5, 3.0)), 5: ((560, 630, 700, 875, 1050), (3.3, 3.3, 3.3, 4.1, 5.0)),
-        6: ((960, 1080, 1200, 1500, 1800), (5.3, 5.3, 5.3, 6.6, 8.0)),
-        7: ((1440, 1620, 1800, 2250, 2700), (8.5, 8.5, 8.5, 10.6, 12.8))}),
-    "int_hyperdrive_overcharge_size{}_class{}": ((0.008, 0.012, 0.012, 0.012, 0.013), {
-        2: ((60, 90, 90, 90, 100), (0.6, 0.9, 0.9, 0.9, 1.0)), 3: ((100, 150, 150, 150, 167), (1.2, 1.8, 1.8, 1.8, 1.9)),
-        4: ((350, 525, 525, 525, 585), (2.0, 3.0, 3.0, 3.0, 3.2)), 5: ((700, 1050, 1050, 1050, 1175), (3.3, 5.0, 5.0, 5.0, 5.2)),
-        6: ((1200, 1800, 1800, 1800, 2000), (5.3, 8.0, 8.0, 8.0, 8.3)),
-        7: ((1800, 2700, 2700, 2700, 3000), (8.5, 12.8, 12.8, 12.8, 13.1)),
-        8: ((2800, 4200, 4200, 4200, 4670), (13.6, 20.4, 20.4, 20.4, 20.7))}),
-}
-FSD_DATA = {name.format(size, c + 1): (opt[c], mf[c], mul[c])
-            for name, (mul, sizes) in FSD_STOCK.items() for size, (opt, mf) in sizes.items() for c in range(5)}
-# the Caspian's Mk II: coriolis-data says 0.011 (Auto_Neutron's table says 4/1000). Either way fleet_figures checks the
-# figures against the Loadout's own MaxJumpRange and, when they miss it, takes the optimal mass that range implies
-FSD_DATA["int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"] = (4670, 6.8, 0.011)
-FSD_MK2_SUPERCHARGE = 6   # the Mk II's neutron supercharge multiplies the range by 6; every other drive by 4
-FSD_RANGE_TOLERANCE = 0.01   # the stated figures must give the Loadout's MaxJumpRange to within 1%, or the range decides
-FUEL_FIT_MIN = 3          # own jumps (with the fuel left and the cargo known) before MaxFuelPerJump is fitted
-FUEL_FIT_POWER_MIN = 5     # ... and before p is fitted, for a drive neither table knows (a new variant)
 JUMP_CARGO_S = 120         # s: a Status.json hold this close to a jump stands in for a Cargo not read yet
 SCOOP_RATE_OF = 20         # arrivals the scoopable share is taken over
 SCOOP_RATE_MIN = 8         # fewer known arrival stars than this: no share (carrier jumps and journal gaps have none)
@@ -1372,12 +1337,6 @@ def migrate_sale_events(db):
         COMMIT;""")
 
 
-def ts_seconds(ts):
-    """Journal timestamp ('2026-09-28T02:06:56Z') -> seconds since the epoch (UTC)."""
-    import calendar
-    return calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
-
-
 AWAY_MIN_S = 2 * 3600   # s: a break shorter than this (a relog, a mode switch) gets the plain greeting
 
 
@@ -1397,11 +1356,6 @@ def live_event(ts, now=None):
         return (time.time() if now is None else now) - ts_seconds(ts) <= SHUTDOWN_LIVE_S
     except (TypeError, ValueError):
         return False
-
-
-def iso_ts(t):
-    """time.time() -> a journal-style UTC timestamp."""
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 def second_before(ts):
@@ -3765,369 +3719,6 @@ def refitted(old, new):
     """True when a Loadout's [drive, unladen t, max range ly, booster] differs from the last one's by more than the
     game's float jitter (the same ship logs 323.150024 t and 323.149994 t)."""
     return bool(old) and (old[0] != new[0] or old[3] != new[3] or abs(old[1] - new[1]) > 0.5 or abs(old[2] - new[2]) > 0.05)
-
-
-def fsd_power(ship):
-    """The drive's power constant p, or None for a drive the tables don't know (fuel_model then fits it)."""
-    item = (ship.get("fsd") or "").lower()
-    if not item:   # a ship saved before the drive's name was kept: its size says
-        return FSD_POWER.get(ship.get("fsd_size"))
-    if item in FSD_POWER_ITEM:
-        return FSD_POWER_ITEM[item]
-    std = FSD_STANDARD.fullmatch(item)
-    return FSD_POWER.get(int(std.group(1))) if std else None
-
-
-def fsd_range(model, mass, fuel=None):
-    """The longest jump at `mass` t. The Loadout's MaxJumpRange is the range at the unladen mass plus one max jump's
-    fuel; range goes as 1/mass, the booster's flat light years apart. max_fuel unknown counts as 0 (a small error).
-    With `fuel` (t in the main tank) below MaxFuelPerJump, the jump that fuel pays for (hop_fuel's inverse)."""
-    b = model["boost"]
-    r = (model["r0"] - b) * (model["unladen"] + (model.get("max_fuel") or 0)) / mass + b
-    mf, p = model.get("max_fuel"), model.get("power")
-    if fuel is not None and mf and p and fuel < mf:
-        r *= (max(fuel, 0) / mf) ** (1 / p)
-    return r
-
-
-def hop_fuel(model, d, mass):
-    """Fuel for a d ly jump at `mass` t, or None past the range (or without MaxFuelPerJump and p)."""
-    if not model.get("max_fuel") or not model.get("power"):
-        return None
-    r = fsd_range(model, mass)
-    return model["max_fuel"] * (d / r) ** model["power"] if 0 <= d <= r + 1e-6 else None
-
-
-def _fit_estimates(model, samples, power):
-    """One MaxFuelPerJump estimate per [ly, fuel used, fuel left, cargo] sample, at power p. The range depends a
-    little on the answer (the Loadout's range includes one max jump's fuel), so each is solved by iteration."""
-    out = []
-    for d, used, left, cargo in samples:
-        mass, mf = model["unladen"] + left + used + cargo, 0.0
-        for _ in range(12):
-            mf = used * (fsd_range(dict(model, max_fuel=mf), mass) / d) ** power
-        out.append(mf)
-    return out
-
-
-def fuel_model(ship, samples):
-    """The fuel model for a ship's Loadout ({unladen, r0, boost, power, max_fuel, fitted}), or None without the mass.
-    p comes from the drive (fsd_power), else is fitted; MaxFuelPerJump from the drive's engineering when it says,
-    else the median of your own jumps' estimates. Either can stay None (range still works, per-hop fuel does not);
-    `need` is how many more usable jumps they take (0 once both are known)."""
-    ship = ship or {}
-    if not ship.get("unladen") or not ship.get("max_range"):
-        return None
-    model = {"unladen": ship["unladen"], "r0": ship["max_range"], "boost": ship.get("booster_ly") or 0,
-             "power": fsd_power(ship), "max_fuel": ship.get("max_fuel"), "fitted": False}
-    good = [s[:4] for s in samples or [] if len(s) >= 4 and s[2] is not None and s[3] is not None and s[0] > 0 and s[1] > 0]
-    if model["power"] is None and len(good) >= FUEL_FIT_POWER_MIN:
-        # a drive the tables lack: the known p whose estimates agree best (the right one gives nearly the same
-        # figure for a 3 ly hop and a 60 ly one; a wrong one drifts with the distance)
-        def spread(p):
-            e = sorted(_fit_estimates(model, good, p))
-            return (e[-1] - e[0]) / e[len(e) // 2]
-        model["power"] = min(sorted(set(FSD_POWER.values()) | set(FSD_POWER_ITEM.values())), key=spread)
-    if not model["max_fuel"] and model["power"] and len(good) >= FUEL_FIT_MIN:
-        e = sorted(_fit_estimates(model, good, model["power"]))
-        model["max_fuel"], model["fitted"] = round(e[len(e) // 2], 3), True
-    # own jumps still to make (not boosted, with the cargo known) before per-hop fuel is known: 0 once it is
-    model["need"] = 0 if model["power"] and model["max_fuel"] else \
-        max(1, (FUEL_FIT_MIN if model["power"] else FUEL_FIT_POWER_MIN) - len(good))
-    return model
-
-
-def jumps_left(model, fuel, cargo, d=None, cap=1000):
-    """(jumps, ly) the fuel takes you, jump after jump, the ship lightening as it burns: at max range (d None) or
-    hops of d ly. None without MaxFuelPerJump and p. Past `cap` jumps the rest is counted at the last hop's cost."""
-    if not model or not model.get("max_fuel") or not model.get("power") or fuel is None or cargo is None:
-        return None
-    n, ly = 0, 0.0
-    while n < cap:
-        mass = model["unladen"] + fuel + cargo
-        hop = fsd_range(model, mass) if d is None else min(d, fsd_range(model, mass))
-        need = hop_fuel(model, hop, mass)
-        if need is None or need <= 0 or need > fuel + 1e-9:
-            return n, round(ly, 1)
-        fuel, n, ly = fuel - need, n + 1, ly + hop
-    more = int(fuel / need)
-    return n + more, round(ly + more * hop, 1)
-
-
-# ---- the Neutron Highway: fleet figures, Spansh's routes, the spoken line, the desktop clipboard ----
-
-def fleet_figures(ev):
-    """A Loadout's figures for the Highway: the ship's masses, tanks and range, and Spansh's exact plotter inputs
-    (fuel_power, fuel_multiplier, optimal_mass, max_fuel, supercharge, booster_ly). The power is the fuel model's
-    (fsd_power: size 8 = 2.90, the Mk II 2.5025); MaxFuelPerJump and the optimal mass from the drive's engineering
-    Modifiers, else its stock figures (FSD_DATA). Those must give the Loadout's own MaxJumpRange (at the unladen mass
-    plus one max jump's fuel, as fsd_range has it) to within FSD_RANGE_TOLERANCE; when they don't (a table error, a
-    drive variant), the optimal mass that range implies is used instead, so Spansh plans with the range the game
-    shows. A MaxJumpRange without the Guardian booster's ly (the booster powered off, or a Loadout written in
-    outfitting) is not taken for a table error: the drive's figures stand, and the booster counts only when it is on.
-    exact: False when a figure is missing (a drive no table knows): the neutron plotter still works."""
-    mods = ev.get("Modules") or []
-    fsd_mod = next((m for m in mods if m.get("Slot") == "FrameShiftDrive"), {})
-    item = (fsd_mod.get("Item") or "").lower()
-    eng = {x.get("Label"): x.get("Value") for x in (fsd_mod.get("Engineering") or {}).get("Modifiers") or []
-           if isinstance(x.get("Value"), (int, float)) and not isinstance(x.get("Value"), bool)}
-    stock = FSD_DATA.get(re.sub(r"_free$", "", item))
-    size = re.search(r"size(\d)", item)
-    booster_mod = next((m for m in mods if "guardianfsdbooster" in (m.get("Item") or "").lower()), None)
-    booster = re.search(r"size(\d)", (booster_mod or {}).get("Item", "").lower())
-    boost = GUARDIAN_BOOST.get(int(booster.group(1)), 0) if booster else 0
-    cap = ev.get("FuelCapacity") or {}
-    power = fsd_power({"fsd": item, "fsd_size": int(size.group(1)) if size else None})
-    max_fuel = eng.get("MaxFuelPerJump") or (stock[1] if stock else None)
-    mult = stock[2] if stock else None
-    opt = eng.get("FSDOptimalMass") or (stock[0] if stock else None)
-    source = "loadout" if eng.get("FSDOptimalMass") else "stock" if opt else None
-    r0, unladen = ev.get("MaxJumpRange"), ev.get("UnladenMass")
-    if r0 and unladen and max_fuel and mult and power and r0 > boost:
-        drive = (max_fuel / mult) ** (1 / power)   # the range at the optimal mass is opt / mass × this
-        fits = lambda b: abs((opt / (unladen + max_fuel) * drive + b) / r0 - 1) <= FSD_RANGE_TOLERANCE
-        if opt and boost and not fits(boost) and fits(0):
-            # MaxJumpRange left the booster out: it was powered off, or the Loadout was written in outfitting. The
-            # drive's own figures are right, so keep them. Off: the ship as the game has it, no booster; on: the
-            # booster's light years on top of the Loadout's range
-            if booster_mod.get("On") is False:
-                boost = 0
-            else:
-                r0 = round(r0 + boost, 3)
-        elif not opt or not fits(boost):
-            opt, source = round((r0 - boost) * (unladen + max_fuel) / drive, 2), "range"
-    out = {"fsd": item, "fsd_size": int(size.group(1)) if size else None, "unladen": unladen, "max_range": r0,
-           "fuel_main": cap.get("Main"), "fuel_reserve": cap.get("Reserve"), "cargo_capacity": ev.get("CargoCapacity"),
-           "booster_ly": boost, "fuel_power": power, "fuel_multiplier": mult, "optimal_mass": opt, "optimal_source": source,
-           "max_fuel": max_fuel,
-           "supercharge": fsd_supercharge(item)}
-    out["exact"] = all(out.get(k) for k in ("fuel_power", "fuel_multiplier", "optimal_mass", "max_fuel", "unladen", "fuel_main"))
-    return out
-
-
-def fleet_range(fig, cargo=0, fuel=None):
-    """A fleet ship's jump range with `cargo` t aboard and the main tank full (or `fuel` t), by the fuel model's
-    scaling of its Loadout range; None without the masses."""
-    model = fleet_model(fig)
-    if not model:
-        return None
-    return round(fsd_range(model, fig["unladen"] + (fig.get("fuel_main") if fuel is None else fuel or 0) + (cargo or 0)), 2)
-
-
-def fleet_model(fig):
-    """A fleet ship's figures as a fuel model (fsd_range's inputs), or None without the masses."""
-    if not fig or not fig.get("unladen") or not fig.get("max_range"):
-        return None
-    return {"unladen": fig["unladen"], "r0": fig["max_range"], "boost": fig.get("booster_ly") or 0,
-            "max_fuel": fig.get("max_fuel"), "power": fig.get("fuel_power")}
-
-
-def fsd_supercharge(item):
-    """A drive's neutron supercharge multiplier: ×6 for the SCO Mk II, ×4 for every other."""
-    return FSD_MK2_SUPERCHARGE if "overchargebooster_mkii" in (item or "").lower() else 4
-
-
-def jump_in_reach(model, d, fuel, other=0.0, mult=1):
-    """Whether a d ly jump is in range with `fuel` t in the main tank and `other` t more aboard (cargo, the
-    reservoir), the range multiplied by `mult` (a neutron supercharge: the whole range, the booster's ly too)."""
-    return fsd_range(model, model["unladen"] + fuel + other, fuel) * mult >= d - 1e-9
-
-
-def max_fuel_for_jump(model, d, other=0.0, mult=1, cap=None):
-    """The most fuel (t in the main tank) with which a d ly jump is still in range (see jump_in_reach), or None when
-    no amount reaches it. The range rises with the fuel up to one max jump's worth (below that the fuel limits the
-    jump) and falls with the mass past it, so from that peak the answer is found by bisection on fsd_range itself.
-    With `cap` (the tank), an answer of cap or more is cap: any fuel the tank holds will do."""
-    lo = model.get("max_fuel") or 0.0
-    if cap is not None and cap <= lo:   # a tank smaller than one max jump's fuel: its whole is the best there is
-        return float(cap) if jump_in_reach(model, d, cap, other, mult) else None
-    if not jump_in_reach(model, d, lo, other, mult):
-        return None
-    hi = cap if cap is not None else lo + 64.0
-    if jump_in_reach(model, d, hi, other, mult):
-        if cap is not None:
-            return float(cap)
-        while jump_in_reach(model, d, hi, other, mult):   # no tank given: widen until it no longer reaches
-            lo, hi = hi, hi * 2
-            if hi > 1e7:
-                return hi
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if jump_in_reach(model, d, mid, other, mult) else (lo, mid)
-    return lo
-
-
-def conservative_range(full, margin, boost=0.0):
-    """A range `margin` ly shorter than `full`, never cutting the drive's own part (the booster's ly apart) by more
-    than half: the conservative plot's range. A booster at least as long as `full` (a typed range shorter than the
-    ship's booster: nonsense) counts as none; the result is never longer than `full`."""
-    boost = boost if 0 < boost < full else 0.0
-    return min(full, max(full - margin, boost + (full - boost) / 2))
-
-
-def conservative_optimal_mass(fig, cargo, margin):
-    """The exact plotter's figures for a conservative plot: the optimal mass that makes the ship's normal full-tank
-    range (cargo aboard) `margin` ly shorter. The range less the booster's ly goes as the optimal mass at every mass
-    (fsd_range), so it is scaled by (R - margin - boost) / (R - boost). (optimal mass, R, the shorter R) or None."""
-    model = fleet_model(fig)
-    if not model or not fig.get("optimal_mass"):
-        return None
-    b = model["boost"]
-    full = fsd_range(model, fig["unladen"] + (fig.get("fuel_main") or 0) + (cargo or 0))
-    short = conservative_range(full, margin, b)
-    return round(fig["optimal_mass"] * (short - b) / (full - b), 3), full, short
-
-
-class HighwayError(Exception):
-    """A plot that failed, in words for the page (Spansh down, an unknown system, a timeout)."""
-
-
-def _num(v, conv=float):
-    """A number from Spansh's answer, or None (a missing or broken field)."""
-    try:
-        out = conv(v)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return out if not isinstance(out, float) or math.isfinite(out) else None
-
-
-def highway_rows(plotter, result):
-    """Spansh's finished route as highway_route rows (dicts), the start first. The exact plotter's "jumps" carry every
-    jump with its fuel; the neutron plotter's "system_jumps" are waypoints with the jumps between them."""
-    if not isinstance(result, dict):
-        raise HighwayError("Spansh sent a route in a shape Outrider does not know")
-    raw = result.get("jumps") if plotter == "exact" else result.get("system_jumps")
-    if not isinstance(raw, list):
-        raise HighwayError("Spansh sent a route in a shape Outrider does not know")
-    rows = []
-    for i, j in enumerate(raw):
-        if not isinstance(j, dict):
-            continue
-        name = j.get("name") if plotter == "exact" else j.get("system")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        id64 = _num(j.get("id64"), int)
-        row = {"system": name.strip(), "id64": id64 if id64 is not None and 0 <= id64 < 2 ** 63 else None,
-               "x": _num(j.get("x")), "y": _num(j.get("y")), "z": _num(j.get("z"))}
-        if plotter == "exact":
-            row.update(distance=_num(j.get("distance")), fuel_used=_num(j.get("fuel_used")),
-                       fuel_left=_num(j.get("fuel_in_tank")), neutron=1 if j.get("has_neutron") else 0,
-                       refuel=1 if j.get("must_refuel") else 0, jumps=0 if not rows else 1,
-                       remaining=_num(j.get("distance_to_destination")))
-        else:
-            row.update(distance=_num(j.get("distance_jumped")), fuel_used=None, fuel_left=None,
-                       neutron=1 if j.get("neutron_star") else 0, refuel=0,
-                       jumps=max(0, _num(j.get("jumps"), int) or 0) if rows else 0, remaining=_num(j.get("distance_left")))
-        rows.append(row)
-    if len(rows) < 2:
-        raise HighwayError("Spansh found no route between those systems")
-    if len(rows) > HIGHWAY_MAX_ROWS:
-        raise HighwayError(f"a route of {len(rows)} systems is longer than Outrider keeps ({HIGHWAY_MAX_ROWS})")
-    return rows
-
-
-NUMBER_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
-
-
-def number_words(n):
-    return NUMBER_WORDS[n] if 0 <= n < len(NUMBER_WORDS) else str(n)
-
-
-def highway_match(rows, id64, name, near=0):
-    """The route row a system is, or None: by id64 (by name when a row has none). A system on the route twice gives
-    the occurrence at or after `near` (where you were), else the latest before it."""
-    low = (name or "").strip().lower()
-    hits = [i for i, r in enumerate(rows)
-            if (r["id64"] == id64 if r["id64"] is not None and id64 is not None else (r["system"] or "").lower() == low)]
-    if not hits:
-        return None
-    ahead = [i for i in hits if i >= near]
-    return ahead[0] if ahead else hits[-1]
-
-
-def highway_refuel_in(rows, i):
-    """Jumps from row i to the next refuel stop after it, or None."""
-    return next((j - i for j in range(i + 1, len(rows)) if rows[j]["refuel"]), None)
-
-
-def highway_bg_file(path):
-    """The Highway map's background image at `path` (the configured one): (content type, os.stat result), or
-    ValueError in words when it cannot be served: not one of HIGHWAY_BG_TYPES by its extension and its first bytes,
-    missing, not a regular file, empty or over HIGHWAY_BG_MAX_BYTES."""
-    kind = HIGHWAY_BG_TYPES.get(os.path.splitext(path)[1].lower())
-    if not kind:
-        raise ValueError("not an image file (" + ", ".join(HIGHWAY_BG_TYPES) + ")")
-    try:
-        st = os.stat(path)
-        if not os.path.isfile(path):
-            raise ValueError("not a file")
-        with open(path, "rb") as fh:
-            head = fh.read(12)
-    except OSError as e:
-        raise ValueError(f"cannot be read ({e.strerror or type(e).__name__})") from None
-    if not 0 < st.st_size <= HIGHWAY_BG_MAX_BYTES:
-        raise ValueError("empty" if not st.st_size else f"over {HIGHWAY_BG_MAX_BYTES // 2 ** 20} MB")
-    if not head.startswith(kind[1]) or (kind[0] == "image/webp" and head[8:12] != b"WEBP"):
-        raise ValueError(f"its content is not {kind[0]}")
-    return kind[0], st
-
-
-def highway_text(rows, i):
-    """The line said on arriving at route row i (not the last): the next stop, a refuel coming up or due here, and
-    the supercharge in a neutron system. Plain words (personality lines come later)."""
-    here, nxt = rows[i], rows[i + 1]
-    k = highway_refuel_in(rows, i)
-    text = f"Next Neutron Highway Stop: {nxt['system']}"
-    if k is not None and k <= HIGHWAY_REFUEL_WARN:
-        text += f", with {number_words(k)} jump{'' if k == 1 else 's'} left to refuel"
-    text += "."
-    if here["refuel"]:
-        text = "Refuel here before continuing. " + text
-    if here["neutron"]:
-        text += " Boost your FSD to continue."
-    return text
-
-
-class Clipboard:
-    """The desktop clipboard (Linux): wl-copy under Wayland, xclip under X11, whichever is installed for the session
-    there is. Run as a plain subprocess (no shell) with the text on its stdin; both fork to serve the selection, so
-    the call returns at once. Tests pass fakes for `which`, `run` and `env`: nothing is ever copied from a test."""
-    TOOLS = (("wl-copy", "WAYLAND_DISPLAY", ("wl-copy",)), ("xclip", "DISPLAY", ("xclip", "-selection", "clipboard")))
-
-    def __init__(self, enabled=True, which=None, run=None, env=None):
-        import shutil
-        import subprocess
-        self.enabled = bool(enabled)
-        self._which, self._run, self._env = which or shutil.which, run or subprocess.run, os.environ if env is None else env
-        self._devnull = subprocess.DEVNULL
-        self.tool = self.argv = None
-        for name, var, argv in self.TOOLS:
-            if self._env.get(var) and self._which(name):
-                self.tool, self.argv = name, list(argv)
-                break
-        self.last = None   # {text, ok, ts, error}: the latest copy, for the Highway tab
-
-    def info(self):
-        why = None if self.tool else "neither wl-copy (Wayland) nor xclip (X11) was found for this desktop session"
-        return {"enabled": self.enabled, "available": bool(self.tool), "tool": self.tool, "why": why, "last": self.last}
-
-    def copy(self, text, force=False):
-        """Put `text` on the clipboard; True when the tool said it did (blocking, briefly: run it off the loop). force:
-        even with [highway] clipboard off (auto-target's paste entry asked for it)."""
-        if not ((self.enabled or force) and self.argv and text):
-            return False
-        err = None
-        try:
-            ok = self._run(self.argv, input=str(text).encode(), stdout=self._devnull, stderr=self._devnull,
-                           timeout=5, check=False).returncode == 0
-            if not ok:
-                err = f"{self.tool} failed"
-        except (OSError, ValueError) as e:
-            ok, err = False, f"{self.tool}: {e}"
-        except Exception as e:  # noqa: BLE001 -- subprocess.TimeoutExpired and the like: report, never raise
-            ok, err = False, f"{self.tool}: {type(e).__name__}"
-        self.last = {"text": str(text), "ok": ok, "ts": iso_ts(time.time()), "error": err}
-        return ok
 
 
 def tally(items):

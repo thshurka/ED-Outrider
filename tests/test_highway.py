@@ -15,6 +15,7 @@ from support import (  # also puts the repository root on sys.path
 )
 import outrider.bio  # noqa: E402
 import ed_outrider  # noqa: E402
+import outrider.fsd  # noqa: E402
 
 
 class HighwayH1(unittest.TestCase):
@@ -557,7 +558,7 @@ class HighwayH1(unittest.TestCase):
         return ev
 
     def test_max_fuel_for_a_jump_caspian(self):
-        c, m = self.CASPIAN, ed_outrider.fleet_model(self.CASPIAN)
+        c, m = self.CASPIAN, outrider.fsd.fleet_model(self.CASPIAN)
         self.assertAlmostEqual(ed_outrider.fsd_range(m, c["unladen"] + c["max_fuel"]), 82.97, places=6)   # the game's figure
         full = ed_outrider.fleet_range(c)
         self.assertAlmostEqual(full, 75.3, delta=0.06)   # a full tank: 75.3 x 6 = 452 ly
@@ -565,9 +566,9 @@ class HighwayH1(unittest.TestCase):
         need = ed_outrider.max_fuel_for_jump(m, 487.9, other=1.14, mult=6, cap=160)
         self.assertAlmostEqual(need, 36.07, delta=0.02)
         self.assertLess(need, 50)
-        self.assertTrue(ed_outrider.jump_in_reach(m, 487.9, need, 1.14, 6))
-        self.assertFalse(ed_outrider.jump_in_reach(m, 487.9, need + 0.01, 1.14, 6))
-        self.assertFalse(ed_outrider.jump_in_reach(m, 487.9, 160, 1.14, 6))
+        self.assertTrue(outrider.fsd.jump_in_reach(m, 487.9, need, 1.14, 6))
+        self.assertFalse(outrider.fsd.jump_in_reach(m, 487.9, need + 0.01, 1.14, 6))
+        self.assertFalse(outrider.fsd.jump_in_reach(m, 487.9, 160, 1.14, 6))
         # Spansh's own formula from the exact plotter's inputs agrees: optimal mass / mass x (max fuel / mult)^(1/p) + booster
         drive = (c["max_fuel"] / c["fuel_multiplier"]) ** (1 / c["fuel_power"])
         self.assertAlmostEqual((c["optimal_mass"] / (c["unladen"] + 1.14 + need) * drive + 10.5) * 6, 487.9, delta=0.1)
@@ -721,8 +722,8 @@ class HighwayH1(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(params["range_boost"], 10.5)
         self.assertLess(params["optimal_mass"], f["optimal_mass"])
-        full = ed_outrider.fsd_range(ed_outrider.fleet_model(f), f["unladen"] + f["fuel_main"])
-        short = ed_outrider.fsd_range(dict(ed_outrider.fleet_model(f), r0=10.5 + (f["max_range"] - 10.5) * params["optimal_mass"] / f["optimal_mass"]),
+        full = ed_outrider.fsd_range(outrider.fsd.fleet_model(f), f["unladen"] + f["fuel_main"])
+        short = ed_outrider.fsd_range(dict(outrider.fsd.fleet_model(f), r0=10.5 + (f["max_range"] - 10.5) * params["optimal_mass"] / f["optimal_mass"]),
                                       f["unladen"] + f["fuel_main"])
         self.assertAlmostEqual(short, full - 5, delta=0.05)
         drive = (f["max_fuel"] / f["fuel_multiplier"]) ** (1 / f["fuel_power"])   # and by Spansh's own formula
