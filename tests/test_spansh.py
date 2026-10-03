@@ -595,9 +595,15 @@ class ReviewBatchE(unittest.TestCase):
                 for path in ("/api/status", "/api/status.txt", "/api/nearby", "/api/speech"):
                     r = await c.get(path, headers={"Origin": "http://overlay.local"} if path.startswith("/api/status") else {})
                     acao[path] = (r.status, r.headers.get("Access-Control-Allow-Origin"))
+                # S20: the long poll's payload is gzipped for a browser that takes it, and plain for one that does not
+                r = await c.get("/api/nearby", headers={"Accept-Encoding": "gzip, deflate, br"})
+                acao["gzip"] = (r.status, r.headers.get("Content-Encoding"), "version" in await r.json())
+                r = await c.get("/api/nearby", headers={"Accept-Encoding": "identity"}, auto_decompress=False)
+                acao["plain"] = r.headers.get("Content-Encoding")
                 return r1.status, called, r2.status, acao
         self.assertEqual(asyncio.run(go()), (403, False, 200, {"/api/status": (200, "*"), "/api/status.txt": (200, "*"),
-                                                               "/api/nearby": (200, None), "/api/speech": (200, None)}))
+                                                               "/api/nearby": (200, None), "/api/speech": (200, None),
+                                                               "gzip": (200, "gzip", True), "plain": None}))
 
     # ---- R22: a port out of range is reported, not a traceback ----
     def test_bad_port_is_reported(self):

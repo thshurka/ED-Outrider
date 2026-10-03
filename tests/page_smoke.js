@@ -2855,6 +2855,26 @@ const settle = async maxMs => {
       : "carrier's last minute, loss link, hidden row, browser voice error, heat cooldown, nested star pairs, exact ids", errors.slice(before));
     if (w.eval("view") === "firsts") { d.querySelector('[data-view="overview"]').click(); await sleep(300); }
   }
+  // S13: Outrider gone quiet: said once after the grace, in the browser's voice; said again when it is back
+  {
+    const w = dom.window, before = errors.length;
+    const got = w.eval(`(() => {
+      const realSpeak = speak, realToast = toast, realNow = Date.now, said = [], f = [speechOn, isSpeaker];
+      const keep = [disconnected, disconnectedAt, lostSaid];
+      let t = realNow(); Date.now = () => t;
+      speak = (text, o) => said.push(text + " [" + o.kind + "]"); toast = () => {}; speechOn = isSpeaker = true;
+      setConnected(false); t += 10000; setConnected(false);          // within the grace: nothing said
+      const early = said.length;
+      t += 25000; setConnected(false); t += 5000; setConnected(false); // past it: said once
+      setConnected(true);
+      speak = realSpeak; toast = realToast; Date.now = realNow; [speechOn, isSpeaker] = f;
+      [disconnected, disconnectedAt, lostSaid] = keep; setConnected(true);
+      return JSON.stringify([early, said]); })()`);
+    const want = JSON.stringify([0, ["Lost contact with Outrider: no alerts until it is back. [connection]", "Back in contact with Outrider. [connection]"]]);
+    const goodS13 = got === want && errors.length === before;
+    allOk = allOk && goodS13;
+    console.log(goodS13 ? "OK" : "FAIL", "| lost contact |", goodS13 ? "said once after the grace, and again when back" : got, errors.slice(before));
+  }
   // F45: the unsold pop-up's headings: a ship loss with no sale before it counts from the loss; bio from any death
   {
     const w = dom.window, before = errors.length;

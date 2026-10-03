@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Robustness (fix plan, batch 10)
+- One of the work steps after each journal read that keeps failing no longer stops the ones after it (auto-target,
+  the quit backup, the clipboard copy only work within a short window); its error shows on the page and its
+  traceback prints once (review S5).
+- When Outrider stops answering for 30 s, the page says so once in the browser's own voice ("Lost contact with
+  Outrider"), and again when it is back (S13).
+- The page's data (the long poll) is gzipped, about 4x smaller (S20).
+- On a jump, Nearby shows what the local cache already knows around you at once, while Spansh is asked (S6).
+
 ## 2026-10-03 · Spansh, config, backups and restore, start-up (fix plan, batch 9)
 - With Spansh down, systems cached from its earlier searches still read as Spansh's, not "not in Spansh"; EDSM's own
   records stay EDSM's (review F27). A failed body refetch keeps the cached full dump instead of the search's partial

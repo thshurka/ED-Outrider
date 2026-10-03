@@ -6268,12 +6268,27 @@ function drawAlertsBtn() { document.getElementById("alertsBtn").classList.toggle
 document.getElementById("alertsBtn").onclick = () => { drawSpeechStyles(); fillThresholds(); alertDialog.showModal(); drawSpeechLog(); };
 drawAlertsBtn();
 
-let disconnected = null;
+let disconnected = null, disconnectedAt = 0, lostSaid = false;
+// Outrider gone quiet (stopped, crashed, the network down): after LOST_SAY_MS without it, the speaking window says
+// so once, in the browser's own voice (Piper is the server's), and again when it is back (review S13). A restart of
+// Outrider is over well within the grace. The journal-silence half was left out: the game is often quiet that long.
+const LOST_SAY_MS = 30000;
+function sayConnection(text) {
+  toast(text);
+  if (speechOn && isSpeaker) speak(text, {kind: "connection"});
+}
 function setConnected(ok) {
-  if (ok && disconnected) { disconnected = null; if (data) render(); }
-  else if (!ok && !disconnected) {
-    disconnected = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  if (ok && disconnected) {
+    disconnected = null; disconnectedAt = 0;
+    if (lostSaid) { lostSaid = false; sayConnection("Back in contact with Outrider."); }
     if (data) render();
+  }
+  else if (!ok && !disconnected) {
+    disconnected = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); disconnectedAt = Date.now();
+    if (data) render();
+  }
+  else if (!ok && !lostSaid && Date.now() - disconnectedAt >= LOST_SAY_MS) {
+    lostSaid = true; sayConnection("Lost contact with Outrider: no alerts until it is back.");
   }
 }
 // A payload the page fails to draw is not a lost connection: the error shows in the Data tile, and polling

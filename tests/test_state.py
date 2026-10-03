@@ -1790,6 +1790,28 @@ class BatchBState(unittest.TestCase):
             self.state.tick({})
         self.assertGreater(self.state.version, v)
 
+    def test_a_failing_follow_up_does_not_starve_the_rest(self):   # S5
+        import contextlib, io
+        ran, follow = [], ("watch_status", "maybe_refresh", "apply_own_changes", "maybe_classify_target", "maybe_unsold",
+                           "maybe_sale_left", "maybe_locate_carrier", "maybe_find_sellers", "maybe_backup_on_quit",
+                           "highway_copy_next", "highway_heavy_check", "maybe_autotarget")
+
+        def boom(*a):
+            ran.append("heavy")
+            raise KeyError("fuel_main")
+        err = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(ed_outrider, "LIVE_DIRS", ["/nonexistent-outrider-dir"]))
+            for name in follow:
+                stack.enter_context(unittest.mock.patch.object(
+                    self.state, name, boom if name == "highway_heavy_check" else (lambda n: lambda *a: ran.append(n))(name)))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            self.state.tick({})
+            self.state.tick({})
+        self.assertEqual(ran.count("maybe_autotarget"), 2)              # after the one that raised, every tick
+        self.assertEqual(self.state.tail_error, "highway_heavy_check: KeyError: 'fuel_main'")
+        self.assertEqual(err.getvalue().count("Traceback"), 1)          # printed once, not every second
+
     # ---- F43 / F44 / F38 / F52: call-outs ----
     def test_login_on_foot_names_your_ship(self):   # F43
         self.j.ship = {"name": "Wanderer", "ship_id": 39}
@@ -2346,6 +2368,21 @@ class FableServer(unittest.TestCase):
         asyncio.run(self.state._refresh(self.j.pos))
         self.assertEqual(calls, [])                          # not asked again within the hour
         self.assertEqual(len(self.state.bases[7][1]["records"]), 2)   # but the search's bodies show
+
+    def test_refresh_shows_the_cache_while_it_asks(self):   # S6
+        import asyncio
+        sp, calls, fail = self.spansh2(self.DUMP2)
+        asyncio.run(self.state._refresh(self.j.pos))         # S7 cached
+        seen = []
+        real = type(sp).sphere
+
+        async def sphere(self_, pos, r):
+            seen.append(sorted(self.state.systems))           # what the page has while Spansh is asked
+            return await real(self_, pos, r)
+        with unittest.mock.patch.object(type(sp), "sphere", sphere):
+            asyncio.run(self.state._refresh(self.j.pos))
+        self.assertEqual(seen, [[7]])
+        self.assertEqual(self.state.bases[7][0], "spansh")
 
     def test_edsm_sphere_is_cut_to_its_limit(self):   # F48
         import asyncio

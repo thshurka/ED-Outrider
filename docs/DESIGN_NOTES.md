@@ -140,6 +140,10 @@ upstream project's choices, not rules of the game.
   their order still go by the bonus-free increment (what mapping adds), as the green-row level does.
 - **A malformed speech file is not installed** (Codex F7): valid JSON whose lists hold anything but strings keeps
   the last good document in use, with the problem shown; bans keep working.
+- **"Lost contact" is the server's silence only** (review S13): said after 30 s without an answer, by the browser's
+  voice. A silent journal while the game runs is not treated as deafness: the game is often quiet that long (carrier
+  jumps, long FSS and SRV stretches).
+- **The long poll is gzipped, never deflated** (review S20): browsers disagree on what "deflate" means.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

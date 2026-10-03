@@ -4633,6 +4633,7 @@ class State:
         self._surface_show = False
         self._surface_sent = None
         self._surface_told = False   # whether the page was last told the surface map shows (a flip either way wakes it)
+        self._follow_up_seen = set()   # tick follow-up errors already printed (each traceback once)
         self._rig_leash = {}
         self._location_landing = None
         # the Neutron Highway: [highway] settings, the plot under way ({state: running | failed | done, plotter, from,
@@ -7452,6 +7453,14 @@ class State:
             return await self.retry_dumps(pos)
         if not retry:
             self.bases, self.systems = {}, {}
+            # what the local cache already holds around the new position shows at once, while the search runs (a
+            # short hop is mostly cached: no blank "loading…" for it; review S6). The answer replaces it row by row.
+            for row in self.near("spansh_systems", pos, r):
+                b = json.loads(row["summary"])
+                if b.get("v") == CACHE_VERSION and dist(pos, b) <= r:
+                    self.bases[row["id64"]] = (cached_source(b), b)
+            for id64 in self.bases:
+                self.safe_row(id64)
         self.status = (f"asking Spansh again about systems near {pos['name']}…" if retry
                        else f"asking Spansh about systems near {pos['name']}…")
         self.bump()
@@ -8923,18 +8932,21 @@ class State:
             committed = True
             # after the commit: its moments (scoop ended, FSS closed early) are live only and it consumes what
             # raised them, so a rollback of this tick must not take them away (the retry could not raise them again)
-            self.watch_status(time.time())
-            self.maybe_refresh()
-            self.apply_own_changes()
-            self.maybe_classify_target()
-            self.maybe_unsold()
-            self.maybe_sale_left()
-            self.maybe_locate_carrier()
-            self.maybe_find_sellers()
-            self.maybe_backup_on_quit()
-            self.highway_copy_next()
-            self.highway_heavy_check()
-            self.maybe_autotarget()
+            # each follow-up on its own: one that keeps raising (a bug, stored state of an unexpected shape) must not
+            # starve the ones after it, several of which only fire within a short window (review S5). A database
+            # error stops the rest (they would fail the same way) and goes to the handler below.
+            for name, step in (("watch_status", lambda: self.watch_status(time.time())), ("maybe_refresh", self.maybe_refresh),
+                               ("apply_own_changes", self.apply_own_changes), ("maybe_classify_target", self.maybe_classify_target),
+                               ("maybe_unsold", self.maybe_unsold), ("maybe_sale_left", self.maybe_sale_left),
+                               ("maybe_locate_carrier", self.maybe_locate_carrier), ("maybe_find_sellers", self.maybe_find_sellers),
+                               ("maybe_backup_on_quit", self.maybe_backup_on_quit), ("highway_copy_next", self.highway_copy_next),
+                               ("highway_heavy_check", self.highway_heavy_check), ("maybe_autotarget", self.maybe_autotarget)):
+                try:
+                    step()
+                except sqlite3.Error:
+                    raise
+                except Exception as e:  # noqa: BLE001 -- reported on the page; the next follow-up still runs
+                    self.follow_up_failed(name, e)
             # a new moment (approach, left body, FSD supercharged...) is a call-out: the long poll answers now,
             # not at the next unrelated bump
             if self.tail_error != last_error or self.journals.moment_seq != seq_before:
@@ -8959,6 +8971,24 @@ class State:
                 route_mtimes.update(mtimes_before)
             self.tail_error = f"{type(e).__name__}: {e}"
             self.bump()
+
+    def follow_up_failed(self, name, e):
+        """One of tick()'s follow-ups raised: its traceback printed once (not every second), what it wrote rolled
+        back and the reader's memory reloaded (the sales already read are kept for note_sale_estimates), and the
+        error shown on the page, as a failed tick does."""
+        import traceback
+        key = (name, type(e).__name__, str(e))
+        if key not in self._follow_up_seen:
+            self._follow_up_seen.add(key)
+            traceback.print_exc()
+        sales = self.journals.new_sales
+        try:
+            self.db.rollback()
+            self.journals.reload()
+        except sqlite3.Error:
+            pass
+        self.journals.new_sales = sales
+        self.tail_error = f"{name}: {type(e).__name__}: {e}"
 
 
 def unsold_total_at(ts):
@@ -9612,7 +9642,12 @@ def make_app(state, hosts=None):
             except asyncio.TimeoutError:
                 return web.Response(status=204)
             await asyncio.sleep(0.15)   # let a burst of changes (a refresh landing dumps) settle into one payload
-        return web.json_response(state.payload())
+        resp = web.json_response(state.payload())
+        # gzip when the browser takes it (every one does): the payload shrinks about 4x, which a tablet on WiFi
+        # notices with a big Nearby radius (review S20). gzip only, never deflate (browsers disagree on what it means)
+        if "gzip" in request.headers.get("Accept-Encoding", "").lower():
+            resp.enable_compression(web.ContentCoding.gzip)
+        return resp
 
     async def left_view(request):
         try:
