@@ -158,6 +158,12 @@ upstream project's choices, not rules of the game.
   for a sound to end (the page holds it for the file's length, at most 3 s).
 - **The status report stays on the page for now** (review S23 deferred to PLAN-tablet phase 6): it depends on each
   browser's thresholds and plan logic; Vespa's fixed "status report" is where a server version is needed.
+- **Header tiles: tooltips on cut lines, no wrapping yet** (review S17): wrapping or click-to-expand would change the
+  header's height and the app layout; left for the author. The tiles' fold has a per-device mode (S44): auto (a
+  small window), six, line, or none, which follows the shared `tilesCollapsed` that ▴/▾ sets; ▴/▾ also makes its
+  choice this device's.
+- **The link pill's "stale" is the long poll's limit, not quiet** (review S41): the server answers within 25 s even
+  with nothing new, so "stale" starts at 30 s without an answer; "linked · N s" counts up to that in quiet play.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

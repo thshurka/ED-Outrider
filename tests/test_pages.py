@@ -353,6 +353,23 @@ class ReviewBatchF(unittest.TestCase):
         self.assertIn("mining", self.search({"source": "local"})["status"])   # nothing ticked names the section
         self.assertIn("Platinum", ed_outrider.SEARCH_OPTIONS["mining"])
 
+    def test_search_lists_what_you_mined_first(self):   # S38
+        # Gold is not in the survey's list (nothing searchable before); you refined 22 t of it on A 1 (icy: no gold
+        # in the survey at all) and 3 t on A 2
+        for bid, tons in ((10, 22), (11, 3)):
+            self.db.execute("INSERT INTO own_mined VALUES (1, ?, 'gold', 'Gold', ?, 't', 't', '')", (bid, tons))
+        self.db.commit()
+        self.assertNotIn("Gold", ed_outrider.mining_minerals())
+        self.assertIn("Gold", ed_outrider.searchable_minerals(self.db))
+        r = self.search({"source": "local", "mining": True, "mining_mineral": "Gold"})
+        self.assertEqual([h["t"] for h in r["results"][0]["matches"]["mining"]][:2],
+                         ["A 1 · Gold 22 t mined here before", "A 2 · Gold 3 t mined here before"])
+        # a surveyed mineral you also refined: your body first, the survey's others after it
+        self.db.execute("INSERT INTO own_mined VALUES (1, 11, 'platinum', 'Platinum', 2, 't', 't', '')")
+        self.db.commit()
+        r = self.search({"source": "local", "mining": True, "mining_mineral": "Platinum"})
+        self.assertEqual([h["t"] for h in r["results"][0]["matches"]["mining"]], ["A 2 · Platinum 2 t mined here before"])
+
     # ---- S5: core module health ----
     def loadout(self, ts, sid, fsd=0.884, extra=()):
         mods = [{"Slot": "FrameShiftDrive", "Item": "int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii", "Health": fsd},

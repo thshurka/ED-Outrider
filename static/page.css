@@ -301,6 +301,10 @@ button.icon.blocked { border-color: var(--warn); }
 button.icon.hushbtn { padding: 3px 4px; font-size: 11px; }
 button.icon.hushbtn.on { border-color: var(--warn); }
 .hushlbl { color: var(--warn); font-size: 12px; white-space: nowrap; }
+/* the link to Outrider (review S41): linked, stale (no answer for longer than a long poll takes), or none */
+.linkpill { font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.linkpill.stale { color: var(--warn); border-color: var(--warn); }
+.linkpill.none { color: var(--bad, #e05555); border-color: var(--bad, #e05555); }
 /* the last line said (review S18): muted, on the icons' own row (no new line: a short window keeps its layout) */
 .lastsaid { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; min-width: 0; }
 .lastsaid #lastSaidText { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -688,6 +692,12 @@ body.nowmode header, body.nowmode main { display: none; }
 .profrow label { display: inline-flex !important; align-items: center; gap: 4px; margin: 0; }
 /* the alerts dialog holds a lot: wider, so it is less of a scroll */
 #alertDialog { width: min(820px, calc(100vw - 32px)); }
+/* the dialog's sections as chips, kept in view while it scrolls (review S43) */
+#alertDialog .chips { position: sticky; top: -1px; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 6px;
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+#alertDialog .chips button { font: inherit; font-size: 11px; padding: 1px 8px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--info); cursor: pointer; }
+#alertDialog .chips button.on { border-color: var(--accent); color: var(--accent); }
 #alertDialog .alerttable { width: 100%; }
 #alertDialog .inlineopts label, #alertDialog .sstyles label { display: inline-flex; align-items: center; gap: 4px; margin: 0 12px 0 0; }
 #alertDialog .inlineopts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; }

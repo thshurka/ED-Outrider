@@ -2329,6 +2329,7 @@ const settle = async maxMs => {
       render();
       o.fold.urgent = [...line.querySelectorAll(".tl-urgent")].map(e => e.textContent.replace(/[0-9.,]+[A-Z]?/g, "N"));
       btn.click(); o.unfold = {tiles: !document.getElementById("tiles").hidden, line: line.hidden, stored: localStorage.getItem("tilesCollapsed")};
+      o.unfold.mode = localStorage.getItem("tilesMode"); localStorage.removeItem("tilesMode");   // ▴/▾ made it this device's (S44)
       const dd = JSON.parse(d0); data.unsold = dd.u; data.fuel = dd.f;
       Object.assign(ovState, ov0); view = v0; size(1024, 768); render();
       return JSON.stringify(o);
@@ -2338,7 +2339,7 @@ const settle = async maxMs => {
               "hist:auto:sticky", "log:auto:sticky", "mat:auto:-", "firsts:auto:sticky", "hwy:auto:sticky"],
       ov: {map: true, inline: "", nearPane: "auto", here: "auto"}, ovPage: true, jump: 100 + (930 - 700), keep: 1100, more: [0, 1], pgdn: [360, true], winScrolls: 0,
       fold: {tiles: true, line: true, stored: "true", exported: true, btn: "▾", name: true, urgent: ["⛽ N%", "unsold N"]},
-      unfold: {tiles: true, line: true, stored: "false"}};
+      unfold: {tiles: true, line: true, stored: "false", mode: "\"six\""}};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodAL = !bad.length && errors.length === before;
     allOk = allOk && goodAL;
@@ -2916,6 +2917,54 @@ const settle = async maxMs => {
     allOk = allOk && goodB11;
     console.log(goodB11 ? "OK" : "FAIL", "| batch 11 voice |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "jump line held for the tunnel and released by it, next line for the PC, volume, own sound lead, last said", errors.slice(before));
+  }
+  // batch 12 (page): colony distance (S1), Here's sortable columns (S19), the link pill (S41), the dialog's chips
+  // (S43), tiles folding on a small window (S44), a cut tile line's tooltip (S17)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, c0 = data.colony;
+      data.colony = {bacterium: 500, electricae: 1000};
+      o.colony = [colonyM("Bacterium"), colonyM("Nope"), colonyTxt("Electricae").replace(/<[^>]+>/g, "")];
+      data.colony = c0;
+      // S19: the sort key and the order it gives
+      const h0 = hereData, s0 = sortKeys.here;
+      o.sortTh = [...document.querySelectorAll("#hereTable th[data-sort]")].map(t => t.dataset.sort);
+      // S41
+      const lh = lastHeard, dc = disconnected;
+      lastHeard = Date.now() - 2000; disconnected = null; o.link = [linkState().text, linkState().state];
+      lastHeard = Date.now() - 48000; o.stale = [linkState().text, linkState().state];
+      disconnected = "14:02"; o.none = [linkState().text, linkState().state];
+      lastHeard = lh; disconnected = dc; drawLinkPill();
+      o.pill = !!document.getElementById("linkPill").textContent;
+      // S43
+      o.chips = [...document.querySelectorAll("#alertChips button")].map(b => b.textContent);
+      // S44: auto folds on a small window, and ▴/▾ makes an explicit choice
+      const m0 = localStorage.getItem("tilesMode"), iw = window.innerWidth, ih = window.innerHeight;
+      localStorage.setItem("tilesMode", '"auto"');
+      Object.defineProperty(window, "innerHeight", {value: 700, configurable: true}); drawTilesFold(); o.autoSmall = tilesFolded;
+      Object.defineProperty(window, "innerHeight", {value: 1000, configurable: true});
+      Object.defineProperty(window, "innerWidth", {value: 1600, configurable: true}); drawTilesFold(); o.autoBig = tilesFolded;
+      localStorage.setItem("tilesMode", '"line"'); drawTilesFold(); o.line = tilesFolded;
+      if (m0 === null) localStorage.removeItem("tilesMode"); else localStorage.setItem("tilesMode", m0);
+      Object.defineProperty(window, "innerHeight", {value: ih, configurable: true}); Object.defineProperty(window, "innerWidth", {value: iw, configurable: true});
+      drawTilesFold();
+      // S17: a cut line gets its text as the tooltip; one with its own title keeps it
+      const ln = [...document.querySelectorAll("#tiles .tile .ln")].find(e => !e.title && e.textContent.trim());
+      o.cut = null;
+      if (ln) { Object.defineProperty(ln, "scrollWidth", {value: 500, configurable: true}); Object.defineProperty(ln, "clientWidth", {value: 100, configurable: true});
+                titleCutLines(); o.cut = !!ln.title && ln.dataset.autoTitle === "1" && ln.textContent.includes(ln.title.slice(0, 5)); }
+      sortKeys.here = s0; hereData = h0;
+      return JSON.stringify(o); })()`));
+    const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], link: ["linked · 2 s", "linked"],
+      stale: ["stale · 48 s", "stale"], none: ["no link · retrying since 14:02", "none"], pill: true,
+      chips: ["Alerts", "Voice", "Auto honk", "Sounds", "Thresholds", "Settings", "Spoken lines"],
+      autoSmall: true, autoBig: false, line: true, cut: true};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodB12 = !bad.length && errors.length === before;
+    allOk = allOk && goodB12;
+    console.log(goodB12 ? "OK" : "FAIL", "| batch 12 page |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "colony distance, sortable Here, link pill, dialog chips, tiles auto-fold, cut lines titled", errors.slice(before));
   }
   // F45: the unsold pop-up's headings: a ship loss with no sale before it counts from the loss; bio from any death
   {

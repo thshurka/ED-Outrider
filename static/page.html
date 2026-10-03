@@ -14,7 +14,7 @@
   <div class="topbar">
     <h1>ED Outrider</h1>
     <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hwy" title="the Neutron Highway: plot a route with Spansh and follow it as you fly">Highway</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
-    <span class="icons"><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
+    <span class="icons"><span id="linkPill" class="linkpill" role="status" title="the page's link to Outrider"></span><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
       <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button><span id="lastSaidLine" class="lastsaid" hidden><button type="button" id="lastSaidBtn" class="icon" title="say it again">▶</button><span id="lastSaidText"></span></span></span>
   </div>
   <div class="tilewrap">
@@ -86,8 +86,8 @@
   <div id="hereLeaving"></div>
   <div id="hereMain" class="pane">
   <table id="hereTable">
-    <thead><tr><th>Body</th><th>Class</th><th class="num c2hide">Dist ls</th><th class="num" title="surface gravity in g">Grav</th><th class="hide-sm c2hide">Atmosphere</th>
-      <th title="biological and geological signals">Bio / Geo</th><th class="num c2hide" title="planetary mining locations (hover or tap a count for the likely minerals)">⛏</th><th class="c2hide">Rings</th><th class="c2hide">Firsts</th><th class="num c2hide" title="what this body's data would pay if sold now">Now</th><th class="num" id="hereMaxTh" title="the most it could pay once scanned, mapped and sampled">Max</th></tr></thead>
+    <thead><tr><th>Body</th><th>Class</th><th class="num c2hide" data-sort="dist" title="distance from the arrival star in light-seconds (click to sort, nearest first)">Dist ls</th><th class="num" data-sort="grav" title="surface gravity in g (click to sort, lowest first)">Grav</th><th class="hide-sm c2hide">Atmosphere</th>
+      <th title="biological and geological signals">Bio / Geo</th><th class="num c2hide" title="planetary mining locations (hover or tap a count for the likely minerals)">⛏</th><th class="c2hide">Rings</th><th class="c2hide">Firsts</th><th class="num c2hide" data-sort="now" title="what this body's data would pay if sold now (click to sort)">Now</th><th class="num" id="hereMaxTh" data-sort="max" title="the most it could pay once scanned, mapped and sampled">Max</th></tr></thead>
     <tbody id="hereRows"></tbody>
   </table>
   <div id="hereSchematic" hidden></div>
@@ -401,12 +401,13 @@
 <dialog id="alertDialog">
   <form method="dialog">
     <h3>Alerts &amp; thresholds</h3>
-    <h4>What happens for each alert</h4>
+    <nav id="alertChips" class="chips" aria-label="sections"></nav>
+    <h4 data-chip="Alerts">What happens for each alert</h4>
     <label class="master"><input type="checkbox" data-alert="enabled"> Desktop notifications (the browser will ask permission once)</label>
     <table id="alertTable" class="alerttable"><thead><tr><th>Alert</th><th title="desktop notification">notify</th>
       <th title="its sound (when 🔊 is on)">sound</th><th title="spoken (when 🗣 is on)">speak</th></tr></thead><tbody id="alertOpts"></tbody></table>
     <div class="hint">Alerts only fire for something out of the ordinary. The tab title also carries the current state, so a background tab still tells you something.</div>
-    <h4>Spoken alerts <span id="ttsEngine" class="unk"></span></h4>
+    <h4 data-chip="Voice">Spoken alerts <span id="ttsEngine" class="unk"></span></h4>
     <label class="mod">Voice <select id="ttsVoice"></select> <span id="ttsStatus" class="hint"></span></label>
     <div class="hint" id="ttsHint"></div>
     <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
@@ -443,7 +444,7 @@
       <span class="hint">comma separated; each line uses one at random, in place of your commander name (which a voice often cannot say); empty goes back to the default</span></label>
     <div class="hint" id="speechHint"></div>
     <div class="hint" id="speechTried"></div>
-    <h4>Auto honk</h4>
+    <h4 data-chip="Auto honk">Auto honk</h4>
     <label class="mod"><input type="checkbox" id="autoHonk"> Honk automatically on arriving in a system by hyperspace
       <span id="autoHonkStatus" class="hint"></span></label>
     <label class="mod"><input type="checkbox" id="autoHonkSay"> When it completes, say how many bodies it found
@@ -458,7 +459,7 @@
     <div class="hint" id="autoHonkGroups" hidden><span id="autoHonkGroupsText"></span>
       <a href="#" id="autoHonkForget" title="clear what auto honk learned about this ship's fire groups">forget</a></div>
     <div class="hint" id="copilotLine" hidden></div>
-    <h4>Sounds</h4>
+    <h4 data-chip="Sounds">Sounds</h4>
     <div class="opts inline">Try them:
       <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>
       <button type="button" class="try" data-try="upbeat" title="known but not fully scanned">▶ unscanned</button>
@@ -471,7 +472,7 @@
       <button type="button" class="try" data-try="danger" title="hull, heat, interdiction">▶ danger</button>
       <button type="button" class="try" id="trySpeak" title="spoken alerts">▶ voice</button>
     </div>
-    <h4>Thresholds (these also drive the header colours and the leaving warning)</h4>
+    <h4 data-chip="Thresholds">Thresholds (these also drive the header colours and the leaving warning)</h4>
     <label class="mod">Exobiology: only count a body as unfinished if it could pay over
       <input type="number" id="bioMin" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="bioMin">reset</span>
       <span class="hint">straight Vista Genomics payout, no first-log bonus; sampling you have already started always counts; a body the rules cannot price always counts</span></label>
@@ -520,7 +521,11 @@
     <label class="mod">Here's suggested order: mark an item "skip?" under
       <input type="number" id="skipFloor" min="0" step="10000" style="width:8em"> cr per minute of supercruise<span class="reset" data-reset="skipFloor">reset</span>
       <span class="hint">supercruise time from the arrival star on a rough community curve (about 40 s at 2,000 ls, 6 min at 100,000 ls); started samples and first-discovery Earth-likes, water worlds, ammonia worlds and terraformables are never marked</span></label>
-    <h4>Settings</h4>
+    <h4 data-chip="Settings">Settings</h4>
+    <label class="mod">Header tiles on this device <select id="tilesMode">
+        <option value="">as ▴/▾ sets them (shared)</option><option value="auto">one line on a small window</option>
+        <option value="six">always the six tiles</option><option value="line">always one line</option></select>
+      <span class="hint">"small" is under 800 px high or 1200 px wide; ▴/▾ beside the tiles still folds or unfolds them, and makes that this device's choice</span></label>
     <div class="opts inline">
       <button type="button" class="try" id="settingsExport" title="download this browser's settings as a file">Export settings</button>
       <button type="button" class="try" id="settingsImport" title="load settings from an exported file (the page reloads)">Import settings…</button>
@@ -531,7 +536,7 @@
     <div class="hint" id="settingsHint">Thresholds, alert choices, personalities, "Call me" names, speed, sorts and filters live in this browser.
       Export them to a file (Import on another browser or after clearing the cache), or save them on the server so a new browser (a tablet running Now) starts with them.
       The view, layouts, the search form and which screen speaks stay per device. The voice is kept by the server already.</div>
-    <details id="speechLogBox" class="speechlog"><summary>Spoken lines: the last 100 alerts in this window and what became of each</summary>
+    <details id="speechLogBox" class="speechlog" data-chip="Spoken lines"><summary>Spoken lines: the last 100 alerts in this window and what became of each</summary>
       <div class="hint">Newest first: said, cut short, dropped (waited too long, you left the system, replaced by newer news, a cooldown, hushed) or
         silent (speech off, not ticked, another window speaks, hushed). Only this window's, and a reload starts afresh.
         👎 on a line from the lines file means never say that one again (for every browser and the voice lab; the last line of a list stays).

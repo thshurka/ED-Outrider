@@ -37,8 +37,8 @@ const posId = () => data && data.position ? data.position.id ?? String(data.posi
 // id64s above 2^53 can round to the same number; Codex C2)
 const sysId = x => !x ? null : x.id != null ? String(x.id) : x.id64 != null ? String(x.id64) : null;
 // Each sortable table keeps its own sort (a value sort chosen in My firsts must not re-sort Nearby).
-const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search"};
-const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance"},
+const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search", hereTable: "here"};
+const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance", here: "max"},
                                store.get("sorts", {}));
 const showVisited = document.getElementById("showVisited");
 const showExplored = document.getElementById("showExplored");
@@ -452,12 +452,32 @@ function renderStrip() {
     (f && f.live && f.pct != null && f.pct < 30 ? ` · ⛽${f.pct}%` : "") +
     (unsoldLevel(data.unsold) === "urgent" ? " · 💰 sell!" : "");
   renderTilesLine();
+  titleCutLines();
+}
+// A tile's line cut short by its width shows the whole of it on hover (review S17, part a): a line that already has a
+// title of its own keeps it, and one that fits again loses the one set here
+function titleCutLines() {
+  for (const el of document.querySelectorAll("#tiles .tile .ln, #tiles .tile .val")) {
+    const cut = el.scrollWidth > el.clientWidth + 1, mine = el.dataset.autoTitle === "1";
+    if (cut && (!el.title || mine)) { el.title = el.textContent.replace(/\s+/g, " ").trim(); el.dataset.autoTitle = "1"; }
+    else if (!cut && mine) { el.removeAttribute("title"); delete el.dataset.autoTitle; }
+  }
 }
 // ---- the header tiles folded into one line (▴/▾ beside them; per browser, tilesCollapsed) ----
 // "Smojooe AR-E b25-7 · ⛽ 64% · 12.79B cr · unsold 92k · carrier 6 ly": where you are, then each tile's headline, in
 // the colour its tile has (fuel and unsold amber or red, the Data tile when the journal is stale or the link is down)
 let tilesFolded = store.get("tilesCollapsed", false) === true, dataBit = "";
+// This device's choice (review S44): "auto" folds on a small window, "six" and "line" fix it; none follows the shared
+// tilesCollapsed (what ▴/▾ last set, exported with the other settings). ▴/▾ makes its choice this device's too.
+const TILES_SMALL = {h: 800, w: 1200};
+const tilesMode = () => { const m = store.get("tilesMode", null); return ["auto", "six", "line"].includes(m) ? m : null; };
+function tilesFoldNow() {
+  const m = tilesMode();
+  return m === "line" ? true : m === "six" ? false
+    : m === "auto" ? (window.innerHeight < TILES_SMALL.h || window.innerWidth < TILES_SMALL.w) : store.get("tilesCollapsed", false) === true;
+}
 function drawTilesFold() {
+  tilesFolded = tilesFoldNow();
   document.getElementById("tiles").hidden = tilesFolded;
   document.getElementById("tilesLine").hidden = !tilesFolded;
   const b = document.getElementById("tilesBtn");
@@ -466,10 +486,18 @@ function drawTilesFold() {
   b.title = tilesFolded ? "show the six tiles again" : "fold the six tiles into one line";
 }
 document.getElementById("tilesBtn").onclick = () => {
-  tilesFolded = !tilesFolded; store.set("tilesCollapsed", tilesFolded); drawTilesFold();
+  tilesFolded = !tilesFolded; store.set("tilesCollapsed", tilesFolded); store.set("tilesMode", tilesFolded ? "line" : "six");
+  drawTilesFold(); drawTilesMode();
   if (data) render();   // the header's height changed: app mode and what is sized to the window follow
 };
-drawTilesFold();
+const tilesModeEl = document.getElementById("tilesMode");
+const drawTilesMode = () => { tilesModeEl.value = tilesMode() || ""; };
+tilesModeEl.onchange = () => { store.set("tilesMode", tilesModeEl.value || null); drawTilesFold(); if (data) render(); };
+window.addEventListener("resize", () => {   // "auto" follows the window
+  if (tilesMode() !== "auto") return;
+  const was = tilesFolded; drawTilesFold(); if (tilesFolded !== was && data) render();
+});
+drawTilesFold(); drawTilesMode();
 function tileLevel(id) { const c = document.getElementById(id).classList; return c.contains("urgent") ? "urgent" : c.contains("warn") ? "warn" : ""; }
 function tilesLineHtml() {
   const p = data.position, f = data.fuel, cm = data.commander, u = data.unsold, c = data.carrier;
@@ -551,6 +579,9 @@ const skipFloor = () => { const v = Number(store.get("skipFloor", null) ?? 10000
 const scText = sec => sec < 90 ? `~${Math.max(10, Math.round(sec / 5) * 5)} s` : `~${Math.round(sec / 60)} min`;
 // the map and bio items worth doing by your thresholds, nearest to the arrival star first, value per minute of
 // supercruise breaking ties, a body with no distance last (in the server's order)
+// metres between samples of a genus (the server's shipped table: review S1), or null for one it does not know
+const colonyM = g => (data && data.colony && g && data.colony[String(g).toLowerCase()]) || null;
+const colonyTxt = g => colonyM(g) ? ` <span class="unk" title="samples of one species must be this far apart">· ${colonyM(g).toLocaleString("en-US")} m</span>` : "";
 function planItems(l) {
   const w = worthLeavingFor(l);
   if (!w) return [];
@@ -2682,16 +2713,18 @@ function renderHere() {
   const dest = data.destination && posId() === h.id64 ? data.destination : null;
   const destBody = dest && h.bodies.find(b => b.body_id === dest.body_id);
   const rowHtml = (b, ind = "") => {
+    // the colony distance in the genus's tooltip (S1): the row's text stays as it is
+    const ct = g => colonyM(g) ? ` title="${esc(g)}: samples ${colonyM(g)} m apart"` : "";
     const bio = [], f = bioFactor(b), atm = b.type === "Planet" && b.atmosphere && b.atmosphere !== "None" ? b.atmosphere : "";
     const guessOf = g => (b.bio_guess || []).find(x => x.genus === g);
     const guessTxt = x => !x || !x.best ? "" : ` <span class="unk" title="likeliest by value: ${esc(x.species.join(" / "))}">(${esc(x.best.split(" ").slice(1).join(" "))}? ${credits(x.value * f)})</span>` + codexMark(x, h.region);
     for (const g of bioGenera(b)) {
       const o = b.organics.find(o => o.genus === g);
-      bio.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}" title="${esc(o.species || "")}${o.variant ? " · " + esc(o.variant) : ""}${o.lost ? " · lost with the ship, sample again" : ""}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}${!o.lost && o.value ? ` <span class="unk">${credits(o.value * f)}</span>` : ""}</span>` +
+      bio.push(o ? `<span class="sp ${o.lost ? "lost" : o.done ? "done" : "part"}" title="${esc(o.species || "")}${o.variant ? " · " + esc(o.variant) : ""}${o.lost ? " · lost with the ship, sample again" : ""}${colonyM(g) ? ` · samples ${colonyM(g)} m apart` : ""}">${esc(g)} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}${!o.lost && o.value ? ` <span class="unk">${credits(o.value * f)}</span>` : ""}</span>` +
                    // a run under way prices the species you logged (known from its first sample), like the pop-up and
                    // the panel; the predictor's guess is only for a lost run or one whose species has no price
                    (o.lost || (!o.done && !o.value) ? guessTxt(guessOf(g)) : "")
-                 : `<span class="sp">${esc(g)} 0/3</span>` + guessTxt(guessOf(g)));
+                 : `<span class="sp"${ct(g)}>${esc(g)} 0/3</span>` + guessTxt(guessOf(g)));
     }
     // signals no genus accounts for: before a DSS, and after a sample taken without one (that genus is listed above)
     const unk = bioUnknown(b);
@@ -2722,7 +2755,13 @@ function renderHere() {
   document.getElementById("hereMaxTh").title = maxBonus()
     ? "the most it could pay once scanned, mapped and sampled, including first-discovery, first-mapped and first-footfall (×5 bio) bonuses where they apply"
     : "the most it could pay once scanned, mapped and sampled, with no bonuses: plain Universal Cartographics and Vista Genomics payouts";
-  const byMax = maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => (maxOf(b) || 0) - (maxOf(a) || 0));
+  document.getElementById("hereMaxTh").title += " (click to sort, the most first)";
+  // the list's order (review S19): Max (the default), Now, distance or gravity; a body with no figure goes last. Bio
+  // has no single value to sort by (and sorting by guesses would present them as facts). Tree and text keep the orbits.
+  const hs = sortKeys.here || "max", asc = hs === "dist" || hs === "grav";
+  const sortVal = {dist: b => b.dist_ls, grav: b => b.gravity, now: b => b.value_now || null}[hs] || (b => maxOf(b) || null);
+  const byMax = hs === "max" && maxBonus() ? h.bodies : [...h.bodies].sort((a, b) => { const x = sortVal(a), y = sortVal(b);
+    return x == null ? (y == null ? 0 : 1) : y == null ? -1 : asc ? x - y : y - x; });
   const fk = focusKey("hereRows");
   document.getElementById("hereRows").innerHTML = (hm.top === "text" ? treeRowsHtml(h, rowHtml) : byMax.map(b => rowHtml(b)).join(""))
     || `<tr><td colspan="11" class="unk">No bodies known here.</td></tr>`;
@@ -2919,7 +2958,7 @@ function bodyPopHtml(b, region) {
       // a logged species pays its own price (a lost one again once resampled); the best guess only bounds the rest
       const price = o ? (o.value ? (o.lost ? `<span class="unk">${credits(o.value * f)}</span>` : credits(o.value * f)) : "")
                       : x && x.value ? "≤" + credits(x.value * f) : "";
-      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}${variantTxt(x)}` : ""}</span><b>${price}</b></li>`);
+      lines.push(`<li><span>${esc(g)}${colonyTxt(g)}${o ? ` · ${esc(o.species || "")} ${o.lost ? "lost ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x && x.best ? ` · likely ${esc(x.best.split(" ").slice(1).join(" "))}${variantTxt(x)}` : ""}</span><b>${price}</b></li>`);
     }
     const unk = bioUnknown(b);   // signals no genus above accounts for, and what they could be
     if (unk) {
@@ -3043,7 +3082,7 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
     for (const g of bioGenera(row)) {
       const o = (row.organics || []).find(o => o.genus === g), x = (row.bio_guess || []).find(x => x.genus === g);
       const priced = o && !o.lost && o.value;   // the species is known from its first sample on
-      lines.push(`<li><span>${esc(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}${x.best && (x.variants || []).length ? ` <span class="unk" title="expected colour variant of the likeliest species">(${esc(x.variants.join(" or "))})</span>` : ""}` : ""}</span>` +
+      lines.push(`<li><span>${esc(g)}${colonyTxt(g)}${o ? ` · ${esc(o.species || "")}${o.variant ? " (" + esc(o.variant) + ")" : ""} ${o.lost ? "lost with the ship ✗" : `${o.samples}/3${o.done ? " ✓" : ""}`}` : x ? ` · could be ${esc(x.species.join(" / "))}${x.best && (x.variants || []).length ? ` <span class="unk" title="expected colour variant of the likeliest species">(${esc(x.variants.join(" or "))})</span>` : ""}` : ""}</span>` +
                  `<b>${priced ? credits(o.value * f) : x && x.value ? "≤" + credits(x.value * f) : ""}</b></li>`);
     }
     const unk = bioUnknown(row);   // signals no genus above accounts for, and what they could be
@@ -4998,6 +5037,7 @@ document.querySelectorAll("th[data-sort]").forEach(b => b.onclick = () => {
   const t = SORT_TABLES[b.closest("table").id]; if (!t) return;
   sortKeys[t] = b.dataset.sort; store.set("sorts", sortKeys);
   if (t === "firsts") renderFirsts();
+  if (t === "here" && hereData) renderHere();
   render();
 });
 const oneJump = document.getElementById("oneJump");
@@ -6335,10 +6375,43 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   render();
 });
 function drawAlertsBtn() { document.getElementById("alertsBtn").classList.toggle("on", !!alertCfg.enabled); }
-document.getElementById("alertsBtn").onclick = () => { drawSpeechStyles(); fillThresholds(); alertDialog.showModal(); drawSpeechLog(); };
+// the dialog's section chips (review S43): one per section, scrolling to it; the last one used reopens there (per device)
+const alertChips = document.getElementById("alertChips");
+const alertSections = [...alertDialog.querySelectorAll("[data-chip]")];
+alertChips.innerHTML = alertSections.map((s, i) => `<button type="button" data-sec="${i}">${esc(s.dataset.chip)}</button>`).join("");
+function showAlertSection(i, remember = true) {
+  const s = alertSections[i]; if (!s) return;
+  if (s.tagName === "DETAILS") s.open = true;
+  s.scrollIntoView({block: "start"});
+  alertChips.querySelectorAll("button").forEach(b => b.classList.toggle("on", Number(b.dataset.sec) === i));
+  if (remember) store.set("alertSection", i);
+}
+alertChips.addEventListener("click", e => { const b = e.target.closest("[data-sec]"); if (b) showAlertSection(Number(b.dataset.sec)); });
+document.getElementById("alertsBtn").onclick = () => {
+  drawSpeechStyles(); fillThresholds(); alertDialog.showModal(); drawSpeechLog();
+  const last = Number(store.get("alertSection", 0));
+  if (last > 0) showAlertSection(last, false);
+};
 drawAlertsBtn();
 
 let disconnected = null, disconnectedAt = 0, lostSaid = false;
+// The link pill (review S41, the author's version): "linked · 2 s" since the last answer; "stale · 48 s" past what
+// a long poll should take (25 s, plus a little); "no link · retrying since 14:02". The page still dims when the link
+// is down. linkState() is the tablet's too.
+const LINK_STALE_MS = 30000;
+function linkState(now = Date.now()) {
+  if (disconnected) return {state: "none", text: `no link · retrying since ${disconnected}`};
+  if (!lastHeard) return {state: "stale", text: "connecting…"};
+  const age = Math.max(0, Math.round((now - lastHeard) / 1000));
+  return age * 1000 > LINK_STALE_MS ? {state: "stale", text: `stale · ${age} s`} : {state: "linked", text: `linked · ${age} s`};
+}
+function drawLinkPill() {
+  const el = document.getElementById("linkPill"); if (!el) return;
+  const l = linkState();
+  if (el.textContent !== l.text) el.textContent = l.text;
+  el.className = "linkpill " + l.state;
+}
+setInterval(drawLinkPill, 1000);
 // Outrider gone quiet (stopped, crashed, the network down): after LOST_SAY_MS without it, the speaking window says
 // so once, in the browser's own voice (Piper is the server's), and again when it is back (review S13). A restart of
 // Outrider is over well within the grace. The journal-silence half was left out: the game is often quiet that long.
@@ -6348,6 +6421,7 @@ function sayConnection(text) {
   if (speechOn && isSpeaker) speak(text, {kind: "connection"});
 }
 function setConnected(ok) {
+  setTimeout(drawLinkPill, 0);
   if (ok && disconnected) {
     disconnected = null; disconnectedAt = 0;
     if (lostSaid) { lostSaid = false; sayConnection("Back in contact with Outrider."); }

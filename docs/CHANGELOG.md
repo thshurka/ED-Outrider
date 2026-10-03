@@ -2,6 +2,21 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Page suggestions (fix plan, batch 12)
+- Here shows each genus's colony distance (metres between samples) before you land: in the row's tooltip, the
+  body pop-up and the body panel (review S1).
+- Here's body table sorts by distance, gravity, Now or Max (click the heading); not by bio, which has no single
+  value (S19).
+- A cut-off line in a header tile shows the whole of it on hover (S17, part a; wrapping is left for later).
+- Search's mining: a mineral you have refined is searchable (Gold, water...), and the bodies where you refined it
+  come first, "Gold 22 t mined here before", surveyed for it or not (S38).
+- A link pill in the top bar: "linked · 2 s", "stale · 48 s" (no answer for longer than a long poll takes), "no link
+  · retrying since 14:02"; the page still dims when the link is down (S41).
+- The alerts dialog has a sticky row of section chips, and reopens at the last section used on this device (S43).
+- Header tiles on this device: one line on a small window (under 800 px high or 1200 wide), always six, always one
+  line, or as ▴/▾ sets them (shared, as before) (S44).
+- The rig leash warning says which way the rig is: "Rig 1 is 3.6 kilometres away, behind you" (S9).
+
 ## 2026-10-03 · Voice (fix plan, batch 11)
 - The jump line is said in the hyperspace tunnel, not over the game's countdown call (review S14), and has its own
   varied, bannable lines in speech.json, `fsd_charge`, 50 per personality list (S15).

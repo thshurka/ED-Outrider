@@ -1570,6 +1570,17 @@ class SurfaceRigs(unittest.TestCase):
         self.assertIsNone(self.j.vehicle["srv_type"])               # an SRV of unknown type: the button is unchanged
         self.assertFalse(self.state.in_rhino())
 
+    def test_which_way_in_eight_sectors(self):   # S9
+        w, b = ed_outrider.which_way, ed_outrider.surface_bearing
+        self.assertEqual([w(x, 0) for x in (0, 44, 90, 140, 180, 225, 270, 330)],
+                         ["ahead", "ahead on your right", "on your right", "behind on your right", "behind you",
+                          "behind on your left", "on your left", "ahead on your left"])
+        self.assertEqual(w(90, 90), "ahead")                          # relative to where you face
+        self.assertEqual([w(45), w(181), w(359)], ["to the north-east", "to the south", "to the north"])   # no heading
+        self.assertAlmostEqual(b(0, 0, 1, 0), 0, places=6)            # due north
+        self.assertAlmostEqual(b(0, 0, 0, 1), 90, places=6)           # due east
+        self.assertAlmostEqual(b(0, 0, -1, -1), 225, delta=0.1)
+
     def test_the_leash(self):
         self.launch()
         self.status(10, 0, 0, heading=180)
@@ -1577,8 +1588,8 @@ class SurfaceRigs(unittest.TestCase):
         for s, north in ((20, 3000), (30, 3600), (40, 3700), (50, 4600), (60, 4700)):
             self.status(s, north, 0)
             self.state.watch_surface(self.base + s)
-        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away; it is lost at 5.",
-                                                   "Rig 1 is 4.6 kilometres away; it is lost at 5."])
+        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away, behind you; it is lost at 5.",
+                                                   "Rig 1 is 4.6 kilometres away, behind you; it is lost at 5."])
         self.status(70, 2000, 0)
         self.state.watch_surface(self.base + 70)              # back in range: it may warn again
         self.status(80, 5100, 0)
@@ -1763,7 +1774,7 @@ class SurfaceRigs(unittest.TestCase):
         self.assertTrue(self.state.in_rhino())
         self.status(50, 3600, 0)
         self.state.watch_surface(self.base + 50)
-        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away; it is lost at 5."])
+        self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away, behind you; it is lost at 5."])
         self.status(60, 3600, 0, flags=1 << 1)            # aboard the ship, landed: not on foot, the SRV is left
         self.state.watch_surface(self.base + 60)
         self.assertIsNone(self.j.vehicle)

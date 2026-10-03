@@ -1085,6 +1085,14 @@ def mining_minerals(odds=None):
     return sorted({n for e in (MINING_ODDS if odds is None else odds).values() for n, _ in e["materials"]})
 
 
+def searchable_minerals(db):
+    """Search's mineral list: the survey's minerals, and every one you have refined (own_mined): the survey names only
+    some, so Gold, water or methanol you mined could not be searched for (review S38)."""
+    names = set(mining_minerals())
+    names |= {r[0] for r in db.execute("SELECT DISTINCT name FROM own_mined WHERE name IS NOT NULL AND tons > 0")}
+    return sorted(names)
+
+
 def rhino_mining(records):
     """(locations, bodies) of planetary mining locations on Rhino-worthy ground (RHINO_GROUNDS) among `records`."""
     hits = [r["mining"] for r in records if r.get("mining") and r.get("type") == "Planet"
@@ -1843,6 +1851,27 @@ def surface_m(lat1, lon1, lat2, lon2, radius):
     p1, p2 = math.radians(lat1), math.radians(lat2)
     a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
     return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+def surface_bearing(lat1, lon1, lat2, lon2):
+    """The initial great-circle bearing, degrees from north, from the first point to the second."""
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.atan2(y, x)) % 360
+
+
+REL_SECTORS = ("ahead", "ahead on your right", "on your right", "behind on your right", "behind you",
+               "behind on your left", "on your left", "ahead on your left")
+COMPASS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
+
+
+def which_way(bearing, heading=None):
+    """Where something at `bearing` is, in eight sectors: relative to your `heading` when it is known ("behind on
+    your left"), else by the compass ("to the north-east")."""
+    if heading is None:
+        return "to the " + COMPASS[int(((bearing % 360) + 22.5) // 45) % 8]
+    return REL_SECTORS[int((((bearing - heading) % 360) + 22.5) // 45) % 8]
 
 
 def surface_offset(lat, lon, bearing, dist, radius):
@@ -4693,6 +4722,8 @@ class State:
             "on_body": self.on_body(),
             "sampling": self.sampling_summary(),
             "surface": self.surface_summary(),
+            # metres between samples per genus (a shipped table), shown before you land (review S1)
+            "colony": outrider.bio.colony_table() if outrider.bio else None,
             "since_sale": self.since_sale(),
             "sellers": self.sellers_summary(),
             "next_stop": self.next_stop_summary(),
@@ -4905,8 +4936,10 @@ class State:
                     wrote = True
                 elif (d > RIG_WARN_AGAIN and level < 2 and RIG_WARN < RIG_WARN_AGAIN) or (d > RIG_WARN and level < 1):
                     self._rig_leash[rig["id"]] = 2 if d > RIG_WARN_AGAIN else 1
-                    j.moment("rig_leash", iso_ts(now), n=rig["n"], dist=round(d), lost=False,
-                             text=f"Rig {rig['n']} is {d / 1000:.1f} kilometres away; it is lost at {RIG_LOST_M / 1000:g}.")
+                    # which way it is, in eight sectors (review S9): the way back, in a short danger line
+                    way = which_way(surface_bearing(h["lat"], h["lon"], rig["lat"], rig["lon"]), h.get("heading"))
+                    j.moment("rig_leash", iso_ts(now), n=rig["n"], dist=round(d), lost=False, way=way,
+                             text=f"Rig {rig['n']} is {d / 1000:.1f} kilometres away, {way}; it is lost at {RIG_LOST_M / 1000:g}.")
                 elif d < RIG_WARN - 200 and level:
                     self._rig_leash[rig["id"]] = 0   # back in range: warn again next time
         wrote |= self.note_location(h)
@@ -9286,7 +9319,7 @@ class Searcher:
             # ticked bio thresholds are OR'd like any other section: the lowest one decides
             "bio": min((BIO_SEARCH[k][1] for k in params.get("bio") or [] if k in BIO_SEARCH), default=None),
             # planetary mining locations (S4), with an optional mineral from the survey (an unknown name counts as none)
-            "mining": {"mineral": params.get("mining_mineral") if params.get("mining_mineral") in mining_minerals() else None}
+            "mining": {"mineral": params.get("mining_mineral") if params.get("mining_mineral") in searchable_minerals(self.db) else None}
                       if params.get("mining") is True else None,
         }
         sections = [k for k in ("stars", "planets", "rings", "hotspots", "bio", "mining") if crit[k] is not None and crit[k] != set()]
@@ -9347,12 +9380,28 @@ class Searcher:
                     f"passed within {self.state.radius:g} ly of — Spansh (online) covers everything reported")
             sparse = bool(sections) and (("hotspots" in sections and n_hot < 5) or ("rings" in sections and n_rings < 10) or n < 20)
         visited = {r[0] for r in db.execute("SELECT id64 FROM visits")}
+        # a mineral you have refined somewhere: those bodies first ("Gold 22 t mined here before"), surveyed for it or
+        # not, whatever its share of the ground's locations (review S38)
+        mineral, mined = (crit.get("mining") or {}).get("mineral"), {}
+        if source == "local" and mineral:
+            for r in db.execute("SELECT system, body_id, tons FROM own_mined WHERE lower(name) = lower(?) AND tons > 0",
+                                (mineral,)):
+                mined.setdefault(r[0], []).append((r[1], r[2]))
         results, found = [], {}
         for id64, (name, x, y, z, records) in systems.items():
             d = dist(pos, {"x": x, "y": y, "z": z})
             if d > coverage:
                 continue
             m = match_system(name, records, crit)
+            if id64 in mined:
+                by_id = {r.get("body_id"): r["name"] for r in records if r.get("body_id") is not None}
+                mine = []
+                for bid, tons in sorted(mined[id64], key=lambda t: -t[1]):
+                    bname = by_id.get(bid) or (db.execute("SELECT name FROM own_bodies WHERE system=? AND body_id=?",
+                                                          (id64, bid)).fetchone() or [f"body {bid}"])[0]
+                    mine.append({"t": f"{bname} · {mineral} {tons} t mined here before", "body": bname, "here": True})
+                ours = {h["body"] for h in mine}
+                m["mining"] = mine + [h for h in m.get("mining", []) if h["body"] not in ours]
             if crit["bio"] is not None and all(k in m for k in sections if k != "bio"):
                 # price from the fullest record we have: a cached Spansh dump plus your scans beats the
                 # search result (which lacks volcanism and the system's stars)
@@ -9616,9 +9665,9 @@ def make_app(state, hosts=None):
             raise ValueError("id64 out of range")
         return v
 
-    options = json.dumps(SEARCH_OPTIONS)
-
     async def index(_):
+        # the mineral list is the survey's plus what you have refined (S38): read for each page load
+        options = json.dumps(dict(SEARCH_OPTIONS, mining=searchable_minerals(state.db)))
         # the browser defaults go into the page itself, so they are there before page.js reads its settings
         # ("<" escaped: a value holding "</script>" cannot end the script element)
         saved = read_browser_defaults(browser_defaults_path(state.db_path)) if state.db_path else None

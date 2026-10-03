@@ -253,6 +253,11 @@ _COLONY_BY_NAME = {"aleoida": 150, "bacterium": 500, "cactoida": 300, "clypeus":
                    "amphora plant": 100, "radicoida": 15}
 
 
+def colony_table():
+    """{genus name, lower case: metres between samples} for the page: the distance shows before you land (review S1)."""
+    return dict(_COLONY_BY_NAME)
+
+
 def colony_distance(genus_code=None, genus_name=None):
     """Metres between samples of one species, by the journal's genus code (or its localised name)."""
     return COLONY_DISTANCE.get(genus_code or "") or _COLONY_BY_NAME.get((genus_name or "").lower())

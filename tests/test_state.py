@@ -1790,6 +1790,10 @@ class BatchBState(unittest.TestCase):
             self.state.tick({})
         self.assertGreater(self.state.version, v)
 
+    def test_payload_carries_the_colony_distances(self):   # S1: shown before you land
+        col = self.state.payload()["colony"]
+        self.assertEqual((col["bacterium"], col["electricae"], col["tussock"]), (500, 1000, 200))
+
     def test_the_jump_line_waits_for_the_tunnel(self):   # S14
         now = time.time()
         ts = ed_outrider.iso_ts(now - 5)
