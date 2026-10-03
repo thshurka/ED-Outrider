@@ -582,6 +582,8 @@ const scText = sec => sec < 90 ? `~${Math.max(10, Math.round(sec / 5) * 5)} s` :
 // metres between samples of a genus (the server's shipped table: review S1), or null for one it does not know
 const colonyM = g => (data && data.colony && g && data.colony[String(g).toLowerCase()]) || null;
 const colonyTxt = g => colonyM(g) ? ` <span class="unk" title="samples of one species must be this far apart">· ${colonyM(g).toLocaleString("en-US")} m</span>` : "";
+// how you are on the body, naming the vehicle the journal says you launched ("in the Rhino", "in the Nomad")
+const howOnBody = ob => ob.how === "in the SRV" && ob.vehicle ? `in the ${ob.vehicle}` : ob.how;
 function planItems(l) {
   const w = worthLeavingFor(l);
   if (!w) return [];
@@ -685,7 +687,7 @@ function renderOnBody() {
   const el = document.getElementById("onbody"), ob = data && data.on_body;
   if (!ob) { el.innerHTML = ""; return; }
   const b = obData && !obData.error && obData.bodies.find(x => x.name === ob.body);
-  if (!b) { el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> (${ob.how})`; return; }
+  if (!b) { el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> (${esc(howOnBody(ob))})`; return; }
   const bits = [], f = bioFactor(b);
   for (const g of bioGenera(b)) {
     const o = b.organics.find(o => o.genus === g), x = (b.bio_guess || []).find(q => q.genus === g);
@@ -697,7 +699,7 @@ function renderOnBody() {
   if (unk) bits.push(`<span class="unk">${unk.label.replace(/ signals?/, m => " bio" + m)}</span>`);
   if (b.geo) bits.push(`<span class="sp geo">🪨 ${b.geo} geo</span>`);
   const x5 = b.value_parts && b.value_parts.bio_factor === 5;
-  el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> <span class="unk">(${ob.how})</span>: ` + (bits.join(" ") || `<span class="unk">no bio or geo signals known</span>`) +
+  el.innerHTML = samplingHtml() + `On <b>${esc(ob.body)}</b> <span class="unk">(${esc(howOnBody(ob))})</span>: ` + (bits.join(" ") || `<span class="unk">no bio or geo signals known</span>`) +
     (x5 && (b.genera.length || b.bio) ? ` · <span class="ok" title="nobody had set foot here when you scanned it: exobiology pays ×5">first footfall ×5</span>` : "");
 }
 // ---- route strip: the plotted route from here, hop by hop ----
@@ -1949,7 +1951,7 @@ function welcomeText(away, dockSays) {
   const hw = hwySpoken(data.highway); if (hw) parts.push(`${hw}.`);
   const ms = modulesSpoken(); if (ms) parts.push(`${ms}.`);
   if (dk && dk.station) parts.push(`Docked at ${dk.station}.`);
-  else if (ob && ob.body) parts.push(`${ob.how === "on foot" ? "On foot" : ob.how === "in the SRV" ? "In the SRV" : "Landed"} on ${ob.body}.`);
+  else if (ob && ob.body) parts.push(`${ob.how === "on foot" ? "On foot" : ob.how === "in the SRV" ? `In the ${ob.vehicle || "SRV"}` : "Landed"} on ${ob.body}.`);
   return parts.join(" ");
 }
 // The ship-loss debrief: what died with the ship (the server's totals, the same as History's) and the nearest

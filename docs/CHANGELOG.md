@@ -2,6 +2,17 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Docs and screenshots refreshed; the Rhino no longer forgotten at launch
+- Launching the Rhino no longer loses track of it: Status.json written while the SRV deploys from the bay lacks the
+  SRV flag, and a fallback took that for "back in the ship", so the co-pilot button gave the status report instead
+  of marking a rig (found in game). The fallback now needs Status.json to say you are in your ship, a minute after
+  the launch. PARSER_VERSION 39: the next start re-reads the journals once, which finds the vehicle you are in again.
+- The line under the tiles says which vehicle you are in on a body, "On A 2 (in the Rhino)" or "(in the Nomad)", from
+  the journal's launch (Status.json's SRV flag is the same for all of them); "the SRV" when the launch was never seen.
+  The welcome back line likewise.
+- AGENT_GUIDE, JOURNAL_REFERENCE, DESIGN_NOTES, README, the example config and the program's own description brought
+  up to date with batches 4-12; every README screenshot taken again (the Highway one at a refuel stop).
+
 ## 2026-10-03 · Page suggestions (fix plan, batch 12)
 - Here shows each genus's colony distance (metres between samples) before you land: in the row's tooltip, the
   body pop-up and the body panel (review S1).

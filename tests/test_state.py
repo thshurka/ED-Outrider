@@ -354,6 +354,18 @@ class Batch2Server(unittest.TestCase):
         self.assertEqual(self.state.on_body()["how"], "on foot")
         self.status(body="Sys A 4")                                 # flying near it: not on it
         self.assertIsNone(self.state.on_body())
+        # in the SRV: which one, from the journal's launch (Status.json's flag is the same for all of them)
+        srv = 1 << 26
+        self.j.handle({"event": "LaunchVessel", "timestamp": "2026-10-03T19:28:15Z", "VesselType": "lander01",
+                       "VesselType_Localised": "Nomad", "ID": 49, "PlayerControlled": True})
+        self.status(body="Sys A 4", flags=srv)
+        self.assertEqual((self.state.on_body()["how"], self.state.on_body()["vehicle"]), ("in the SRV", "Nomad"))
+        self.j.handle({"event": "DockSRV", "timestamp": "2026-10-03T19:34:30Z", "SRVType": "lander01", "ID": 49})
+        self.j.handle({"event": "LaunchSRV", "timestamp": "2026-10-03T19:35:13Z", "SRVType": "mev_rhino",
+                       "SRVType_Localised": "SRV Rhino", "ID": 54, "PlayerControlled": True})
+        self.assertEqual(self.state.on_body()["vehicle"], "Rhino")
+        self.j.vehicle = None                                       # a launch the journals never showed
+        self.assertIsNone(self.state.on_body()["vehicle"])
 
     def test_destination(self):
         self.status(destination={"System": 1, "Body": 7, "Name": "Sys 7 a"})

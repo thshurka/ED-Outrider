@@ -1362,21 +1362,21 @@ class SurfaceRigs(unittest.TestCase):
         self.assertIsNone(self.state.hush)                    # ...or hush
         self.assertEqual(self.texts(), ["Rig 1 placed.", "Rig 1 picked up.", "Rig 1 placed."])
         # outside the Rhino (on foot, in the ship, in a Scarab) the button works as before
-        self.status(20, flags=1 << 3)                         # landed, in the ship: the in-SRV flag gone
-        self.state.watch_surface(self.base + 20)
+        self.status(70, flags=(1 << 1) | ed_outrider.FLAG_IN_MAIN_SHIP)   # landed, back in the ship a minute on
+        self.state.watch_surface(self.base + 70)
         self.assertIsNone(self.j.vehicle)
         self.state.copilot_gesture("status")
         self.state.copilot_gesture("hush")
         self.assertEqual((self.state.copilot["seq"], self.state.copilot["action"]), (2, "hush"))
         self.assertIsNotNone(self.state.hush)
-        self.launch(30, "testbuggy")
-        self.status(31)
+        self.launch(80, "testbuggy")
+        self.status(81)
         self.state.copilot_gesture("again")
         self.assertEqual(self.state.copilot["action"], "again")
         self.assertEqual(len(self.texts()), 3)
         # the page's own requests (the Now bar) never mark rigs, even in the Rhino
-        self.launch(40)
-        self.status(41, 300)
+        self.launch(90)
+        self.status(91, 300)
         self.state.copilot_action("status")
         self.assertEqual(self.state.copilot["action"], "status")
         self.assertEqual(len(self.texts()), 3)
@@ -1775,9 +1775,24 @@ class SurfaceRigs(unittest.TestCase):
         self.status(50, 3600, 0)
         self.state.watch_surface(self.base + 50)
         self.assertEqual(self.texts(("rig_leash",)), ["Rig 1 is 3.6 kilometres away, behind you; it is lost at 5."])
-        self.status(60, 3600, 0, flags=1 << 1)            # aboard the ship, landed: not on foot, the SRV is left
-        self.state.watch_surface(self.base + 60)
+        self.status(70, 3600, 0, flags=(1 << 1) | ed_outrider.FLAG_IN_MAIN_SHIP)   # aboard the ship, landed: not on foot, the SRV is left
+        self.state.watch_surface(self.base + 70)
         self.assertIsNone(self.j.vehicle)
+
+    def test_the_rhino_is_kept_while_it_deploys(self):   # found in game 2026-10-03: the button gave the status report
+        self.launch()
+        for s in (3, 8):   # Status.json written during the deployment, without the SRV flag (still in the ship's bay)
+            self.status(s, flags=(1 << 1) | ed_outrider.FLAG_IN_MAIN_SHIP)
+            self.state.watch_surface(self.base + s)
+            self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino", s)
+        self.status(12, flags=1 << 1)                     # not in the SRV, but not said to be in the ship either
+        self.state.watch_surface(self.base + 12)
+        self.assertEqual(self.j.vehicle["srv_type"], "mev_rhino")
+        self.status(15, heading=180)                      # out on the ground: the press marks a rig
+        self.state.watch_surface(self.base + 15)
+        self.assertTrue(self.state.in_rhino())
+        self.state.copilot_gesture("status")
+        self.assertEqual(self.texts(), ["Rig 1 placed."])
 
     def test_rigs_go_with_a_destroyed_rhino_a_death_or_a_relog(self):
         """R10: SRVDestroyed, Died and a relog (LoadGame) take the rigs out with them; one that collected stays a saved

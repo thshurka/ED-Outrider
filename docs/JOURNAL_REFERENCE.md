@@ -20,10 +20,10 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 
 | Events | What for |
 |---|---|
-| `FSDJump`, `CarrierJump`, `Location` | Visits, the jump path (`jumps`), current and previous position, region crossings. `FSDJump` `JumpDist`/`FuelUsed`/`FuelLevel` feed the fuel model (not when `BoostUsed`). `Taxi`/`Multicrew` mark rides that are not your ship's fuel or honk. A `Location` in the system you are already in is a relog, not an arrival. `FSDJump`/`CarrierJump` also move the Neutron Highway along its route (`highway_arrival`). |
+| `FSDJump`, `CarrierJump`, `Location` | Visits, the jump path (`jumps`), current and previous position, region crossings. `FSDJump` `JumpDist`/`FuelUsed`/`FuelLevel` feed the fuel model (not when `BoostUsed`). `Taxi`/`Multicrew` mark rides that are not your ship's fuel or honk. A `Location` in the system you are already in is a relog, not an arrival. `FSDJump`/`CarrierJump`, and a `Location` that moves you (a respawn, a login elsewhere; not a relog), also move the Neutron Highway along its route (`highway_arrival`). |
 | `FSDTarget` | The targeted system (sound verdict, "leaving unfinished work" check) and its star class. |
-| `StartJump` | Star class of the destination; `JumpType: Hyperspace` means the FSD is charging (the charge line, the speech queue clears). |
-| `Scan` | Bodies (`own_bodies`, the record used everywhere), the arrival star's `WasDiscovered` (discovery streak verdict), first-scan `WasDiscovered`/`WasMapped`/`WasFootfalled` (`own_firsts`), landable `Materials` (jumponium), valuable finds. Nav-beacon scans (`ScanType` NavBeaconDetail/NavBeacon) never count as your discoveries. |
+| `StartJump` | Star class of the destination. `JumpType: Hyperspace` is written as the FSD starts charging, at the start of the countdown (before the game's own countdown call): the jump card and the speech queue clearing happen here, but the jump line's words wait for Status.json's FsdJump flag (bit 30, the tunnel: a "hyperspace" moment) or 8 s. |
+| `Scan` | Bodies (`own_bodies`, the record used everywhere), the arrival star's `WasDiscovered` (discovery streak verdict), first-scan `WasDiscovered`/`WasMapped`/`WasFootfalled` (`own_firsts`), landable `Materials` (jumponium), valuable finds. Nav-beacon scans (`ScanType` NavBeaconDetail/NavBeacon) never count as your discoveries. The arrival star can be scanned twice (the auto scan, then a Detailed one after the honk, or a nav beacon's): one arrival per visit. |
 | `FSSDiscoveryScan` | The honk: `BodyCount`, `Progress`; triggers the arrival briefing. |
 | `FSSAllBodiesFound` | All bodies found: the FSS debrief. |
 | `FSSBodySignals` | Bio, geo and planetary mining location counts found by the FSS (spoken signal counts, bio finds). |
@@ -34,13 +34,13 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 | `CodexEntry` | Codex entries, "new to your codex", vouchers. |
 | `Disembark` | Footfall on a planet (`OnPlanet`). |
 | `ApproachBody`, `LeaveBody`, `Touchdown` | Approach briefing, leaving a body mid-run, the body you are at; your ship's landing spot. |
-| `LaunchSRV`, `LaunchVessel`, `DockSRV`, `SRVDestroyed`, `SupercruiseExit`, `SupercruiseEntry`, `Liftoff` | Which body your SRV is out on and which SRV (`SRVType` `mev_rhino` is the Rhino); the ship marker; rigs lost with the Rhino. The Nomad launches with `LaunchVessel` (`VesselType` `lander01`, `VesselType_Localised` "Nomad") but docks with `DockSRV`, and Status.json reports it as an SRV (bit 26). |
+| `LaunchSRV`, `LaunchVessel`, `DockSRV`, `SRVDestroyed`, `SupercruiseExit`, `SupercruiseEntry`, `Liftoff` | Which body your SRV is out on and which SRV (`SRVType` `mev_rhino` is the Rhino); the ship marker; rigs lost with the Rhino. The Nomad launches with `LaunchVessel` (`VesselType` `lander01`, `VesselType_Localised` "Nomad") but docks with `DockSRV`, and Status.json reports it as an SRV (bit 26). `LaunchVessel` must keep the body you are on, as `LaunchSRV` does (PARSER_VERSION 37). |
 | `MiningRefined` | 1 t of a commodity refined by the SRV (`own_mined`, "Mined previously", Rhino collections). |
 | `MultiSellExplorationData`, `SellExplorationData` | Cartographic sales (one row per page, keyed by file:offset), which systems were sold. |
-| `SellOrganicData` | Vista Genomics sales, each `BioData` entry with its `Bonus` (the x5 check). |
+| `SellOrganicData` | Vista Genomics sales, each `BioData` entry with its `Bonus` (the x5 check). Two sales can share a second, so `bio_sales` rows are keyed by journal line (PARSER_VERSION 38); a visit sold in several goes (sales under 5 minutes apart) is one x5 check. |
 | `Died`, `Resurrect` | Deaths and whether the ship (and its data) was lost (`Option`). |
 | `LoadGame`, `Commander`, `Rank`, `Progress`, `Promotion`, `Statistics`, `Shutdown` | Logins and sessions, credits at login, ranks, career statistics, the quit (recap, quit backup). |
-| `Loadout` | Ship, jump range, fuel capacity, unladen mass, FSD and Guardian booster, engineering modifiers, hull and core module health, rebuy. Also the latest one per `ShipID` goes to `fleet_loadouts` (`note_fleet`, `fleet_figures`): the Highway's ship list and the exact plotter's inputs. |
+| `Loadout` | Ship, jump range, fuel capacity, unladen mass, FSD and Guardian booster, engineering modifiers, hull and core module health, rebuy. Also the latest one per `ShipID` goes to `fleet_loadouts` (`note_fleet`, `fleet_figures` in `outrider/fsd.py`): the Highway's ship list and the exact plotter's inputs. |
 | `EngineerCraft` | Engineering that moves the jump range before the next `Loadout`. |
 | `Cargo` (`Vessel: Ship`) | Tonnes in the hold: the ship's mass for the fuel model. |
 | `FuelScoop`, `RefuelAll`, `RefuelPartial` | Last refuel. |
@@ -57,12 +57,14 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 - **Status.json** (read on mtime change, `read_status`): `Fuel.FuelMain`/`FuelReservoir`, `Flags`, `Flags2`,
   `BodyName`, `Latitude`, `Longitude`, `Altitude`, `PlanetRadius`, `Heading`, `Cargo`, `Destination`,
   `GuiFocus`, `FireGroup`, `timestamp`. Flags used: landed (bit 1), scooping (11), FSD charging (17), in SRV
-  (26), HUD analysis mode (27), altitude from average radius (29), in the hyperspace tunnel (30); Flags2
+  (26), HUD analysis mode (27), altitude from average radius (29), in the hyperspace tunnel (30, FsdJump: the jump line is said once it
+  comes on after a hyperspace StartJump; auto honk waits while it is set); Flags2
   bit 0 on foot, bits 3/13/14 on foot in a station, hangar or social space (counted as docked). In the SRV, the
   Nomad or a fighter (bits 25, 26), `Fuel` and `Cargo` are the vehicle's, not the ship's: the fuel tile keeps the
   ship's last figures and shows the vehicle's separately.
 - **NavRoute.json** (`read_navroute`): `Route[]` of `StarSystem`, `SystemAddress`, `StarPos`, `StarClass`; the
-  route strip, star classes and "unreported" systems. An empty route means it was cleared.
+  route strip, star classes and "unreported" systems. An empty route means it was cleared. The last hop is the
+  system plotted to (`navroute_end`: auto-target's check for a waypoint beyond one jump).
 - **Controls bindings** (`outrider/honk.py`): the active preset's `.binds` file in the game's Options/Bindings folder,
   for Primary Fire's keyboard binding and auto-target's (`GalaxyMapOpen`, `UI_Right`/`Left`/`Up`/`Down`, `UI_Select`,
   `UI_Back`, `CycleNextPanel`, and the galaxy map camera's `CamYaw*`, `CamZoom*`, `CamTranslate*`). `StartPreset.4.start` names a preset per line (General, Ship, SRV, On foot): the `UI_*`
@@ -82,7 +84,7 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
   `System` and `Body`. Targets selected from an SRV (a rig, a deposit) write nothing at all.
 - The on-foot-in-station bits come from the documented flags and have not been confirmed in a live file.
 - `GuiFocus` values auto-target relies on: 0 the cockpit (no panel), 6 the galaxy map (the full list is
-  `outrider.target.GUI_FOCUS`). `Destination.System` is the targeted system's id64 (the check that auto-target worked).
+  `outrider.target.GUI_FOCUS`). `Destination.System` is the targeted system's id64 (the check that auto-target worked); when the galaxy map plots a route of several jumps it is the first hop, and NavRoute.json's last hop is the system chosen, which auto-target also accepts.
   Flags auto-target's guards read: docked (bit 0), landed (1), FSD charging (17), in danger (22), being interdicted
   (23), in SRV (26), in the hyperspace tunnel (30); Flags2 bit 0 on foot.
 
@@ -103,8 +105,10 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 - Leash: a community guide ("Rhino Planetary Mining", CMDR Dunn Actual) found a warning at 4 km and the rig
   destroyed at 5 km (`RIG_LOST_M`). Outrider warns earlier by default (`rig_warn` 3.5 km, again at 4.5 km).
 - A rig refills in about 5.5-8 minutes (same guide), hence "probably full" after 8 (`RIG_FULL_S`).
-- `LoadGame` inside an SRV names the ship; `Location` only says `InSRV`. The SRV type is carried over from the
-  last `LaunchSRV` that was never docked.
+- `LoadGame` inside an SRV names the ship, but inside the Nomad its `Ship` is `Lander01` (`Ship_Localised` "Nomad"), which
+  is not a ship of yours (`not_a_ship`); `Location` only says `InSRV`. The SRV type is carried over from the
+  last `LaunchSRV` that was never docked. While an SRV deploys from the ship's bay, Status.json is written for some
+  seconds without the in-SRV flag: never take that for "back in the ship" (only InMainShip, bit 24, a minute on).
 - `Liftoff` fires for every hop between sample sites and when the ship is dismissed with you on foot; use
   `LeaveBody` for "left the body".
 
@@ -130,9 +134,9 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
 - A system Spansh lists may still 404 on its dump for a while (`NO_DUMP_RETRY`).
 
 **Fuel and the frame shift drive**
-- Fuel per jump = `MaxFuelPerJump` x (distance / range at this mass) ^ p. `FSD_POWER` holds p per drive size
+- Fuel per jump = `MaxFuelPerJump` x (distance / range at this mass) ^ p. `FSD_POWER` (`outrider/fsd.py`) holds p per drive size
   (size 2 = 2.00 ... size 8 = 2.90, standard and SCO alike); the Caspian's Mk II SCO drive
-  (`FSD_POWER_ITEM`) is 2.5025. Guardian boosters add `GUARDIAN_BOOST` light years. Sources: EDCD
+  (`FSD_POWER_ITEM`, `outrider/fsd.py`) is 2.5025. Guardian boosters add `GUARDIAN_BOOST` (`outrider/fsd.py`) light years. Sources: EDCD
   coriolis-data (`frame_shift_drive.json` "fuelpower", `guardian_fsd_booster.json` "jumpboost") and
   EDDiscovery's EliteDangerousCore (`ModuleList.cs` "PowerConstant", which rounds the Mk II to 2.503).
 - The Caspian's **SCO Mk II** drive (`int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii`): fuel multiplier
@@ -152,7 +156,8 @@ the code; the constants named are in `ed_outrider.py` unless another file is giv
   ended.
 - `CarrierLocation` is written at login and at a booked jump's departure, but only while the game runs; a
   booked jump is assumed done 300 s after departure until confirmed (`CARRIER_SETTLE`).
-- `HullDamage` also reports fighters and SRVs (`PlayerPilot`, `Fighter`), and `HeatDamage` can repeat every few
+- `HullDamage` also reports fighters (`PlayerPilot` false or `Fighter` true) and the SRV or Nomad you drive, whose
+  lines carry no `Fighter` key at all (every ship line in the author's journals has `"Fighter": false`), and `HeatDamage` can repeat every few
   seconds (one alert per 30 s).
 - A replay (re-read, legacy import, catch-up after a restart) delivers old events; anything spoken or
   position-based must check `live_event(ts)`.

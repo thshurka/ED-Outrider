@@ -158,7 +158,8 @@ stop</b>.
 The **Overview** at the top shows Here and Nearby together: drag the divider, swap sides or stack them.
 
 On a window of at least about 900 × 600 the page fits the window: the header stays put and each list scrolls
-in its own box. **▴** folds the tiles into one line (remembered per browser). A table too wide for its box
+in its own box. **▴** folds the tiles into one line (remembered on this device; the alerts dialog's Settings can fold
+them only on a small window). A table too wide for its box
 switches to short forms ("HMC", "G star"; hover for the full text) rather than scroll sideways.
 
 **Now** is the cockpit view for a second monitor or a tablet, in big text: the system, the target, fuel,
@@ -207,7 +208,7 @@ notification and be spoken (🗣), chosen per alert in the **🔔 alerts** dialo
 
 Spoken but not notified unless you tick it: the arrival briefing, the FSS debrief, leaving a body with
 sampling unfinished, each species completed, tank full, a high-gravity approach with a lot aboard, the
-Neutron Highway's next stop, and discovery streaks (ten known systems in a row, or five undiscovered). Off
+Neutron Highway's next stop, auto-target's result, the jump line, auto honk's result, and discovery streaks (ten known systems in a row, or five undiscovered). Off
 until ticked: **jumponium** (see the voice, below).
 
 The same dialog holds the thresholds. Your browser remembers them; the config file sets what a new
@@ -282,7 +283,7 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
 - **Routine systems: sound only** (a tick, off by default) plays a soft two-note sound instead of the
   briefing where there is nothing to do.
 - **FSS debrief:** what is worth doing once every body is found. **Signals** as the FSS finds them.
-  **"Charging to jump"** with whether the star ahead is scoopable, and any hazard.
+  **The jump line** in the hyperspace tunnel, with whether the star ahead is scoopable, and any hazard.
 - **Greeting and goodbye:** what is at stake after a long break (and any core module under your level), and a
   session recap when you quit.
 - **Exobiology:** leaving a body mid-run warns; the third sample says what it paid and what is left.
@@ -320,6 +321,8 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
   own countdown call; it has its own varied lines in `speech.json` (`fsd_charge`). The scoop and hazard warnings
   are said after it.
 - **The last line said** shows beside the header's icons, with ▶ to hear it again.
+- **Lost contact.** If Outrider stops answering for 30 seconds, the speaking window says "Lost contact with
+  Outrider" in the browser's own voice, and again when it is back.
 
 **Spoken lines: what was said, and banning lines**
 
@@ -470,8 +473,9 @@ Setting it up:
 
 On Linux, one button on your HOTAS (or a spare key) talks to the voice:
 
-- **Tap:** a status report: fuel and jumps (and any core module under your level), the next stop, what is
-  aboard against your rebuy, and the nearest unvisited system. With a body targeted it leads with that body
+- **Tap:** a status report: fuel and jumps (and any core module under your level), on a Highway route the boost
+  and the next route system, the next stop, what is aboard against your rebuy, and the nearest unvisited system
+  (left out while you follow a route). With a body targeted it leads with that body
   ("A 3: 2.4 g, thin ammonia, 3 bio signals, up to 19 million, about 2 minutes, worth it"); mid-run on a body,
   the sampling. A tap mid-line cuts it short.
 - **Double tap:** the last line again.
@@ -479,7 +483,8 @@ On Linux, one button on your HOTAS (or a spare key) talks to the voice:
 - **In the Rhino** on a planet, any press marks rigs instead (see The surface map).
 
 Set it up under `[copilot]` in `ed_outrider.toml`: `enabled = true`, the `device` (part of its name, such
-as `"X-56 Rhino Throttle"`, or a `/dev/input/by-id/…` path) and the `button`. Run
+as `"X-56 Rhino Throttle"`, or a `/dev/input/by-id/…` path; of several devices that match, the one that has the
+button is used) and the `button`. Run
 `python3 -m outrider.button --listen` to find the button's name. `hold_ms` and `double_ms` tune the gestures. The
 alerts dialog shows whether it is listening.
 

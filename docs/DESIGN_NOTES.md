@@ -43,7 +43,8 @@ upstream project's choices, not rules of the game.
   bans and the config alone.
 - **The firsts watch is gentle to Spansh:** each system daily for a month, then weekly, at most 150 checks a day,
   and it can be switched off.
-- **The suggested order is not a route planner:** a fixed supercruise time curve, no spoken next stop.
+- **The suggested order is not a route planner:** a fixed supercruise time curve; its first stop is said ("Next: …") only
+  in the mapped call-out and the status report.
 - **Discovery streak lines are limited to two kinds,** no records or milestones.
 - **The approach warning fires on ApproachBody only** and reuses the unsold amber level rather than a new setting.
 - **"Leaving a body unfinished" only nags** if you landed or sampled there this visit.
@@ -210,6 +211,9 @@ confirmed while playing. Treat reports about them as likely real.
 - The Highway's plots against live Spansh (both plotters send the requests Spansh's site and Auto_Neutron send;
   tested with a mocked Spansh), following a route in game, and whether a name copied by `wl-copy`/`xclip` pastes
   into the galaxy map under Proton. The too-heavy warning and a conservative plot against a real route.
-- Auto-target in game: the default sequence targeted a system end to end with "test now" (2026-10-02, the author's
-  bindings and Linux/Proton). Not yet tried: a run triggered by a real supercharge on a route, other keyboard
-  layouts and presets, and both entry modes side by side.
+- Auto-target in game: the first default sequence targeted a system end to end with "test now" (2026-10-02), and the
+  current one (a camera yaw before the search, 1.5 s before Enter, a zoom in the plot step) is what worked on
+  2026-10-03 (the author's bindings, Linux/Proton). Not yet tried: a run triggered by a real supercharge on a route,
+  Target next and Retry from the page, other keyboard layouts and presets, and both entry modes side by side.
+- The jump line's wait for Status.json's FsdJump flag (bit 30) in a live jump; your own sound files and Volume
+  through the real players; the co-pilot button choosing the throttle of a real two-part X-56.

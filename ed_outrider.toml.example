@@ -125,8 +125,9 @@
 #                       # Your own EDDN uploads (EDMC and the like) are told apart by their time. false: never asks
 
 [speech]
-# For the page's "Play speech and sounds on this PC" tick (in the 🔔 alerts dialog, per browser, off until
-# ticked): the PC running Outrider then plays the spoken lines and the alert sounds itself (Linux only).
+# Sounds and the PC's player. server_player is for the page's "Play speech and sounds on this PC" tick (in the 🔔
+# alerts dialog, per browser, off until ticked): the PC running Outrider then plays the spoken lines and the alert
+# sounds itself (Linux only). sound_dir is used in the browser and on the PC.
 # server_player = "auto"   # "auto" (the first of pw-play, paplay, aplay and ffplay installed), one of those
 #                          # by name, or "off" (the tick then falls back to the browser playing them)
 # sound_dir = "my-sounds"  # your own alert sounds, played in the browser and on the PC: a folder of <name>.wav
@@ -134,8 +135,9 @@
 #                          # up to 3 seconds each; a sound with no file keeps Outrider's own
 
 [copilot]
-# One HOTAS (or keyboard) button for the voice (Linux; outrider/button.py). Tap: a status report (fuel and jumps, the
-# next stop, what is aboard against your rebuy, the nearest unvisited system; a targeted body first; the sampling
+# One HOTAS (or keyboard) button for the voice (Linux; outrider/button.py). Tap: a status report (fuel and jumps, on a
+# Highway route the boost and the next route system, the next stop, what is aboard against your rebuy, the nearest
+# unvisited system, left out while you follow a route; a targeted body first; the sampling
 # while you sample). Double tap: the last line again. Hold: hush the voice until the next jump (danger still
 # speaks); hold again to end it. In the Rhino on a planet any press marks a mining rig placed or picked up instead.
 # Outrider only reads the button, never grabs it: unbind it in Elite's controls, or it does its game action too.
@@ -143,7 +145,8 @@
 # Joysticks and throttles are readable through uaccess; a keyboard or mouse needs the input group.
 # python3 -m outrider.button --listen  lists the devices and prints the name of each button you press.
 # enabled = false
-# device = "X-56 Rhino Throttle"   # a part of the device's name, or a /dev/input/by-id/... path
+# device = "X-56 Rhino Throttle"   # a part of the device's name, or a /dev/input/by-id/... path (of several
+#                                  # devices that match, the one that has the button)
 # button = "BTN_TRIGGER_HAPPY5"    # the button's evdev name, or its code number, as --listen prints it
 # hold_ms = 600                    # held this long (ms) or more: a hold
 # double_ms = 350                  # a second press within this long (ms) of the first release: a double tap
@@ -156,6 +159,8 @@
 # press keys in the galaxy map to make the next route system the target (outrider/target.py), through the same
 # virtual keyboard as auto honk. The keys go to whichever window has focus. It is key-press automation of the same
 # kind as auto honk: whether it fits Frontier's rules is your call. python3 -m outrider.target --show prints the steps.
+# The Highway tab's 🎯 Target next (and ⟳ Retry) runs the same steps on demand, after a 5 s countdown, whether or not
+# autotarget is on.
 # autotarget = false
 # autotarget_delay = 5      # seconds after the supercharge (0 to 60)
 # autotarget_entry = "type" # "type" the name (US keyboard layout) or "paste" it (wl-copy/xclip, then Ctrl+V)

@@ -23,7 +23,8 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
   Bookmarks  systems you starred, with a note each
   Search     local database or Spansh: star classes (scoopable shortcut), planet types, ring types,
              ring hotspot minerals, unfinished exobiology, planetary mining locations (local only, optionally
-             by likely mineral); and any system by name (GET /api/find)
+             by likely mineral, or a mineral your SRV refined, those bodies first); and any system by name
+             (GET /api/find)
   Map        3D canvas of the neighbourhood with your path, first discoveries, boost stars
              (neutron / white dwarf) and your carrier; fills the window; left-drag rotates,
              right-drag moves, the wheel zooms
@@ -32,8 +33,9 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              jump list, a top-down map on the galactic regions (or your own galaxy image), a line under the tiles on
              Overview / Nearby / Here, the next system put on
              the desktop clipboard (wl-copy / xclip) and said on arrival; optionally (Linux, off by default) the
-             next system targeted after a supercharge by key presses in the galaxy map (outrider/target.py, the
-             same virtual keyboard as auto honk); [highway] in the config
+             next system targeted after a supercharge, or on demand with 🎯 Target next / ⟳ Retry, by key
+             presses in the galaxy map (outrider/target.py, the same virtual keyboard as auto honk); the drive
+             maths in outrider/fsd.py, the route helpers in outrider/highway.py; [highway] in the config
   History   your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
              each death cost including exobiology), your most valuable finds; exports
@@ -60,18 +62,22 @@ cartographic + exobiology estimate from outrider/unsold.py. Targeting a system p
 neither Spansh nor EDSM has heard of it, upbeat if it is not fully scanned, thud if you have been
 there or it is fully scanned, plus an alert if you are leaving unfinished work behind. Arriving
 somewhere undiscovered is announced by the voice (a sound only corrects a targeting call that was
-wrong). Desktop notifications are optional (🔔 alerts).
+wrong). Desktop notifications are optional (🔔 alerts). A link pill says whether the page is linked to Outrider
+(linked / stale / no link), and the last line said sits beside the header's icons with ▶ to hear it again.
 
 Alerts can be spoken (🗣): with Piper (outrider/tts.py) when it is installed, else the browser's voice, in
 the personalities of resources/speech.json (outrider/speech.py: business, sarcastic, sweet, with swearing versions at
 a chosen rate), calling you by the names you choose. Besides the alerts the voice can say signal
-counts as the FSS finds them, where the frame shift drive is taking you and whether that star is
-scoopable, brief you on arrival, after the FSS, on approach and on leaving a body, welcome you back
+counts as the FSS finds them, where the frame shift drive is taking you (said in the hyperspace tunnel, not
+over the game's countdown call) and whether that star is scoopable, brief you on arrival, after the FSS, on approach and on leaving a body, welcome you back
 after a break, debrief a ship loss and recap the session on quit, and it names the galactic region you cross into. Lines you tire of can be
 banned from the Spoken lines list (data/speech_banned.json). Lines go through a priority queue in
 one browser window (danger first; the queue clears when the FSD charges). voice_lab.py is a separate
 window for trying voices and lines. Optionally the server plays the speech and the alert sounds itself
-(POST /api/say/play, /api/sound/play; static/sounds.json), so no click on the page is needed. Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
+(POST /api/say/play, /api/sound/play; static/sounds.json, or your own <name>.wav files from [speech] sound_dir,
+served to the page by GET /api/sound/file/{name}), so no click on the page is needed; the next line is
+synthesised while one plays (POST /api/say/prefetch), and Volume is set per device. When Outrider stops
+answering for 30 s, the page says "Lost contact with Outrider" in the browser's voice. Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
 keyboard binding on arriving by hyperspace so the Discovery Scanner fires, and says how many bodies
 it found. The voice can be hushed for a while (the page, or POST /api/hush: the state is the server's, so
 every window and device sees it), and a co-pilot button (outrider/button.py, Linux, optional, read-only) asks the
@@ -81,7 +87,8 @@ The database backs itself up (a dated zip, the newest kept) at start when a day 
 the game (each copy checked with quick_check and the zip with testzip before older ones rotate out), and
 every live journal is archived once into data/backups/journals/; --restore puts a zip back and --list-backups
 lists them. Every request goes through a Host/Origin guard (request_guard), and a GET another site's page
-sends (Sec-Fetch-Site) is refused except OPEN_GETS (/api/status for overlays), so another web site cannot
+sends (Sec-Fetch-Site) is refused except OPEN_GETS (/api/status and /api/status.txt, for overlays, which alone
+send Access-Control-Allow-Origin: *), so another web site cannot
 read the journals or trigger actions.
 
 Body data is Spansh's merged with your own journal scans, so what you scan shows up immediately,
@@ -111,7 +118,8 @@ relative to this folder. The layout: outrider/ the modules, resources/ the shipp
 mining_odds.json, speech.json), data/ your own files (the database, browser_defaults.json,
 speech_banned.json, backups/, piper-voices/; git-ignored), docs/ the notes and screenshots.
 The page itself is static/page.html + page.css + page.js next to this script (edit and reload).
-Tests: python3 -m unittest discover tests; python3 -m outrider.bio --backtest scores the bio rules against
+Tests: scripts/verify.sh runs them all (python3 -m unittest discover tests, one subject file per
+tests/test_*.py, shared fakes in tests/support.py); python3 -m outrider.bio --backtest scores the bio rules against
 your journals.
 
 Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp;
@@ -329,6 +337,8 @@ AUTOHONK_TEST_COUNTDOWN = 5   # s: the Test button's time to click into the game
 BACKUP_MIN_GAP = 60     # s: a manual backup is refused this soon after the last one finished
 # Status.json GuiFocus: what has the game's focus other than the cockpit (0). Primary Fire does nothing there.
 GUI_FOCUS = outrider.target.GUI_FOCUS
+FLAG_IN_MAIN_SHIP = 1 << 24   # Status.json Flags: in your own ship (not the SRV, a fighter or on foot)
+VEHICLE_SETTLE_S = 60        # s after an SRV launch before Status.json alone may say you are back aboard
 FLAG_FSD_JUMP = 1 << 30   # Status.json Flags: in the hyperspace tunnel
 FLAG_SCOOPING = 1 << 11   # Status.json Flags: fuel scooping
 FLAG_FSD_CHARGING = 1 << 17
@@ -1003,7 +1013,8 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 36: fleet_loadouts' figures again: a MaxJumpRange without the Guardian booster keeps the drive's optimal mass.
 # 37: the Nomad's LaunchVessel keeps the body you are on: a Rhino launched after it records its mining (own_mined).
 # 38: bio_sales keyed by journal line (two Vista sales in one second); a Vista visit's x5 check made as one.
-PARSER_VERSION = 38
+# 39: the vehicle you are in rebuilt from the journals (a live fallback forgot the Rhino at every launch).
+PARSER_VERSION = 39
 # Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
@@ -4844,6 +4855,14 @@ class State:
                 "heading": st.get("heading"), "alt": st.get("alt"), "radius": st["planet_radius"],
                 "flags": st.get("flags") or 0, "flags2": st.get("flags2") or 0}
 
+    @staticmethod
+    def _settled_after(ts, launch_ts):
+        """Whether the Status.json reading at ts is VEHICLE_SETTLE_S or more after the vehicle's launch."""
+        try:
+            return ts_seconds(ts) - ts_seconds(launch_ts) >= VEHICLE_SETTLE_S
+        except (TypeError, ValueError):
+            return False
+
     def in_rhino(self, h=None):
         """In the Rhino (the SRV the journal's LaunchSRV named mev_rhino) on a body, with a position."""
         h = h or self.surface_here()
@@ -4915,10 +4934,14 @@ class State:
         j = self.journals
         st, said = j.status_json or {}, j.moment_seq
         wrote = False
-        # written after the launch (the journal line can be read a tick before Status.json catches up with it); not
-        # while on foot (Flags2 bit 0): out of the SRV on foot, it waits on the ground for you to get back in
-        if st.get("live") and st.get("flags") is not None and not st["flags"] & FLAG_IN_SRV and j.vehicle and \
-                not (st.get("flags2") or 0) & 1 and (st.get("ts") or "") > (j.vehicle.get("ts") or ""):
+        # A fallback for a DockSRV the journals never showed: Status.json says you are back in your ship (InMainShip,
+        # not merely "not in the SRV"), and a minute after the launch. While the SRV deploys from the bay Status.json
+        # is written without the SRV flag for a while, and taking that for "out of it" lost the Rhino at every launch
+        # (the button then gave the status report instead of marking a rig: found in game 2026-10-03). Never while on
+        # foot (Flags2 bit 0): out of the SRV on foot, it waits on the ground for you to get back in.
+        if st.get("live") and st.get("flags") is not None and not st["flags"] & FLAG_IN_SRV and \
+                st["flags"] & FLAG_IN_MAIN_SHIP and j.vehicle and not (st.get("flags2") or 0) & 1 and \
+                self._settled_after(st.get("ts"), j.vehicle.get("ts")):
             j.vehicle = None
             meta_set(self.db, "vehicle", None)
             wrote = True
@@ -5361,7 +5384,12 @@ class State:
         how = "on foot" if flags2 & 1 else "in the SRV" if flags & (1 << 26) else "landed" if flags & 2 else None
         if not how:
             return None
-        return {"body": short_name(pos["name"], st["body"]), "full": st["body"], "how": how, "system": str(pos["id64"])}
+        # which vehicle: Status.json's SRV flag is the same for the Nomad, the Rhino and the Scarab; the journal's
+        # launch says which ("SRV Rhino" -> "Rhino"; None when it is not known, the page then says "the SRV")
+        label = (self.journals.vehicle or {}).get("label") if how == "in the SRV" else None
+        vehicle = re.sub(r"^SRV ", "", label) if isinstance(label, str) and label.strip() else None
+        return {"body": short_name(pos["name"], st["body"]), "full": st["body"], "how": how, "vehicle": vehicle,
+                "system": str(pos["id64"])}
 
     def destination(self):
         """The in-game destination when it is a body in the system you are in (Status.json), else None."""

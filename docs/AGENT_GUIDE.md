@@ -18,7 +18,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | File | What it holds |
 |---|---|
 | `outrider/__init__.py` | `ROOT` (the repository), `RESOURCES_DIR` (`resources/`), `DATA_DIR` (`data/`): every default path starts from these. Modules with a CLI run as `python3 -m outrider.<name>` from the repository root |
-| `ed_outrider.py` | Almost everything: config (`settings_from`, `config_text`), the schema (`SCHEMA`, `RESET_JOURNAL_DATA`, `open_db`), the journal reader (`class Journals`), Spansh/EDSM (`class Spansh`), the live state and every summary the page shows (`class State`), Search (`class Searcher`), backups, the web app (`make_app`, `request_guard`) and `run()`/`main()`. The Neutron Highway's state and orchestration (its maths and route helpers are in `outrider/fsd.py` and `outrider/highway.py`, imported here): `Spansh.plot`, `Journals.note_fleet`/`highway_arrival` (fleet rows, progress and detours), `State.highway_*` (summary, view, plot, store, clear, copy, background, `highway_heavy_check`: too much fuel for the next jump) and auto-target (`maybe_autotarget` the trigger, `_autotarget` the delay / honk-first wait / run on a worker thread, `start_autotarget_test` with `autotarget_test_target` (the nearest known system a plain jump away, no route needed), `set_autotarget`, `autotarget_info`). Vehicles: `read_status` keeps the ship's fuel and cargo while you are in the SRV, the Nomad or a fighter (Status.json reports the vehicle's) and `fuel_summary` adds `vehicle` {label, fuel}; `highway_bg_file` (the map's own image: the configured file, image types only) |
+| `ed_outrider.py` | Almost everything: config (`settings_from`, `config_text`), the schema (`SCHEMA`, `RESET_JOURNAL_DATA`, `open_db`), the journal reader (`class Journals`), Spansh/EDSM (`class Spansh`), the live state and every summary the page shows (`class State`), Search (`class Searcher`), backups, the web app (`make_app`, `request_guard`) and `run()`/`main()`. The Neutron Highway's state and orchestration (its maths and route helpers are in `outrider/fsd.py` and `outrider/highway.py`, imported here): `Spansh.plot`, `Journals.note_fleet`/`highway_arrival` (fleet rows, progress and detours), `State.highway_*` (summary, view, plot, store, clear, copy, background, `highway_heavy_check`: too much fuel for the next jump) and auto-target (`maybe_autotarget` the trigger, `_autotarget` the delay / honk-first wait / run on a worker thread, `start_autotarget_test` with `autotarget_test_target` (the nearest known system a plain jump away, no route needed), `start_autotarget_run(kind, countdown)` (a run the page asks for: "test", or "next" for Target next / Retry against `autotarget_target(manual=True)`, the next route system or off the route the closest one), `cancel_autotarget(route)` (the toggle off, a cleared or replaced route), `set_autotarget`, `autotarget_info`). Vehicles: `read_status` keeps the ship's fuel and cargo while you are in the SRV, the Nomad or a fighter (Status.json reports the vehicle's) and `fuel_summary` adds `vehicle` {label, fuel} |
 | `outrider/core.py` | Small shared helpers with no dependencies: `iso_ts`, `ts_seconds` (journal timestamps) |
 | `outrider/fsd.py` | The frame shift drive's maths, pure: the drive tables (`FSD_DATA`, `FSD_POWER`, `GUARDIAN_BOOST`...), `fsd_range`, `hop_fuel`, the fuel model fitted to your jumps (`fuel_model`, `jumps_left`), a fleet ship's plotter inputs (`fleet_figures`/`fleet_range`/`fleet_model`), `max_fuel_for_jump`/`jump_in_reach`, `conservative_range`/`conservative_optimal_mass` |
 | `outrider/highway.py` | The Highway's route helpers: `highway_rows` (Spansh's answer as rows), `highway_match`, `highway_refuel_in`, `highway_text` (the spoken line), `highway_bg_file`, `HighwayError`, `class Clipboard` (wl-copy/xclip). The route's state and auto-target stay in `ed_outrider.State` (their constants are patched by verify.sh and the tests on `ed_outrider`, the Spansh URLs among them) |
@@ -27,12 +27,12 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/log.py` | The Log view: one-line summaries, read straight from the journal files on request |
 | `outrider/materials.py` | Material names, grades, caps, synthesis recipes, and folding material events into an inventory |
 | `outrider/speech.py` | Loads and checks `speech.json`; `KEYS` (every alert and its placeholders), `SAMPLES`, bans (`banned_path`: `data/speech_banned.json` for the shipped file, beside a copy of your own) |
-| `outrider/tts.py` | Piper synthesis (`Speaker`), voice downloads (into `data/piper-voices/`), and playing lines/sounds on the PC (`LinePlayer`) |
-| `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding (`keyboard_bindings` reads any controls) and presses it through a uinput virtual keyboard (`Honker`: its `owners`, "honk" and "target", keep it open; its `lock` is held for a whole press or auto-target sequence) |
-| `outrider/target.py` | The Highway's auto-target: `build_steps` (the sequence; its configurable parts are `DEFAULT_SEARCH`, `DEFAULT_SUBMIT` and `DEFAULT_PLOT`, lists of `parse_step` strings found in game, see `DESIGN_NOTES.md`), `guard` (when it must not start), `Targeter` (resolves keys from the preset and `autotarget_keys`, `run`: the step runner on honk's device and lock, aborts, dry run), `US_KEYMAP` (typing), `ACTIONS` (the controls it may read, galaxy map camera included) |
+| `outrider/tts.py` | Piper synthesis (`Speaker`), voice downloads (into `data/piper-voices/`), and playing lines/sounds on the PC (`LinePlayer`); `SoundBank` (the alert sounds, with your own `<name>.wav` from `[speech] sound_dir`, WAV only, up to `SOUND_FILE_MAX_S` 3 s), `scale_wav` (the page's per-device Volume applied to the WAV the PC's player gets) |
+| `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding (`keyboard_bindings` reads any controls) and presses it through a uinput virtual keyboard (`Honker`: its `owners`, "honk", "target" and "target-test", keep it open; its `lock` is held for a whole press or auto-target sequence; `press(check, cancel)` runs `check` under the lock just before the first key (a reason raises `NotNow`, nothing pressed) and `cancel` is that feature's own token, so switching one feature off stops its run while the other keeps the device open) |
+| `outrider/target.py` | The Highway's auto-target: `build_steps` (the sequence; its configurable parts are `DEFAULT_SEARCH`, `DEFAULT_SUBMIT` and `DEFAULT_PLOT`, lists of `parse_step` strings found in game, see `DESIGN_NOTES.md`), `guard` (when it must not start) / `targeted` (already the target: Status.json's `Destination.System`, or NavRoute.json ending at it for a waypoint several jumps away), `Targeter` (resolves keys from the preset and `autotarget_keys`, `run`: the step runner on honk's device and lock, aborts, a cancel token, dry run), `US_KEYMAP` (typing), `ACTIONS` (the controls it may read, galaxy map camera included) |
 | `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
-| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip) |
+| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip); `hwyAutoStart(kind)` (test now, and Target next / Retry via POST `/api/highway/target`), `hwyAimBtn` (🎯 beside "Next:"), `hwySpoken` (the Highway clause of the status report); `linkState`/`drawLinkPill` (the link pill); `outVolume` (Volume, per device); `ownSounds` (your own sound files) |
 | `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
 | `resources/speech.json` | Spoken lines per alert and personality (business, sarcastic, sweet, plus `_profane` lists) |
 | `resources/bio_rules.json` | Spawn rules and region map data fetched from upstream projects (refreshed at start when upstream changed) |
@@ -56,11 +56,13 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    JSON state in `meta` (position, ship, carrier, fuel history...), and appends **moments**
    (`Journals.moment(kind, ts, ...)`) to a 16-entry deque with a growing `seq`.
 4. **Status.json / NavRoute.json** are read when their mtime changes (`read_status`, `read_navroute`).
-5. **Commit, then follow-up.** After the commit the tick runs the live checks: `watch_status` (scoop, FSS,
-   surface map, rig leash), `maybe_refresh` (Spansh sphere on arrival), `apply_own_changes`,
-   `maybe_classify_target`, `maybe_unsold`, `maybe_sale_left`, carrier, sellers, the quit backup.
+5. **Commit, then follow-up.** After the commit the tick runs the follow-ups, each on its own (one that raises is
+   reported by `follow_up_failed` and the rest still run; a database error stops them): `watch_status` (scoop, FSS,
+   the hyperspace tunnel `watch_tunnel`, surface map, rig leash), `maybe_refresh` (the local cache at once, then the
+   Spansh sphere on arrival), `apply_own_changes`, `maybe_classify_target`, `maybe_unsold`, `maybe_sale_left`,
+   carrier, sellers, the quit backup, `highway_copy_next`, `highway_heavy_check`, `maybe_autotarget`.
    `State.bump()` wakes every waiting page request.
-6. **Payload.** `GET /api/nearby?since=<run>:<version>` is a long poll (25 s, 204 when nothing changed) that
+6. **Payload.** `GET /api/nearby?since=<run>:<version>` is a long poll (25 s, 204 when nothing changed; gzipped when the browser takes it) that
    returns `State.payload()`: position, systems, target, moments (priced by `moments_summary`), fuel,
    surface map, speech info and more. Other views fetch their own endpoints: `/api/system/{id64}`,
    `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
@@ -71,8 +73,10 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
    spoken line from `line(key, vars, plain)`.
 8. **Speech.** `speak()` queues lines by priority (danger first; stale lines dropped; the queue clears when
-   the FSD charges). One window speaks (Web Locks). Audio is Piper via `/api/say`, the PC via
-   `/api/say/play`, or the browser's own voice.
+   the FSD charges; a line can be held: the jump line waits for the "hyperspace" moment, at most `JUMP_LINE_WAIT`
+   8 s). One window speaks (Web Locks). Audio is Piper via `/api/say`, the PC via `/api/say/play`, or the browser's
+   own voice; the next line is synthesised while one plays (the PC's play request names it, the browser's Piper path
+   posts it to `/api/say/prefetch`). Your own sounds come from `/api/sound/file/{name}`.
 
 Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields, never the number.
 
@@ -137,10 +141,12 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   database; `checkpoint()`/`restore()` cover what lives only in memory (moments, sets of bodies touched,
   the collection under way...). New in-memory state changed by handling lines must be added to both, or a
   retry announces things twice. A journal line that lacks a field is skipped with a log line
-  (`KeyError`/`TypeError` are caught per line); database errors must propagate so the tick is retried.
+  (`KeyError`/`TypeError` are caught per line); database errors must propagate so the tick is retried. The
+  follow-ups after the commit run one by one: an exception is reported (`follow_up_failed`: the traceback once, the
+  error on the page) and the next one still runs; `sqlite3.Error` propagates.
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
-  screen speaks) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+  screen speaks, `volume`, `tilesMode`, the alerts dialog's `alertSection`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
 - **Page layout: scroll the pane, not the window.** On a window of at least 900 × 600 (`appWanted`; not Now) the
   body gets `app`: it is the window's height with no page scroll, the header stays, the view fills the rest (flex
   columns with `min-height: 0` down the chain) and each `.pane` (a bordered box, tabindex in app mode) scrolls on its
@@ -174,8 +180,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   a running game) or the co-pilot button (reads `/dev/input`) against a real game or device from tests or a
   scratch server, and the same for auto-target (it opens the galaxy map and types): tests use `FakeGame` (a fake
   device that plays the galaxy map) with `_fake_evdev()` (key codes, no `UInput`), never `Honker.open()` on real evdev.
-  Never POST to `/api/highway/autotarget/test` or `/api/highway/target` on a server that sees a live game. Use the existing fakes (`FakeHonker`, `FakeUI`, stand-in `evdev` namespaces in
-  `tests/support.py`). Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
+  Never POST to `/api/highway/autotarget/test` or `/api/highway/target` on a server that sees a live game. Use the existing fakes: `FakeGame`, `_fake_evdev()`,
+  `button_fake_evdev`, `FakeClock`/`use_fake_time` in `tests/support.py`, and the local `FakeHonker`/`FakeUI` classes
+  in `test_devices.py` and `test_config.py` as patterns. Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
 - **No stray side effects.** Don't download Piper voices into the real `data/piper-voices/`, don't let a test
   rewrite `resources/bio_rules.json`, and don't write the real `data/speech_banned.json` (use a speech file in a
   temp folder: its bans go beside it).
