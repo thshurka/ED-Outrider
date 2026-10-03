@@ -561,6 +561,38 @@ class LinePlayer:
         await asyncio.gather(*self._sounds, return_exceptions=True)
 
 
+def scale_wav(wav, volume):
+    """A 16-bit PCM WAV at `volume` (0 to 1, the page's Volume for Outrider's own voice and sounds: review S12),
+    for the PC's player, whose own volume flags differ (aplay has none). Anything else, or full volume, unchanged."""
+    import array
+    try:
+        v = float(volume)
+    except (TypeError, ValueError):
+        return wav
+    if not wav or v >= 1 or v != v:
+        return wav
+    v = max(0.0, v)
+    try:
+        with wave.open(io.BytesIO(wav)) as r:
+            params, frames = r.getparams(), r.readframes(r.getnframes())
+    except (wave.Error, EOFError):
+        return wav
+    if params.sampwidth != 2:
+        return wav
+    a = array.array("h", frames)
+    if sys.byteorder != "little":
+        a.byteswap()
+    for i, x in enumerate(a):
+        a[i] = int(x * v)
+    if sys.byteorder != "little":
+        a.byteswap()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setparams(params)
+        w.writeframes(a.tobytes())
+    return out.getvalue()
+
+
 def load_sounds(path=SOUNDS_FILE):
     """static/sounds.json: {"gain": g, "sounds": {name: {"tones": [...], "lowpass"?: Hz}}}."""
     with open(path, encoding="utf-8") as f:
@@ -627,12 +659,19 @@ def render_sound(spec, gain=0.8, rate=SOUND_RATE):
     return buf.getvalue()
 
 
-class SoundBank:
-    """The alert sounds rendered to WAV on first use, rendered again when sounds.json changes."""
+SOUND_FILE_MAX_S = 3.0          # s: your own sound file is used up to this long (the voice waits for a sound to end)
+SOUND_FILE_MAX_BYTES = 2_000_000
 
-    def __init__(self, path=SOUNDS_FILE):
-        self.path = path
+
+class SoundBank:
+    """The alert sounds rendered to WAV on first use, rendered again when sounds.json changes. With `own_dir`
+    ([speech] sound_dir: review S16), a <name>.wav there replaces that sound: a name sounds.json has, a WAV (every
+    player and browser takes one), at most SOUND_FILE_MAX_S long; anything else is reported, not used."""
+
+    def __init__(self, path=SOUNDS_FILE, own_dir=None):
+        self.path, self.own_dir = path, own_dir
         self._stamp, self._doc, self._wavs = None, None, {}
+        self._own_key, self._own = None, ({}, [])
 
     def _load(self):
         stamp = os.path.getmtime(self.path)
@@ -643,9 +682,62 @@ class SoundBank:
     def names(self):
         return list(self._load()["sounds"])
 
+    def own(self):
+        """({name: (path, seconds)}, [problems]) for the sound files in own_dir, looked at again when the folder or
+        a file in it changes."""
+        d = self.own_dir
+        if not d:
+            return {}, []
+        try:
+            files = sorted(f for f in os.listdir(d) if f.lower().endswith(".wav"))
+            key = (os.path.getmtime(d), tuple((f, os.path.getmtime(os.path.join(d, f))) for f in files))
+        except OSError as e:
+            return {}, [f"{d}: {e.strerror or e}"]
+        if key == self._own_key:
+            return self._own
+        names = set(self.names())
+        found, problems = {}, []
+        for f in files:
+            name, path = f[:-4], os.path.join(d, f)
+            if name not in names:
+                problems.append(f"{f}: not one of the sounds ({', '.join(sorted(names))})")
+                continue
+            try:
+                if os.path.getsize(path) > SOUND_FILE_MAX_BYTES:
+                    raise ValueError(f"over {SOUND_FILE_MAX_BYTES // 1_000_000} MB")
+                with wave.open(path) as w:
+                    secs = w.getnframes() / float(w.getframerate() or 1)
+                if secs > SOUND_FILE_MAX_S:
+                    raise ValueError(f"{secs:.1f} s long, over {SOUND_FILE_MAX_S:g} s")
+            except (OSError, EOFError, wave.Error, ValueError) as e:
+                problems.append(f"{f}: not used ({e})")
+                continue
+            found[name] = (path, round(secs, 2))
+        self._own_key, self._own = key, (found, problems)
+        return self._own
+
+    def info(self):
+        """For the payload: {"own": {name: seconds}, "problems": [...]} (the page fetches and decodes its own copy)."""
+        found, problems = self.own()
+        return {"own": {n: s for n, (_p, s) in found.items()}, "problems": problems}
+
+    def own_file(self, name):
+        """The bytes of your own file for a sound, or None."""
+        hit = self.own()[0].get(name)
+        if not hit:
+            return None
+        try:
+            with open(hit[0], "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
     def wav(self, name):
-        """WAV bytes for a sound, or None for a name sounds.json does not have (call it off the event loop:
-        rendering takes a few tens of milliseconds)."""
+        """WAV bytes for a sound (your own file when there is one), or None for a name sounds.json does not have
+        (call it off the event loop: rendering takes a few tens of milliseconds)."""
+        mine = self.own_file(name)
+        if mine:
+            return mine
         doc = self._load()
         spec = doc["sounds"].get(name)
         if not isinstance(spec, dict):

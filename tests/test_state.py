@@ -1790,6 +1790,28 @@ class BatchBState(unittest.TestCase):
             self.state.tick({})
         self.assertGreater(self.state.version, v)
 
+    def test_the_jump_line_waits_for_the_tunnel(self):   # S14
+        now = time.time()
+        ts = ed_outrider.iso_ts(now - 5)
+        self.j.handle({"event": "StartJump", "timestamp": ts, "JumpType": "Hyperspace", "StarSystem": "Far", "SystemAddress": 77,
+                       "StarClass": "K"})
+        self.j.status_json = {"live": True, "flags": ed_outrider.FLAG_FSD_CHARGING, "ts": ts}
+        self.state.watch_status(now)                                 # the countdown: nothing yet
+        kinds = lambda: [m["kind"] for m in self.j.moments]
+        self.assertNotIn("hyperspace", kinds())
+        self.j.status_json = {"live": True, "flags": ed_outrider.FLAG_FSD_JUMP, "ts": ed_outrider.iso_ts(now)}
+        self.state.watch_status(now)
+        self.state.watch_status(now + 1)                             # still in it: once
+        m = [x for x in self.j.moments if x["kind"] == "hyperspace"]
+        self.assertEqual([(x["system"], x["charge"]) for x in m],
+                         [("Far", next(x for x in self.j.moments if x["kind"] == "fsd_charge")["seq"])])
+        # out and into the tunnel again with no new charge (supercruise): no second line
+        self.j.status_json = {"live": True, "flags": 0, "ts": "x"}
+        self.state.watch_status(now + 20)
+        self.j.status_json = {"live": True, "flags": ed_outrider.FLAG_FSD_JUMP, "ts": "y"}
+        self.state.watch_status(now + 30)
+        self.assertEqual(kinds().count("hyperspace"), 1)
+
     def test_a_failing_follow_up_does_not_starve_the_rest(self):   # S5
         import contextlib, io
         ran, follow = [], ("watch_status", "maybe_refresh", "apply_own_changes", "maybe_classify_target", "maybe_unsold",

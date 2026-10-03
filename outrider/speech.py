@@ -65,6 +65,8 @@ KEYS = {
     "tank_full": "fuel scooping filled the tank: {jumps} (max-range jumps a full tank gives; may be missing)",
     "scoop_stopped": "fuel scooping stopped before the tank was full: {pct}",
     "supercharged": "the frame shift drive was supercharged by a neutron star or white dwarf cone: {mult} (e.g. '4 times')",
+    "fsd_charge": "the jump line, said in the hyperspace tunnel (the game itself announces the charge): {system} (where you "
+                  "are jumping to). Whether the star there is scoopable and any hazard are said after it, outside these lines",
     "body_brief": "approaching a body with biological signals: {body}, "
                   "{text} (what they could be, e.g. '3 biological signals, one of Stratum, Bacterium or Fungoida, 1M to 19M')",
     "high_g": "approaching a landable high-gravity body with a lot of unsold data aboard: {gravity} (in g), "
@@ -377,6 +379,7 @@ SAMPLES = {
     "bio_done_more": {"species": "Stratum Tectonicas", "value": "19.2M", "left": "Bacterium and Fungoida"},
     "bio_done_last": {"species": "Stratum Tectonicas", "value": "19.2M"},
     "tank_full": {"jumps": 8}, "scoop_stopped": {"pct": 64}, "supercharged": {"mult": "4 times"},
+    "fsd_charge": {"system": "Drojau LL-O b26-3"},
     "body_brief": {"body": "B 7", "text": "3 biological signals, one of Stratum, Bacterium or Fungoida, 1.0M to 19.0M"},
     "high_g": {"gravity": "2.6", "value": "480.2M", "rebuys": "3.2"},
     "arrival_brief": {"text": "Undiscovered. 14 bodies. Scoopable K star."},

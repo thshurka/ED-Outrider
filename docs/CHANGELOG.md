@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Voice (fix plan, batch 11)
+- The jump line is said in the hyperspace tunnel, not over the game's countdown call (review S14), and has its own
+  varied, bannable lines in speech.json, `fsd_charge`, 50 per personality list (S15).
+- The next queued line is synthesised while the current one plays, on the PC and in the browser (S11).
+- A Volume for Outrider's own voice and sounds, per device (S12).
+- Your own alert sounds: `[speech] sound_dir`, a folder of `<name>.wav` files up to 3 s each (S16).
+- The last line said, beside the header's icons, with ▶ to hear it again (S18).
+- S23 (the status report composed on the server) is left to PLAN-tablet phase 6, as its review advised.
+
 ## 2026-10-03 · Robustness (fix plan, batch 10)
 - One of the work steps after each journal read that keeps failing no longer stops the ones after it (auto-target,
   the quit backup, the clipboard copy only work within a short window); its error shows on the page and its

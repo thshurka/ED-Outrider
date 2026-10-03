@@ -1070,7 +1070,23 @@ function addCaption(words) {
   captions.push({words: w, at: Date.now()});
   if (captions.length > 3) captions.shift();
   if (view === "now" && data) renderNow();
+  drawLastSaid();
 }
+// the desktop page's "last said" (review S18): the latest caption, muted, with ▶ to hear it again (Now has its own)
+function drawLastSaid() {
+  const c = captions[captions.length - 1], el = document.getElementById("lastSaidLine");
+  if (!el) return;
+  el.hidden = !c;
+  if (!c) return;
+  const t = document.getElementById("lastSaidText");
+  t.textContent = c.words; t.title = `${c.words} (${agoText(c.at)})`;
+}
+document.getElementById("lastSaidBtn").onclick = () => {
+  const c = captions[captions.length - 1];
+  if (c) speak(lastSaid && lastSaid.words === c.words ? lastSaid.words : c.words,
+               {kind: "manual", voice: lastSaid && lastSaid.words === c.words ? lastSaid.voice : null,
+                pace: lastSaid && lastSaid.words === c.words ? lastSaid.pace || 1 : 1});
+};
 const agoText = at => { const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 10 ? "just now" : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`; };
 // the bar: 🗣 as in the header, a 30-minute hush (or its end), the status report, and ✕ back (not in a ?mode=now window)
@@ -1500,7 +1516,7 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
     const words = (typeof say === "function" ? say() : say) || title;
     // the line's alert and its speech.json wording, for the 👎 in Spoken lines
     entry.style = lineStyle; entry.key = lineKey; entry.template = lineTemplate;
-    speak(words, {delay: plays ? delay + (SOUND_LEAD[snd] ?? 900) : delay, kind, tag, still, log: entry, ...styleVoice(lineStyle)});
+    speak(words, {delay: plays ? delay + soundLead(snd) : delay, kind, tag, still, log: entry, ...styleVoice(lineStyle)});
     addCaption(words);
     return true;
   }
@@ -1524,6 +1540,7 @@ function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still =
 // interdiction are said at most once in 30 s, so a flapping condition cannot keep repeating.
 const SPEECH_MAX_AGE = 20000;
 const SPEECH_COOLDOWN = {heat: 30000, interdicted: 30000};
+const JUMP_LINE_WAIT = 8000;   // ms: the jump line's latest start after the charge, when the tunnel is never seen
 const SPEECH_SYS_BOUND = new Set(["find", "signals", "jump", "honk", "brief", "fss", "mapped", "approach", "bodybrief", "jumponium", "highway", "autotarget"]);
 // a rig confirmation answers your own press, like a line asked for
 const speechPrio = (kind, tag) => DANGER.has(tag) || kind === "hull" || kind === "fuel" ? 0 : kind === "manual" || kind === "rigs" ? 1
@@ -1659,6 +1676,12 @@ addEventListener("pagehide", () => {
   try { navigator.sendBeacon("api/say/stop", new Blob([JSON.stringify({id: pcLineId})], {type: "application/json"})); } catch {}
 });
 // say one line: Piper on the server when it has a voice ready, else the browser's own; stop() cuts it short
+// the line the worker will pick after this one, as Piper needs it: made while this one plays (review S11)
+const lineSpeed = it => Math.min(2, Math.max(0.5, speechSpeed() * (it.pace || 1)));
+function nextLine() {
+  const i = speechPick(speechItems), it = i < 0 ? null : speechItems[i];
+  return it ? {text: it.words, voice: it.voice || null, speed: lineSpeed(it)} : null;
+}
 async function sayNow(item) {
   const cur = speechNow = {prio: item.prio, kind: item.kind, stopped: false, halt: null, stop() { this.stopped = true; if (this.halt) this.halt(); }};
   try {
@@ -1670,7 +1693,8 @@ async function sayNow(item) {
       try {
         const speed = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
         const r = await fetch("api/say/play", {method: "POST", headers: {"Content-Type": "application/json"},
-                                               body: JSON.stringify({text: item.words, voice: item.voice || null, speed, id})});
+                                               body: JSON.stringify({text: item.words, voice: item.voice || null, speed, id, next: nextLine(),
+                                                                     volume: outVolume()})});
         if (r.ok) {
           item.engine = "Piper on the PC";
           try { item.capped = !!(await r.json()).capped; } catch {}   // killed at its time limit: logged as cut, not said
@@ -1693,7 +1717,10 @@ async function sayNow(item) {
         if (r.ok) {
           const buf = await ctx.decodeAudioData(await r.arrayBuffer());
           if (cur.stopped) return;
-          const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+          const nx = nextLine();   // this line's audio is in hand: the server makes the next one meanwhile
+          if (nx) fetch("api/say/prefetch", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(nx)}).catch(() => {});
+          const src = ctx.createBufferSource(), vol = ctx.createGain(); src.buffer = buf;
+          vol.gain.value = outVolume(); src.connect(vol); vol.connect(ctx.destination);
           item.engine = "Piper";
           await new Promise(res => { src.onended = res; cur.halt = () => { try { src.stop(); } catch {} res(); }; src.start(); });
           return;
@@ -1707,7 +1734,7 @@ async function sayNow(item) {
     await new Promise(res => {
       let done = false; const finish = () => { if (!done) { done = true; res(); } };
       const rate = Math.min(2, Math.max(0.5, speechSpeed() * (item.pace || 1)));
-      const u = new SpeechSynthesisUtterance(item.words); u.rate = rate; u.onend = finish;
+      const u = new SpeechSynthesisUtterance(item.words); u.rate = rate; u.volume = outVolume(); u.onend = finish;
       // an error is not "said" (nor the line "say again" repeats: review F44), unless Outrider's own cancel() caused it
       u.onerror = ev => { const why = ev && ev.error;
         if (!cur.stopped && !item.timedOut && why !== "interrupted" && why !== "canceled") item.unsaid = `the browser voice failed (${why || "?"})`;
@@ -1740,6 +1767,9 @@ const speechProfanePct = () => Math.min(100, Math.max(0, Number(store.get("speec
 const speechNames = () => String(store.get("speechNames", null) ?? (data && data.defaults && data.defaults.speech_names) ?? "Boss, Hefay, Sir")
   .split(",").map(x => x.trim()).filter(Boolean);
 // the voice's pace: 1 is its own, 1.3 is 30% faster
+// Outrider's own output volume, 0 to 1 (review S12): per device, not shared (a tablet and the PC differ)
+const outVolume = () => { const raw = store.get("volume", null), v = Number(raw);
+  return raw !== null && raw !== "" && isFinite(v) ? Math.min(1, Math.max(0, v / 100)) : 1; };
 const speechSpeed = () => Math.min(2, Math.max(0.5, Number(store.get("speechSpeed", null) ?? (data && data.defaults && data.defaults.speech_speed) ?? 1) || 1));
 // the "mapped" call-out after each planet's DSS mapping: off unless ticked ([defaults] speak_mapped, or per browser)
 const sayMapped = () => !!(store.get("sayMapped", null) ?? (data && data.defaults && data.defaults.speak_mapped) ?? false);
@@ -1863,7 +1893,7 @@ const LINE_SAMPLES = {
   left_body: {body: "A 3", text: "Stratum 2 of 3, and Tussock untouched, up to 4.1M"},
   bio_done_more: {species: "Stratum Tectonicas", value: "19.2M", left: "Bacterium and Fungoida"},
   bio_done_last: {species: "Stratum Tectonicas", value: "19.2M"},
-  tank_full: {jumps: 8}, scoop_stopped: {pct: 64}, supercharged: {mult: "4 times"},
+  tank_full: {jumps: 8}, scoop_stopped: {pct: 64}, supercharged: {mult: "4 times"}, fsd_charge: {system: "Drojau LL-O b26-3"},
   body_brief: {body: "B 7", text: "3 biological signals, one of Stratum, Bacterium or Fungoida, 1.0M to 19.0M"},
   high_g: {gravity: "2.6", value: "480.2M", rebuys: "3.2"},
   arrival_brief: {text: "Undiscovered. 14 bodies. Scoopable K star."},
@@ -5176,17 +5206,40 @@ function soundHere(ctx, out, s) {
     tone(ctx, t.dry ? out : wet, t.freq, t.start || 0, t.dur, {type: t.type, vol: t.vol, attack: t.attack, glideTo: t.glideTo});
 }
 // in this browser (WebAudio), which only plays once the page has had a click
+// Your own sound files ([speech] sound_dir: review S16), fetched and decoded ahead of time, so the alert does not wait
+// for them: name -> AudioBuffer once ready (a Promise while loading; null when it failed: Outrider's own then)
+const ownSounds = {};
+let ownSoundsKey = null;
+function loadOwnSounds() {
+  const own = (data && data.sound_files && data.sound_files.own) || {}, key = JSON.stringify(own), ctx = actx;
+  if (key === ownSoundsKey || !ctx) return;
+  ownSoundsKey = key;
+  for (const k of Object.keys(ownSounds)) if (!(k in own)) delete ownSounds[k];
+  for (const name of Object.keys(own)) {
+    ownSounds[name] = fetch(`api/sound/file/${encodeURIComponent(name)}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject())
+      .then(b => ctx.decodeAudioData(b)).then(buf => { ownSounds[name] = buf; }, () => { ownSounds[name] = null; });
+  }
+}
+// how long the voice waits after a sound: your own file's length (3 s at most), else the built-in sound's lead
+const soundLead = snd => { const s = data && data.sound_files && data.sound_files.own && data.sound_files.own[snd];
+  return s ? Math.min(3000, Math.round(s * 1000)) : SOUND_LEAD[snd] ?? 900; };
 function playHere(name) {
   const ctx = audio(); if (!ctx || !SOUNDS[name]) return;
   if (ctx.state !== "running") { drawSoundBtn(); return; }  // would only pile up and play late
-  const out = ctx.createGain(); out.gain.value = SOUND_DATA.gain ?? .8; out.connect(ctx.destination);
+  const mine = ownSounds[name];
+  if (mine && !(mine instanceof Promise)) {
+    const src = ctx.createBufferSource(), out = ctx.createGain(); src.buffer = mine;
+    out.gain.value = outVolume(); src.connect(out); out.connect(ctx.destination); src.start();
+    return;
+  }
+  const out = ctx.createGain(); out.gain.value = (SOUND_DATA.gain ?? .8) * outVolume(); out.connect(ctx.destination);
   soundHere(ctx, out, SOUNDS[name]);
 }
 // on the PC when ticked (it answers at once; the sound may overlap a line, as here), else or on any failure here
 function play(name) {
   if (!SOUNDS[name]) return;
   if (!serverPlay()) return playHere(name);
-  fetch("api/sound/play", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})})
+  fetch("api/sound/play", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name, volume: outVolume()})})
     .then(r => { if (!r.ok) playHere(name); }, () => playHere(name));
 }
 function drawSoundBtn() {
@@ -5291,6 +5344,7 @@ function copilotDo(cp) {
   else if (cp.action === "replay" && cp.words) speak(cp.words, {kind: "manual"});
 }
 function onData() {
+  loadOwnSounds();   // your own sound files, decoded before an alert needs one
   drawTts();
   const sv = data.speech && data.speech.version;
   if (sv && sv !== speechLib.version && sv !== speechLibWanted) { speechLibWanted = sv; loadSpeechLib(); }
@@ -5443,8 +5497,16 @@ function onData() {
         const scoop = /^[OBAFGKM](_|$)/.test(m.star_class || "");
         const hz = sayHazard() ? hazardSaid(m.star_class) : "";   // a neutron star, white dwarf or black hole ahead
         clearForJump();
+        // the card now; the words once in the tunnel (the "hyperspace" moment below), not over the game's own
+        // countdown call (review S14), or JUMP_LINE_WAIT on when Status.json never says. speech.json's own lines
+        // (S15) carry only the system: the scoop and the hazard are said after them, so an edited line cannot drop them
         alertOut("jump", `Jumping to ${m.system}`, m.star_class ? `${spokenStar(m.star_class)}${scoop ? ", scoopable" : ", not scoopable"}` : "",
-                 {tag: "fsd_charge", say: `Frame Shift Drive charging to jump to ${m.system}.${scoop ? " This star is scoopable." : ""}${hz ? " " + hz : ""}`});
+                 {tag: "fsd_charge", delay: JUMP_LINE_WAIT,
+                  say: () => line("fsd_charge", {system: m.system}, `Jumping to ${m.system}.`) + (scoop ? " This star is scoopable." : "") + (hz ? " " + hz : "")});
+      }
+      else if (m.kind === "hyperspace") {   // in the tunnel: the jump line queued at the charge is said now
+        const it = speechItems.find(x => x.tag === "fsd_charge");
+        if (it && it.notBefore > Date.now()) { it.notBefore = Date.now(); if (speechWake) speechWake(); }
       }
       else if (m.kind === "region") {   // the first jump into a galactic region this session
         regionFlash = {name: m.region, until: Date.now() + 60000};
@@ -5871,6 +5933,11 @@ const namesBox = document.getElementById("speechNames");
 const speedBox = document.getElementById("speechSpeed"), speedOut = document.getElementById("speechSpeedOut");
 speedBox.oninput = () => { speedOut.textContent = Number(speedBox.value).toFixed(2) + "×"; };
 speedBox.onchange = () => { store.set("speechSpeed", Number(speedBox.value)); drawSpeechStyles(); };
+const volBox = document.getElementById("speechVolume"), volOut = document.getElementById("speechVolumeOut");
+const drawVolume = () => { volBox.value = Math.round(outVolume() * 100); volOut.textContent = `${volBox.value}%`; };
+volBox.oninput = () => { volOut.textContent = `${volBox.value}%`; };
+volBox.onchange = () => { store.set("volume", Number(volBox.value)); drawVolume(); };
+drawVolume();
 for (const [id, key] of [["sayBio", "sayBio"], ["sayGeo", "sayGeo"], ["sayHazard", "sayHazard"], ["sayMapped", "sayMapped"], ["routineQuiet", "routineQuiet"]])
   document.getElementById(id).onchange = e => store.set(key, e.target.checked);
 namesBox.onchange = () => { store.set("speechNames", namesBox.value.trim() ? namesBox.value : null); drawSpeechStyles(); };
@@ -5965,6 +6032,9 @@ function drawTts() {
   }
   if (t && t.voice && document.activeElement !== sel) sel.value = t.voice;
   sel.disabled = !opts.length;
+  const sf = data && data.sound_files, own = sf ? Object.keys(sf.own || {}) : [];   // [speech] sound_dir (S16)
+  document.getElementById("soundFiles").textContent = !sf ? "" : (own.length ? `Your own sounds: ${own.join(", ")}.` : "No sound files of your own found.")
+    + ((sf.problems || []).length ? ` Not used: ${sf.problems.join("; ")}.` : "");
   drawServerPlay();
   drawSpeechBtn();
   drawHonk();

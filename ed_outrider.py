@@ -764,6 +764,9 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                         else str(df.get("speech_names", SPEECH_NAMES)),
         "speech_file": speech_file_path(sv.get("speech_file")),
         "server_player": num("speech", spk, "server_player", _config_player, SERVER_PLAYER),
+        # your own alert sounds: <name>.wav files replacing sounds.json's (review S16); "" for none
+        "sound_dir": os.path.join(SCRIPT_DIR, os.path.expanduser(str(spk["sound_dir"])))
+                     if isinstance(spk.get("sound_dir"), str) and spk["sound_dir"].strip() else "",
         "backup_dir": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("backup_dir") or BACKUP_DIR))),
         "backup_keep": max(1, num("server", sv, "backup_keep", int, BACKUP_KEEP)),
         "backup_every_days": max(0.0, num("server", sv, "backup_every_days", float, BACKUP_EVERY_DAYS)),
@@ -886,6 +889,7 @@ watch_firsts = {"true" if st["watch_firsts"] else "false"}   # check your unsold
 
 [speech]   # for the page's "Play speech and sounds on this PC" tick (per browser, off until ticked)
 server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay, aplay, ffplay found), one of those, or off (Linux)
+{"" if st["sound_dir"] else "# "}sound_dir = {q(_root_relative(st["sound_dir"]) if st["sound_dir"] else "my-sounds")}   # your own alert sounds: <name>.wav (fanfare, thud, chime, alert...), up to 3 s each
 
 [autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see outrider/honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
@@ -4617,6 +4621,7 @@ class State:
         self._honk_cancel = None   # threading.Event: the running auto honk's own token (set by switching it off)
         self._honk_done = None     # (arrival, time.time()) the last auto honk task ended
         self._fss_focus = None     # Status.json GuiFocus at the last tick (9 = the FSS)
+        self._in_tunnel, self._tunnel_for = False, None   # in the hyperspace tunnel at the last tick; the charge it was for
         self._fss_closed = None    # (id64, arrival ts, time) the FSS was closed: judged FSS_SETTLE s later
         self._fss_warned = None    # (id64, arrival ts): "bodies still hidden" once per visit
         self._moment_extra = {}    # seq -> (key, fields): what moments_summary adds, kept while the key holds
@@ -4675,6 +4680,7 @@ class State:
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
             "tts": self.speaker.info() if self.speaker else None,
+            "sound_files": self.sounds.info() if self.sounds and self.sounds.own_dir else None,   # your own sounds (S16)
             "player": self.player.info() if self.player else None,
             "speech": self.speech.info() if self.speech else None,
             "autohonk": self.autohonk_info(),
@@ -7662,8 +7668,30 @@ class State:
             j.moment("scoop_end", st.get("ts") or iso_ts(now), jumps=jumps, **end)
             self.bump()
         self.watch_fss(now)
+        self.watch_tunnel(now)
         if self.watch_surface(now):
             self.bump()
+
+    def watch_tunnel(self, now):
+        """Into the hyperspace tunnel: Status.json's FSD-jump flag coming on after a hyperspace StartJump (its
+        fsd_charge moment, within a minute). A "hyperspace" moment then lets the page say the jump line now, in the
+        quiet of the tunnel, not over the game's own countdown call (review S14). Once per charge."""
+        st = self.journals.status_json or {}
+        on = bool(st.get("live") and (st.get("flags") or 0) & FLAG_FSD_JUMP)
+        was, self._in_tunnel = self._in_tunnel, on
+        if not on or was:
+            return
+        m = next((x for x in reversed(self.journals.moments) if x["kind"] == "fsd_charge"), None)
+        if not m or m["seq"] == self._tunnel_for:
+            return
+        try:
+            if not 0 <= now - ts_seconds(m["ts"]) <= 60:
+                return
+        except (TypeError, ValueError):
+            return
+        self._tunnel_for = m["seq"]
+        self.journals.moment("hyperspace", st.get("ts") or iso_ts(now), system=m.get("system"), charge=m["seq"])
+        self.bump()
 
     def watch_fss(self, now):
         """GuiFocus 9 (the FSS) closing: FSS_SETTLE s later (the journal's last Scan lines may lag the status
@@ -9933,6 +9961,28 @@ def make_app(state, hosts=None):
             return web.json_response({"error": "no Piper voice ready"}, status=503)
         return web.Response(body=audio, content_type="audio/wav", headers={"Cache-Control": "no-store"})
 
+    prefetching = set()   # the warm-up tasks (kept so they are not collected mid-way)
+
+    def prefetch(sp, d):
+        """Synthesise the next queued line ({text, voice, speed}) into Speaker's cache while the current one plays, so
+        it starts at once (review S11). Called only once the current line's audio exists: a warm-up that took the
+        voice's lock first would make the line being said wait for it. Fire and forget: a failure costs nothing."""
+        if not isinstance(d, dict) or not isinstance(d.get("text"), str) or not d["text"].strip() or not sp or not sp.ready:
+            return None
+        t = asyncio.get_running_loop().create_task(synth(sp, outrider.tts.clip_text(d["text"]), d.get("speed"), d.get("voice")))
+        prefetching.add(t)
+        t.add_done_callback(lambda x: (prefetching.discard(x), x.cancelled() or x.exception()))
+        return t
+
+    async def say_prefetch_view(request):
+        """{text, voice, speed}: warm the cache with the line the page will say next (its own Piper path calls this once
+        the current line's audio is in hand). 202 at once."""
+        body = await json_object(request)
+        if body is None:
+            return web.json_response({"error": "expected a JSON object"}, status=400)
+        prefetch(state.speaker, body)
+        return web.json_response({"ok": True}, status=202)
+
     def no_player():
         """The 503 for "Play speech and sounds on this PC" when this machine has no player to use, or None."""
         pl = state.player
@@ -9982,7 +10032,8 @@ def make_app(state, hosts=None):
             audio = await synth(sp, text, body.get("speed"), body.get("voice"))
             if not audio:
                 return web.json_response({"error": "no Piper voice ready"}, status=503)
-            result = await state.player.play_line(line, audio)
+            prefetch(sp, body.get("next"))   # the page's next line, made while this one plays
+            result = await state.player.play_line(line, outrider.tts.scale_wav(audio, body.get("volume")))
         finally:
             state.player.release(line)
         if result == "failed":
@@ -10013,8 +10064,16 @@ def make_app(state, hosts=None):
             return web.json_response({"error": f"sounds: {e}"}, status=503)
         if wav is None:
             return web.json_response({"error": "no such sound"}, status=404)
-        state.player.play_sound(wav)
+        state.player.play_sound(outrider.tts.scale_wav(wav, body.get("volume")))
         return web.json_response({"ok": True})
+
+    async def sound_file_view(request):
+        """GET /api/sound/file/<name>: your own file for that sound ([speech] sound_dir), for the page to decode
+        ahead of time; 404 when there is none."""
+        data = state.sounds.own_file(request.match_info["name"]) if state.sounds else None
+        if not data:
+            return web.json_response({"error": "no such sound file"}, status=404)
+        return web.Response(body=data, content_type="audio/wav", headers={"Cache-Control": "no-store"})
 
     async def speech_view(_):
         """The spoken alerts' lines (speech.json, less the banned ones): the page asks again when the payload's
@@ -10150,6 +10209,8 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/radius", radius_view)
     app.router.add_get("/api/say", say_view)
     app.router.add_post("/api/say/play", say_play_view)
+    app.router.add_post("/api/say/prefetch", say_prefetch_view)
+    app.router.add_get("/api/sound/file/{name}", sound_file_view)
     app.router.add_post("/api/say/stop", say_stop_view)
     app.router.add_post("/api/sound/play", sound_play_view)
     app.router.add_get("/api/speech", speech_view)
@@ -10471,6 +10532,7 @@ async def run(args, st):
                                "Piper not installed, the page uses browser speech (see outrider/tts.py)"))
     state.speaker.start()
     state.player = outrider.tts.LinePlayer(st["server_player"])
+    state.sounds.own_dir = st["sound_dir"] or None
     print("playing on this PC (the page's tick): " + (state.player.name or (
         "off ([speech] server_player)" if state.player.choice == "off" else
         f"{st['server_player']} not found" if state.player.choice != "auto" else

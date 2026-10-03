@@ -716,6 +716,81 @@ class BatchAAudio(unittest.TestCase):
         self.assertEqual(self.played(), [(b"RIFFone", "-")])   # on stdin; the refused line never played
         self.assertFalse(self.state.player.busy)
 
+    def test_your_own_sound_files(self):   # S16
+        import wave
+        import outrider.tts
+        d = os.path.join(self.tmp, "my-sounds")
+        os.makedirs(d)
+
+        def write(name, secs):
+            with wave.open(os.path.join(d, name), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+                w.writeframes(b"\x00\x01" * int(8000 * secs))
+        write("fanfare.wav", 1.5)
+        write("thud.wav", 5)                                  # too long: the voice would wait for it
+        write("kazoo.wav", 1)                                 # not one of the sounds
+        with open(os.path.join(d, "chime.wav"), "w") as f:
+            f.write("not audio")
+        bank = outrider.tts.SoundBank(own_dir=d)
+        info = bank.info()
+        self.assertEqual(info["own"], {"fanfare": 1.5})
+        self.assertEqual(len(info["problems"]), 3)
+        self.assertTrue(any("thud.wav" in p and "over 3 s" in p for p in info["problems"]))
+        with open(os.path.join(d, "fanfare.wav"), "rb") as f:
+            mine = f.read()
+        self.assertEqual(bank.wav("fanfare"), mine)            # the PC plays your file
+        self.assertTrue(bank.wav("alert").startswith(b"RIFF"))   # the others are Outrider's own
+        self.assertNotEqual(bank.wav("thud"), outrider.tts.SoundBank(own_dir=d).own_file("thud"))
+        self.state.sounds, self.state.speaker = bank, None   # (no voice: the payload needs no Piper here)
+
+        async def go(c):
+            r = await c.get("/api/sound/file/fanfare")
+            body = await r.read()
+            gone = (await c.get("/api/sound/file/thud")).status
+            payload = (await (await c.get("/api/nearby")).json())["sound_files"]
+            return r.status, body == mine, gone, payload["own"]
+        self.assertEqual(self.client(go), (200, True, 404, {"fanfare": 1.5}))
+
+    def test_volume_scales_what_the_pc_plays(self):   # S12
+        import array, io, wave
+        import outrider.tts
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(22050)
+            w.writeframes(array.array("h", [1000, -2000, 32767]).tobytes())
+        wav = buf.getvalue()
+        half = outrider.tts.scale_wav(wav, 0.5)
+        with wave.open(io.BytesIO(half)) as r:
+            self.assertEqual(list(array.array("h", r.readframes(3))), [500, -1000, 16383])
+        for same in (1, 1.5, None, "loud", float("nan")):
+            self.assertIs(outrider.tts.scale_wav(wav, same), wav)
+        self.assertEqual(outrider.tts.scale_wav(b"RIFFnot a wav", 0.5), b"RIFFnot a wav")   # not a WAV: as it was
+        # the line played on the PC is the scaled one
+        self.state.player = self.fake()
+        self.state.speaker.say = lambda text, speed, voice=None: wav
+
+        async def go(c):
+            return (await c.post("/api/say/play", json={"text": "x", "volume": 0.5})).status
+        self.assertEqual(self.client(go), 200)
+        self.assertEqual(self.played()[0][0], half)
+
+    def test_next_line_is_made_while_this_one_plays(self):   # S11
+        import asyncio
+        self.state.player = self.fake(seconds=0.3)
+        made, sp = [], self.state.speaker
+        real = type(sp).say
+        type(sp).say = lambda self_, text, speed, voice=None: (made.append(text), real(self_, text, speed, voice))[1]
+        self.addCleanup(setattr, type(sp), "say", real)
+
+        async def go(c):
+            r = await c.post("/api/say/play", json={"text": "one", "next": {"text": "two", "speed": 1.0}})
+            p = await c.post("/api/say/prefetch", json={"text": "three"})
+            await asyncio.sleep(0.2)
+            bad = (await c.post("/api/say/prefetch", json=[1])).status
+            return r.status, p.status, bad
+        self.assertEqual(self.client(go), (200, 202, 400))
+        self.assertEqual(made, ["one", "two", "three"])   # "two" after "one"'s audio existed, never before it
+
     def test_stop(self):
         import asyncio
         self.state.player = self.fake(seconds=10)

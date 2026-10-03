@@ -129,6 +129,9 @@
 # ticked): the PC running Outrider then plays the spoken lines and the alert sounds itself (Linux only).
 # server_player = "auto"   # "auto" (the first of pw-play, paplay, aplay and ffplay installed), one of those
 #                          # by name, or "off" (the tick then falls back to the browser playing them)
+# sound_dir = "my-sounds"  # your own alert sounds, played in the browser and on the PC: a folder of <name>.wav
+#                          # files (fanfare, thud, chime, alert... the names in static/sounds.json), WAV only,
+#                          # up to 3 seconds each; a sound with no file keeps Outrider's own
 
 [copilot]
 # One HOTAS (or keyboard) button for the voice (Linux; outrider/button.py). Tap: a status report (fuel and jumps, the

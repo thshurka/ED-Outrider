@@ -144,6 +144,20 @@ upstream project's choices, not rules of the game.
   voice. A silent journal while the game runs is not treated as deafness: the game is often quiet that long (carrier
   jumps, long FSS and SRV stretches).
 - **The long poll is gzipped, never deflated** (review S20): browsers disagree on what "deflate" means.
+- **The jump line waits for the hyperspace tunnel** (review S14): the card shows at the charge (StartJump), the
+  words are held and released by a "hyperspace" moment (Status.json's FSD-jump flag after that StartJump), or after
+  8 s when the flag never comes. Its `speech.json` lines (S15) carry only `{system}`: the scoop and hazard sentences
+  follow outside the template, since check() never requires a placeholder and an edited line must not drop a
+  neutron warning.
+- **The next line is synthesised while the current one plays** (review S11), and only once the current line's audio
+  exists (Speaker's lock taken first by a warm-up would make the line being said wait): the PC's play request names
+  the next line; the browser's Piper path posts it to /api/say/prefetch after decoding its own.
+- **Volume is per device and scales the samples for the PC** (review S12): the players' own volume flags differ
+  (aplay has none), so the server scales the 16-bit WAV it hands them.
+- **Your own sounds are WAV only, up to 3 s** (review S16): every player and browser takes WAV, and the voice waits
+  for a sound to end (the page holds it for the file's length, at most 3 s).
+- **The status report stays on the page for now** (review S23 deferred to PLAN-tablet phase 6): it depends on each
+  browser's thresholds and plan logic; Vespa's fixed "status report" is where a server version is needed.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

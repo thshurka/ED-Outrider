@@ -426,7 +426,7 @@ const settle = async maxMs => {
       "All 3 found. Worth it: A 3, terraformable high metal content world, 1.9M to map and biology on C 2, up to 19.0M.",
       "2.6 g. 480.0M credits aboard. Land gently.", "Scooping stopped at 50 percent.", "Tank full.",
       "Stratum Tectonicas complete. That was the last one here.", "Session over: 4 jumps and 30 light-years.",
-      "Frame Shift Drive charging to jump to Y. Neutron star ahead: throttle down on arrival, mind the jet cone."];
+      "Jumping to Y. Neutron star ahead: throttle down on arrival, mind the jet cone."];
     const goodPure = JSON.stringify(got) === JSON.stringify(want), goodSaid = JSON.stringify(said) === JSON.stringify(wantSaid);
     const goodB = goodPure && goodSaid && errors.length === before;
     allOk = allOk && goodB;
@@ -2874,6 +2874,48 @@ const settle = async maxMs => {
     const goodS13 = got === want && errors.length === before;
     allOk = allOk && goodS13;
     console.log(goodS13 ? "OK" : "FAIL", "| lost contact |", goodS13 ? "said once after the grace, and again when back" : got, errors.slice(before));
+  }
+  // batch 11 (voice): the jump line held from the charge and said in the tunnel (S14), from speech.json (S15); the next
+  // line sent with the PC's play request (S11); the volume (S12); your own sound's length holds the voice (S16); the
+  // last said line with ▶ (S18)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, f = [speechOn, isSpeaker, alertSpeak.jump, lastMomentSeq], realSay = sayNow;
+      speechOn = isSpeaker = alertSpeak.jump = true; speechItems = [];
+      sayNow = async () => {};   // nothing is really said here
+      const s0 = lastMomentSeq, mk = (i, m) => Object.assign({seq: s0 + i, ts: new Date().toISOString()}, m), saved = data.moments;
+      data.moments = [mk(1, {kind: "fsd_charge", system: "Far Away", star_class: "K"})]; onData();
+      const it = speechItems.find(x => x.tag === "fsd_charge");
+      o.held = !!it && it.notBefore - Date.now() > 5000;
+      o.words = it ? it.words : null;
+      data.moments = [mk(2, {kind: "hyperspace", system: "Far Away", charge: s0 + 1})]; onData();
+      o.released = !!it && it.notBefore <= Date.now();
+      hushSpeech(true); data.moments = saved; sayNow = realSay; [speechOn, isSpeaker, alertSpeak.jump, lastMomentSeq] = f;
+      // S11: the next line rides with the PC's play request
+      speechItems = [{words: "Second line.", prio: 2, at: 1, notBefore: 1, pace: 1}];
+      o.next = nextLine(); speechItems = [];
+      // S12
+      const v0 = localStorage.getItem("volume");
+      localStorage.setItem("volume", "40"); o.vol = outVolume(); localStorage.setItem("volume", "abc"); o.volBad = outVolume();
+      if (v0 === null) localStorage.removeItem("volume"); else localStorage.setItem("volume", v0);
+      // S16
+      const sf = data.sound_files; data.sound_files = {own: {fanfare: 2.5, thud: 9}, problems: []};
+      o.lead = [soundLead("fanfare"), soundLead("thud"), soundLead("chime")]; data.sound_files = sf;
+      // S18
+      addCaption("Tank full.");
+      o.last = [document.getElementById("lastSaidLine").hidden, document.getElementById("lastSaidText").textContent];
+      return JSON.stringify(o); })()`));
+    const want = {held: true, words: null, released: true, next: {text: "Second line.", voice: null, speed: null}, vol: 0.4, volBad: 1,
+      lead: [2500, 3000, 1000], last: [false, "Tank full."]};
+    const bad = [];
+    for (const k of ["held", "released", "vol", "volBad", "lead", "last"]) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) bad.push(k);
+    if (!/^(Jumping to Far Away|.*Far Away.*)\. This star is scoopable\.$/.test(got.words || "")) bad.push("words");
+    if (!got.next || got.next.text !== "Second line." || !(got.next.speed > 0)) bad.push("next");
+    const goodB11 = !bad.length && errors.length === before;
+    allOk = allOk && goodB11;
+    console.log(goodB11 ? "OK" : "FAIL", "| batch 11 voice |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "jump line held for the tunnel and released by it, next line for the PC, volume, own sound lead, last said", errors.slice(before));
   }
   // F45: the unsold pop-up's headings: a ship loss with no sale before it counts from the loss; bio from any death
   {

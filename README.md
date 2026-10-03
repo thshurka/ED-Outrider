@@ -312,6 +312,14 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
 - **Play speech and sounds on this PC.** Ticked in the dialog, the PC running Outrider plays the voice and
   sounds itself: no click to allow audio, and the voice comes from the PC even with the page on a tablet (a page
   must still be open). Linux only: `pw-play`, `paplay`, `aplay` or `ffplay` (`[speech] server_player`).
+- **Volume** (in the dialog, per device) sets Outrider's own voice and sounds, in the browser or on the PC.
+- **Your own sounds:** `[speech] sound_dir` names a folder of `<name>.wav` files (fanfare, thud, chime, alert… the
+  names in `static/sounds.json`), up to 3 seconds each; each replaces that sound in the browser and on the PC. The
+  dialog lists the ones it uses and why any file is not used.
+- **The jump line** ("Jumping to Hwy Stop 38") is said once you are in the hyperspace tunnel, not over the game's
+  own countdown call; it has its own varied lines in `speech.json` (`fsd_charge`). The scoop and hazard warnings
+  are said after it.
+- **The last line said** shows beside the header's icons, with ▶ to hear it again.
 
 **Spoken lines: what was said, and banning lines**
 
@@ -520,7 +528,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
-| `[speech]` | `server_player`, for **Play speech and sounds on this PC** |
+| `[speech]` | `server_player`, for **Play speech and sounds on this PC**; `sound_dir`, your own alert sounds |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
 | `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
