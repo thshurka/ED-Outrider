@@ -111,10 +111,11 @@ class Auth(unittest.TestCase):
             out = [(await c.post("/api/auth/signin", json=b)).status for b in ([1], {"password": 5}, {})]
             r = await c.post("/api/auth/signin", json={"password": "hunter2"}, headers={"X-Outrider-App": "0.9.0"})
             out.append((r.status, (await r.json())["code"]))
-            r = await c.post("/api/auth/signin", json={"password": "hunter2"}, headers={"X-Outrider-App": "1.0.0"})
-            out.append(r.status)
+            for v in ("1.0.0", "1.0.0-debug"):
+                r = await c.post("/api/auth/signin", json={"password": "hunter2"}, headers={"X-Outrider-App": v})
+                out.append(r.status)
             return out
-        self.assertEqual(self.client(go), [400, 400, 400, (426, "app_too_old"), 200])
+        self.assertEqual(self.client(go), [400, 400, 400, (426, "app_too_old"), 200, 200])
 
     # ---- what the network reaches without a session ----
     def test_pages_without_a_session(self):
@@ -175,6 +176,10 @@ class Auth(unittest.TestCase):
         self.assertTrue(all(A.is_loopback(x) for x in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "127.0.0.5")))
         self.assertFalse(any(A.is_loopback(x) for x in ("192.168.1.208", "fe80::1", None, "")))
         self.assertEqual((A.version_tuple("1.10.0") > A.version_tuple("1.9.9"), A.version_tuple("x")), (True, ()))
+        # a build suffix is not part of the version: a debug build is not "too old" (found by the Android app)
+        self.assertEqual([A.version_tuple(v) for v in ("1.0.0-debug", "1.1.0+5", " 2.0 ", "1.0.0-rc.1+b")],
+                         [(1, 0, 0), (1, 1, 0), (2, 0), (1, 0, 0)])
+        self.assertEqual((A.version_tuple("-1"), A.version_tuple("")), ((), ()))
         t = A.make_token("s" * 64, "pw")
         self.assertTrue(A.check_token("s" * 64, "pw", t))
         self.assertFalse(A.check_token("s" * 64, "pw2", t))

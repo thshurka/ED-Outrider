@@ -10,6 +10,7 @@ in memory), every token dies when the password changes, and signing out puts tha
 import hashlib
 import hmac
 import ipaddress
+import re
 import secrets
 import time
 
@@ -77,9 +78,10 @@ def request_token(headers, cookies):
 
 
 def version_tuple(v):
-    """'1.2.10' -> (1, 2, 10); anything unreadable -> () (older than every version)."""
+    """'1.2.10' -> (1, 2, 10), a build suffix ignored ('1.0.0-debug', '1.1.0+5'); anything unreadable -> () (older
+    than every version)."""
     try:
-        return tuple(int(x) for x in str(v).strip().split("."))
+        return tuple(int(x) for x in re.split(r"[-+]", str(v).strip(), maxsplit=1)[0].split("."))
     except ValueError:
         return ()
 
