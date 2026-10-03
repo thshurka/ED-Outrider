@@ -395,12 +395,13 @@ follows it as you fly. One route is kept (following it needs no network) until y
 - **Too much fuel.** A long neutron jump may be in range only with the fuel the plotter expected. On arrival, and
   as you scoop, Outrider checks the next jump against the fuel aboard and warns ("⚠ too much fuel for the next
   jump: ≤ 36 t, you have 140 t").
-- **The list** shows the next 200 jumps with distance, ⚡ neutron, fuel and ⛽ refuel stops; click a name to copy
+- **The list** shows the next 200 jumps with distance, ⚡ neutron, fuel and ⛽ refuel stops (the exact plotter's: the
+  neutron plotter has none, scoop as you go); click a name to copy
   it. The map beside it draws the route on the galactic regions with landmarks and your carrier. You can put your
   own galaxy image under it (`background_image`, an EDAstro chart say).
-- **Following.** Arriving at any route system moves you along, forwards or back; anywhere else is **Off Route:
-  Detour** until you are back on it. A line under the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron
-  · 4.2 ly · 38 of 399 · refuel in 3").
+- **Following.** Arriving at any route system moves you along, forwards or back; anywhere else (a respawn
+  included) is **Off Route: Detour** until you are back on it, with the closest route system marked. A line under
+  the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly · 38 of 399 · refuel in 3 jumps").
 - **Clipboard.** On arrival the next system's name goes on the desktop clipboard for the galaxy map (Linux:
   `wl-copy` or `xclip`).
 - **The voice:** "Next Neutron Highway Stop: Hwy Stop 38, with three jumps left to refuel. Boost your FSD to

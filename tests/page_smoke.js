@@ -2479,11 +2479,17 @@ const settle = async maxMs => {
       const nf = hwyFixture({plotter: "neutron", at: 0}); nf.route.id = nf.summary.id = "hwy-test-2";
       return json(hwyPayload(nf, {state: "done", plotter: "neutron", from: "Hwy Stop 37", to: "Colonia"}));
     };
+    w.eval("drawHwyMap()");
+    got.exactRefuel = [w.getComputedStyle(d.querySelector('#hwyTable th[title^="refuel"]')).display !== "none",
+      /refuel/.test(d.getElementById("hwyMapNote").textContent), /scoop as you go/.test(d.getElementById("hwyHead").textContent)];
     d.getElementById("hwyGo").click(); await sleep(400);
     got.plotBody = (calls.find(c => c[0] === "api/highway/plot") || [])[2];
     got.running = d.getElementById("hwyStatus").textContent;
     await sleep(4300);
     got.polls = polls;
+    w.eval("drawHwyMap()");
+    got.neutronRefuel = [w.getComputedStyle(d.querySelector('#hwyTable th[title^="refuel"]')).display !== "none",
+      /refuel/.test(d.getElementById("hwyMapNote").textContent), /scoop as you go/.test(d.getElementById("hwyHead").textContent)];
     got.afterPlot = [d.getElementById("hwyStatus").textContent, d.getElementById("hwyTable").classList.contains("neutron"),
                      d.querySelectorAll("#hwyRows tr.ahead").length];
     // the exact plotter's body (its ticks, no range) and a refusal shown in its words
@@ -2543,9 +2549,12 @@ const settle = async maxMs => {
       exactFields: [true, false], failed: "Could not plot the route: Spansh found no route between those systems.",
       suggest: "Colonia|Col 285 Sector AA-A c1", clearFirst: [0, "Click again to clear"],
       cleared: ["api/highway/clear POST,api/highway GET", "No route yet.", true],
-      lineNext: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3", lineOnMap: "",
+      lineNext: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 jumps", lineOnMap: "",
       lineOff: "🛣 Off Route: Detour · nearest Hwy Stop 39 12.0 ly", lineDone: "🛣 Highway complete", opened: "hwy", lineGone: "",
-      copied: ["Hwy Stop 38"]};
+      copied: ["Hwy Stop 38"], exactRefuel: [true, true, false], neutronRefuel: [false, false, true],
+      doneTo: [30, 35, 99, -1]};
+    got.doneTo = JSON.parse(w.eval(`JSON.stringify([hwyDoneTo({at: 30, furthest: 35}, {complete: false}, 100),
+      hwyDoneTo({at: null, furthest: 35}, {}, 100), hwyDoneTo({at: 3, furthest: 3}, {complete: true}, 100), hwyDoneTo({}, null, 5)])`));
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const p = got.proj;
     if (!/\+162 more after these/.test(got.more)) bad.push("more");
@@ -2671,7 +2680,7 @@ const settle = async maxMs => {
     got.plain = [cons.checked, ly.value, ly.disabled];
     w.fetch = realFetch;
     w.eval(`localStorage.removeItem("highway"); data.highway = null; H.shipSel = null; view = "overview"; render()`);
-    const want = {strip: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 · ⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t",
+    const want = {strip: "🛣 Next: Hwy Stop 38 · 4.2 ly · 38 of 399 · refuel in 3 jumps · ⚠ too much fuel for the next jump: ≤ 36 t, you have 140 t",
       off: [false, "5", true, ""], noteX4: "≈ 4 ly shorter jumps, about 16 ly on a ×4 neutron jump",
       noteX6: "≈ 4 ly shorter jumps, about 24 ly on a ×6 neutron jump",
       body: {plotter: "exact", to: "Colonia", ship_id: 3, cargo: 0, injections: true, exclude_secondary: false, supercharged: false,

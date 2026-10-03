@@ -3895,7 +3895,7 @@ function hwyLineHtml(s, {short = false, glyph = true} = {}) {
   if (n.distance != null) bits.push(`${Number(n.distance).toFixed(1)} ly`);
   bits.push(`${s.index} of ${s.total}`);
   if (s.refuel_here) bits.push(`<span class="hwyfuel">⛽ refuel here</span>`);
-  else if (s.refuel_in != null) bits.push(`refuel in ${s.refuel_in}`);
+  else if (s.refuel_in != null) bits.push(`refuel in ${s.refuel_in} jump${s.refuel_in === 1 ? "" : "s"}`);
   const hv = s.heavy;   // the next jump is out of range with the fuel aboard (the plan expects a lighter ship)
   if (hv) bits.push(`<span class="hwyheavy" title="the next jump (${Number(hv.distance).toFixed(1)} ly${hv.boost > 1 ? `, ×${hv.boost} supercharged` : ""}) ` +
     `is in range only with at most ${Number(hv.need_t).toFixed(1)} t in the main tank: jettison or burn some">⚠ too much fuel for the next jump: ` +
@@ -3945,7 +3945,7 @@ function hwyRowHtml(r, cls) {
     `<td class="hwyc">${r.neutron ? `<span class="hwyn" title="a neutron star: supercharge your FSD there">⚡</span>` : ""}</td>` +
     `<td class="num hwy-n">${r.i > 0 && r.jumps != null ? r.jumps : ""}</td>` +
     `<td class="num hwy-x c2hide">${r.i > 0 ? hwyFuel(r.fuel_used) : ""}</td><td class="num hwy-x">${hwyFuel(r.fuel_left)}</td>` +
-    `<td class="hwyc">${r.refuel ? `<span class="hwyfuel" title="refuel here before continuing">⛽</span>` : ""}</td>` +
+    `<td class="hwyc hwy-x">${r.refuel ? `<span class="hwyfuel" title="refuel here before continuing">⛽</span>` : ""}</td>` +
     `<td class="num">${r.remaining != null ? Math.round(r.remaining).toLocaleString() : ""}</td></tr>`;
 }
 const HWY_COLS = 9;
@@ -3962,7 +3962,8 @@ function hwyHeadHtml(hd) {
   const n = x => x == null ? "?" : Math.round(x).toLocaleString();
   const o = r.options || {}, sh = r.ship;
   const how = (r.plotter === "neutron"
-    ? `neutron plotter · ${o.range != null ? `${o.range} ly range · ` : ""}×${o.supercharge_multiplier || 4} · ${o.efficiency ?? "?"}% efficiency`
+    ? `neutron plotter · ${o.range != null ? `${o.range} ly range · ` : ""}×${o.supercharge_multiplier || 4} · ${o.efficiency ?? "?"}% efficiency` +
+      ` · no refuel stops: scoop as you go`
     : `exact plotter${o.injections ? " · injections" : ""}${o.exclude_secondary ? " · no secondary stars" : ""}`) +
     (o.conservative_ly ? ` · conservative −${o.conservative_ly} ly` : "");
   const ship = sh ? ` · ${esc(shipLabel(sh.name, sh.type))}${sh.type && shipName(sh.type) !== shipLabel(sh.name, sh.type) ? ` (${esc(shipName(sh.type))})` : ""}` +
@@ -4526,6 +4527,11 @@ function hwyMapPoints() {
   if (pos && pos.x != null) pts.push([pos.x, pos.z]);
   return pts;
 }
+// The last route row the map draws as done: the list's boundary (where you are), so after flying back along the
+// route the rows it calls ahead are not drawn grey; off the route (no `at`) the furthest reached; all once complete.
+function hwyDoneTo(r, s, n) {
+  return s && s.complete ? n - 1 : (r.at ?? r.furthest ?? -1);
+}
 function drawHwyMap() {
   if (view !== "hwy") return;
   const wrap = hEl("hwyMapWrap"), w = wrap.clientWidth, h = wrap.clientHeight;
@@ -4533,7 +4539,8 @@ function drawHwyMap() {
   const r = H.data && H.data.route, pos = data && data.position;
   const bg = H.data && H.data.background;
   hEl("hwyMapNote").innerHTML = (r ? `<span class="lg-done">━ done</span> <span class="lg-ahead">━ ahead</span> <span class="lg-n">◆ neutron</span>` +
-    ` <span class="lg-f">○ refuel</span> <span class="lg-you">● you</span> <span>↑ +Z (core)</span>` : "No route: plot one to see it here.") +
+    (r.plotter === "neutron" ? "" : ` <span class="lg-f">○ refuel</span>`) +
+    ` <span class="lg-you">● you</span> <span>↑ +Z (core)</span>` : "No route: plot one to see it here.") +
     (bg && bg.why ? ` <span class="warnc" title="${esc(bg.name || "")}">background image: ${esc(bg.why)}</span>` : "");
   hwyLayerButtons();
   if (!g) return;
@@ -4555,7 +4562,7 @@ function drawHwyMap() {
   HM.named = drawHwyBackground(g, v, w, h, C, dpr);
   if (r) {
     const P = r.points || [], s = r.summary || {};
-    const doneTo = s.complete ? P.length - 1 : Math.max(r.furthest ?? -1, r.at ?? -1);
+    const doneTo = hwyDoneTo(r, s, P.length);
     const seg = (from, to, colour, width) => {
       g.strokeStyle = colour; g.lineWidth = width; g.lineJoin = "round"; g.beginPath();
       let pen = false;

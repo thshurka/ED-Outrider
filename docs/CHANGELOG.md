@@ -2,6 +2,21 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Highway data fixes (fix plan, batch 1)
+- A ship whose Loadout's MaxJumpRange leaves out the Guardian booster (booster off, or an outfitting Loadout) keeps
+  its real FSD optimal mass: the exact plotter planned about 1.5x the real fuel per jump and too many refuel stops
+  (review F1). PARSER_VERSION 36: the next start re-reads the journals once to rebuild the ships' figures.
+- The neutron plotter's conservative range keeps the ship's booster floor (12 ly with a 10.5 ly booster and a 10 ly
+  margin plots 11.25 ly, not 6) and never exceeds the full range (Codex F5).
+- Off the route, the nearest route system is the closest one, passed or not (the author's rule), and a second detour
+  through the same system no longer shows a stale one (review F7).
+- A jump read just after a plot finished moves the route (arrivals are compared with the position's journal time,
+  not the wall clock: review F8); a respawn or a login elsewhere counts as an arrival, so it shows the detour
+  (review F10).
+- The map greys the route up to where you are, as the list does, after flying back along it (review F15);
+  "refuel in 3 jumps" has its unit (F16); a neutron route hides the ⛽ column and the refuel legend and says "no
+  refuel stops: scoop as you go".
+
 ## 2026-10-03 · Test safety and test tooling (fix plan, batch 0)
 - The page smoke test needs an explicit port and refuses 8025: run bare, it used to default to a real Outrider's
   port, and it clicks and POSTs (found by the Codex review).

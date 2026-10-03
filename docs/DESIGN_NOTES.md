@@ -47,6 +47,10 @@ upstream project's choices, not rules of the game.
   (`highway_route`), kept through a journal re-read and carried by backups.
 - **Detour and resume:** arriving off the route counts as a detour only once the route was joined (flying to its
   start is not one), and arriving at *any* route system resumes it, neutron or not, forwards or back. Said once each.
+  A respawn or a login somewhere else (a Location that moves you, not a relog) counts as an arrival too. Off the route
+  the nearest route system marked is the CLOSEST one, passed or not (the author's rule, 2026-10-03: getting back on
+  the highway is the fastest way on). Arrivals count when newer than the position the route was plotted at (its
+  journal time, not the wall clock), so a jump read just after the plot finished still moves the route.
 - **The Highway's cargo is not remembered.** The form takes the cargo aboard from the journals each time (a
   remembered figure would be stale the next day); only the plotter and its options are per-browser settings.
 - **Auto-target presses keys in the galaxy map** (opt-in, Linux; decided with the author 2026-10-01): open the map,
@@ -106,6 +110,9 @@ upstream project's choices, not rules of the game.
 - **NPC crew deaths are not subtracted** from the crew count: the evidence showed that would be wrong.
 - **Spansh cannot search for planetary mining locations;** that search is Local only.
 - **The neutron plotter gives waypoints, not fuel:** no fuel columns or refuel stops; the exact plotter has them.
+  The page hides the ⛽ column and the map's refuel legend on a neutron route and says "scoop as you go".
+- **A Loadout's MaxJumpRange can leave the Guardian booster out** (powered off, or written in outfitting): the drive's
+  figures are kept, the booster counts only when it is on; a typed neutron range keeps the booster floor only with a ship.
 - **Region borders follow the grid,** cells of 4096/83 ≈ 49 ly, so close up they are steps, as the region map defines
   them; a name sits at its region's centroid (or the region's cell nearest it), so zoomed in it may be off screen (the
   scale bar's "centre:" says the region under the middle).

@@ -108,7 +108,7 @@ class HighwayH1(unittest.TestCase):
         db.close()
         self.assertIn("DELETE FROM fleet_loadouts", ed_outrider.RESET_JOURNAL_DATA)
         self.assertNotIn("highway", ed_outrider.RESET_JOURNAL_DATA)
-        self.assertEqual(ed_outrider.PARSER_VERSION, 35)
+        self.assertGreaterEqual(ed_outrider.PARSER_VERSION, 36)   # 35: fleet_loadouts; 36: their booster figures (F1)
 
     def test_fleet_figures(self):
         mul, p, b = 0.013, 2.45, 10.5
@@ -127,6 +127,18 @@ class HighwayH1(unittest.TestCase):
         r0 = 1175 / (300 + 5.2) * drive(5.2)
         f = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z", unladen=300, r0=r0, booster=False))
         self.assertEqual((f["optimal_mass"], f["optimal_source"], f["booster_ly"]), (1175, "stock", 0))
+        # MaxJumpRange WITHOUT the booster's ly (review F1: seven of the author's Loadouts): the booster powered off,
+        # or a Loadout written in outfitting. The engineered optimal mass stands (it used to be swapped for a smaller
+        # one, so Spansh simulated ~1.5x the fuel per jump); off: no booster; on: its ly on top of the range
+        r_drive = 2000 / (400 + 6.1) * drive(6.1)
+        for on, boost_ly, rng in ((False, 0, r_drive), (True, b, r_drive + b)):
+            ev = self.loadout("2026-01-01T00:00:00Z", mods={"FSDOptimalMass": 2000, "MaxFuelPerJump": 6.1}, unladen=400,
+                              r0=r_drive)
+            ev["Modules"][1]["On"] = on
+            f = ed_outrider.fleet_figures(ev)
+            self.assertEqual((f["optimal_mass"], f["optimal_source"], f["booster_ly"]), (2000, "loadout", boost_ly), on)
+            self.assertAlmostEqual(f["max_range"], rng, places=2)
+            self.assertAlmostEqual(ed_outrider.fleet_range(f, fuel=6.1), rng, places=1)
         # the Caspian's Mk II: p 2.5025 (the fuel model's), supercharge x6; a size 8 SCO: p 2.90, x4
         mk2 = ed_outrider.fleet_figures(self.loadout("2026-01-01T00:00:00Z",
                                                      fsd="int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii"))
@@ -304,6 +316,71 @@ class HighwayH1(unittest.TestCase):
         self.assertEqual(self.state.highway_view()["route"]["count"], 6)
 
     # ---- progress, detours, the moments ----
+
+    def test_nearest_is_the_closest_route_system_passed_or_not(self):
+        """Off the route, the nearest route system is the CLOSEST one, passed or not (the author's rule): getting back
+        on the highway is the fastest way on. The same side trip twice gives the same answer (review F7: the cache
+        used to keep a stale "not yet passed" answer)."""
+        self.plot_exact()
+        self.jump(1, 101, "Neu A", 50)
+        self.jump(2, 999, "Side Trip", 60)
+        p = self.state.highway_summary()
+        self.assertEqual((p["nearest"]["name"], p["nearest"]["distance"]), ("Neu A", 10.0))
+        for s, (id64, name, x) in enumerate(((102, "Bridge B", 80), (103, "Scoop C", 100), (104, "Neu D", 150)), 3):
+            self.jump(s, id64, name, x)
+        self.jump(6, 999, "Side Trip", 60)   # the same side trip, now far past Neu A: still the closest route system
+        p = self.state.highway_summary()
+        self.assertEqual((p["off_route"], p["furthest"], p["nearest"]["name"], p["nearest"]["distance"]),
+                         (True, 4, "Neu A", 10.0))
+        self.jump(7, 997, "New Side Trip", 55)   # a new system by Neu A, long passed: Neu A, not Neu D 95 ly ahead
+        p = self.state.highway_summary()
+        self.assertEqual((p["nearest"]["name"], p["nearest"]["distance"], p["nearest"]["index"]), ("Neu A", 5.0, 1))
+        self.jump(8, 998, "Other Side", 145)   # next to Neu D: that one
+        p = self.state.highway_summary()
+        self.assertEqual((p["nearest"]["name"], p["nearest"]["distance"], p["nearest"]["index"]), ("Neu D", 5.0, 4))
+
+    def test_a_jump_read_after_the_plot_still_counts(self):
+        """A jump the game wrote while the plot finished (in the same second, or just before) is read by the next
+        tick: it still moves the route (review F8: it was dropped against the plot's wall-clock time)."""
+        self.plot_exact()   # at Start, arrived 100 s ago
+        self.jump(-0.5, 101, "Neu A", 50)   # written half a second before the route was stored, read now
+        p = self.state.highway_summary()
+        self.assertEqual((p["at"], p["next"]["name"]), (1, "Bridge B"))
+        self.assertEqual(self.hw_moments()[-1][0], "next")
+
+    def test_plotted_in_hyperspace_the_arrival_at_the_start_joins(self):
+        """Plotted while jumping to the route's start (review F8, second case): the arrival, read after the route
+        was stored, joins the route there."""
+        self.jump(-100, 990, "Before", -30)
+        rows = ed_outrider.highway_rows("exact", self.EXACT)
+        self.state.highway_store(rows, {"plotter": "exact", "options": {}, "ship": None})
+        self.jump(-0.3, 100, "Start", 0)
+        hw = ed_outrider.meta_get(self.db, "highway")
+        self.assertEqual((hw["at"], hw["furthest"]), (0, 0))
+        self.assertIsNotNone(hw["arrival_ts"])
+        # a line older than the position the route was plotted at (a re-read) still never moves it
+        self.jump(-300, 104, "Neu D", 150)
+        self.assertEqual(ed_outrider.meta_get(self.db, "highway")["at"], 0)
+
+    def test_a_respawn_off_the_route_is_a_detour(self):
+        """Died and rebought at a station far back (Died, Resurrect, Location there): the Highway says you are off the
+        route and where the nearest route system is (review F10: it said you were still at Neu A). A relog where you
+        already were changes nothing."""
+        self.plot_exact()
+        self.jump(1, 101, "Neu A", 50)
+        self.j.handle({"event": "Died", "timestamp": self.ts(2)})
+        self.j.handle({"event": "Resurrect", "timestamp": self.ts(3), "Option": "rebuy", "Cost": 1000, "Bankrupt": False})
+        self.j.handle({"event": "Location", "timestamp": self.ts(4), "StarSystem": "Far Station", "SystemAddress": 777,
+                       "StarPos": [500, 0, 0], "Docked": True})
+        p = self.state.highway_summary()
+        self.assertEqual((p["at"], p["off_route"], p["nearest"]["name"]), (None, True, "End"))
+        self.assertEqual(self.hw_moments()[-1][0], "off_route")
+        # back in a route system and logging out and in there: you are at it, once
+        self.jump(5, 104, "Neu D", 150)
+        n = len(self.hw_moments())
+        self.j.handle({"event": "Location", "timestamp": self.ts(6), "StarSystem": "Neu D", "SystemAddress": 104,
+                       "StarPos": [150, 0, 0]})
+        self.assertEqual((self.state.highway_summary()["at"], len(self.hw_moments())), (4, n))
 
     def test_progress_detour_resume_complete(self):
         hw = self.plot_exact()
@@ -676,6 +753,15 @@ class HighwayH1(unittest.TestCase):
         self.assertAlmostEqual(params["range"], round(ed_outrider.fleet_range(f) - 5, 2), places=6)   # the ship's range less 5
         _, _, params = plot({"plotter": "neutron", "range": 8, "conservative": True, "conservative_ly": 6}, self.NEUTRON)
         self.assertEqual(params["range"], 4.0)
+        # the ship's Guardian booster floor (Codex F5): 12 ly with its 10.5 ly booster and a 10 ly margin plots 11.25 ly
+        # (the drive's 1.5 ly halved, the booster kept), not 6.0; a typed range with no ship has no booster to keep
+        _, _, params = plot({"plotter": "neutron", "range": 12, "conservative": True, "conservative_ly": 10}, self.NEUTRON)
+        self.assertEqual(params["range"], 11.25)
+        _, _, params = plot({"plotter": "neutron", "range": 12, "ship_id": None, "conservative": True, "conservative_ly": 10},
+                            self.NEUTRON)
+        self.assertEqual(params["range"], 6.0)
+        self.assertEqual(ed_outrider.conservative_range(8, 6, 10.5), 4.0)   # a booster longer than the range: none
+        self.assertLessEqual(ed_outrider.conservative_range(12, 0.5, 10.5), 12)
         _, _, params = plot({"plotter": "neutron", "range": 50, "conservative": False}, self.NEUTRON)
         self.assertEqual(params["range"], 50)
         # refused: a margin out of range, a tick that is not a boolean

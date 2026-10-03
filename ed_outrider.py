@@ -990,7 +990,8 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 33: what the SRV's refinery collected on each body (own_mined: "Mined previously").
 # 34: nav-beacon scans make no own_firsts rows; Vista Genomics sales keep their BioData species (bio_sales.bio_data).
 # 35: every ship's latest Loadout (fleet_loadouts: the Highway's ship list and the exact plotter's figures).
-PARSER_VERSION = 35
+# 36: fleet_loadouts' figures again: a MaxJumpRange without the Guardian booster keeps the drive's optimal mass.
+PARSER_VERSION = 36
 # Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
@@ -2063,10 +2064,15 @@ class Journals:
     def highway_arrival(self, id64, name, ts):
         """A jump into a system with a Highway route active: progress (the row you are at, the furthest reached),
         the detour when the system is not on the route, back on it at any route system (neutron or not), and the
-        end. Only arrivals after the plot and after the last one applied count, so a journal re-read or a late
-        legacy folder never moves it; the spoken moments only for a jump just now (live_event)."""
+        end. Only arrivals newer than the position the route was plotted at (since_ts, a journal time: a jump the
+        game wrote while the plot finished, not read yet, still counts) and than the last one applied count, so a
+        journal re-read or a late legacy folder never moves it; the spoken moments only for a jump just now
+        (live_event). A route stored before since_ts existed keeps the old rule (after created_ts, the wall clock)."""
         hw = meta_get(self.db, "highway")
-        if not hw or ts <= max(hw.get("created_ts") or "", hw.get("arrival_ts") or ""):
+        if not hw:
+            return
+        since = hw.get("since_ts")
+        if (ts < since if since else ts <= (hw.get("created_ts") or "")) or ts <= (hw.get("arrival_ts") or ""):
             return
         rows = self.highway_route(hw)
         if not rows:
@@ -2531,7 +2537,9 @@ class Journals:
             meta_set(self.db, "pos", self.pos)
         if ev.get("event") == "FSDJump" and current and not ride:
             self.jump_arrival = {"id64": id64, "name": ev.get("StarSystem"), "ts": ts}
-        if name in ("FSDJump", "CarrierJump") and current and not relog:
+        # the Highway: a jump, or a Location that moves you (a respawn after a death, a login somewhere else: review
+        # F10), not a relog where you already were
+        if name in ("FSDJump", "CarrierJump", "Location") and current and not relog:
             self.highway_arrival(id64, ev.get("StarSystem"), ts)
 
     def note_region(self, prev, id64, x, y, z, ts):
@@ -3855,7 +3863,9 @@ def fleet_figures(ev):
     Modifiers, else its stock figures (FSD_DATA). Those must give the Loadout's own MaxJumpRange (at the unladen mass
     plus one max jump's fuel, as fsd_range has it) to within FSD_RANGE_TOLERANCE; when they don't (a table error, a
     drive variant), the optimal mass that range implies is used instead, so Spansh plans with the range the game
-    shows. exact: False when a figure is missing (a drive no table knows): the neutron plotter still works."""
+    shows. A MaxJumpRange without the Guardian booster's ly (the booster powered off, or a Loadout written in
+    outfitting) is not taken for a table error: the drive's figures stand, and the booster counts only when it is on.
+    exact: False when a figure is missing (a drive no table knows): the neutron plotter still works."""
     mods = ev.get("Modules") or []
     fsd_mod = next((m for m in mods if m.get("Slot") == "FrameShiftDrive"), {})
     item = (fsd_mod.get("Item") or "").lower()
@@ -3863,8 +3873,8 @@ def fleet_figures(ev):
            if isinstance(x.get("Value"), (int, float)) and not isinstance(x.get("Value"), bool)}
     stock = FSD_DATA.get(re.sub(r"_free$", "", item))
     size = re.search(r"size(\d)", item)
-    booster = next((re.search(r"size(\d)", m.get("Item", "").lower()) for m in mods
-                    if "guardianfsdbooster" in (m.get("Item") or "").lower()), None)
+    booster_mod = next((m for m in mods if "guardianfsdbooster" in (m.get("Item") or "").lower()), None)
+    booster = re.search(r"size(\d)", (booster_mod or {}).get("Item", "").lower())
     boost = GUARDIAN_BOOST.get(int(booster.group(1)), 0) if booster else 0
     cap = ev.get("FuelCapacity") or {}
     power = fsd_power({"fsd": item, "fsd_size": int(size.group(1)) if size else None})
@@ -3875,7 +3885,16 @@ def fleet_figures(ev):
     r0, unladen = ev.get("MaxJumpRange"), ev.get("UnladenMass")
     if r0 and unladen and max_fuel and mult and power and r0 > boost:
         drive = (max_fuel / mult) ** (1 / power)   # the range at the optimal mass is opt / mass × this
-        if not opt or abs((opt / (unladen + max_fuel) * drive + boost) / r0 - 1) > FSD_RANGE_TOLERANCE:
+        fits = lambda b: abs((opt / (unladen + max_fuel) * drive + b) / r0 - 1) <= FSD_RANGE_TOLERANCE
+        if opt and boost and not fits(boost) and fits(0):
+            # MaxJumpRange left the booster out: it was powered off, or the Loadout was written in outfitting. The
+            # drive's own figures are right, so keep them. Off: the ship as the game has it, no booster; on: the
+            # booster's light years on top of the Loadout's range
+            if booster_mod.get("On") is False:
+                boost = 0
+            else:
+                r0 = round(r0 + boost, 3)
+        elif not opt or not fits(boost):
             opt, source = round((r0 - boost) * (unladen + max_fuel) / drive, 2), "range"
     out = {"fsd": item, "fsd_size": int(size.group(1)) if size else None, "unladen": unladen, "max_range": r0,
            "fuel_main": cap.get("Main"), "fuel_reserve": cap.get("Reserve"), "cargo_capacity": ev.get("CargoCapacity"),
@@ -3940,8 +3959,10 @@ def max_fuel_for_jump(model, d, other=0.0, mult=1, cap=None):
 
 def conservative_range(full, margin, boost=0.0):
     """A range `margin` ly shorter than `full`, never cutting the drive's own part (the booster's ly apart) by more
-    than half: the conservative plot's range."""
-    return max(full - margin, boost + (full - boost) / 2)
+    than half: the conservative plot's range. A booster at least as long as `full` (a typed range shorter than the
+    ship's booster: nonsense) counts as none; the result is never longer than `full`."""
+    boost = boost if 0 < boost < full else 0.0
+    return min(full, max(full - margin, boost + (full - boost) / 2))
 
 
 def conservative_optimal_mass(fig, cargo, margin):
@@ -8396,14 +8417,16 @@ class State:
         return i if i < len(rows) else None
 
     def highway_nearest(self, hw, rows):
-        """While off the route: the nearest route system not yet passed {name, id, index, distance}, or None."""
+        """While off the route: the CLOSEST route system, passed or not {name, id, index, distance}, or None. Getting
+        back on the highway is the fastest way on (the author's rule, 2026-10-03); arriving there resumes the route.
+        The answer depends only on the route and where you are, which is the cache key."""
         pos = self.journals.pos
         if not pos or not hw.get("off_route"):
             return None
         key = (hw["id"], pos["id64"])
         if self._hw_near[0] != key:
-            best = min(((dist(pos, r), i) for i, r in enumerate(rows) if i >= (hw.get("furthest") or 0)
-                        and None not in (r["x"], r["y"], r["z"])), default=None)
+            best = min(((dist(pos, r), i) for i, r in enumerate(rows) if None not in (r["x"], r["y"], r["z"])),
+                       default=None)
             self._hw_near = (key, best and {"name": rows[best[1]]["system"], "id": str(rows[best[1]]["id64"])
                                             if rows[best[1]]["id64"] is not None else None,
                                             "index": best[1], "distance": round(best[0], 1)})
@@ -8646,8 +8669,8 @@ class State:
                 if mult not in (4, 6):
                     raise ValueError("supercharge_multiplier must be 4 or 6")
                 full = rng
-                if margin:
-                    rng = conservative_range(rng, margin)
+                if margin:   # never cut the drive's own part by more than half; a ship's booster ly stay (a typed
+                    rng = conservative_range(rng, margin, (fig.get("booster_ly") or 0) if ship else 0)   # range, no ship: 0)
                 params = {"from": frm, "to": to, "range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult}
                 options = {"range": round(rng, 2), "efficiency": eff, "supercharge_multiplier": mult, "cargo": cargo}
                 if margin:
@@ -8691,8 +8714,9 @@ class State:
         pos = self.journals.pos
         i = highway_match(rows, pos["id64"], pos["name"]) if pos else None
         now = time.time()
-        hw = dict(meta, id=f"{now:.6f}", created_ts=iso_ts(now), at=i, furthest=i, off_route=None,
-                  arrival_ts=None, done_ts=None)
+        # since_ts: the journal time of the position matched here; arrivals after it count, read yet or not (F8)
+        hw = dict(meta, id=f"{now:.6f}", created_ts=iso_ts(now), since_ts=(pos or {}).get("ts"), at=i, furthest=i,
+                  off_route=None, arrival_ts=None, done_ts=None)
         meta_set(self.db, "highway", hw)
         self.db.commit()
         self._hw_copied = None
