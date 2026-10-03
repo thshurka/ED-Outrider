@@ -51,6 +51,11 @@ upstream project's choices, not rules of the game.
 - **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in
   `static/fonts/` with their licences. Fonts like "Euro Caps" or LCARS fan fonts have unclear redistribution terms:
   the player may drop one into `data/fonts/` (served at `/userfonts/`), and the theme uses it first.
+- **A body's picture is an impression, drawn, never an image** (tablet plan phase 7): made in the page from the scan
+  (class colours, bands, clouds and continents, the atmosphere's rim, rings by class, size by radius), seeded by the
+  ids so it never changes, lit from the left (toward the parent star, as the schematic lays orbits out), and labelled
+  "impression from scan data". No image files, no screenshots, no rotating globe: the DSS gives counts, not where
+  things are, so anything more would be invented. Marks are text under it, never on it.
 - **A question by voice is answered on the PC and captioned everywhere** (tablet plan phase 6). `/api/ask` sends the
   answer through the co-pilot channel: the window that speaks says it (a line you asked for, so it speaks through a
   hush, as the status report does), every other window, the tablet's included, shows it as a caption. `spoken` says

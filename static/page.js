@@ -3159,7 +3159,125 @@ function renderBodyInto(panel, d, bodyName, closeJs) {
     ["Mapped by you", row.mapped ? "yes" : "no"], ["Scan", own.ScanType ? `${esc(own.ScanType)} · ${esc(own.timestamp.replace("T", " ").replace("Z", ""))}` : "not scanned by you"],
   ]));
   h += `<div class="src">Sources: ${d.own ? "your journal Scan" : "no scan of yours"}${d.spansh ? ` · Spansh (updated ${esc((sp.updateTime || "").slice(0, 10))})` : d.spansh_error ? ` · Spansh lookup failed (${esc(d.spansh_error)})` : " · not on Spansh"}</div>`;
-  panel.innerHTML = h;
+  panel.innerHTML = h.replace("</h3>", "</h3>" + bodyArtHtml(d));   // the picture beside the title, the text round it
+  drawBodyArt(panel, d);
+}
+
+// ---- drawn bodies (tablet plan phase 7): a static picture of a body made from its scan data, beside the body panel's
+// title, labelled as an impression. Its class gives the colours (PLANET_COLOURS, STAR_COLOURS), the system and body
+// ids seed the texture (the same look every time), the light comes from the left (toward the parent star, as Here's
+// schematic lays the orbits out), with bands on gas giants, clouds and continents where there is water, an atmosphere
+// rim tinted by its main gas, tilted rings by their class, size by radius. Marks (landable, terraformable, signals) are
+// text under it, never on it. No image files, no rotating globe. bodyLook is pure; drawBodyArt paints it.
+const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ""); const n = m ? parseInt(m[1], 16) : 0x999999; return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+const mixRgb = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t);
+function bodySeed(...parts) {   // a 32-bit FNV-1a hash of the ids
+  let h = 2166136261;
+  for (const ch of parts.join("|")) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+function seededRng(seed) {   // mulberry32
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function noiseField(rng, n = 32) {   // smooth value noise on a wrapping n x n grid, and its fractal sum
+  const g = Array.from({length: n * n}, rng), at = (x, y) => g[((y % n + n) % n) * n + ((x % n + n) % n)];
+  const sm = t => t * t * (3 - 2 * t);
+  const v = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), tx = sm(x - xi), ty = sm(y - yi);
+    const a = at(xi, yi) + (at(xi + 1, yi) - at(xi, yi)) * tx, b = at(xi, yi + 1) + (at(xi + 1, yi + 1) - at(xi, yi + 1)) * tx; return a + (b - a) * ty; };
+  return (x, y, oct = 4) => { let s = 0, amp = 0.5, f = 1, norm = 0; for (let i = 0; i < oct; i++) { s += v(x * f, y * f) * amp; norm += amp; amp /= 2; f *= 2; } return s / norm; };
+}
+const ATMO_TINTS = [[/oxygen/i, "#9ec4ff"], [/nitrogen/i, "#8fb0ff"], [/sulphur|sulfur/i, "#ead96e"], [/carbon dioxide/i, "#e6be96"],
+  [/ammonia/i, "#b4dc8c"], [/methane/i, "#78c8dc"], [/water/i, "#aad2ff"], [/argon/i, "#c8aaff"], [/neon/i, "#ff96c8"], [/helium/i, "#fff0c8"], [/silicate/i, "#d2b496"]];
+const RING_TINTS = {Icy: "#d2e1f0", Rocky: "#aa8c6e", "Metal Rich": "#968278", Metallic: "#b4b4be"};
+// what to draw, from the body's row (Here's) and your Scan when there is one: pure, so the smoke test can check it
+function bodyLook(row, own = {}, ids = []) {
+  const sub = String(row.subtype || own.PlanetClass || own.StarType || ""), isStar = row.type === "Star" || !!own.StarType;
+  const rng = seededRng(bodySeed(...ids, row.name || ""));
+  const kind = isStar ? "star" : /gas giant|Gas giant/.test(sub) ? "gas" : /Earth-like/.test(sub) ? "elw" : /^Water world/.test(sub) ? "water"
+    : /Ammonia/.test(sub) ? "ammonia" : /Icy|Rocky ice/i.test(sub) ? "ice" : /metal/i.test(sub) ? "metal" : "rock";
+  const base = hexRgb(isStar ? (STAR_COLOURS[starGroup(starCode(sub))] || "#ffd27f") : planetColour(sub));
+  const atm = String(row.atmosphere || own.Atmosphere || own.AtmosphereType || "");
+  const thin = !atm || /^none$/i.test(atm) || /no atmosphere/i.test(atm);
+  const tint = !isStar && !thin && kind !== "gas" ? hexRgb((ATMO_TINTS.find(([re]) => re.test(atm)) || [null, "#c8c8dc"])[1]) : null;
+  const rk = row.radius_km != null ? row.radius_km : own.Radius ? own.Radius / 1000 : null;
+  const sizeOf = r => r == null ? 0.26 : Math.max(0.14, Math.min(0.36, 0.14 + 0.22 * Math.log10(Math.max(r, 200) / 200) / Math.log10(400)));
+  const starSize = {N: 0.12, D: 0.13, BH: 0.14, L: 0.24, T: 0.22, Y: 0.2}[starCode(sub)] || 0.28;
+  const rings = isStar ? [] : (row.ring_details || []).length ? row.ring_details.map(r => hexRgb(RING_TINTS[r.type] || "#bbb"))
+    : row.rings ? [hexRgb("#c8beaa")] : [];
+  let r = isStar ? starSize : sizeOf(rk);
+  if (rings.length) r = Math.min(r, 0.21);   // the rings reach 2.2 radii and must fit
+  return {kind, base, base2: mixRgb(base, kind === "gas" ? [255, 245, 225] : [20, 20, 25], kind === "gas" ? 0.35 : 0.45), r,
+          tint, rings, tilt: (rng() - 0.5) * 0.9, bandFreq: 6 + Math.floor(rng() * 7), seed: Math.floor(rng() * 4294967296),
+          glow: isStar, dark: isStar && ["N", "BH", "D"].includes(starCode(sub))};
+}
+function bodyArtHtml(d) {
+  const row = d.row || {}, own = d.own || {}, sp = d.spansh || {};
+  if (!row.name && !own.BodyName) return "";
+  const marks = [row.landable && "landable", row.terraformable && "terraformable", row.bio && `🧬 ${row.bio}`, row.geo && `🪨 ${row.geo}`,
+                 (row.rings || (row.ring_details || []).length) && "ringed"].filter(Boolean).join(" · ");
+  return `<div class="bodyart"><canvas class="bodycanvas" width="120" height="120" aria-label="${esc(`a picture of ${d.full_name || row.name}, from its scan data`)}" role="img"></canvas>` +
+    `<div class="artcap">impression from scan data${marks ? `<br>${marks}` : ""}</div></div>`;
+}
+function drawBodyArt(panel, d) {
+  const c = panel.querySelector(".bodycanvas"); if (!c) return;
+  const S = 120, dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = Math.round(S * dpr); c.height = Math.round(S * dpr); c.style.width = c.style.height = S + "px";
+  const g = c.getContext && c.getContext("2d"); if (!g) return;   // no canvas (the smoke test): the caption only
+  const L = bodyLook(d.row || {}, d.own || {}, [d.id64 || ""]), W = c.width, cx = W / 2, cy = W / 2, R = L.r * W;
+  const fbm = noiseField(seededRng(L.seed));
+  g.clearRect(0, 0, W, W);
+  const ringBand = front => {   // the rings: behind the body, then their front half over it
+    if (!L.rings.length) return;
+    g.save(); g.translate(cx, cy); g.rotate(L.tilt);
+    if (front) { g.beginPath(); g.rect(-W, 0, 2 * W, W); g.clip(); }
+    L.rings.forEach((col, i) => {
+      const rr = R * (1.45 + i * 0.32);
+      g.beginPath(); g.ellipse(0, 0, rr, rr * 0.28, 0, 0, Math.PI * 2);
+      g.strokeStyle = `rgba(${col.map(Math.round).join(",")},${front ? 0.75 : 0.55})`; g.lineWidth = R * 0.24; g.stroke();
+    });
+    g.restore();
+  };
+  if (L.glow && !L.dark) {   // a star's corona
+    const out = Math.min(R * 1.9, W * 0.49), gr = g.createRadialGradient(cx, cy, R * 0.8, cx, cy, out);   // inside the canvas
+    gr.addColorStop(0, `rgba(${L.base.join(",")},0.55)`); gr.addColorStop(1, `rgba(${L.base.join(",")},0)`);
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, out, 0, Math.PI * 2); g.fill();
+  }
+  if (L.tint) {   // an atmosphere's rim
+    const gr = g.createRadialGradient(cx, cy, R * 0.95, cx, cy, R * 1.18);
+    gr.addColorStop(0, `rgba(${L.tint.join(",")},0.6)`); gr.addColorStop(1, `rgba(${L.tint.join(",")},0)`);
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, R * 1.18, 0, Math.PI * 2); g.fill();
+  }
+  ringBand(false);
+  const img = g.getImageData(0, 0, W, W), px = img.data, light = [-0.78, -0.32, 0.54];
+  const x0 = Math.max(0, Math.floor(cx - R)), x1 = Math.min(W - 1, Math.ceil(cx + R));
+  for (let y = x0; y <= x1; y++) for (let x = x0; x <= x1; x++) {
+    const dx = (x + 0.5 - cx) / R, dy = (y + 0.5 - cy) / R, d2 = dx * dx + dy * dy;
+    if (d2 > 1) continue;
+    const nz = Math.sqrt(1 - d2), u = Math.atan2(dx, nz) / Math.PI + 1, v = Math.asin(Math.max(-1, Math.min(1, dy))) / Math.PI + 0.5;
+    let col = L.base;
+    if (L.kind === "gas" || L.kind === "ammonia") {
+      const by = dy * Math.cos(L.tilt) - dx * Math.sin(L.tilt), w = fbm(u * 3, by * 4 + 10, 3);
+      col = mixRgb(L.base, L.base2, 0.5 + 0.5 * Math.sin(by * L.bandFreq + w * 4) * (L.kind === "gas" ? 0.9 : 0.4));
+    } else if (L.kind === "star") {
+      col = mixRgb(L.base, [255, 255, 255], 0.25 * fbm(u * 6, v * 6, 2));
+    } else {
+      const n = fbm(u * 5, v * 5);
+      if (L.kind === "elw" || L.kind === "water") {
+        const sea = hexRgb(L.kind === "elw" ? "#2f6fc0" : "#3f8ee8");
+        col = L.kind === "elw" && n > 0.53 ? mixRgb(hexRgb("#4f9a4a"), hexRgb("#9c8a5a"), Math.min(1, (n - 0.53) * 6)) : mixRgb(sea, [10, 30, 70], 0.3 * (0.53 - n));
+        const cl = fbm(u * 7 + 31, v * 7 + 17, 3);
+        if (cl > 0.55) col = mixRgb(col, [245, 248, 255], Math.min(0.85, (cl - 0.55) * 5));
+      } else col = mixRgb(L.base, L.base2, Math.max(0, Math.min(1, (n - 0.35) * (L.kind === "ice" ? 1.2 : 2))));
+    }
+    const lit = L.kind === "star" ? 0.72 + 0.28 * nz : 0.1 + 0.9 * Math.max(0, dx * light[0] + dy * light[1] + nz * light[2]);
+    if (L.tint) col = mixRgb(col, L.tint, 0.55 * Math.pow(1 - nz, 3));
+    const i = (y * W + x) * 4, a = Math.min(1, (1 - Math.sqrt(d2)) * R);   // a soft edge
+    px[i] = px[i] * (1 - a) + col[0] * lit * a; px[i + 1] = px[i + 1] * (1 - a) + col[1] * lit * a; px[i + 2] = px[i + 2] * (1 - a) + col[2] * lit * a;
+    px[i + 3] = Math.max(px[i + 3], Math.round(255 * a));
+  }
+  g.putImageData(img, 0, 0);
+  ringBand(true);
 }
 
 // ---- My firsts ----

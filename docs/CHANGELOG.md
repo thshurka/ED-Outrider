@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Drawn bodies (tablet plan, phase 7)
+- A body's details (Here, Search) have a picture of it, drawn from its scan data:
+  - its class's colours, with bands on gas giants and clouds and continents on Earth-likes and water worlds;
+  - an atmosphere rim tinted by its main gas, rings by their class, its size by its radius;
+  - the same look every time, and labelled "impression from scan data", with landable, terraformable and signals
+    noted under it.
+
 ## 2026-10-03 · Ask Outrider by voice: POST /api/ask (tablet plan, phase 6, Outrider's side)
 - The tablet app sends a question in words. Outrider answers the fixed ones without any AI: status report, fuel,
   unsold, next jump, what's left here, nearest unvisited, hush and unhush. Their phrases are in resources/ask.json

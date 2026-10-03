@@ -85,7 +85,8 @@ ground worth a Rhino.
 </td>
 <td width="50%" valign="top">
 <b>Here</b> — the current system body by body: values, bio and geo signals, 🌋 volcanism, and before the
-DSS the genera each bio signal could be. Hover a body for a summary, click it for everything. ⛏ gives a
+DSS the genera each bio signal could be. Hover a body for a summary, click it for everything, with a picture of
+it drawn from its scan data (an impression: class colours, bands, clouds, atmosphere, rings, size). ⛏ gives a
 community survey's mineral odds for that ground (odds, not contents) and what your SRV mined there before.
 The to-do line ticks itself off as you honk, map and sample, in a suggested order with supercruise time and
 credits per minute ("~2 min · 450k/min"; "skip?" when not worth the trip). Bio nobody has set foot on is
@@ -96,7 +97,7 @@ valued with the ×5 first-footfall bonus.
 <tr>
 <td width="50%" valign="top">
 <b>Map</b> — a 3D view: left-drag to rotate, right-drag to move, scroll to zoom. Your path in orange,
-your first discoveries in gold, visited systems in blue; tick <i>boost stars</i> for neutron stars and
+your first discoveries in gold, visited systems in blue (by touch: one finger rotates, two move, pinch zooms); tick <i>boost stars</i> for neutron stars and
 white dwarfs.
 <br><br><img src="docs/images/map.png" alt="The 3D map">
 </td>

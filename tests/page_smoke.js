@@ -3410,6 +3410,21 @@ const settle = async maxMs => {
       let heard = 0; window.OutriderApp = {listen() { heard++; }}; tabRender(); o.push(document.getElementById("tabAsk").hidden);
       document.getElementById("tabAsk").click(); o.push(heard); delete window.OutriderApp; tabRender(); o.push(document.getElementById("tabAsk").hidden);
       return JSON.stringify(o); })()`));
+    // drawn bodies (phase 7): the look is the scan's (kind, colours, rim, rings, size) and the same every time for a body
+    got.bodies = JSON.parse(tw.eval(`(() => {
+      const k = (sub, extra = {}) => bodyLook(Object.assign({name: "A 1", subtype: sub}, extra), {}, ["99"]);
+      const a = k("Earth-like world", {atmosphere: "Thin Oxygen"}), b = k("Earth-like world", {atmosphere: "Thin Oxygen"});
+      const other = bodyLook({name: "A 2", subtype: "Earth-like world"}, {}, ["99"]);
+      const kinds = ["Class I gas giant", "Earth-like world", "Water world", "Ammonia world", "Icy body", "Rocky ice world", "High metal content world",
+                     "Metal-rich body", "Rocky body", "Gas giant with water-based life"].map(x => k(x).kind);
+      const star = bodyLook({name: "A", type: "Star", subtype: "K (Yellow-Orange) Star"}), ns = bodyLook({name: "B", type: "Star", subtype: "Neutron Star"});
+      const ringed = k("Class I gas giant", {radius_km: 70000, ring_details: [{type: "Icy"}, {type: "Metallic"}]});
+      const html = bodyArtHtml({full_name: "S A 1", row: {name: "A 1", landable: true, bio: 3, terraformable: true}});
+      const panel = document.createElement("div"); panel.innerHTML = html; drawBodyArt(panel, {row: {name: "A 1"}});   // no canvas here: no throw
+      return JSON.stringify([JSON.stringify(a) === JSON.stringify(b), a.seed !== other.seed, kinds, !!a.tint, k("Rocky body", {atmosphere: "No atmosphere"}).tint,
+        k("Class I gas giant", {atmosphere: "Hydrogen"}).tint, star.kind, star.glow, ns.dark, ns.r < star.r, ringed.rings.length, ringed.r <= 0.21,
+        k("Icy body", {radius_km: 500}).r < k("Icy body", {radius_km: 6000}).r, /impression from scan data/.test(html) && /landable · terraformable · 🧬 3/.test(html)]);
+    })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3429,6 +3444,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
+      bodies: [true, true, ["gas", "elw", "water", "ammonia", "ice", "ice", "metal", "metal", "rock", "gas"], true, null, null, "star", true, true, true, 2, true, true, true],
       ask: [true, "Fuel at 41 percent.", 0, false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],
