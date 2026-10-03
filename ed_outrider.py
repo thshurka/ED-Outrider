@@ -9653,12 +9653,25 @@ def sounds_json():
         return "null"
 
 
-def load_page():
+# The tablet layout (GET /tablet): the same page in a tablet mode (body.tablet: page.js draws its shell), with the
+# shell's stylesheet and every theme's (each scoped to its data-theme, so the per-device picker switches without a
+# reload). Fonts a theme lists first may come from data/fonts/ (fan fonts never committed: FONT_DIR, /userfonts/).
+TABLET_STYLES = ("tablet.css", "themes/lcars.css")
+TABLET_THEMES = ("lcars",)
+FONT_DIR = os.path.join(outrider.DATA_DIR, "fonts")
+USER_FONT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}\.(ttf|otf|woff2?)")
+
+
+def load_page(tablet=False):
     """page.html with its script and stylesheet links stamped by modification time, so a browser fetches
-    the new copy as soon as either file changes instead of running a cached one."""
+    the new copy as soon as either file changes instead of running a cached one. tablet: the /tablet layout."""
     with open(os.path.join(STATIC_DIR, "page.html"), encoding="utf-8") as f:
         html = f.read()
-    for name in ("page.js", "page.css"):
+    if tablet:
+        links = "".join(f'<link rel="stylesheet" href="static/{n}">' for n in TABLET_STYLES)
+        html = html.replace("</head>", links + "</head>", 1).replace("<body>", '<body class="tablet">', 1)
+        html = html.replace('<html lang="en">', f'<html lang="en" data-theme="{TABLET_THEMES[0]}">', 1)
+    for name in ("page.js", "page.css") + (TABLET_STYLES if tablet else ()):
         try:
             stamp = int(os.path.getmtime(os.path.join(STATIC_DIR, name)))
         except OSError:
@@ -9833,8 +9846,9 @@ def make_app(state, hosts=None):
 
     def signin_needed(request):
         """No session: the app (its User-Agent says OutriderApp/) and every /api/ or /static/ call get 401
-        signin_required, so the app shows its own sign-in; a browser is sent to the sign-in page."""
-        if request.path.startswith(("/api/", "/static/")) or "OutriderApp/" in (request.headers.get("User-Agent") or ""):
+        signin_required, so the app shows its own sign-in; a browser is sent to the sign-in page (never a resource:
+        /userfonts/ is one too)."""
+        if request.path.startswith(("/api/", "/static/", "/userfonts/")) or "OutriderApp/" in (request.headers.get("User-Agent") or ""):
             return web.json_response({"error": "sign in first: this Outrider asks devices on the network for its password",
                                       "code": "signin_required"}, status=401)
         nxt = request.path_qs if request.path_qs.startswith("/") and not request.path_qs.startswith("//") else "/"
@@ -9919,13 +9933,13 @@ def make_app(state, hosts=None):
             raise ValueError("id64 out of range")
         return v
 
-    async def index(_):
+    async def index(request):
         # the mineral list is the survey's plus what you have refined (S38): read for each page load
         options = json.dumps(dict(SEARCH_OPTIONS, mining=searchable_minerals(state.db)))
         # the browser defaults go into the page itself, so they are there before page.js reads its settings
         # ("<" escaped: a value holding "</script>" cannot end the script element)
         saved = read_browser_defaults(browser_defaults_path(state.db_path)) if state.db_path else None
-        return web.Response(text=load_page().replace("/*SEARCH_OPTIONS*/null", options)
+        return web.Response(text=load_page(tablet=request.path == "/tablet").replace("/*SEARCH_OPTIONS*/null", options)
                             .replace("/*SERVER_DEFAULTS*/null", json.dumps(saved).replace("<", "\\u003c"))
                             .replace("/*SOUNDS*/null", sounds_json()),
                             content_type="text/html")
@@ -9990,7 +10004,18 @@ def make_app(state, hosts=None):
     async def firsts_view(_):
         return web.json_response({"firsts": state.firsts_list(), "computed": (state.unsold or {}).get("computed")})
 
+    async def user_font(request):
+        """GET /userfonts/{name}: a font file you dropped into data/fonts/ (a theme lists it before its own OFL font;
+        a missing one is a 404 and the browser falls back)."""
+        name = request.match_info["name"]
+        path = os.path.join(FONT_DIR, name)
+        if not USER_FONT_RE.fullmatch(name) or not os.path.isfile(path):
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "max-age=86400"})
+
     app.router.add_get("/", index)
+    app.router.add_get("/tablet", index)
+    app.router.add_get("/userfonts/{name}", user_font)
     app.router.add_static("/static/", STATIC_DIR, show_index=False)
     async def bookmark(request):
         try:

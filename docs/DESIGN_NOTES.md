@@ -39,6 +39,18 @@ upstream project's choices, not rules of the game.
   and the docs say so rather than pretending otherwise (TLS on a LAN means certificate pain for little gain). Five
   failed sign-ins a minute per address, then 429. `/api/version`, the sign-in page and calls, the tab icon and
   `OPEN_GETS` stay open (the app must learn whether a password is wanted before it has one).
+- **The tablet layout is the same page, not a second app** (PLAN-tablet phase 3): `/tablet` serves page.html with
+  `body.tablet`, and page.js draws a shell round the views it already has (6,000 lines of rendering are not worth
+  duplicating). Themes are only for the tablet (the author, 2026-10-03): the desktop page keeps its look and has no
+  picker. LCARS is a theme, not the structure: the shell's parts are neutral and every look is custom properties, so
+  Elite and Babylon 5 can follow as stylesheets.
+- **The tablet never speaks or plays sounds.** The PC's voice is the cockpit's; a tablet that also spoke would double
+  every line, and on a plain-http LAN address there are no Web Locks to pick one speaker. Alerts are a banner there.
+- **One automatic page switch on the tablet:** to Now when the surface map shows, back when it hides (only if you
+  are still on Now and chose no page meanwhile). Anything more would take the page from under your finger.
+- **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in
+  `static/fonts/` with their licences. Fonts like "Euro Caps" or LCARS fan fonts have unclear redistribution terms:
+  the player may drop one into `data/fonts/` (served at `/userfonts/`), and the theme uses it first.
 - **Only `/api/status` and `/api/status.txt` are readable cross-site,** for stream overlays: they alone send
   `Access-Control-Allow-Origin: *` (no credentials are involved), so a fetch from an overlay page on another origin or
   a local file can read them (review F6).

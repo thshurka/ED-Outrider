@@ -1,0 +1,59 @@
+/* LCARS, the tablet's first theme (data-theme="lcars"; only /tablet sets it, the desktop page is never themed). Black,
+   peach, lavender, periwinkle and orange, amber for Silent Running; elbows at the head's and foot's left corners and
+   pills down the page nav. Fonts: Antonio (display) and Barlow Condensed (text), both SIL OFL 1.1, in static/fonts/
+   with their licences. A font of your own for the display face goes first if you drop it in as
+   data/fonts/lcars-display.ttf (served at /userfonts/; never committed); without it Antonio is used. */
+@font-face { font-family: "LCARS Display"; font-weight: 100 700; font-display: swap;
+  src: url("../../userfonts/lcars-display.ttf") format("truetype"), url("../fonts/Antonio-VF.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 400; font-display: swap; src: url("../fonts/BarlowCondensed-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 500; font-display: swap; src: url("../fonts/BarlowCondensed-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 600 700; font-display: swap; src: url("../fonts/BarlowCondensed-SemiBold.ttf") format("truetype"); }
+
+:root[data-theme="lcars"] {
+  --lc-orange: #FF9933; --lc-peach: #FFCC99; --lc-lavender: #CC99CC; --lc-periwinkle: #9999FF; --lc-amber: #FFB000;
+  --lc-red: #FF6666; --lc-ink: #120A00; --lc-panel: #120E1A; --lc-line: #2A2238;
+  /* page.css's colours, so the views take the theme too (light mode included: the theme is always dark) */
+  --bg: #000000; --panel: var(--lc-panel); --line: var(--lc-line); --text: #F4E9DA; --muted: #B9A6C6;
+  --accent: var(--lc-orange); --good: #99DD99; --warn: var(--lc-amber); --bad: var(--lc-red); --info: var(--lc-periwinkle);
+  --hot: #99DD99; --biohot: var(--lc-lavender);
+  --tb-font: "Barlow Condensed", system-ui, sans-serif; --tb-font-display: "LCARS Display", "Barlow Condensed", sans-serif;
+  --tb-case: uppercase; --tb-track: 1px; --tb-size: 18px;
+  --tb-frame: var(--lc-orange); --tb-frame2: var(--lc-lavender); --tb-title: var(--lc-orange);
+  --tb-chip-bg: #1A1424; --tb-chip-k: var(--lc-lavender); --tb-chip-v: #F4E9DA;
+  --tb-group-bg: var(--lc-lavender); --tb-group-fg: #1A0E1A; --tb-group-open-bg: var(--lc-orange); --tb-group-open-fg: var(--lc-ink);
+  --tb-group-radius: 0; --tb-page-radius: 24px 0 0 24px;
+  --tb-page-bg: var(--lc-periwinkle); --tb-page-fg: #0A0A1E; --tb-page-on-bg: var(--lc-peach); --tb-page-on-fg: var(--lc-ink);
+  --tb-fill: var(--lc-lavender);
+  --tb-btn-bg: var(--lc-periwinkle); --tb-btn-fg: #0A0A1E; --tb-btn-on-bg: var(--lc-amber); --tb-btn-on-fg: var(--lc-ink); --tb-btn-radius: 14px;
+  --tb-link-ok: var(--lc-periwinkle); --tb-link-stale: var(--lc-amber); --tb-link-none: var(--lc-red);
+  --tb-rail-border: #4A4054; --tb-sheet-bg: #07060C; --tb-sheet-border: var(--lc-periwinkle); --tb-sheet-radius: 18px;
+  --tb-banner-bg: #07060C; --tb-banner-fg: #F4E9DA; --tb-banner-border: var(--lc-orange); --tb-danger: var(--lc-red);
+  color-scheme: dark;
+}
+:root[data-theme="lcars"] body.tablet { background: #000; color: var(--text); }
+/* the head's elbow: an orange block with a round top-left corner, a bar along the top with a curve inside the corner */
+[data-theme="lcars"] .tb-head .tb-corner { background: var(--lc-orange); border-top-left-radius: 48px; }
+[data-theme="lcars"] .tb-head .tb-bar { position: relative; padding: 20px 0 0 32px; align-self: stretch; }
+[data-theme="lcars"] .tb-head .tb-bar::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 20px;
+  background: var(--lc-orange); border-radius: 0 10px 10px 0; }
+[data-theme="lcars"] .tb-head .tb-bar::after { content: ""; position: absolute; left: 0; top: 20px; width: 24px; height: 24px;
+  background: radial-gradient(circle at 100% 100%, transparent 23.5px, var(--lc-orange) 24px); }
+/* the foot's: lavender, the round corner at the bottom left, the bar along the bottom */
+[data-theme="lcars"] .tb-foot .tb-corner { background: var(--lc-lavender); border-bottom-left-radius: 32px; }
+[data-theme="lcars"] .tb-foot .tb-bar { position: relative; padding: 0 0 12px 28px; align-self: stretch; }
+[data-theme="lcars"] .tb-foot .tb-bar::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px;
+  background: var(--lc-lavender); border-radius: 0 6px 6px 0; }
+[data-theme="lcars"] .tb-foot .tb-bar::after { content: ""; position: absolute; left: 0; bottom: 12px; width: 20px; height: 20px;
+  background: radial-gradient(circle at 100% 0, transparent 19.5px, var(--lc-lavender) 20px); }
+/* the nav: group blocks with their label in the bottom right, pages as pills set in from the left */
+[data-theme="lcars"] .tb-pages .tb-page { margin-left: 28px; }
+[data-theme="lcars"] .tb-navfill { border-bottom-left-radius: 32px; }
+[data-theme="lcars"] .tb-group.here:not(.open) { box-shadow: inset 6px 0 var(--lc-orange); }
+/* the views: headings in the display face, lavender table heads, pill-shaped controls */
+[data-theme="lcars"] body.tablet th { color: var(--lc-lavender); letter-spacing: 1px; }
+[data-theme="lcars"] body.tablet tr.target td { background: rgba(255, 153, 51, .14); }
+[data-theme="lcars"] body.tablet main button, [data-theme="lcars"] body.tablet main select { border-radius: 14px; }
+[data-theme="lcars"] body.tablet #nowView .now-sys { color: var(--lc-peach); font-family: var(--tb-font-display); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px; }
+[data-theme="lcars"] body.tablet #nowView .now-card { border-radius: 22px; }
+[data-theme="lcars"] .tb-sheet h2 { color: var(--lc-peach); }

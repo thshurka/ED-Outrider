@@ -1,0 +1,140 @@
+/* The tablet layout (GET /tablet: body.tablet; page.js "---- the tablet layout"). Structure only: the shell's grid, its
+   neutral parts (.tb-head with the status strip, .tb-nav, .tb-main, .tb-rail, .tb-foot, .tb-banner, .tb-sheet) and
+   touch sizes. Every colour, font, radius and border is a custom property with a plain default here; a theme
+   (static/themes/<name>.css, scoped to its [data-theme]) sets them and may dress a part's shape. Target: a landscape
+   tablet near 1280 x 800 CSS px (the Galaxy Tab A11+ at dpr 1.5); touch targets at least 48 px. */
+:root {
+  --tb-pad: 10px; --tb-gap: 10px; --tb-head-h: 64px; --tb-foot-h: 44px; --tb-nav-w: 170px; --tb-rail-w: 196px; --tb-touch: 48px;
+  --tb-font: system-ui, sans-serif; --tb-font-display: var(--tb-font); --tb-size: 17px; --tb-case: none; --tb-track: 0;
+  --tb-frame: var(--accent); --tb-frame2: var(--muted);   /* the head's and the foot's colours */
+  --tb-title: var(--accent);
+  --tb-chip-bg: var(--panel); --tb-chip-k: var(--muted); --tb-chip-v: var(--text); --tb-chip-radius: 16px;
+  --tb-group-bg: var(--panel); --tb-group-fg: var(--text); --tb-group-open-bg: var(--accent); --tb-group-open-fg: var(--bg);
+  --tb-page-bg: var(--panel); --tb-page-fg: var(--text); --tb-page-on-bg: var(--accent); --tb-page-on-fg: var(--bg);
+  --tb-page-radius: 8px; --tb-group-radius: 8px; --tb-fill: transparent;
+  --tb-btn-bg: var(--panel); --tb-btn-fg: var(--text); --tb-btn-on-bg: var(--accent); --tb-btn-on-fg: var(--bg); --tb-btn-radius: 8px;
+  --tb-link-ok: var(--info); --tb-link-stale: var(--warn); --tb-link-none: var(--bad);
+  --tb-rail-border: var(--line); --tb-sheet-bg: var(--panel); --tb-sheet-border: var(--line); --tb-sheet-radius: 12px;
+  --tb-banner-bg: var(--panel); --tb-banner-fg: var(--text); --tb-banner-border: var(--warn); --tb-danger: var(--bad);
+}
+body.tablet, body.tablet.app { display: grid; height: 100vh; overflow: hidden; margin: 0; padding: var(--tb-pad); gap: var(--tb-gap);
+  grid-template-columns: var(--tb-nav-w) minmax(0, 1fr) var(--tb-rail-w);
+  grid-template-rows: var(--tb-head-h) minmax(0, 1fr) var(--tb-foot-h);
+  font-family: var(--tb-font); font-size: var(--tb-size); -webkit-tap-highlight-color: transparent; }
+html.tb-dim body.tablet { filter: brightness(.55); }
+/* ---- the parts ---- */
+.tb-head { grid-column: 1 / -1; grid-row: 1; display: flex; min-width: 0; }
+.tb-foot { grid-column: 1 / -1; grid-row: 3; display: flex; min-width: 0; }
+.tb-head .tb-corner, .tb-foot .tb-corner { flex: 0 0 var(--tb-nav-w); }
+.tb-head .tb-bar, .tb-foot .tb-bar { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0 12px; }
+.tb-title { font-family: var(--tb-font-display); font-weight: 700; font-size: 28px; color: var(--tb-title); text-transform: var(--tb-case);
+  letter-spacing: var(--tb-track); white-space: nowrap; }
+.tb-chip { display: flex; align-items: baseline; gap: 8px; padding: 4px 14px; border-radius: var(--tb-chip-radius); background: var(--tb-chip-bg);
+  min-width: 0; }
+.tb-chip .tb-k { font-family: var(--tb-font-display); font-size: 13px; color: var(--tb-chip-k); text-transform: var(--tb-case); letter-spacing: var(--tb-track); }
+.tb-chip .tb-v { font-size: 19px; font-weight: 500; color: var(--tb-chip-v); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tabSys { flex: 0 1 auto; } #tabSys .tb-v { max-width: 260px; }
+.tb-chip.warn .tb-v { color: var(--warn); } .tb-chip.urgent .tb-v { color: var(--bad); font-weight: 700; } .tb-chip.stale .tb-v { color: var(--muted); }
+.tb-grow { flex: 1 1 auto; }
+.tb-link { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 4px 14px; border-radius: var(--tb-chip-radius);
+  border: 2px solid var(--tb-link-ok); color: var(--tb-link-ok); font-family: var(--tb-font-display); font-size: 15px;
+  text-transform: var(--tb-case); letter-spacing: var(--tb-track); white-space: nowrap; }
+.tb-link::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+.tb-link.stale { border-color: var(--tb-link-stale); color: var(--tb-link-stale); }
+.tb-link.none { border-color: var(--tb-link-none); color: var(--tb-link-none); border-style: dashed; }
+.tb-nav { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden auto; }
+.tb-group { flex: 0 0 auto; min-height: 54px; border: 0; border-radius: var(--tb-group-radius); background: var(--tb-group-bg); color: var(--tb-group-fg);
+  font: 600 19px var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track);
+  display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px; cursor: pointer; }
+.tb-group.open { background: var(--tb-group-open-bg); color: var(--tb-group-open-fg); }
+.tb-pages { display: flex; flex-direction: column; gap: 6px; }
+.tb-page { min-height: var(--tb-touch); border: 0; border-radius: var(--tb-page-radius); background: var(--tb-page-bg); color: var(--tb-page-fg);
+  font: 17px var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track);
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 14px; cursor: pointer; }
+.tb-page.on { background: var(--tb-page-on-bg); color: var(--tb-page-on-fg); font-weight: 600; }
+.tb-maptag { padding: 1px 8px; border-radius: 10px; background: var(--tb-page-on-fg); color: var(--tb-page-on-bg); font-size: 13px; font-weight: 600; }
+.tb-navfill { flex: 1 1 auto; min-height: 12px; background: var(--tb-fill); }
+.tb-main { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.tb-rail { grid-column: 3; grid-row: 2; min-height: 0; display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--tb-rail-border); border-radius: var(--tb-sheet-radius); }
+.tb-railnote { text-align: center; color: var(--muted); font-family: var(--tb-font-display); text-transform: var(--tb-case);
+  letter-spacing: var(--tb-track); font-size: 15px; padding: 12px; }
+.tb-railnote span { font-size: 13px; }
+.tb-voice { font-family: var(--tb-font-display); font-size: 14px; text-transform: var(--tb-case); letter-spacing: var(--tb-track);
+  padding: 3px 12px; border-radius: 14px; border: 2px solid var(--tb-link-ok); color: var(--tb-link-ok); white-space: nowrap; }
+.tb-btn { min-height: 36px; padding: 4px 14px; border: 0; border-radius: var(--tb-btn-radius); background: var(--tb-btn-bg); color: var(--tb-btn-fg);
+  font: 14px var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track); cursor: pointer; white-space: nowrap; }
+.tb-btn.on { background: var(--tb-btn-on-bg); color: var(--tb-btn-on-fg); }
+.tb-btn:disabled { opacity: .45; cursor: default; }
+.tb-caption { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* an alert: over the top of the main column, a flash when it comes */
+.tb-banner { position: fixed; z-index: 30; top: calc(var(--tb-pad) + var(--tb-head-h) + var(--tb-gap));
+  left: calc(var(--tb-pad) + var(--tb-nav-w) + var(--tb-gap) + 12px); right: calc(var(--tb-pad) + var(--tb-rail-w) + var(--tb-gap) + 12px);
+  padding: 12px 18px; border-radius: var(--tb-sheet-radius); border: 3px solid var(--tb-banner-border); background: var(--tb-banner-bg);
+  color: var(--tb-banner-fg); font-size: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, .6); cursor: pointer; }
+.tb-banner b { font-weight: 600; } .tb-banner span { color: var(--muted); }
+.tb-banner.danger { border-color: var(--tb-danger); } .tb-banner.danger b::before { content: "⚠ "; color: var(--tb-danger); }
+.tb-banner.flash { animation: tb-flash .9s ease-out 2; }
+@keyframes tb-flash { 0%, 40% { box-shadow: 0 0 0 6px var(--tb-banner-border), 0 8px 30px rgba(0, 0, 0, .6); } 100% { box-shadow: 0 8px 30px rgba(0, 0, 0, .6); } }
+.tb-banner.danger.flash { animation-name: tb-flash-danger; }
+@keyframes tb-flash-danger { 0%, 40% { box-shadow: 0 0 0 6px var(--tb-danger), 0 8px 30px rgba(0, 0, 0, .6); } 100% { box-shadow: 0 8px 30px rgba(0, 0, 0, .6); } }
+@media (prefers-reduced-motion: reduce) { .tb-banner.flash { animation: none; } }
+/* the sheets: a row's facts, and this tablet's settings */
+.tb-sheet { width: min(640px, 90vw); max-height: 86vh; padding: 0; border: 2px solid var(--tb-sheet-border); border-radius: var(--tb-sheet-radius);
+  background: var(--tb-sheet-bg); color: var(--text); font-family: var(--tb-font); font-size: 18px; }
+.tb-sheet::backdrop { background: rgba(0, 0, 0, .6); }
+.tb-sheet form { margin: 0; padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+.tb-sheethead { display: flex; align-items: center; gap: 12px; }
+.tb-sheethead h2 { flex: 1 1 auto; margin: 0; font: 600 24px var(--tb-font-display); color: var(--tb-title); text-transform: var(--tb-case);
+  letter-spacing: var(--tb-track); overflow-wrap: anywhere; }
+.tb-sheethead .tb-btn { min-width: var(--tb-touch); min-height: var(--tb-touch); font-size: 20px; }
+.tb-facts { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; }
+.tb-facts dt { color: var(--muted); font-family: var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track); font-size: 15px; padding-top: 2px; }
+.tb-facts dd { margin: 0; white-space: normal; overflow-wrap: anywhere; }
+.tb-acts { display: flex; flex-wrap: wrap; gap: 10px; }
+.tb-acts:empty { display: none; }
+.tb-acts .tb-btn { min-height: var(--tb-touch); font-size: 17px; }
+.tb-row { display: flex; align-items: center; gap: 12px; min-height: var(--tb-touch); }
+.tb-row select { min-height: 40px; font: inherit; }
+.tb-row input[type=checkbox] { width: 26px; height: 26px; }
+.tb-note { margin: 0; color: var(--muted); font-size: 15px; }
+/* ---- the views inside the shell ---- */
+/* the desktop's own head (the six tiles, the tab buttons, the icons) gives way to the shell; its strips stay */
+body.tablet header { padding: 0 4px 4px; border-bottom: 0; }
+body.tablet header .topbar, body.tablet header .tilewrap, body.tablet #obMap, body.tablet #nowBar, body.tablet #lastSaidLine { display: none !important; }
+body.tablet header > div:empty { margin: 0; }
+body.tablet main { padding: 4px 0 0; }
+body.tablet.app main { padding: 4px 0 0; }
+body.tablet #overView { display: none !important; }
+/* secondary columns go to the row's sheet (a tap) */
+body.tablet .hide-sm { display: none; }
+body.tablet th, body.tablet td { padding: 11px 8px; }
+body.tablet th { font-family: var(--tb-font-display); font-size: 14px; }
+body.tablet main button, body.tablet main select, body.tablet main input:not([type=checkbox]):not([type=radio]) { min-height: 40px; font-size: inherit; }
+body.tablet main input[type=checkbox], body.tablet main input[type=radio] { width: 22px; height: 22px; vertical-align: middle; }
+body.tablet tbody tr { cursor: pointer; }
+/* PC back-end actions stay on the PC: auto-target's switch, delay, test and steps (Target next stays) */
+body.tablet label:has(#hwyAutoOn), body.tablet label:has(#hwyAutoDelay), body.tablet #hwyAutoTest, body.tablet #hwyAutoStepsBox { display: none !important; }
+/* Now, sized for the main column (page.css sizes it for a whole window) */
+body.tablet #nowView { min-height: 0; flex: 1 1 0; overflow: auto; padding: 8px 14px; }
+body.tablet #nowView .now-sys { font-size: 40px; margin-bottom: 10px; }
+body.tablet #nowView .now-line { font-size: 24px; margin: 10px 0; }
+body.tablet #nowView .now-body { font-size: 20px; }
+body.tablet #nowView .now-card { font-size: 24px; padding: 8px 14px; margin: 10px 0; }
+body.tablet #nowView .now-small, body.tablet #nowView .now-cap { font-size: 18px; }
+body.tablet #nowView .now-cap { padding: 6px 0; }
+body.tablet #nowView.mapsplit .now-sys { font-size: 32px; } body.tablet #nowView.mapsplit .now-line { font-size: 20px; }
+body.tablet #nowView .now-caps { margin-top: 12px; padding-top: 8px; }
+/* Now with the surface map: compact text, so the map and its legend have the room (the captions are in the footer) */
+body.tablet #nowView.mapon .now-sys { font-size: 30px; margin-bottom: 6px; }
+body.tablet #nowView.mapon .now-line { font-size: 19px; margin: 6px 0; }
+body.tablet #nowView.mapon .now-body { font-size: 17px; }
+body.tablet #nowView.mapon .now-card { font-size: 19px; padding: 6px 12px; margin: 6px 0; }
+body.tablet #nowView.mapon .now-small, body.tablet #nowView.mapon .now-caps { display: none; }
+body.tablet #nowView.mapon #nowMap { margin-top: 6px; padding-top: 6px; }
+/* the header's strips take no room while empty (the desktop keeps the target line's height so the page does not jump) */
+body.tablet #target:empty { min-height: 0; margin: 0; }
+/* the Highway: the jump list wider than the desktop's 44 %, the map beside it */
+body.tablet.app #hwyPanes { grid-template-columns: minmax(0, 56%) minmax(0, 1fr); }
+.tb-sheet .tb-row { font-size: 18px; }
+body.tablet #nowMapLegend { font-size: 16px; }

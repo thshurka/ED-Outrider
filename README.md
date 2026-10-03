@@ -189,6 +189,36 @@ Under the Where tile, the **discovery streak** is a dot per arrival for your las
 amber: bodies nobody had reported, blue: known, grey: revisited), and the **unreported horizon**: "nearest
 known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the galaxy map is one nobody has reported.
 
+## 📱 On a tablet
+
+Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
+the same pages in a cockpit layout, here with its first theme, LCARS.
+
+<p align="center">
+  <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
+</p>
+
+- **The strip on top** shows the system, fuel and unsold data, and the link to Outrider in words
+  ("LINKED · 2 S AGO", "STALE · 48 S AGO", "NO LINK · RETRYING").
+- **The pages** are on the left in three groups of four: Explore (Now, Nearby, Here, Samples), Navigate (Bookmarks,
+  Search, Map, Highway) and Records (History, Log, Materials, My firsts). There is no Overview.
+- **Tap a row** in a table for all of its facts, including the columns too narrow to show, with Show in Here and
+  Bookmark.
+- **The maps by touch:** on the galaxy map one finger rotates, two fingers move it and a pinch zooms; on the Highway
+  map two fingers move and pinch.
+- **On a planet** the tablet switches to Now when the surface map appears (the Now button says MAP) and back to your
+  page when it goes. Nothing else switches pages by itself.
+- **The voice stays on the PC.** The tablet never speaks or plays sounds: an alert is a banner across the top (red
+  for danger), and the footer has Hush, Status report and the last line said.
+- **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
+  honk, auto-target's switch and test, backups and the voice settings stay on the PC.
+- **Settings** (bottom right) has the theme, a dim switch, the screen size in CSS pixels and Sign out.
+
+Outrider must listen on your network for this (`[server] host = "0.0.0.0"`). With `[server] password` set, the tablet
+signs in once: see "Opening the page from another device" under Settings. The fonts are Antonio and Barlow Condensed,
+both under the SIL Open Font License and shipped with Outrider. If you have an LCARS font of your own, save it as
+`data/fonts/lcars-display.ttf` and the theme uses it for its headings. It stays in your git-ignored `data/` folder.
+
 ## 🔔 Alerts
 
 Alerts fire only for something out of the ordinary. Each can play a sound (🔊), show a desktop
@@ -578,7 +608,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | File | What it does |
 |---|---|
 | `ed_outrider.py` | The server and the journal reader |
-| `static/` | The page (HTML, CSS, JS) — edit and reload; `sounds.json` holds the alert sounds; `favicon.svg` the tab icon |
+| `static/` | The page (HTML, CSS, JS) — edit and reload; `sounds.json` holds the alert sounds; `favicon.svg` the tab icon; `tablet.css`, `themes/` and `fonts/` the tablet layout |
 | `outrider/` | The modules below; those with a command line run as `python3 -m outrider.<name>` from this folder |
 | `outrider/unsold.py` | The unsold-data estimate; also works on its own (`python3 -m outrider.unsold --help`) |
 | `outrider/log.py` | One-line summaries of journal events for the Log view |
@@ -597,7 +627,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page, against a scratch server only (it refuses 8025 and a missing port) |
 | `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
 | `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server |
-| `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/` |
+| `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/`, `fonts/` |
 | `docs/` | Notes for contributors and their coding agents (code map, rules, journal traps, design notes, changelog); `images/` holds the screenshots |
 
 For overlays, `GET /api/status` returns a compact JSON status and

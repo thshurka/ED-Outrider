@@ -34,6 +34,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
 | `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip); `hwyAutoStart(kind)` (test now, and Target next / Retry via POST `/api/highway/target`), `hwyAimBtn` (🎯 beside "Next:"), `hwySpoken` (the Highway clause of the status report); `linkState`/`drawLinkPill` (the link pill); `outVolume` (Volume, per device); `ownSounds` (your own sound files) |
+| `static/tablet.css`, `static/themes/`, `static/fonts/` | The tablet layout (`GET /tablet`: the same page with `body.tablet`; `load_page(tablet=True)` adds `TABLET_STYLES` and `data-theme`). `tablet.css` is structure only: the shell's grid and its neutral parts (`.tb-head`, `.tb-nav`, `.tb-main`, `.tb-rail`, `.tb-foot`, `.tb-banner`, `.tb-sheet`), every colour, font and radius a `--tb-*` custom property; each theme (`themes/lcars.css`) sets them and page.css's colours under its `[data-theme]`, and may dress a part's shape. `fonts/`: OFL fonts only, each with its `OFL-<Family>.txt`. `page.js`'s tablet section is at its end ("---- the tablet layout": `tabSetup` moves header, Now and main into `#tabMain`; `tabAutoView` the surface map's switch to Now and back; `tabRender` the status strip; `tabDrawLink`/`tabLinkText`; `tabBanner` for alerts; `tabRowTap`/`tabRowFacts`/`tabOpenRow` the row sheet over `TAB_SHEET_TABLES`; `tabOpenSettings`), its state in `TB` at the top beside `TABLET` |
 | `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
 | `resources/speech.json` | Spoken lines per alert and personality (business, sarcastic, sweet, plus `_profane` lists) |
 | `resources/bio_rules.json` | Spawn rules and region map data fetched from upstream projects (refreshed at start when upstream changed) |
@@ -69,7 +70,8 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
    `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/highway` (+ `/systems?q=`, `/background`; POST `/plot`,
    `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`, `/target` {countdown?}: Target next / Retry), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`, `/api/version`, `/api/auth/signin`
-   and `/signout` (see the app's contract below). The payload carries only the highway line's facts
+   and `/signout` (see the app's contract below). The pages: `/`, `/tablet` (the same page, tablet layout), `/signin`;
+   `/userfonts/{name}` serves a font from `data/fonts/`. The payload carries only the highway line's facts
    (`highway_summary`); the Highway tab fetches the route itself.
 7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
@@ -148,7 +150,15 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   error on the page) and the next one still runs; `sqlite3.Error` propagates.
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
-  screen speaks, `volume`, `tilesMode`, the alerts dialog's `alertSection`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+  screen speaks, `volume`, `tilesMode`, the alerts dialog's `alertSection`, the tablet's `tabletView`, `tabletTheme` and
+  `tabletDim`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+- **The tablet layout** (`body.tablet`, `TABLET` in page.js) is the same views in another shell, never a copy of them:
+  a view change works on both. The tablet never speaks, plays sounds or joins the one-speaker lock (`speakMode()` is
+  "never" there): keep any new sound or speech path behind `speakerHere()`. It has no Overview. The desktop page must
+  not change: tablet-only rules go under `body.tablet` in `tablet.css`, themes only under their `[data-theme]` (only
+  `/tablet` sets one). A new theme: its stylesheet in `TABLET_STYLES`, its name in `TABLET_THEMES` and `TB.themes`,
+  an `<option>` in `#tabTheme`. A font: OFL only, with its licence file (`test_tablet.py` checks); a fan font is the
+  player's drop-in in `data/fonts/` (`/userfonts/`, `USER_FONT_RE`), listed first in the theme's `@font-face`.
 - **Page layout: scroll the pane, not the window.** On a window of at least 900 × 600 (`appWanted`; not Now) the
   body gets `app`: it is the window's height with no page scroll, the header stays, the view fills the rest (flex
   columns with `min-height: 0` down the chain) and each `.pane` (a bordered box, tabindex in app mode) scrolls on its

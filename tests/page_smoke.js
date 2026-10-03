@@ -3272,6 +3272,114 @@ const settle = async maxMs => {
     console.log(goodBG ? "OK" : "FAIL", "| highway map background |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "42 regions decoded as the server reads them; landmarks projected; toggles per device; image, regions, names and landmarks under the route", errors.slice(before));
   }
+  // ---- the tablet layout (GET /tablet, PLAN-tablet phase 3): the same page in its own shell. The desktop page above
+  // never shows the shell; the tablet opens on Now, shows every page from its nav, never speaks or plays sounds, goes to
+  // Now while the surface map shows and back after, says the link in words, and opens a row's facts in a sheet.
+  {
+    const desk = [!d.body.classList.contains("tablet"), d.getElementById("tabNav").hidden, d.getElementById("tabMain").hidden,
+                  !d.documentElement.dataset.theme];
+    const terr = [];
+    const thtml = await (await fetch(base + "tablet")).text();
+    const tdom = new JSDOM(thtml, {url: base + "tablet", runScripts: "dangerously", resources: "usable", pretendToBeVisual: true,
+      beforeParse(w) {
+        w.fetch = (u, o) => {
+          const poll = /api\/nearby\?since=/.test(String(u));
+          if (!poll) { inflight++; lastNet = Date.now(); }
+          return fetch(new URL(u, base), o).finally(() => { if (!poll) { inflight--; lastNet = Date.now(); } });
+        };
+        w.addEventListener("error", e => terr.push(e.message));
+        w.localStorage.clear();
+        w.scrollBy = () => {};
+        w.HTMLCanvasElement.prototype.getContext = () => null;
+      }});
+    const tw = tdom.window, td = tw.document;
+    for (let i = 0; i < 60 && !tw.eval("typeof data !== 'undefined' && data"); i++) await sleep(500);
+    await settle(3000);
+    const got = {desk};
+    got.shell = ["tabHead", "tabNav", "tabMain", "tabRail", "tabFoot"].map(id => !td.getElementById(id).hidden);
+    const tm = td.getElementById("tabMain");
+    got.moved = [tm.contains(td.querySelector("header")), tm.contains(td.getElementById("nowView")), tm.contains(td.querySelector("main"))];
+    got.theme = td.documentElement.dataset.theme;
+    got.start = tw.eval("view");
+    got.quiet = tw.eval("[isSpeaker, speakerHere(), speakMode(), speechOn]");
+    got.status = [td.getElementById("tabSysV").textContent.length > 1, /t|—/.test(td.getElementById("tabFuelV").textContent)];
+    // every page from the nav: its group opens, its view fills, nothing throws
+    const fills = {now: "#nowView", near: "#rows", here: "#hereRows", bio: "#bioRows", bm: "#bmTable", search: "#searchForm", map: "#mapView",
+                   hwy: "#hwyHead", hist: "#histRows", log: "#logRows", mat: "#matGrid", firsts: "#firstsRows"};
+    got.pages = [];
+    for (const [g, vs] of Object.entries({explore: ["now", "near", "here", "bio"], navigate: ["bm", "search", "map", "hwy"], records: ["hist", "log", "mat", "firsts"]})) {
+      td.querySelector(`#tabNav [data-group="${g}"]`).click();
+      for (const v of vs) {
+        const before = terr.length;
+        td.querySelector(`#tabNav [data-view="${v}"]`).click();
+        await settle(2500);
+        const el = td.querySelector(fills[v]), shown = [...td.querySelectorAll("#tabNav [data-pages]")].filter(x => !x.hidden).map(x => x.dataset.pages);
+        const ok = tw.eval("view") === v && el && el.textContent.trim().length > 0 && shown.join() === g && terr.length === before &&
+          td.querySelector(`#tabNav [data-view="${v}"]`).classList.contains("on");
+        if (!ok) got.pages.push(`${v}: view ${tw.eval("view")}, groups ${shown}, errors ${terr.slice(before)}`);
+      }
+    }
+    // the surface map: to Now and back to the page you were on; a page chosen meanwhile stays
+    got.mapSwitch = JSON.parse(tw.eval(`(() => {
+      const tag = () => !document.getElementById("tabMapTag").hidden, o = [];
+      const on = () => { data.surface = {body: "ABC 1", system: posId(), body_id: 3, lat: 0, lon: 0, heading: 0, alt: 0, radius: 1000000, show: true,
+        down: true, alt_avg: false, rhino: false, ship: null, rigs: [], sites: [], locations: [], bio: []}; render(); };
+      const off = () => { data.surface = null; render(); };
+      document.querySelector('#tabNav [data-view="hwy"]').click();
+      on(); o.push([view, tag()]); off(); o.push([view, tag()]);
+      on(); document.querySelector('#tabNav [data-view="bm"]').click(); off(); o.push([view, tag()]);
+      return JSON.stringify(o); })()`));
+    // the link in words (linkState's states), and the pill drawn with them
+    got.link = tw.eval(`[tabLinkText({state: "linked"}, lastHeard + 2400), tabLinkText({state: "stale"}, lastHeard + 48000), tabLinkText({state: "none"})]`);
+    tw.eval("drawLinkPill()");
+    got.pill = [/^linked · \d+ s ago$/.test(td.getElementById("tabLink").textContent), td.getElementById("tabLink").className];
+    // an alert: a banner (danger marked), nothing queued to speak
+    got.banner = JSON.parse(tw.eval(`(() => { alertOut("hull", "Hull at 40%", "take it easy");
+      const b = document.getElementById("tabBanner"); return JSON.stringify([!b.hidden, b.classList.contains("danger"), b.textContent.includes("Hull at 40%"), speechItems.length]); })()`));
+    // a row's sheet: its facts in full, Show in Here and Bookmark; the name is not copied
+    td.querySelector('#tabNav [data-view="near"]').click(); await settle(1500);
+    const cell = td.querySelector("#rows tr td.name");
+    if (cell) {
+      const toastBefore = td.getElementById("toast").textContent;
+      cell.click();
+      const sh = td.getElementById("tabSheet"), dts = [...sh.querySelectorAll("dt")].map(x => x.textContent);
+      got.sheet = [sh.hasAttribute("open"), td.getElementById("tabSheetTitle").textContent === cell.dataset.name,
+                   ["System", "Dist", "Status", "Main star", "Bodies"].every(k => dts.includes(k)), dts.length >= 6,
+                   !!sh.querySelector('[data-act="here"]'), !!sh.querySelector('[data-act="bm"]'),
+                   td.getElementById("toast").textContent === toastBefore];
+      sh.querySelector('[data-act="here"]').click(); await settle(1500);
+      got.sheetHere = [sh.hasAttribute("open"), tw.eval("view")];
+    } else got.sheet = "no Nearby row";
+    // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
+    got.target = await (async () => {
+      const real = tw.fetch; let sent = null;
+      tw.fetch = (u, o) => { if (/api\/highway\/target/.test(String(u))) { sent = o && o.body; return Promise.resolve({ok: false, json: async () => ({error: "smoke"})}); } return real(u, o); };
+      tw.eval('hwyAutoStart("next")'); await sleep(100); tw.fetch = real; return sent;
+    })();
+    // two fingers on a map: the midpoint's move and the pinch
+    got.pinch = tw.eval("JSON.stringify(pinchStep([{x: 0, y: 0}, {x: 10, y: 0}], [{x: 5, y: 5}, {x: 25, y: 5}]))");
+    // the settings sheet: the screen in CSS px, the sign-in state (this PC: signed in, whatever the password)
+    td.getElementById("tabSetBtn").click(); await settle(1500);
+    got.settings = [td.getElementById("tabSettings").hasAttribute("open"), /CSS px/.test(td.getElementById("tabViewport").textContent),
+                    td.getElementById("tabAppVer").textContent, /signed in|asks no password/.test(td.getElementById("tabSignState").textContent)];
+    td.getElementById("tabTheme").value = "lcars"; td.getElementById("tabTheme").dispatchEvent(new tw.Event("change"));
+    td.getElementById("tabDim").checked = true; td.getElementById("tabDim").dispatchEvent(new tw.Event("change"));
+    got.prefs = [td.documentElement.dataset.theme, td.documentElement.classList.contains("tb-dim"), tw.localStorage.getItem("tabletDim"),
+                 tw.localStorage.getItem("view"), JSON.parse(tw.localStorage.getItem("tabletView"))];
+    const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
+      quiet: [false, false, "never", false], status: [true, true], pages: [],
+      mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
+      link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
+      target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
+      settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodT = !bad.length && !terr.length;
+    allOk = allOk && goodT;
+    console.log(goodT ? "OK" : "FAIL", "| tablet layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, pinch, settings", terr);
+    tw.close();
+  }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",
     headers: Object.assign({"Content-Type": "application/json"}, origin ? {Origin: origin} : {})}).then(r => r.status);

@@ -30,6 +30,15 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 let data = null, version = -1;
+// The tablet layout (GET /tablet sets body.tablet): the same views in a shell of its own, drawn by "---- the tablet
+// layout" near the end. It never speaks or plays sounds (the PC does), keeps its own page, and has no Overview.
+const TABLET = typeof document !== "undefined" && !!document.body && document.body.classList.contains("tablet");
+// its state, here at the top so nothing reads it before it exists (its functions are at the end, hoisted):
+// group: the nav group shown while you browse another one; beforeMap: the page to go back to when the surface map hides
+// (null: you were on Now already, or chose a page since); mapWas: whether the map showed at the last draw
+const TB = {group: null, beforeMap: null, mapWas: false, bannerTimer: null, bannerKey: null,
+            groups: {explore: ["now", "near", "here", "bio"], navigate: ["bm", "search", "map", "hwy"], records: ["hist", "log", "mat", "firsts"]},
+            themes: ["lcars"]};
 // Where you are, as the exact id64 string (position.id). The JSON number position.id64 loses the last digits above
 // 2^53, so string comparisons with the server's exact ids (arrival, Here, moments) must use this.
 const posId = () => data && data.position ? data.position.id ?? String(data.position.id64) : null;
@@ -1050,19 +1059,27 @@ function ovMapFit({width, height, gap = 12}) {
   if (side >= OV_MAP_MIN || (side > 0 && side === height)) return {beside: true, S: side, legendW: width - side - gap};
   return {beside: false, S: Math.max(Math.min(120, width, height), Math.min(width, height - 90)), legendW: null};
 }
+// the area Now's map is fitted in: the window, or on the tablet its main column (its right and bottom edges, in page
+// coordinates, as the window's would be)
+function nowArea() {
+  if (!TABLET) return {vw: innerWidth, vh: innerHeight};
+  const r = document.getElementById("tabMain").getBoundingClientRect();
+  return {vw: r.width || innerWidth, vh: (r.bottom || innerHeight) + (window.scrollY || 0)};
+}
 function renderSurface() {
   const s = data && data.surface, show = surfaceShows(s), cfg = surfaceCfg();
   const box = document.getElementById("nowMap"), strip = document.getElementById("obMap"), nv = document.getElementById("nowView");
   const onNow = show && view === "now";
   box.hidden = !onNow;
   nv.classList.toggle("mapon", onNow);
-  nv.classList.toggle("mapsplit", onNow && nowMapSplit(innerWidth, innerHeight));
+  nv.classList.toggle("mapsplit", onNow && nowMapSplit(nowArea().vw, nowArea().vh));
   if (onNow) {
     const cs = getComputedStyle(nv), px = v => parseFloat(v) || 0;
     const width = (nv.clientWidth || innerWidth) - px(cs.paddingLeft) - px(cs.paddingRight);
     const smap = box.querySelector(".smap"), legend = document.getElementById("nowMapLegend");
     const top = smap.getBoundingClientRect().top + (window.scrollY || 0);
-    const F = nowMapFit({vw: innerWidth, vh: innerHeight, width, top, gap: px(getComputedStyle(box).columnGap) || 24, bottom: Math.max(12, px(cs.paddingBottom))});
+    const {vw, vh} = nowArea();
+    const F = nowMapFit({vw, vh, width, top, gap: px(getComputedStyle(box).columnGap) || 24, bottom: Math.max(12, px(cs.paddingBottom))});
     box.classList.toggle("stack", !F.beside);
     legend.style.flexBasis = F.legendW ? F.legendW + "px" : "";
     legend.style.maxHeight = F.split ? Math.max(F.S, F.H) + "px" : "";
@@ -1111,6 +1128,7 @@ function addCaption(words) {
 }
 // the desktop page's "last said" (review S18): the latest caption, muted, with ▶ to hear it again (Now has its own)
 function drawLastSaid() {
+  if (TABLET) tabDrawCaption();
   const c = captions[captions.length - 1], el = document.getElementById("lastSaidLine");
   if (!el) return;
   el.hidden = !c;
@@ -1182,8 +1200,8 @@ function nowDestText(hd, l, plan, b) {
 // leaving Now: ✕ back or a double tap (not on the bar or a caption). A window opened at ?mode=now stays on Now, with
 // its URL, so a stray tap or a reload keeps it there.
 function leaveNow() {
-  if (nowWindow || view !== "now") return;
-  view = viewBeforeNow || "overview"; store.set("view", view);
+  if (TABLET || nowWindow || view !== "now") return;   // the tablet's page nav leaves it
+  view = viewBeforeNow || "overview"; saveView();
   render();
 }
 document.getElementById("nowBack").onclick = ev => { ev.stopPropagation(); leaveNow(); };
@@ -1253,7 +1271,11 @@ function star(s) {
   return `<span class="mono" title="${esc(s.main_star)}">${esc(s.main_class)}</span>${scoop}`;
 }
 
-let view = store.get("view", "near");
+// the tablet keeps its own page (a desktop browser opening /tablet to try it must not lose its view) and has no Overview
+const TABLET_VIEWS = ["now", "near", "here", "bio", "bm", "search", "map", "hwy", "hist", "log", "mat", "firsts"];
+let view = TABLET ? store.get("tabletView", "now") : store.get("view", "near");
+if (TABLET && !TABLET_VIEWS.includes(view)) view = "now";
+const saveView = () => store.set(TABLET ? "tabletView" : "view", view);
 let viewBeforeNow = view === "now" ? "overview" : view;
 // the only URL parameter the page reads: a window opened at ?mode=now (the ↗ beside Now) shows Now and nothing else
 const nowWindow = new URLSearchParams(location.search).get("mode") === "now";
@@ -1270,7 +1292,8 @@ const appOn = () => document.body.classList.contains("app");
 // true when the mode changed (then what is sized to its box must be redrawn)
 function applyAppMode() {
   const head = document.querySelector("header"), was = appOn();
-  const on = view !== "now" && !nowWindow && appWanted(innerWidth, innerHeight, head.offsetHeight, was);
+  // the tablet's shell always fits the screen (its main column is the pane's box)
+  const on = view !== "now" && !nowWindow && (TABLET || appWanted(innerWidth, innerHeight, head.offsetHeight, was));
   document.documentElement.style.setProperty("--head-h", head.offsetHeight + "px");
   if (on === was) return false;
   document.body.classList.toggle("app", on);
@@ -1428,7 +1451,7 @@ const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true
 // not spoken until you tick them: they repeat what the game (or another alert) already told you
 const QUIET_KINDS = {scoopstop: false, supercharge: false, bodybrief: false, ...OFF_KINDS};
 const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), QUIET_KINDS, store.get("alertSpeak", {}));
-let speechOn = store.get("speech", false);
+let speechOn = !TABLET && store.get("speech", false);   // the tablet never speaks: the PC does
 function notify(kind, title, body) {
   if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return false;
   try {
@@ -1460,10 +1483,10 @@ function mappedText(m) {
 // line gets it, with no heartbeats to go stale. Without Web Locks (an old browser, a plain-http LAN address,
 // the jsdom smoke test) every window speaks, as before. "This screen speaks" in the alerts dialog (per browser)
 // can make this browser always speak or never.
-let isSpeaker = !(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request);
+let isSpeaker = !TABLET && !(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request);
 let speakerWait = null;   // this window's place in the queue for the lock (an AbortController)
 function claimSpeaker(steal = false) {
-  if (!(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request)) return;
+  if (TABLET || !(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request)) return;   // never in line
   if (speakerWait) { const w = speakerWait; speakerWait = null; w.abort(); }   // stealing: leave the queue first
   const ac = steal ? null : new AbortController();
   speakerWait = ac;
@@ -1476,7 +1499,7 @@ function claimSpeaker(steal = false) {
     isSpeaker = false; drawSpeaker(); claimSpeaker();   // another window took it: wait in line again
   });
 }
-const speakMode = () => { const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
+const speakMode = () => { if (TABLET) return "never"; const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
 const speakerHere = () => speakMode() === "always" || (speakMode() === "auto" && isSpeaker);
 // "Play speech and sounds on this PC" (per browser, off by default): the speaking window still picks and queues
 // the lines, but the PC running Outrider plays them and the alert sounds through its own player, so no click on
@@ -1542,6 +1565,7 @@ function uncool(it) {
 const SOUND_LEAD = {fanfare: 1700, chime: 1000};
 function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still = null, quiet = false} = {}) {
   lastAlert = {kind, title, body, at: Date.now()};
+  if (TABLET) tabBanner(kind, title, body);   // the tablet shows it; the PC says it
   const entry = logSpeech({kind, tag, words: title});
   const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
   const loud = speakerHere(), hush = hushed() && speechPrio(kind, tag) > 1;   // hushed: danger (and a rig press's answer) still speaks
@@ -2374,6 +2398,7 @@ function unsoldHtml(u) {
 
 function render() {
   if (!data) return;
+  if (TABLET) tabAutoView();   // the surface map's switch to Now and back, before the views are shown
   const bms = bmMap();
   renderUnsold();
   const p = data.position;
@@ -2526,6 +2551,7 @@ function render() {
       <td class="notable c2hide">${nb}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm c2hide">${known}</td></tr>`;
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
+  if (TABLET) tabRender();
   // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
   if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
 }
@@ -2595,7 +2621,7 @@ document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
   if (b.dataset.view === "now" && view !== "now") viewBeforeNow = view;
   if (b.dataset.view === "hist" && view !== "hist") histKey = null;   // fresh numbers each time the tab opens
   if (b.dataset.view === "hwy" && view !== "hwy") H.key = null;   // the fleet, ship and cargo afresh (review F3)
-  keepPanes(() => { view = b.dataset.view; store.set("view", view); render(); });
+  keepPanes(() => { view = b.dataset.view; saveView(); render(); });
 });
 
 // ---- Here: every body in the current system ----
@@ -3462,7 +3488,7 @@ async function tailLog() {   // new journal lines since the newest row: prepend 
 }
 function openBodyIn(id, name) {
   id = String(id);
-  view = "here"; store.set("view", view);
+  view = "here"; saveView();
   pinnedSystem = posId() === id ? null : id;
   hidePop();
   selectedBody = name; selectedSystem = id; bodyData = null;
@@ -3517,7 +3543,7 @@ let bioSort = store.get("bioSort", {key: "ts", dir: -1});
 bDays.onchange = () => { store.set("bDays", bDays.value); bioKey = null; loadBio(); };
 bState.onchange = () => { store.set("bState", bState.value); renderBio(); };
 bFilter.oninput = () => renderBio();
-function showInHere(id) { view = "here"; store.set("view", view); pinSystem(id); }
+function showInHere(id) { view = "here"; saveView(); pinSystem(id); }
 // ---- Find a system by name (Search's top row): the server resolves it, Here shows it ----
 const foundSys = {};   // id -> the last /api/find answer: the pinned Here heading's distance for a system not nearby
 document.getElementById("findForm").addEventListener("submit", async e => {
@@ -3822,6 +3848,7 @@ function drawMap() {
     mapCanvas.width = Math.round(w * dpr); mapCanvas.height = Math.round(h * dpr);
   }
   const g = mapCanvas.getContext("2d");
+  if (!g) return;   // no canvas (the smoke test's jsdom): the legend only, as drawHwyMap does
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
 
   const d = M.data, c = d.center, R = d.radius;
@@ -3989,15 +4016,36 @@ function mapPopHtml(pt) {
     (pt.arrived ? `<div class="unk">on your path: arrived ${esc(pt.arrived.replace("T", " ").replace("Z", ""))}</div>` : "") +
     (b ? `<div class="sec">★ ${esc(b.note) || "bookmarked"}</div>` : "") + `<div class="sec unk">click to copy name</div>`;
 }
-// left drag rotates; right (or middle) drag moves the picture; the wheel zooms
+// Two fingers on a map (pure): from where they were (a) to where they are (b), each [{x, y}, {x, y}], the move of their
+// midpoint (dx, dy), the ratio of their spread (scale: a pinch), and the midpoint now (x, y)
+function pinchStep(a, b) {
+  const mid = p => ({x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2}), span = p => Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  const ma = mid(a), mb = mid(b), sa = span(a);
+  return {dx: mb.x - ma.x, dy: mb.y - ma.y, scale: sa > 0 ? span(b) / sa : 1, x: mb.x, y: mb.y};
+}
+const twoOf = ptrs => [...ptrs.values()].slice(0, 2).map(p => ({x: p.x, y: p.y}));
+// left drag rotates; right (or middle) drag moves the picture; the wheel zooms. Touch: one finger rotates, two move the
+// picture and pinch to zoom; a tap shows the system's card (a click copies its name).
+const mapPtrs = new Map();
 mapCanvas.addEventListener("contextmenu", e => e.preventDefault());
 mapCanvas.addEventListener("pointerdown", e => {
+  mapPtrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  mapCanvas.setPointerCapture(e.pointerId); mapCanvas.classList.add("dragging");
+  if (mapPtrs.size === 2) { M.drag = {two: twoOf(mapPtrs), panX: M.panX, panY: M.panY, zoom: M.zoom, moved: true}; return; }
+  if (mapPtrs.size > 2) return;
   M.drag = {x: e.clientX, y: e.clientY, yaw: M.yaw, pitch: M.pitch, panX: M.panX, panY: M.panY,
             pan: e.button === 2 || e.button === 1, moved: false};
   if (M.drag.pan) e.preventDefault();
-  mapCanvas.setPointerCapture(e.pointerId); mapCanvas.classList.add("dragging");
 });
 mapCanvas.addEventListener("pointermove", e => {
+  if (mapPtrs.has(e.pointerId)) mapPtrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (M.drag && M.drag.two) {
+    if (mapPtrs.size < 2) return;
+    const g = pinchStep(M.drag.two, twoOf(mapPtrs));
+    M.panX = M.drag.panX + g.dx; M.panY = M.drag.panY + g.dy;
+    M.zoom = Math.max(0.2, Math.min(12, M.drag.zoom * g.scale));
+    hidePop(); M.hover = null; drawMap(); return;
+  }
   if (M.drag) {
     const dx = e.clientX - M.drag.x, dy = e.clientY - M.drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) M.drag.moved = true;
@@ -4013,10 +4061,22 @@ mapCanvas.addEventListener("pointermove", e => {
   if (q) { popId = "map"; pop.innerHTML = mapPopHtml(q.pt); pop.style.display = "block"; placePop(e.clientX, e.clientY); }
   else if (popId === "map") hidePop();
 });
-mapCanvas.addEventListener("pointerup", e => {
-  const click = M.drag && !M.drag.moved && !M.drag.pan; M.drag = null; mapCanvas.classList.remove("dragging");
-  if (click) { const q = mapHit(e); if (q) copyText(q.pt.name); }
-});
+function mapPointerEnd(e) {
+  mapPtrs.delete(e.pointerId);
+  if (M.drag && M.drag.two) {   // one finger of two lifted: the other rotates on from here (never a tap)
+    const rest = [...mapPtrs.values()][0];
+    M.drag = rest ? {x: rest.x, y: rest.y, yaw: M.yaw, pitch: M.pitch, panX: M.panX, panY: M.panY, pan: false, moved: true} : null;
+    if (!M.drag) mapCanvas.classList.remove("dragging");
+    return;
+  }
+  const click = e.type === "pointerup" && M.drag && !M.drag.moved && !M.drag.pan; M.drag = null; mapCanvas.classList.remove("dragging");
+  if (!click) return;
+  const q = mapHit(e); if (!q) return;
+  if (e.pointerType === "touch") { popId = "map"; pop.innerHTML = mapPopHtml(q.pt); pop.style.display = "block"; placePop(e.clientX, e.clientY); }
+  else copyText(q.pt.name);
+}
+mapCanvas.addEventListener("pointerup", mapPointerEnd);
+mapCanvas.addEventListener("pointercancel", mapPointerEnd);
 mapCanvas.addEventListener("pointerleave", () => { if (!M.drag) { M.hover = null; if (popId === "map") hidePop(); drawMap(); } });
 mapCanvas.addEventListener("wheel", e => {
   e.preventDefault(); M.zoom = Math.max(0.2, Math.min(12, M.zoom * Math.exp(-e.deltaY * 0.0015))); drawMap();
@@ -4391,7 +4451,9 @@ async function hwyAutoStart(kind) {
   const url = kind === "test" ? "api/highway/autotarget/test" : "api/highway/target", w = kind === "test" ? "test" : "target";
   const show = msg => { hwyRun = {seq: null, kind, done: true, msg}; drawHwyAuto(); renderHwyLine(); if (kind !== "test") toast(msg); };
   let r, j;
-  try { r = await fetch(url, {method: "POST"}); j = await r.json(); }
+  // no countdown from the tablet: the game keeps the keyboard focus (the desktop page's click took it)
+  const opts = TABLET && kind !== "test" ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({countdown: 0})} : {method: "POST"};
+  try { r = await fetch(url, opts); j = await r.json(); }
   catch { show("could not reach Outrider"); return; }
   if (!r.ok) { show(`cannot ${w}: ${j.error || "?"}`); return; }
   const mine = hwyRun = {seq: j.seq, kind, system: j.system, n: j.in, dry: j.dry_run, done: false, msg: ""};
@@ -4856,12 +4918,25 @@ const hwyHit = e => { const b = hwyCanvas.getBoundingClientRect(), x = e.clientX
   let best = null, bd = 10;
   for (const n of HM.named) { const d = Math.hypot(n.sx - x, n.sy - y); if (d < bd) { bd = d; best = n; } }
   return best; };
+// a drag moves the map, the wheel zooms; touch: two fingers move it and pinch to zoom (round their midpoint)
+const hwyPtrs = new Map();
 hwyCanvas.addEventListener("pointerdown", e => {
   if (!HM.v) return;
-  HM.drag = {x: e.clientX, y: e.clientY, cx: HM.v.cx, cz: HM.v.cz, moved: false};
+  hwyPtrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
   hwyCanvas.setPointerCapture && hwyCanvas.setPointerCapture(e.pointerId); hwyCanvas.classList.add("dragging");
+  if (hwyPtrs.size === 2) { HM.drag = {two: twoOf(hwyPtrs), v: Object.assign({}, HM.v), moved: true}; return; }
+  if (hwyPtrs.size > 2) return;
+  HM.drag = {x: e.clientX, y: e.clientY, cx: HM.v.cx, cz: HM.v.cz, moved: false};
 });
 hwyCanvas.addEventListener("pointermove", e => {
+  if (hwyPtrs.has(e.pointerId)) hwyPtrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (HM.drag && HM.drag.two && HM.v) {
+    if (hwyPtrs.size < 2) return;
+    const g = pinchStep(HM.drag.two, twoOf(hwyPtrs)), v0 = HM.drag.v, b = hwyCanvas.getBoundingClientRect();
+    HM.auto = false;
+    HM.v = hwyZoom(Object.assign({}, v0, {cx: v0.cx - g.dx / v0.scale, cz: v0.cz + g.dy / v0.scale}), g.scale, g.x - b.left, g.y - b.top);
+    drawHwyMap(); return;
+  }
   if (HM.drag && HM.v) {
     const dx = e.clientX - HM.drag.x, dy = e.clientY - HM.drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) HM.drag.moved = true;
@@ -4872,10 +4947,19 @@ hwyCanvas.addEventListener("pointermove", e => {
   hwyCanvas.title = n ? `${n.title || `${n.name} (#${n.i})`} · click to copy` : "";
   hwyCanvas.style.cursor = n ? "copy" : "";
 });
-hwyCanvas.addEventListener("pointerup", e => {
-  const click = HM.drag && !HM.drag.moved; HM.drag = null; hwyCanvas.classList.remove("dragging");
+function hwyPointerEnd(e) {
+  hwyPtrs.delete(e.pointerId);
+  if (HM.drag && HM.drag.two) {   // one finger of two lifted: the other drags on from here (never a tap)
+    const rest = [...hwyPtrs.values()][0];
+    HM.drag = rest && HM.v ? {x: rest.x, y: rest.y, cx: HM.v.cx, cz: HM.v.cz, moved: true} : null;
+    if (!HM.drag) hwyCanvas.classList.remove("dragging");
+    return;
+  }
+  const click = e.type === "pointerup" && HM.drag && !HM.drag.moved; HM.drag = null; hwyCanvas.classList.remove("dragging");
   if (click) { const n = hwyHit(e); if (n) copyText(n.name); }
-});
+}
+hwyCanvas.addEventListener("pointerup", hwyPointerEnd);
+hwyCanvas.addEventListener("pointercancel", hwyPointerEnd);
 hwyCanvas.addEventListener("wheel", e => {
   if (!HM.v) return;
   e.preventDefault();
@@ -5325,7 +5409,7 @@ function drawSoundBtn() {
 soundBtn.onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (soundOn) audio(); drawSoundBtn(); };
 document.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { play(b.dataset.try); drawSoundBtn(); });
 // Browsers only allow audio after a click; any click on the page unlocks it.
-document.addEventListener("pointerdown", () => { if (soundOn) { audio(); setTimeout(drawSoundBtn, 50); } });
+document.addEventListener("pointerdown", () => { if (soundOn && !TABLET) { audio(); setTimeout(drawSoundBtn, 50); } });
 if (soundOn === null) soundOn = true;  // provisional until the payload's defaults arrive
 if (soundOn) audio();
 drawSoundBtn();
@@ -6023,7 +6107,7 @@ document.getElementById("speakerClaim").onclick = () => claimSpeaker(true);
 // another window changed the setting (localStorage is shared by the browser's windows)
 window.addEventListener("storage", e => { if (e.key === "speakMode") drawSpeaker();
   // 🗣 in another window of this browser (a ?mode=now window's bar): the window speaking follows it
-  if (e.key === "speech") { speechOn = store.get("speech", false); drawSpeechBtn(); if (!speechOn) hushSpeech(true); if (view === "now") drawNowBar(); } if (e.key === "speakOnServer") { drawServerPlay(); drawSoundBtn(); } });
+  if (e.key === "speech" && !TABLET) { speechOn = store.get("speech", false); drawSpeechBtn(); if (!speechOn) hushSpeech(true); if (view === "now") drawNowBar(); } if (e.key === "speakOnServer") { drawServerPlay(); drawSoundBtn(); } });
 drawSpeaker(); drawServerPlay();
 // a window opened at ?mode=now (the second screen) waits a moment, so a main window opened with it speaks
 if (view === "now") setTimeout(() => claimSpeaker(), 1000); else claimSpeaker();
@@ -6442,6 +6526,7 @@ function drawLinkPill() {
   const l = linkState();
   if (el.textContent !== l.text) el.textContent = l.text;
   el.className = "linkpill " + l.state;
+  if (TABLET) tabDrawLink(l);
 }
 setInterval(drawLinkPill, 1000);
 // Outrider gone quiet (stopped, crashed, the network down): after LOST_SAY_MS without it, the speaking window says
@@ -6454,6 +6539,7 @@ const LOST_SAY_MS = 30000, LOST_PARTS = ["Lost contact with Outrider.", "No aler
 const LOST_TEXT = LOST_PARTS.join(" ");
 const lostLine = {key: null, buf: null};   // buf: [AudioBuffer, ...], one per sentence
 async function prepareLostLine() {
+  if (TABLET) return;   // never said here
   const t = data && data.tts;
   if (!t || t.engine !== "piper") return;
   const ctx = actx || audio();   // decoding needs no click: the context may stay paused until the line is played
@@ -6626,3 +6712,189 @@ document.addEventListener("click", async e => {
   catch (err) { r = {error: err.message}; }
   if (r.error) toast(`could not clear the next stop: ${r.error}`);
 });
+
+// ---- the tablet layout (GET /tablet; PLAN-tablet phase 3) ----
+// The same views in a shell of neutral parts: the head with the status strip (system, fuel, unsold) and the link pill,
+// the page nav (three groups of four pages), the main column (the header's strips, Now and the views, moved into it),
+// the game-button rail (kept for the next phase) and the footer with the PC's voice controls. A theme stylesheet
+// (static/themes/<name>.css, data-theme on <html>, chosen per device) dresses them. The tablet never speaks or plays
+// sounds: an alert is a banner here. The one page switch it makes by itself: to Now when the surface map shows, and
+// back to the page you were on when it hides. A tap on a table row opens a sheet with all its facts (no hover here).
+const tabGroupOf = v => Object.keys(TB.groups).find(g => TB.groups[g].includes(v)) || "explore";
+// a sheet opened and closed (the open attribute where a browser has no modal dialogs: the smoke test's jsdom)
+const tabShow = d => { if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute("open", ""); } };
+const tabClose = d => { if (d.close) d.close(); else d.removeAttribute("open"); };
+function tabSetup() {
+  for (const id of ["tabHead", "tabNav", "tabMain", "tabRail", "tabFoot"]) document.getElementById(id).hidden = false;
+  document.getElementById("tabMain").append(document.querySelector("header"), document.getElementById("nowView"), document.querySelector("main"));
+  tabTheme(store.get("tabletTheme", TB.themes[0]));
+  tabDim(store.get("tabletDim", false) === true);
+  const nav = document.getElementById("tabNav");
+  nav.querySelectorAll("[data-group]").forEach(b => b.onclick = () => { TB.group = b.dataset.group; tabDrawNav(); });
+  // a page you choose: no automatic way back from Now any more, and the nav shows that page's group again
+  nav.addEventListener("click", e => { if (e.target.closest("[data-view]")) { TB.beforeMap = null; TB.group = null; } }, true);
+  document.getElementById("tabHush").onclick = async () => {
+    try {
+      const r = await fetch("api/hush", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode: hushed() ? "off" : "30m"})});
+      if (!r.ok) throw new Error(String(r.status));
+    } catch { toast("Could not reach Outrider to hush the voice"); }
+  };
+  document.getElementById("tabStatus").onclick = () => postCopilot({action: "status"}, "ask for a status report");
+  document.getElementById("tabSetBtn").onclick = tabOpenSettings;
+  document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
+  document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
+  document.getElementById("tabSignOut").onclick = tabSignOut;
+  document.getElementById("tabSheetActs").addEventListener("click", e => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    tabClose(document.getElementById("tabSheet"));
+    if (b.dataset.act === "here") showInHere(b.dataset.id);
+    else if (b.dataset.act === "bm") openBookmark(b.dataset.id, b.dataset.name);
+  });
+  document.getElementById("tabBanner").onclick = () => tabBannerHide();
+  // before the page's own handlers (a name's click copies it, which means nothing on a tablet)
+  document.addEventListener("click", tabRowTap, true);
+  const hint = document.querySelector("#mapView .hint");   // the galaxy map by touch
+  if (hint) hint.textContent = "One finger rotates · two fingers move · pinch to zoom · tap a system for its card. " +
+    "The grid is the galactic plane through your position; stalks drop each system onto it.";
+  tabDrawNav(); tabDrawCaption();
+}
+function tabTheme(name) {
+  const t = TB.themes.includes(name) ? name : TB.themes[0];
+  document.documentElement.dataset.theme = t;
+  document.getElementById("tabTheme").value = t;
+  const app = window.OutriderApp;   // the app's own screens (settings, sign-in) follow the theme
+  if (app && typeof app.setTheme === "function") { try { app.setTheme(t); } catch {} }
+}
+function tabDim(on) { document.documentElement.classList.toggle("tb-dim", !!on); document.getElementById("tabDim").checked = !!on; }
+// the surface map's switch: to Now when it shows, back to where you were when it hides (only if you are still on Now
+// and chose no page meanwhile). A pinned system belongs to the page it was pinned in: Now shows where you are.
+function tabAutoView() {
+  const shown = surfaceShows(data.surface);
+  if (shown && !TB.mapWas) {
+    TB.beforeMap = view !== "now" ? view : null;
+    if (view !== "now") { pinnedSystem = null; view = "now"; saveView(); }
+  } else if (!shown && TB.mapWas) {
+    if (view === "now" && TB.beforeMap) { view = TB.beforeMap; saveView(); }
+    TB.beforeMap = null;
+  }
+  TB.mapWas = shown;
+}
+function tabDrawNav() {
+  const g = TB.group || tabGroupOf(view);
+  document.querySelectorAll("#tabNav [data-group]").forEach(b => {
+    const open = b.dataset.group === g;
+    b.classList.toggle("open", open); b.setAttribute("aria-expanded", String(open));
+    b.classList.toggle("here", b.dataset.group === tabGroupOf(view));   // the group of the page shown
+  });
+  document.querySelectorAll("#tabNav [data-pages]").forEach(p => { p.hidden = p.dataset.pages !== g; });
+  const tag = document.getElementById("tabMapTag"), on = !!surfShown;
+  tag.hidden = !on;
+  tag.parentElement.setAttribute("aria-label", on ? "Now, surface map showing" : "Now");
+}
+// the status strip: system, fuel, unsold (the levels as words and marks too, never colour alone)
+function tabRender() {
+  const p = data.position, f = data.fuel, u = data.unsold;
+  const set = (id, text, cls = "") => { const el = document.getElementById(id); if (el.textContent !== text) el.textContent = text; el.parentElement.className = "tb-chip" + (cls ? " " + cls : ""); };
+  set("tabSysV", p ? p.name : "—");
+  const fl = !f ? ["—", ""] : !f.live ? [f.main != null ? `${f.main.toFixed(1)} t (last)` : "—", "stale"]
+    : f.main == null ? ["not read yet", "stale"]
+    : [`${f.main.toFixed(f.main >= 100 ? 0 : 1)}${f.capacity ? " / " + f.capacity : ""} t${f.pct != null && f.pct < 30 ? ` · ${f.pct < 15 ? "⚠ " : ""}${f.pct}%` : ""}`,
+       f.pct == null ? "" : f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : ""];
+  set("tabFuelV", fl[0], fl[1]);
+  const lvl = u ? unsoldLevel(u) : null;
+  set("tabUnsoldV", u && u.total != null ? `${lvl === "urgent" ? "⚠ " : ""}${credits(u.total)} cr` : "—", lvl === "urgent" || lvl === "warn" ? lvl : "");
+  tabDrawNav();
+  tabDrawHush();
+}
+function tabDrawHush() {
+  const b = document.getElementById("tabHush"), on = hushed(), h = hushState;
+  const left = on && h.end != null ? Math.max(0, Math.ceil((h.end - Date.now()) / 1000)) : 0;
+  const text = !on ? "Hush 30 min" : h.end == null ? "Voice back (till the jump)" : `Voice back (${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")})`;
+  if (b.textContent !== text) b.textContent = text;
+  b.classList.toggle("on", on);
+}
+// the link pill in words: LINKED · 2 S AGO, STALE · 48 S AGO, NO LINK · RETRYING (linkState's states)
+function tabLinkText(l, now = Date.now()) {
+  const age = lastHeard ? Math.max(0, Math.round((now - lastHeard) / 1000)) : null;
+  return l.state === "none" ? "no link · retrying" : age == null ? "connecting…" : `${l.state === "linked" ? "linked" : "stale"} · ${age} s ago`;
+}
+function tabDrawLink(l) {
+  const el = document.getElementById("tabLink"), text = tabLinkText(l);
+  if (el.textContent !== text) el.textContent = text;
+  el.className = "tb-link " + l.state;
+  tabDrawHush(); tabDrawCaption();   // the hush's minutes count down with the pill's second; "reconnecting" follows the link
+}
+function tabDrawCaption() {
+  const c = captions[captions.length - 1], el = document.getElementById("tabCaption");
+  const text = disconnected ? "Reconnecting: old alerts will not replay" : c ? c.words : "";
+  if (el.textContent !== text) el.textContent = text;
+}
+// an alert: a banner over the page for a while (danger longer, and red), tap to dismiss
+const TAB_BANNER_MS = 8000, TAB_BANNER_DANGER_MS = 15000;
+function tabBanner(kind, title, body) {
+  const el = document.getElementById("tabBanner"), danger = DANGER.has(kind);
+  el.innerHTML = `<b>${esc(title)}</b>${body ? ` <span>${esc(body)}</span>` : ""}`;
+  el.className = "tb-banner" + (danger ? " danger" : "");
+  el.hidden = false;
+  void el.offsetWidth; el.classList.add("flash");   // the flash runs again for each alert
+  clearTimeout(TB.bannerTimer);
+  TB.bannerTimer = setTimeout(tabBannerHide, danger ? TAB_BANNER_DANGER_MS : TAB_BANNER_MS);
+}
+function tabBannerHide() { clearTimeout(TB.bannerTimer); document.getElementById("tabBanner").hidden = true; }
+// ---- the detail sheet: every fact in a table row, its full forms (the compact table hides some) ----
+const TAB_SHEET_TABLES = ["nearTable", "firstsTable", "leftTable", "bioTable", "codexTable", "bmTable", "sTable", "hwyTable", "tripTable", "topTable"];
+// what keeps its own tap: links and buttons, the ☆, a pop-up cell, ⌖ Here, a body that opens its own panel
+const TAB_OWN_TAP = "button, a, input, select, label, summary, [data-bm], [data-aim], [data-pop], [data-goto], [data-body], [data-sbodypop], [data-sort], [data-rescanpop]";
+function tabRowTap(e) {
+  const tr = e.target.closest && e.target.closest("tbody tr"), table = tr && tr.closest("table");
+  if (!table || !TAB_SHEET_TABLES.includes(table.id) || e.target.closest(TAB_OWN_TAP) || tr.cells.length < 2) return;
+  e.preventDefault(); e.stopPropagation();
+  tabOpenRow(table, tr);
+}
+// [label, html] for each cell with something in it, labelled by its column's full heading (pure on the DOM given)
+function tabRowFacts(table, tr) {
+  const heads = table.tHead ? [...table.tHead.rows[table.tHead.rows.length - 1].cells] : [];
+  const out = [];
+  [...tr.cells].forEach((td, i) => {
+    const th = heads[i], lf = th && th.querySelector(".lf");
+    const label = ((lf || th || {}).textContent || "").trim().replace(/[▴▾]/g, "").trim();
+    const c = td.cloneNode(true);
+    c.querySelectorAll(".sf, .sf1, .sf2, [data-bm]").forEach(x => x.remove());
+    const html = c.innerHTML.trim();
+    if (html && c.textContent.trim()) out.push([label, html]);
+  });
+  return out;
+}
+function tabOpenRow(table, tr) {
+  const nameEl = tr.querySelector("[data-name]"), name = nameEl ? nameEl.dataset.name : tr.cells[0].textContent.trim();
+  const idEl = tr.querySelector("[data-id], [data-goto]"), id = idEl ? idEl.dataset.id || idEl.dataset.goto : null;
+  const bm = tr.querySelector("[data-bm]");
+  document.getElementById("tabSheetTitle").textContent = name;
+  document.getElementById("tabSheetList").innerHTML = tabRowFacts(table, tr).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+  document.getElementById("tabSheetActs").innerHTML =
+    (id ? `<button type="button" class="tb-btn" data-act="here" data-id="${esc(id)}">Show in Here</button>` : "") +
+    (bm ? `<button type="button" class="tb-btn" data-act="bm" data-id="${esc(bm.dataset.bm)}" data-name="${esc(bm.dataset.name || name)}">Bookmark…</button>` : "");
+  tabShow(document.getElementById("tabSheet"));
+}
+// ---- the settings sheet: the theme, dim, this screen's size (CSS px), the app's version, sign out ----
+async function tabOpenSettings() {
+  document.getElementById("tabViewport").textContent = `${innerWidth} × ${innerHeight} CSS px at ${+(window.devicePixelRatio || 1).toFixed(2)}×`;
+  const app = window.OutriderApp;
+  let ver = "a browser (no app)";
+  if (app) { try { ver = typeof app.appVersion === "function" ? String(app.appVersion()) : "the app"; } catch { ver = "the app"; } }
+  document.getElementById("tabAppVer").textContent = ver;
+  const st = document.getElementById("tabSignState"), out = document.getElementById("tabSignOut");
+  st.textContent = "…"; out.disabled = true;
+  tabShow(document.getElementById("tabSettings"));
+  try {
+    const v = await (await fetch("api/version")).json();
+    st.textContent = !v.password ? "Outrider asks no password" : v.signed_in ? "signed in" : "not signed in";
+    out.disabled = !v.password;
+  } catch { st.textContent = "Outrider not reachable"; }
+}
+async function tabSignOut() {
+  try { await fetch("api/auth/signout", {method: "POST"}); } catch {}
+  tabClose(document.getElementById("tabSettings"));
+  signInAgain();
+}
+if (TABLET) tabSetup();

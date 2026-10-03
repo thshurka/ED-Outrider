@@ -2,6 +2,22 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · The tablet layout (tablet plan, phase 3)
+- `http://<PC>:8025/tablet`: the same pages in a layout for a landscape tablet, in its first theme, LCARS. The
+  status strip (system, fuel, unsold) and the link in words are on top. The pages are on the left in three groups of
+  four, with no Overview. Hush, Status report and the last line said are in the footer. The right-hand column is kept
+  for the game buttons of the next phase.
+- On the tablet:
+  - It never speaks or plays sounds; an alert is a banner (red for danger).
+  - A tap on a table row opens all of its facts, with Show in Here and Bookmark.
+  - It goes to Now while the surface map shows and back afterwards; the Now button says MAP.
+  - Target next runs without a countdown.
+  - The settings sheet has the theme, dim, the screen size and Sign out.
+- The maps by touch, on any touch screen: one finger rotates the galaxy map, two fingers move it and a pinch zooms; on
+  the Highway map two fingers move and pinch.
+- The fonts are Antonio and Barlow Condensed (SIL OFL 1.1), shipped in static/fonts/. A font of your own goes in
+  data/fonts/lcars-display.ttf.
+
 ## 2026-10-03 · Exact plots work again
 - The Highway's Exact plots always failed with "Spansh: Unable to find route": Spansh's exact plotter now takes
   systems by id64, not by name (found in game). Outrider sends the id64 of where you are, of a system it already
