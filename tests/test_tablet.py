@@ -52,6 +52,16 @@ class Tablet(unittest.TestCase):
             self.assertIsNone(re.search(r"^:root\s*\{", css, re.M), "a theme sets nothing outside its data-theme")
             self.assertIn(f'<option value="{t}">', tablet)
 
+    def test_name_fields_are_not_auto_capitalised(self):
+        """A tablet keyboard capitalises a field's first letter and corrects words: system names and search terms
+        must reach Outrider as typed (found on the Galaxy Tab's Samsung keyboard)."""
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.html"), encoding="utf-8") as f:
+            html = f.read()
+        for id_ in ("findName", "hwyFrom", "hwyTo", "lFilter", "mFilter", "bFilter"):
+            tag = re.search(rf'<input [^>]*id="{id_}"[^>]*>', html).group(0)
+            for attr in ('autocapitalize="off"', 'autocorrect="off"', 'spellcheck="false"'):
+                self.assertIn(attr, tag, id_)
+
     def test_fonts_are_ofl_and_shipped_with_their_licences(self):
         fonts = os.path.join(ed_outrider.STATIC_DIR, "fonts")
         files = os.listdir(fonts)

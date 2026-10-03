@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Tablet fixes from the Android app's test
+- System-name and search fields (Find, the Highway's from and to, the Log, Materials and Samples filters) are no
+  longer capitalised or corrected by a tablet's keyboard.
+- Now's "screen may sleep" hint is not shown in the Android app, which keeps the screen on itself.
+
 ## 2026-10-03 · The tablet layout (tablet plan, phase 3)
 - `http://<PC>:8025/tablet`: the same pages in a layout for a landscape tablet, in its first theme, LCARS. The
   status strip (system, fuel, unsold) and the link in words are on top. The pages are on the left in three groups of

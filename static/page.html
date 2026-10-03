@@ -177,7 +177,7 @@
     <label><input type="checkbox" id="lNoise"> show noise</label>
     <label>Last <select id="lDays"><option value="1">day</option><option value="7" selected>7 days</option><option value="30">30 days</option>
       <option value="90">90 days</option><option value="365">year</option><option value="3650">everything</option></select></label>
-    <input type="search" id="lFilter" placeholder="search events" class="filter">
+    <input type="search" id="lFilter" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="search events" class="filter">
     <span id="lStatus" class="unk"></span>
   </div>
   <div class="pane" id="logPane">
@@ -193,7 +193,7 @@
 </section>
 <section id="matView" hidden>
   <div class="srow">
-    <input type="search" id="mFilter" placeholder="filter materials" class="filter">
+    <input type="search" id="mFilter" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="filter materials" class="filter">
     <label><input type="checkbox" id="mHeld"> held only</label>
     <span id="matStatus" class="unk"></span>
   </div>
@@ -211,7 +211,7 @@
       <option value="90">90 days</option><option value="365">year</option><option value="3650">everything</option></select></label>
     <label>Show <select id="bState"><option value="">all</option><option value="aboard">aboard</option>
       <option value="sold">sold</option><option value="lost">lost</option><option value="in progress">in progress</option></select></label>
-    <input type="search" id="bFilter" placeholder="filter genus, species, variant, system" class="filter">
+    <input type="search" id="bFilter" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="filter genus, species, variant, system" class="filter">
     <span class="grow"></span>
     <span class="exports">Export: <a href="api/export?what=organics&format=csv" download>CSV</a> · <a href="api/export?what=organics&format=json" download>JSON</a></span>
   </div>
@@ -283,8 +283,8 @@
       <form id="hwyForm" autocomplete="off">
         <div class="srow">
           <span class="seg" role="radiogroup" aria-label="plotter"><label title="every jump with its fuel, from your ship's own figures (Spansh's galaxy plotter)"><input type="radio" name="hwyPlotter" value="exact" checked>Exact</label><label title="neutron stars as boosts, waypoints only (Spansh's neutron plotter): any ship, from its range"><input type="radio" name="hwyPlotter" value="neutron">Neutron</label></span>
-          <label>From <input type="text" id="hwyFrom" maxlength="100" placeholder="where you are" spellcheck="false"></label>
-          <label class="hwyto">To <input type="text" id="hwyTo" maxlength="100" placeholder="destination system" spellcheck="false" list="hwyNames"></label>
+          <label>From <input type="text" id="hwyFrom" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="where you are"></label>
+          <label class="hwyto">To <input type="text" id="hwyTo" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="destination system" list="hwyNames"></label>
           <datalist id="hwyNames"></datalist>
         </div>
         <div class="srow">
@@ -343,8 +343,8 @@
 <section id="searchView" hidden>
   <div class="pane" id="searchPane">
   <form id="findForm" class="srow">
-    <label>Find a system by name <input type="search" id="findName" maxlength="100" placeholder="e.g. Synuefe XR-H d11-102"
-      autocomplete="off" spellcheck="false"></label>
+    <label>Find a system by name <input type="search" id="findName" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="e.g. Synuefe XR-H d11-102"
+      autocomplete="off"></label>
     <button type="submit">Find</button>
     <span class="hint" id="findStatus">opens it in Here: whether you have been there, its bodies and your firsts; ☆ there bookmarks it or makes it the next stop. Unknown here? EDSM is asked.</span>
   </form>

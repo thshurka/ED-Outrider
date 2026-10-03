@@ -3336,6 +3336,10 @@ const settle = async maxMs => {
     // an alert: a banner (danger marked), nothing queued to speak
     got.banner = JSON.parse(tw.eval(`(() => { alertOut("hull", "Hull at 40%", "take it easy");
       const b = document.getElementById("tabBanner"); return JSON.stringify([!b.hidden, b.classList.contains("danger"), b.textContent.includes("Hull at 40%"), speechItems.length]); })()`));
+    // Now's "screen may sleep" hint: in a browser, not in the Android app (it keeps the screen on itself)
+    got.hint = JSON.parse(tw.eval(`(() => { view = "now"; render(); nowHintUntil = Date.now() + 60000; renderNow();
+      const a = !!document.querySelector("#nowBody .now-hint"); window.OutriderApp = {}; renderNow();
+      const b = !!document.querySelector("#nowBody .now-hint"); delete window.OutriderApp; return JSON.stringify([a, b]); })()`));
     // a row's sheet: its facts in full, Show in Here and Bookmark; the name is not copied
     td.querySelector('#tabNav [data-view="near"]').click(); await settle(1500);
     const cell = td.querySelector("#rows tr td.name");
@@ -3369,7 +3373,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
-      link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      hint: [true, false], link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};

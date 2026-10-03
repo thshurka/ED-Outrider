@@ -783,7 +783,7 @@ function renderNow() {
     lines.push(`<div class="now-card alert">${esc(lastAlert.title)}${lastAlert.body ? ` <span class="unk">${esc(lastAlert.body)}</span>` : ""}</div>`);
   if (captions.length) lines.push(`<div class="now-caps">${captions.slice().reverse().map(c =>
     `<div class="now-cap" data-words="${esc(c.words)}" title="say it again (through the window that is speaking)">▶ ${esc(c.words)} <span class="unk">${agoText(c.at)}</span></div>`).join("")}</div>`);
-  if (nowHintUntil && Date.now() < nowHintUntil)
+  if (nowHintUntil && Date.now() < nowHintUntil && !window.OutriderApp)   // the Android app keeps the screen on itself
     lines.push(`<div class="now-line now-small now-hint">screen may sleep: set the tablet's screen timeout, or open over localhost/HTTPS</div>`);
   el.innerHTML = lines.join("");
   renderSurface();
