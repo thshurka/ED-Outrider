@@ -201,3 +201,9 @@
 # background_extent = [-45000, 45000, -20000, 70000]   # ly: the image's edges, [xmin, xmax, zmin, zmax]. The default
 #                           # is the bounds the usual galaxy images (EDAstro's charts) use: X -45000 to 45000, Z -20000 to 70000
 # background_opacity = 0.6  # 0.05 to 1
+
+[mcp]
+# The MCP bridge, for asking an AI client (Claude Code, the Claude desktop app) about your game: the client starts
+# python3 -m outrider.mcp, which reads the running Outrider (read-only; see the README). Not used by the server.
+# url = "http://127.0.0.1:8025"   # where Outrider runs; default: this PC at [server] port
+# max_rows = 25             # rows in a list a tool answers with (1 to 200); how many were left out is counted

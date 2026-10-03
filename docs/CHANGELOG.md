@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Ask an AI about your game: the MCP bridge (tablet plan, phase 2)
+- `python3 -m outrider.mcp`: an AI client (Claude Code, the Claude desktop app) can ask your running Outrider
+  questions through ten read-only tools: current status, this system, nearby systems, the nearest unvisited
+  system, one body, unsold data, work left behind, the Highway route, travel history and materials. Answers are
+  compact, with long lists capped. If Outrider isn't running, the tools say so.
+- Read-only by rule: the tools read GET routes only and never press, plot, bookmark or hush. It talks to this PC,
+  so `[server] password` never applies. Nothing extra to install.
+- `[mcp] url` and `max_rows` in the config; the README has the connection steps and a privacy note.
+
 ## 2026-10-03 · An open page picks up a new Outrider by itself
 - After Outrider is updated and restarted, a page left open (the tablet, the Now window) reloads by itself once
   nothing has been touched for a minute and nothing is being said. The page you were on comes back. Before, it went

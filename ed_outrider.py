@@ -164,6 +164,7 @@ import outrider.honk       # auto honk: holds Primary Fire on arrival (optional;
 import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
+import outrider.mcp        # the MCP bridge's [mcp] settings (the bridge itself runs as python3 -m outrider.mcp)
 from outrider.core import iso_ts, ts_seconds   # journal timestamps
 from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
     FSD_RANGE_MODS, GUARDIAN_BOOST, conservative_optimal_mass, conservative_range, fleet_figures, fleet_range, fsd_range,
@@ -837,6 +838,8 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
                     "autotarget_submit": num("highway", hw, "autotarget_submit", _config_plot_steps,
                                              list(HIGHWAY["autotarget_submit"])),
                     "autotarget_dry_run": flag("highway", hw, "autotarget_dry_run", HIGHWAY["autotarget_dry_run"])},
+        # [mcp]: read by the MCP bridge (python3 -m outrider.mcp), not the server; here so --write-config writes it
+        **outrider.mcp.mcp_settings(cfg),
     }
 
 
@@ -954,6 +957,10 @@ conservative_ly = {st["highway"]["conservative_ly"]:g}   # that margin (ly, 0.5 
 background_image = {q(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
 background_extent = [{", ".join(f"{x:g}" for x in st["highway"]["background_extent"])}]   # ly: the image's edges, [xmin, xmax, zmin, zmax] (the usual galaxy images: -45000, 45000, -20000, 70000)
 background_opacity = {st["highway"]["background_opacity"]:g}   # 0.05 to 1
+
+[mcp]
+{"url = " + q(st["mcp_url"]) if st["mcp_url"] else "# url = " + q("http://127.0.0.1:8025")}   # the running Outrider for the MCP bridge (python3 -m outrider.mcp); default: this PC at [server] port
+max_rows = {st["mcp_rows"]}   # how many rows a list in a tool's answer holds (the rest are counted)
 """
 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")

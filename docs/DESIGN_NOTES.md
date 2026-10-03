@@ -51,6 +51,11 @@ upstream project's choices, not rules of the game.
 - **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in
   `static/fonts/` with their licences. Fonts like "Euro Caps" or LCARS fan fonts have unclear redistribution terms:
   the player may drop one into `data/fonts/` (served at `/userfonts/`), and the theme uses it first.
+- **The MCP bridge reads the running server, never the database** (PLAN-mcp): every summary lives in `State`, so the
+  bridge asks the read-only GET routes over 127.0.0.1 and reuses them; the password never applies to it (loopback).
+  Its tools are defined once in `outrider/tools.py`, so the voice's AI layer offers the same ones. MCP's stdio
+  transport is a few dozen lines of JSON-RPC, written directly rather than pulling in the SDK (one less dependency;
+  the SDK's API has moved before). Read-only is a safety rule: no tool presses, plots, bookmarks or hushes.
 - **Only `/api/status` and `/api/status.txt` are readable cross-site,** for stream overlays: they alone send
   `Access-Control-Allow-Origin: *` (no credentials are involved), so a fetch from an overlay page on another origin or
   a local file can read them (review F6).

@@ -219,6 +219,24 @@ signs in once: see "Opening the page from another device" under Settings. The fo
 both under the SIL Open Font License and shipped with Outrider. If you have an LCARS font of your own, save it as
 `data/fonts/lcars-display.ttf` and the theme uses it for its headings. It stays in your git-ignored `data/` folder.
 
+## 🤖 Ask an AI about your game
+
+An AI client you already use (Claude Code, the Claude desktop app, or any other MCP client) can ask Outrider questions
+in plain language: "what's worth landing on here?", "how much am I carrying unsold?", "what's left within 50 ly?",
+"how far to the next refuel on the highway?". The client starts `python3 -m outrider.mcp`, which reads your running
+Outrider and answers through ten read-only tools. These are current status, this system, nearby systems, the nearest
+unvisited system, one body, unsold data, work left behind, the Highway route, travel history and materials.
+It can only read: it never presses keys, plots, bookmarks or hushes anything. Nothing extra to install.
+
+- **Claude Code**, from the Outrider folder: `claude mcp add --transport stdio outrider -- python3 -m outrider.mcp`
+  (add `--scope user` to have it in every project). Use the venv's python if Outrider runs in one.
+- **Claude desktop app:** add to `claude_desktop_config.json` under `mcpServers`:
+  `"outrider": {"command": "python3", "args": ["-m", "outrider.mcp"], "cwd": "/path/to/Outrider"}`.
+- If Outrider isn't running, the tools say so. `[mcp] url` points the bridge elsewhere (default: this PC at
+  `[server] port`); `[mcp] max_rows` caps how many rows a list answers with (25).
+- **Privacy:** Outrider uploads nothing, but what the tools answer goes to your AI client's provider like anything
+  else you type into it. A client running a local model keeps everything on your PC.
+
 ## 🔔 Alerts
 
 Alerts fire only for something out of the ordinary. Each can play a sound (🔊), show a desktop
@@ -570,6 +588,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC**; `sound_dir`, your own alert sounds |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
+| `[mcp]` | `url`, `max_rows`: for the MCP bridge (see Ask an AI) |
 | `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
 Command-line flags override the file for a single run:
@@ -619,6 +638,8 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `voice_lab.py` | A window for trying voices and lines, and downloading Piper voices |
 | `outrider/button.py` | The co-pilot button (Linux, optional); `--listen` |
 | `outrider/auth.py` | Sign-in for other devices: `[server] password`, session tokens, the sign-in rate limit |
+| `outrider/tools.py` | The read-only questions an AI may ask (one registry, used by the MCP bridge and the voice) |
+| `outrider/mcp.py` | The MCP bridge for AI clients: `python3 -m outrider.mcp` (stdio); `--list` shows the tools |
 | `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
 | `outrider/target.py` | The Highway's auto-target (Linux, optional); `--show` |
 | `outrider/bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
