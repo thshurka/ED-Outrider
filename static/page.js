@@ -6430,8 +6430,10 @@ setInterval(drawLinkPill, 1000);
 const LOST_SAY_MS = 30000, LOST_TEXT = "Lost contact with Outrider: no alerts until it is back.";
 const lostLine = {key: null, buf: null};
 async function prepareLostLine() {
-  const t = data && data.tts, ctx = actx;
-  if (!t || t.engine !== "piper" || !ctx) return;
+  const t = data && data.tts;
+  if (!t || t.engine !== "piper") return;
+  const ctx = actx || audio();   // decoding needs no click: the context may stay paused until the line is played
+  if (!ctx) return;
   const speed = speechSpeed(), key = `${t.voice || ""}|${speed}`;
   if (lostLine.key === key) return;
   lostLine.key = key;
@@ -6441,19 +6443,27 @@ async function prepareLostLine() {
     lostLine.buf = await ctx.decodeAudioData(await r.arrayBuffer());
   } catch { lostLine.key = null; }   // asked again with the next payload
 }
-// -> what was played: "piper", "sound" or "" (speech off, another window speaks, or the audio not allowed yet)
-function sayLost() {
+// -> what was played: "piper", "sound" or "" (speech off, another window speaks, or the audio not allowed yet).
+// Its fate goes in the dialog's Spoken lines like any line, so a silent one says why.
+async function sayLost() {
+  const entry = logSpeech({kind: "connection", words: LOST_TEXT});
+  if (!(speechOn && isSpeaker)) { toast(LOST_TEXT); setFate(entry, !speechOn ? "silent: speech off" : "silent: another window speaks"); return ""; }
+  const ctx = await runningAudio();   // paused audio starts again if this page has had a click since it loaded
+  if (!ctx) {
+    toast(LOST_TEXT + " (click the page once so it may play sound)");
+    setFate(entry, "not said: the browser has not allowed this page to play audio yet (click it once)");
+    return "";
+  }
   toast(LOST_TEXT);
-  if (!(speechOn && isSpeaker)) return "";
-  const ctx = actx;
-  if (lostLine.buf && ctx && ctx.state === "running") {
+  if (lostLine.buf) {
     const src = ctx.createBufferSource(), vol = ctx.createGain(); src.buffer = lostLine.buf;
     vol.gain.value = outVolume(); src.connect(vol); vol.connect(ctx.destination); src.start();
-    addCaption(LOST_TEXT);
+    addCaption(LOST_TEXT); entry.engine = "Piper (made in advance)"; setFate(entry, "said");
     return "piper";
   }
-  if (soundOn && ctx && ctx.state === "running") { playHere("alert"); return "sound"; }
-  return "";
+  playHere("alert");
+  setFate(entry, "not said: the line was not made in advance (no Piper voice ready): the alert sound instead");
+  return "sound";
 }
 function sayConnection(text) {
   toast(text);

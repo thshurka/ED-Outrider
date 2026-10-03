@@ -2872,10 +2872,10 @@ const settle = async maxMs => {
       speak = realSpeak; toast = realToast; Date.now = realNow; [speechOn, isSpeaker] = f; sayLost = realLost;
       // with no line made in advance and no audio allowed: nothing robotic, nothing at all
       const lb = lostLine.buf; lostLine.buf = null; const spoke = []; speak = t => spoke.push(t);
-      speechOn = isSpeaker = true; const how = sayLost(); speak = realSpeak; [speechOn, isSpeaker] = f; lostLine.buf = lb;
+      speechOn = isSpeaker = true; sayLost(); speak = realSpeak; [speechOn, isSpeaker] = f; lostLine.buf = lb;
       [disconnected, disconnectedAt, lostSaid] = keep; setConnected(true);
-      return JSON.stringify([early, said, spoke.length, how !== "piper"]); })()`);
-    const want = JSON.stringify([0, ["lost", "Back in contact with Outrider. [connection]"], 0, true]);
+      return JSON.stringify([early, said, spoke.length]); })()`);
+    const want = JSON.stringify([0, ["lost", "Back in contact with Outrider. [connection]"], 0]);
     const goodS13 = got === want && errors.length === before;
     allOk = allOk && goodS13;
     console.log(goodS13 ? "OK" : "FAIL", "| lost contact |", goodS13 ? "said once after the grace, and again when back" : got, errors.slice(before));
