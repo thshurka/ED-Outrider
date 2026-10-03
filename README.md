@@ -358,7 +358,7 @@ On a planet, Now shows a map under its lines: on the ground, in the SRV, on foot
   "placed"), tons so far, distance and bearing. A solid rig is **probably full**: 8 minutes since it was
   placed or last collected from.
 - **The leash:** the game destroys a rig 5 km from its Rhino. Past 3.5 km it turns red and the voice warns,
-  again at 4.5 km ("Rig 3 is 3.8 kilometres away; it is lost at 5.").
+  again at 4.5 km ("Rig 3 is 3.8 kilometres away, behind you; it is lost at 5.": which way, in eight sectors).
 - **Strip copy:** a tick in the dialog adds a small copy to the on-body strip, with a one-line legend.
 
 **Marking rigs.** The game logs nothing when you deploy or pick up a rig, so you tell Outrider with the
@@ -508,6 +508,11 @@ alerts dialog shows whether it is listening.
   comes off automatically, based on what your past sales paid.
 - **Losing your ship loses your data.** Discoveries and samples that went down show as *lost* until you scan
   them again. Scanning a body you've already sold adds nothing; only mapping it still pays.
+- **Small things worth knowing:** the pill at the top right says whether the page is linked to Outrider ("stale"
+  after 30 s without an answer); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
+  its colony distance; Search's mining list includes minerals you have refined, with those bodies first; the
+  alerts dialog's chips jump to its sections; and the dialog's Settings choose whether the header tiles fold to
+  one line on a small window, on this device.
 
 ## ⚙️ Settings
 
