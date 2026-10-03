@@ -2,6 +2,19 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Tablet: a compact Search, Show in Here from results, cards and panels that fit
+Found by the author on the tablet:
+- Search: its five sections sit side by side in four columns, each scrolling on its own, with the results right under
+  them. Before, ring hotspots and mining dropped to a second row far down the page. The form's controls take the
+  theme's colours.
+- A search result's sheet has Show in Here; it opens the system from its ☆, since the row has no other link.
+- The pop-up card (a body's signals, mining odds, a system's bodies) stays on the screen and scrolls by touch. A
+  touch inside it keeps it open.
+- Here, and Here pinned beside Nearby: the heading and to-do list are capped, the whole view scrolls when it still
+  doesn't fit, and a body's details on the right can't end up under the footer.
+- From a check of every page at 1280 × 800 by touch: larger text in the Log, Materials and body details, and bigger
+  tap areas round ⌖, 🔍 and ☆.
+
 ## 2026-10-03 · The view buttons are orange pills
 - The row of view buttons (Overview … Now) was the browser's plain white buttons, glaring on the dark page: each is
   now a pill in the HUD's orange, outlined, with the view you are on filled (asked by the author).

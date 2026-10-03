@@ -3354,6 +3354,21 @@ const settle = async maxMs => {
       sh.querySelector('[data-act="here"]').click(); await settle(1500);
       got.sheetHere = [sh.hasAttribute("open"), tw.eval("view")];
     } else got.sheet = "no Nearby row";
+    // a search result (a ☆ and a name, no other link): its sheet still opens the system in Here (author, on the tablet)
+    got.searchSheet = JSON.parse(tw.eval(`(() => {
+      document.getElementById("sRows").innerHTML = '<tr><td class="bmcell"><span class="bm" data-bm="123456" data-name="Smoke Sys">☆</span></td>' +
+        '<td class="name" data-name="Smoke Sys">Smoke Sys</td><td class="num dist">4.20</td><td class="matches">star</td></tr>';
+      document.getElementById("sTable").hidden = false;
+      tabOpenRow(document.getElementById("sTable"), document.querySelector("#sRows tr"));
+      const h = document.querySelector('#tabSheetActs [data-act="here"]');
+      tabClose(document.getElementById("tabSheet")); document.getElementById("sRows").innerHTML = "";
+      return JSON.stringify(h ? h.dataset.id : null); })()`));
+    // the pop-up card takes touches on the tablet: a touch or the mouse events after a tap inside it keep it open
+    got.popKeeps = JSON.parse(tw.eval(`(() => {
+      popId = "smoke"; pop.innerHTML = "<h3>card</h3>"; pop.style.display = "block";
+      pop.dispatchEvent(new TouchEvent("touchstart", {bubbles: true, touches: []}));
+      pop.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: 5, clientY: 5}));
+      const kept = pop.style.display === "block"; hidePop(); return JSON.stringify(kept); })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3373,7 +3388,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
-      hint: [true, false], link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};

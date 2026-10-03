@@ -138,3 +138,51 @@ body.tablet #target:empty { min-height: 0; margin: 0; }
 body.tablet.app #hwyPanes { grid-template-columns: minmax(0, 56%) minmax(0, 1fr); }
 .tb-sheet .tb-row { font-size: 18px; }
 body.tablet #nowMapLegend { font-size: 16px; }
+/* the room a view has under the shell: the window less the shell's head, foot, padding and gaps, and the strips above */
+body.tablet { --tb-view-h: calc(100vh - var(--tb-head-h) - var(--tb-foot-h) - 2 * var(--tb-pad) - 2 * var(--tb-gap) - var(--head-h, 0px)); }
+/* a pop-up card (a body's mining odds, signals, a system's bodies): kept on the screen and scrolled by touch, a tap
+   inside it keeps it (the desktop's card follows the mouse and takes no pointer) */
+body.tablet #pop { pointer-events: auto; max-height: calc(100vh - 16px); max-width: min(420px, calc(100vw - 32px)); overflow-y: auto;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch; font-size: 15px; }
+/* a body's details beside a list (Here, Search): never taller than the view, scrolled on its own */
+body.tablet main > #hereView.detail > #bodyPanel, body.tablet #sBodyPanel { max-height: calc(var(--tb-view-h) - 12px); overflow-y: auto;
+  overscroll-behavior: contain; }
+/* Search: the five sections side by side in four columns, each scrolling on its own, so the results show under them */
+body.tablet #searchForm .sgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 8px; align-items: stretch; }
+body.tablet #searchForm .sgrid > fieldset, body.tablet #searchForm .sstack > fieldset { min-width: 0; margin: 0; padding: 2px 8px 6px;
+  overflow-y: auto; overscroll-behavior: contain; }
+body.tablet #searchForm .sgrid > fieldset { height: 252px; }
+body.tablet #searchForm .sstack { display: flex; flex-direction: column; gap: 8px; height: 252px; min-width: 0; }
+body.tablet #searchForm .sstack > fieldset { flex: 1 1 0; min-height: 0; }
+body.tablet #searchForm .opts label, body.tablet #searchForm fieldset > label { display: flex; align-items: center; gap: 8px; font-size: 15px;
+  padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.tablet #searchForm .opts.inline { margin: 2px 0 4px; gap: 0 10px; }
+body.tablet #searchForm .opts.inline label { display: inline-flex; }
+body.tablet #searchForm fieldset select { max-width: 100%; }
+body.tablet #searchForm .hint, body.tablet #findForm .hint:not(:empty) { font-size: 13px; }
+body.tablet #searchForm .sgrid .hint, body.tablet #searchForm > .hint { display: none; }
+body.tablet #searchForm .srow, body.tablet #findForm { flex-wrap: nowrap; gap: 10px; }
+body.tablet #findForm label { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+body.tablet #findForm label input { flex: 1 1 auto; min-width: 0; }
+body.tablet #findForm .hint { flex: 0 1 34%; }
+body.tablet main input[type=checkbox], body.tablet main input[type=radio] { flex: 0 0 auto; }
+/* form controls in the theme's colours, never the browser's white */
+body.tablet main select, body.tablet main input:not([type=checkbox]):not([type=radio]), .tb-sheet select {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+/* text sized for a tablet at arm's length where page.css sets small sizes, and tap targets at least finger-sized */
+body.tablet #logRows td { padding: 9px 8px; font-size: 15px; } body.tablet #logRows td.ev { font-size: 14px; }
+body.tablet #logRows tr.day td { font-size: 14px; padding-top: 14px; } body.tablet #logRows pre { font-size: 13px; }
+body.tablet .synth { font-size: 14.5px; padding: 8px 12px; } body.tablet .srcTable { font-size: 15px; } body.tablet .srcTable td { padding: 8px 10px; }
+body.tablet #matGrid h4, body.tablet h3.subhead { font-size: 14px; } body.tablet #matGrid .grade { font-size: 13px; }
+body.tablet #bodyPanel dl, body.tablet #sBodyPanel dl { font-size: 15px; } body.tablet #bodyPanel table, body.tablet #sBodyPanel table { font-size: 14px; }
+body.tablet .hint { font-size: 14px; }
+/* ⌖ (open in Here), 🔍 (the body) and ☆: a bigger box round the small mark, the line's height kept */
+body.tablet .goto, body.tablet [data-goto], body.tablet #logRows [data-body], body.tablet td.bmcell [data-bm] {
+  display: inline-block; padding: 8px 10px; margin: -8px -4px; }
+/* Here (its own page, or pinned beside Nearby): its heading and to-do list capped, and the whole view scrolls when what
+   is left would still not fit, so a body's details (on the right) are never cut off under the footer */
+body.tablet main > #hereView, body.tablet.app main.nearPinned > #hereView { overflow-y: auto; overscroll-behavior: contain; }
+body.tablet #hereHead { max-height: 24vh; overflow-y: auto; }
+body.tablet.app #hereLeaving { max-height: 16vh; }
+body.tablet.app main > #hereView.detail { grid-template-rows: auto auto minmax(260px, 1fr); }
+body.tablet.app main.nearPinned > #hereView.detail > #bodyPanel, body.tablet.app main.nearPinned > #hereView > #hereMain { min-height: 200px; }

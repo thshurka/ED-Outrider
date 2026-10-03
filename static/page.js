@@ -5252,7 +5252,7 @@ function placePop(x, y) {
   const r = pop.getBoundingClientRect(), pad = 14;
   let left = x + pad, top = y + pad;
   if (left + r.width > innerWidth - 8) left = Math.max(8, x - r.width - pad);
-  if (top + r.height > innerHeight - 8) top = Math.max(8, y - r.height - pad);
+  if (top + r.height > innerHeight - 8) top = Math.max(8, Math.min(y - r.height - pad, innerHeight - 8 - r.height));
   pop.style.left = left + "px"; pop.style.top = top + "px";
 }
 function showPop(td, x, y) {
@@ -5309,6 +5309,7 @@ function hidePop() { popId = null; pop.style.display = "none"; }
 let lastPointer = null;
 document.addEventListener("mousemove", e => {
   if (e.target === mapCanvas) return;  // the map draws its own hover
+  if (e.target.closest && e.target.closest("#pop")) return;   // inside the card (only the tablet's takes the pointer)
   lastPointer = {x: e.clientX, y: e.clientY};
   const td = e.target.closest("[data-minepop], [data-rescanpop], [data-pop], [data-bm], [data-unsold], [data-bodypop], [data-sbodypop]");
   td ? showPop(td, e.clientX, e.clientY) : popId !== null && hidePop();
@@ -5324,6 +5325,7 @@ document.addEventListener("mouseleave", hidePop);
 // Touch: tap the bodies cell to toggle.
 document.addEventListener("touchstart", e => {
   if (e.target.closest("[data-bm]")) return;  // taps on a star open the bookmark dialog
+  if (e.target.closest("#pop")) return;   // scrolling the card (it takes touches on the tablet)
   const td = e.target.closest("[data-minepop], [data-rescanpop], [data-pop], [data-unsold], [data-bodypop], [data-sbodypop]"); if (!td) return hidePop();
   const t = e.touches[0];
   const key = td.dataset.minepop !== undefined ? "mine" + (td.closest("[data-bodypop]") || {dataset: {}}).dataset.bodypop
@@ -6867,8 +6869,9 @@ function tabRowFacts(table, tr) {
 }
 function tabOpenRow(table, tr) {
   const nameEl = tr.querySelector("[data-name]"), name = nameEl ? nameEl.dataset.name : tr.cells[0].textContent.trim();
-  const idEl = tr.querySelector("[data-id], [data-goto]"), id = idEl ? idEl.dataset.id || idEl.dataset.goto : null;
   const bm = tr.querySelector("[data-bm]");
+  // the system's id: a link to it, else its ☆ (Search's results and Bookmarks have no other)
+  const idEl = tr.querySelector("[data-id], [data-goto]"), id = idEl ? idEl.dataset.id || idEl.dataset.goto : bm ? bm.dataset.bm : null;
   document.getElementById("tabSheetTitle").textContent = name;
   document.getElementById("tabSheetList").innerHTML = tabRowFacts(table, tr).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
   document.getElementById("tabSheetActs").innerHTML =
