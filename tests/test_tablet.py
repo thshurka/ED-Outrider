@@ -83,6 +83,25 @@ class Tablet(unittest.TestCase):
             os.utime(path, ns=(1, os.stat(path).st_mtime_ns + 10 ** 9))
             self.assertNotEqual(ed_outrider.page_stamp(d), a)
 
+    def test_restart_needed(self):
+        """Outrider's code changed on disk but it was not restarted: the payload says so, so an open page waits for the
+        restart before reloading onto page files that may need the new server (found on the tablet: Ask before /api/ask)."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "outrider"))
+            for name in ("ed_outrider.py", os.path.join("outrider", "a.py")):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("x = 1\n")
+            a = ed_outrider.code_stamp(d)
+            p = os.path.join(d, "outrider", "a.py")
+            os.utime(p, ns=(1, os.stat(p).st_mtime_ns + 10 ** 9))
+            self.assertNotEqual(ed_outrider.code_stamp(d), a)
+        self.assertFalse(ed_outrider.restart_needed(now=1e12))   # the code running is the code on disk
+        self.assertFalse(self.state.payload()["restart_needed"])
+        with unittest.mock.patch.object(ed_outrider, "CODE_STAMP_START", "older000000"):
+            self.assertTrue(ed_outrider.restart_needed(now=2e12))
+            self.assertTrue(self.state.payload()["restart_needed"])
+        ed_outrider.restart_needed(now=3e12)
+
     def test_fonts_are_ofl_and_shipped_with_their_licences(self):
         fonts = os.path.join(ed_outrider.STATIC_DIR, "fonts")
         files = os.listdir(fonts)

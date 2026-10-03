@@ -2,6 +2,14 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Rail: where an unbound control is bound; captions as written; "restart to finish updating"
+- A rail button bound only on your HOTAS says so ("On Joy 5 only: add a keyboard key"): the rail presses keys through
+  a virtual keyboard, and the game takes a joystick button only from that joystick (found with Night Vision, Ship
+  Lights and Analysis Mode on the X-56).
+- Captions (Now, the tablet's footer) show names as written ("Smojooe ZC-D c12-2"), not the voice's spelling.
+- When Outrider's code was updated but Outrider not restarted, an open page no longer reloads onto new page files that
+  need the new server; a line under the header says to restart it, and the page reloads once it has.
+
 ## 2026-10-03 · Settings (was the alerts dialog): folding sections, the whole config file, a wider window
 - ⚙ Settings replaces 🔔 "Alerts & thresholds" (asked by the author). Its controls are in twelve sections that fold:
   Alerts, Voice, What is said, Sounds, Values, Risk and warnings, Surface map, Auto honk, Display, Sharing, Server

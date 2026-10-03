@@ -4777,7 +4777,8 @@ class State:
     def payload(self):
         pos, jr = self.journals.pos, self.journals.jump_range
         return {
-            "version": self.version, "run_id": RUN_ID, "page_stamp": page_stamp(), "status": self.status, "radius": self.radius,
+            "version": self.version, "run_id": RUN_ID, "page_stamp": page_stamp(), "restart_needed": restart_needed(),
+            "status": self.status, "radius": self.radius,
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
             "tts": self.speaker.info() if self.speaker else None,
@@ -8952,13 +8953,15 @@ class State:
             sets = self.rail_sets()
             items = [dict(outrider.rail.catalogue_entry(ctx, b["id"]), label=b["label"]) for b in sets[ctx]]
             dirs = self.honker.journal_dirs if self.honker else LIVE_DIRS
-            binds = outrider.honk.keyboard_bindings(dirs, [b["action"] for b in items], hint="the tablet's rail",
+            binds = outrider.honk.keyboard_bindings(dirs, [b["action"] for b in items], hint=None,
                                                     category=outrider.rail.CATEGORY[ctx])
             for b in items:
                 keys, text = binds.get(b["action"], (None, "not read"))
                 out["buttons"].append({"id": b["id"], "label": b["label"], "action": b["action"],
                                        "action_label": outrider.honk.action_label(b["action"]), "bound": bool(keys),
                                        "keys": text if keys else None, "why": None if keys else text,
+                                       # where an unbound one is now (a HOTAS button), for the tablet's short line
+                                       "now_on": (re.search(r"now only (.+?) on ", text or "") or [None, None])[1] if not keys else None,
                                        "state": outrider.rail.state_of(b, st), "reported": b["state"] is not None,
                                        "states": 3 if b["state"] == "headlights" else 2, "amber": b["amber"]})
             out["why_not"] = self.rail_why_not()
@@ -9000,7 +9003,7 @@ class State:
             return {"error": "no such button in this set"}, 404
         if not b["bound"]:
             return {"error": b["why"]}, 409
-        keys, _ = outrider.honk.keyboard_bindings(self.honker.journal_dirs, [b["action"]], hint="the tablet's rail",
+        keys, _ = outrider.honk.keyboard_bindings(self.honker.journal_dirs, [b["action"]], hint=None,
                                                   category=outrider.rail.CATEGORY[ctx])[b["action"]]
         if not self.honker.ready and not self.honker.open("rail"):
             return {"error": self.honker.device_error or "the virtual keyboard could not be opened"}, 409
@@ -9937,6 +9940,34 @@ def page_stamp(static_dir=None, now=None):
     if static_dir is None:
         _page_stamp.update(at=now, value=value)
     return value
+
+
+# The server's own code (this file and outrider/*.py) as it was when it started: when the files on disk differ, Outrider
+# was updated but not restarted, and an open page must not reload onto new page files that need the new server (the
+# tablet once showed Ask against a server without /api/ask): the payload says restart_needed instead.
+def code_stamp(root=None):
+    root = root or SCRIPT_DIR
+    files = [os.path.join(root, "ed_outrider.py")] + sorted(glob(os.path.join(glob_escape(os.path.join(root, "outrider")), "*.py")))
+    parts = []
+    for p in files:
+        try:
+            st = os.stat(p)
+            parts.append(f"{os.path.basename(p)}:{st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            parts.append(f"{os.path.basename(p)}:-")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
+
+
+CODE_STAMP_START = code_stamp()
+_code_stamp = {"at": None, "value": None}
+
+
+def restart_needed(now=None):
+    """Whether the server's code on disk differs from the code running (checked at most every PAGE_STAMP_S)."""
+    now = time.monotonic() if now is None else now
+    if _code_stamp["at"] is None or now - _code_stamp["at"] >= PAGE_STAMP_S:
+        _code_stamp.update(at=now, value=code_stamp())
+    return _code_stamp["value"] != CODE_STAMP_START
 
 
 def load_page(tablet=False):

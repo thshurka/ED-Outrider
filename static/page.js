@@ -1119,9 +1119,12 @@ function renderSurface() {
 // Now's caption strip: the last three lines said, in every window (a window that is not speaking shows the plain
 // wording of what the speaking one says). A tap asks the window that is speaking to say it again.
 const captions = [];
+// shown as written ("Smojooe ZC-D c12-2"), not in the voice's spelling ("Smojooe Z C D, c 12 2"; found on the tablet):
+// only markup and symbols go. `said` is the spoken form, to match the line last said for its voice and pace.
+const captionText = t => String(t).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 function addCaption(words) {
-  const w = spokenText(words || ""); if (!w) return;
-  captions.push({words: w, at: Date.now()});
+  const w = captionText(words || ""); if (!w) return;
+  captions.push({words: w, said: spokenText(w), at: Date.now()});
   if (captions.length > 3) captions.shift();
   if (view === "now" && data) renderNow();
   drawLastSaid();
@@ -1138,9 +1141,8 @@ function drawLastSaid() {
 }
 document.getElementById("lastSaidBtn").onclick = () => {
   const c = captions[captions.length - 1];
-  if (c) speak(lastSaid && lastSaid.words === c.words ? lastSaid.words : c.words,
-               {kind: "manual", voice: lastSaid && lastSaid.words === c.words ? lastSaid.voice : null,
-                pace: lastSaid && lastSaid.words === c.words ? lastSaid.pace || 1 : 1});
+  const same = c && lastSaid && lastSaid.words === c.said;
+  if (c) speak(same ? lastSaid.words : c.words, {kind: "manual", voice: same ? lastSaid.voice : null, pace: same ? lastSaid.pace || 1 : 1});
 };
 const agoText = at => { const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 10 ? "just now" : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`; };
@@ -2551,6 +2553,7 @@ function render() {
       <td class="notable c2hide">${nb}</td><td class="num hide-sm" title="${valueTitle(s)}">${valueCell(s)}</td><td class="num hide-sm c2hide">${known}</td></tr>`;
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
+  document.getElementById("updateLine").hidden = !data.restart_needed;
   if (TABLET) tabRender();
   // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
   if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
@@ -6865,6 +6868,9 @@ function pageQuiet(now = Date.now()) {
     !(a && (/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) || a.isContentEditable));
 }
 function pageStampTick(now = Date.now()) {
+  // Outrider's own code changed but it was not restarted: new page files may need the new server, so no reload until
+  // it restarts; the line under the header says so (drawn by render)
+  if (data && data.restart_needed) return false;
   if (!PAGE_STAMP || !data || !data.page_stamp || data.page_stamp === PAGE_STAMP) return false;
   if (!pageStale) { pageStale = true; toast("Outrider has a newer page: it reloads once you leave it alone for a minute"); }
   if (!pageQuiet(now)) return false;
@@ -7178,7 +7184,7 @@ function tabDrawRail() {
     const mode = tabRailMode(b, r), dis = mode === "bind" || mode === "nolink" || mode === "pending" || !r.can_press;
     const state = {pending: "Sent", notconf: "Not confirmed", unknown: "Not reported", bind: b.reported && b.state ? RAIL_STATE_WORDS[b.state] : "—",
                    nolink: "No link"}[mode] || RAIL_STATE_WORDS[b.state] || "";
-    const sub = mode === "bind" ? `Bind a key: ${b.action_label}` : mode === "pending" ? "waiting for the game" : mode === "nolink" ? "Outrider not reachable" : "";
+    const sub = mode === "bind" ? (b.now_on ? `On ${b.now_on} only: add a keyboard key` : `Bind a key: ${b.action_label}`) : mode === "pending" ? "waiting for the game" : mode === "nolink" ? "Outrider not reachable" : "";
     return `<button type="button" class="tb-rb ${mode}${b.amber ? " amber" : ""}${b.states === 3 && b.state === "high" ? " high" : ""}" data-rail="${esc(b.id)}"` +
       `${dis ? " disabled" : ""} aria-label="${esc(`${b.label}, ${state}${sub ? ", " + sub : ""}`)}" title="${esc(b.keys || b.why || "")}">` +
       `<span class="tb-rbl"><b>${esc(b.label)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span><span class="tb-rbs"><i></i>${esc(state)}</span></button>`;

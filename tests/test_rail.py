@@ -152,7 +152,8 @@ class Server(unittest.TestCase):
         journals, binds = make_controls(self, self.tmp.name, start="P\nP\nP\nP")
         with open(os.path.join(binds, "P.4.2.binds"), "w") as f:
             f.write(binds_xml("P", {"LandingGearToggle": ("Key_L", ["Key_LeftAlt"]), "ToggleCargoScoop": "Key_H",
-                                    "ToggleDriveAssist": "Key_D"}))
+                                    "ToggleDriveAssist": "Key_D"}).replace("</Root>",   # night vision on the HOTAS only
+                    '<NightVisionToggle><Primary Device="SaitekX56Throttle" Key="Joy_5" /><Secondary Device="{NoDevice}" Key="" /></NightVisionToggle></Root>'))
         self.db = ed_outrider.open_db(":memory:")
         self.addCleanup(self.db.close)
         self.state = ed_outrider.State(self.db, ed_outrider.Journals(self.db), None, 25)
@@ -176,6 +177,11 @@ class Server(unittest.TestCase):
         gear, nv = r["buttons"][0], r["buttons"][2]
         self.assertEqual((gear["bound"], gear["state"], nv["bound"], nv["action_label"]), (True, "off", False, "Night Vision Toggle"))
         self.assertIn("no keyboard binding", nv["why"])
+        # bound on the HOTAS only: it says where, and that a keyboard key is what the rail needs (asked by the author)
+        self.assertEqual(nv["now_on"], "Joy 5")
+        self.assertIn("now only Joy 5 on SaitekX56Throttle", nv["why"])
+        self.assertNotIn("or set", nv["why"])
+        self.assertIsNone(r["buttons"][3]["now_on"])   # ship lights: bound nowhere
         self.assertEqual(self.state.payload()["rail"]["context"], "ship")   # in the long poll's payload: confirmed there
         full = self.state.rail_info(full=True)
         self.assertEqual(set(full["edit"]), set(rail.CONTEXTS))

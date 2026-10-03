@@ -141,7 +141,7 @@ def _preset_file(d, action, hint, category=None):
         files = sorted(glob.glob(os.path.join(glob.escape(d), glob.escape(preset) + ".*binds")), key=os.path.getmtime)
         if not files:   # the built-in presets live in the game's install folder, not here
             return None, None, (f"the controls preset {preset!r} is a built-in one (no .binds file in the controls folder): "
-                                f"bind {action_label(action)} in a custom preset, or set {hint}")
+                                f"bind {action_label(action)} in a custom preset" + (f", or set {hint}" if hint else ""))
     else:
         files = sorted(glob.glob(os.path.join(glob.escape(d), "Custom*.binds")), key=os.path.getmtime)
         if not files:
@@ -171,9 +171,15 @@ def _action_binding(root, action, preset, hint):
         mods = [elite_key(m.get("Key")) for m in modifiers]
         if key and all(mods):
             return mods + [key], f"{' + '.join(key_label(k) for k in mods + [key])} ({slot.lower()} binding of {name} in {preset or 'your preset'})"
+    # what it IS bound to (a HOTAS button): a virtual keyboard cannot press it, since the game takes a joystick
+    # button only from that joystick, so the words say where it is now and what to add
+    other = next((f"{b.get('Key').replace('_', ' ')} on {b.get('Device')}" for slot in ("Primary", "Secondary")
+                  for b in [node.find(slot) if node is not None else None]
+                  if b is not None and b.get("Device") not in (None, "", "Keyboard", "{NoDevice}") and b.get("Key")), None)
     return None, (f"{name} has no keyboard binding in {preset or 'your preset'}"
+                  + (f" (now only {other}: a joystick button cannot be pressed from here)" if other else "")
                   + (" (a key with a joystick modifier cannot be pressed from here)" if mixed else "")
-                  + f": give it one as its second binding in Elite's controls, or set {hint}")
+                  + ": give it a keyboard key as its second binding in Elite's controls" + (f", or set {hint}" if hint else ""))
 
 
 def _read_action(d, action, hint, parsed, category=None):

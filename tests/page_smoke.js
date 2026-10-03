@@ -3375,6 +3375,8 @@ const settle = async maxMs => {
       o.push(pageStampTick());   // the same stamp: nothing
       const keep = data.page_stamp; data.page_stamp = "newer0000000";
       lastInputAt = Date.now(); o.push(pageStampTick(), n);   // touched just now: waits
+      data.restart_needed = true; lastInputAt = 0; o.push(pageStampTick(), n); render();   // Outrider not restarted yet: waits, and says so
+      o.push(!document.getElementById("updateLine").hidden); data.restart_needed = false; render();
       lastInputAt = 0; o.push(pageStampTick(), n);   // a quiet minute: reloads
       data.page_stamp = keep; return JSON.stringify(o); })()`));
     // the rail (phase 4): drawn from the payload's rail; a press is SENT until Status.json shows the change, "not
@@ -3407,6 +3409,8 @@ const settle = async maxMs => {
     got.ask = JSON.parse(tw.eval(`(() => { const o = [document.getElementById("tabAsk").hidden];
       takeCopilot({seq: lastCopilotSeq + 1, action: "say", words: "Fuel at 41 percent."}, false);
       o.push(document.getElementById("tabCaption").textContent, speechItems.length);
+      takeCopilot({seq: lastCopilotSeq + 1, action: "say", words: "Nearest unvisited: Smojooe ZC-D c12-2, 10.8 light years."}, false);
+      o.push(document.getElementById("tabCaption").textContent);   // as written, not the voice's spelling
       let heard = 0; window.OutriderApp = {listen() { heard++; }}; tabRender(); o.push(document.getElementById("tabAsk").hidden);
       document.getElementById("tabAsk").click(); o.push(heard); delete window.OutriderApp; tabRender(); o.push(document.getElementById("tabAsk").hidden);
       return JSON.stringify(o); })()`));
@@ -3450,10 +3454,10 @@ const settle = async maxMs => {
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
       themes: [["elite", "babylon5", "lcars", "lcars"], ["elite", "babylon5", "lcars", "lcars"], ["lcars", "elite", "babylon5"]],
       bodies: [true, true, ["gas", "elw", "water", "ammonia", "ice", "ice", "metal", "metal", "rock", "gas"], true, null, null, "star", true, true, true, 2, true, true, true],
-      ask: [true, "Fuel at 41 percent.", 0, false, 1, true],
+      ask: [true, "Fuel at 41 percent.", 0, "Nearest unvisited: Smojooe ZC-D c12-2, 10.8 light years.", false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],
-      reload: [true, true, false, false, 0, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};
