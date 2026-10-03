@@ -1299,6 +1299,24 @@ class BatchAIntegrity(unittest.TestCase):
                          [("2026-01-02T01:00:00Z", "2026-01-02T00:00:00Z", 1),
                           ("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 0)])
 
+    def test_a_login_with_no_jump_is_its_own_session(self):   # F31
+        self.jump("2026-01-01T10:00:00Z", 1)
+        self.jump("2026-01-01T11:00:00Z", 2, 10)
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T14:00:00Z", "Commander": "J", "Credits": 1})
+        self.j.handle({"event": "SAAScanComplete", "timestamp": "2026-01-01T14:10:00Z", "SystemAddress": 2, "BodyID": 3,
+                       "BodyName": "S2 3"})                         # a Rhino evening: mapped, no jump
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T14:40:00Z", "Commander": "J", "Credits": 1})   # a relog
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-02T08:00:00Z", "Commander": "J", "Credits": 1})   # crashed,
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-02T09:00:00Z", "Commander": "J", "Credits": 1})   # back in
+        self.jump("2026-01-02T09:30:00Z", 3, 20)
+        rows = self.state.history(3650 * 3)["sessions"]
+        self.assertEqual([(s["start"], s["end"], s["from"], s["jumps"], s["mapped"]) for s in rows],
+                         [("2026-01-02T09:30:00Z", "2026-01-02T09:30:00Z", "2026-01-02T08:00:00Z", 1, 0),
+                          ("2026-01-01T14:00:00Z", "2026-01-01T14:40:00Z", "2026-01-01T14:00:00Z", 0, 1),
+                          ("2026-01-01T10:00:00Z", "2026-01-01T11:00:00Z", "2026-01-01T10:00:00Z", 2, 0)])
+        self.assertEqual(rows[1]["systems"][0]["name"], "S2")   # where you were
+        self.assertEqual(self.state.history(3650 * 3)["all_time"]["mapped"], 1)
+
     def test_session_gaps_in_utc(self):   # F50: 1.5 h across the UK clocks going back is one session
         old = os.environ.get("TZ")
         os.environ["TZ"] = "Europe/London"

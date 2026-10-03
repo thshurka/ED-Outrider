@@ -2770,6 +2770,23 @@ const settle = async maxMs => {
     console.log(goodB6 ? "OK" : "FAIL", "| batch 6 page fixes |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "Here follows the in-game target, the fuel tile on foot / in the SRV, no stale undock call-out after a sale", errors.slice(before));
   }
+  // F45: the unsold pop-up's headings: a ship loss with no sale before it counts from the loss; bio from any death
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(w.eval(`(() => {
+      const heads = u => [...new DOMParser().parseFromString(unsoldHtml(u), "text/html").querySelectorAll(".lbl")].map(e => e.textContent);
+      const part = (cutoff, last_sold) => ({cutoff, last_sold, estimated_payout: 1, estimated_value: 1, bodies: 1, systems: 1,
+                                            first_discoveries: 0, mapped: 0, samples: 0, base_value: 0, max_value: 0, unknown_species: []});
+      const u = (c, b) => ({total: 2, thresholds: [5, 10], carto: c, bio: b, species: [], computed: "12:00:00"});
+      return JSON.stringify([heads(u(part("2026-09-20T00:00:00Z", null), part("2026-09-21T00:00:00Z", "2026-09-01T00:00:00Z"))),
+                             heads(u(part(null, "2026-09-01T00:00:00Z"), part(null, null)))]);
+    })()`));
+    const ok = /Cartographics · since your ship was lost/.test(got[0][0]) && /Exobiology · since you died/.test(got[0][1]) &&
+      /Cartographics · since you last sold/.test(got[1][0]) && /Exobiology · all on record/.test(got[1][1]);
+    const goodF45 = ok && errors.length === before;
+    allOk = allOk && goodF45;
+    console.log(goodF45 ? "OK" : "FAIL", "| unsold headings |", ok ? "a loss with no sale before it, a death for bio" : JSON.stringify(got), errors.slice(before));
+  }
   // Target next (review Q4): the line's button and the box's (POST api/highway/target; the countdown on the button; the
   // tab not opened, the name not copied), a row's Retry while the failed run's row is still the one to target; and
   // the Highway in the spoken status report and welcome (S2). Every request is answered here: nothing reaches the server

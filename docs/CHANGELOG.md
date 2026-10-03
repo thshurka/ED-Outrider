@@ -2,6 +2,20 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Sales, history and unsold estimates (fix plan, batch 7)
+- A Vista Genomics visit sold in several goes is checked as one against the x5 prediction: History's trip note no
+  longer counts an x5 run twice, or reports a miss when the x1 run was sold first (review F21).
+- Two Vista Genomics sales in the same second stay two (bio_sales keyed by journal line: Codex C1).
+  PARSER_VERSION 38: the next start re-reads the journals once.
+- A login with no jump, two hours or more after anything else (a sampling or Rhino evening in one system), is a
+  History session of its own, not more of the one before; a relog shortly before a session's first jump starts
+  that session (F31).
+- A body mapped before any line named its system (a carrier jump, then the DSS) is sold with the system, not left
+  "aboard" (F36).
+- The unsold pop-up's headings: a ship loss with no sale before it says "since your ship was lost", and exobiology
+  says "since you died" (any death takes it) (F45).
+- `python3 -m outrider.unsold --calibrate --commander X` leaves other commanders' sales out of the comparison (Codex F8).
+
 ## 2026-10-03 · Play fixes outside the Highway (fix plan, batch 6)
 - Launching the Nomad no longer forgets the body you are on: a Rhino launched after it records its mining again
   (review F5). PARSER_VERSION 37: the next start re-reads the journals once to rebuild Mined previously.

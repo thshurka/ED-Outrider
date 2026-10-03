@@ -997,7 +997,8 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 35: every ship's latest Loadout (fleet_loadouts: the Highway's ship list and the exact plotter's figures).
 # 36: fleet_loadouts' figures again: a MaxJumpRange without the Guardian booster keeps the drive's optimal mass.
 # 37: the Nomad's LaunchVessel keeps the body you are on: a Rhino launched after it records its mining (own_mined).
-PARSER_VERSION = 37
+# 38: bio_sales keyed by journal line (two Vista sales in one second); a Vista visit's x5 check made as one.
+PARSER_VERSION = 38
 # Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
@@ -1151,7 +1152,8 @@ CREATE TABLE IF NOT EXISTS own_footfall (system INTEGER, body_id INTEGER, ts TEX
 CREATE TABLE IF NOT EXISTS sales (name TEXT, ts TEXT, bodies INTEGER);
 -- Vista Genomics sales: bio_data the species each BioData entry named with whether it paid the bonus, JSON
 -- [[species, bonus], ...] (lower case codex keys), for organic_replay; NULL on a row stored before it was kept.
-CREATE TABLE IF NOT EXISTS bio_sales (ts TEXT PRIMARY KEY, species INTEGER, bio_data TEXT);
+-- source: the journal line ("file:offset"), so two Vista Genomics sales in one second stay two (Codex C1)
+CREATE TABLE IF NOT EXISTS bio_sales (ts TEXT, species INTEGER, bio_data TEXT, source TEXT, PRIMARY KEY (ts, source));
 CREATE INDEX IF NOT EXISTS sales_name ON sales (name);
 -- Every login (LoadGame): History starts a session's window at the login before its first jump.
 CREATE TABLE IF NOT EXISTS logins (ts TEXT PRIMARY KEY);
@@ -1263,6 +1265,7 @@ def open_db(path, rescan=False):
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
     migrate_sale_events(db)
+    migrate_bio_sales(db)
     # Columns added to an existing table since the database was created: add them.
     for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\);", SCHEMA, re.S):
         table, body = m.group(1), m.group(2)
@@ -1338,6 +1341,16 @@ def migrate_sale_events(db):
             SELECT ts, kind, base, bonus, total, systems, species, '' FROM sale_events_old;
         DROP TABLE sale_events_old;
         COMMIT;""")
+
+
+def migrate_bio_sales(db):
+    """bio_sales from before the source column (keyed by ts alone, so two sales in one second were one): rebuilt
+    empty with the new key. Journal-derived: the re-read PARSER_VERSION 38 asks for fills it again."""
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(bio_sales)")}
+    if "source" in cols:
+        return
+    create = re.search(r"CREATE TABLE IF NOT EXISTS bio_sales \(.*?\);", SCHEMA, re.S).group(0)
+    db.executescript(f"BEGIN; DROP TABLE bio_sales; {create} COMMIT;")
 
 
 AWAY_MIN_S = 2 * 3600   # s: a break shorter than this (a relog, a mode switch) gets the plain greeting
@@ -2377,9 +2390,10 @@ class Journals:
                 self.drop_runs("done_ts IS NULL AND (ts IS NULL OR ts <= ?)", (ts,), ts)
                 self.bio_sales_changed = True
             elif name == "SellOrganicData":
-                check = sale_check(self.db, ts, ev.get("BioData") or [])   # before this sale is stored
-                self.db.execute("INSERT OR IGNORE INTO bio_sales (ts, species, bio_data) VALUES (?, ?, ?)",
-                                (ts, len(ev.get("BioData") or []), json.dumps(sale_species(ev.get("BioData") or []))))
+                check = sale_check(self.db, ts, ev.get("BioData") or [], self.line_source)   # before this sale is stored
+                self.db.execute("INSERT OR IGNORE INTO bio_sales (ts, species, bio_data, source) VALUES (?, ?, ?, ?)",
+                                (ts, len(ev.get("BioData") or []), json.dumps(sale_species(ev.get("BioData") or [])),
+                                 self.line_source))
                 self.bio_sales_changed = True
                 paid = sum((b.get("Value") or 0) + (b.get("Bonus") or 0) for b in ev.get("BioData") or [])
                 self.add_earnings(ts, paid)
@@ -3408,7 +3422,7 @@ def organic_replay(db, until=None):
         f"WHERE o.done_ts IS NOT NULL{cut} ORDER BY o.done_ts", args)]
     cut = "" if until is None else " WHERE ts < ?"
     events += [(r["ts"], 1, json.loads(r["bio_data"]) if r["bio_data"] else None)
-               for r in db.execute(f"SELECT ts, bio_data FROM bio_sales{cut}", args)]
+               for r in db.execute(f"SELECT ts, bio_data FROM bio_sales{cut} ORDER BY ts, rowid", args)]   # journal order
     events += [(r["ts"], 0, None) for r in db.execute(f"SELECT ts FROM deaths{cut}", args)]
     events.sort(key=lambda e: (e[0], e[1]))
     key = lambda r: (r["system"], r["body_id"], r["species"])
@@ -3445,33 +3459,60 @@ def organic_fates(db):
     return c["fates"]
 
 
-def sale_check(db, ts, bio_data):
-    """A Vista Genomics sale at ts against the prediction: the completed runs aboard just before it (organic_replay:
-    a run an earlier sale did not name is still aboard, and an earlier sale of the same visit has taken its own runs
-    out already), each predicted x5 where your first scan of its body said nobody had set foot there (own_firsts),
-    matched to the sale's BioData by species counts alone (a BioData entry names no body). {sold, predicted (runs
-    predicted x5, at most the entries sold of the species), matched (of those, paid the bonus), paid (entries paid
-    the bonus), unknown (runs sold whose footfall is not known), used}, or None for an empty sale. Journal state
-    only: a re-read rebuilds it."""
+def sale_check(db, ts, bio_data, source=None):
+    """A Vista Genomics sale at ts against the prediction. The visit (sales under SALE_SESSION_S apart, as the ledger
+    groups them, since the last death) is checked as one: the completed runs aboard before its first sale (organic_replay),
+    each predicted x5 where your first scan of its body said nobody had set foot there (own_firsts), against
+    everything the visit sold so far, matched by species counts alone (a BioData entry names no body). Each sale
+    stores what it adds to the visit's check, so the ledger's sum over the visit is that one check, whatever order
+    the entries came in (selling an x1 run first no longer leaves the x5 run "aboard" to be predicted again: review
+    F21). {sold, predicted (runs predicted x5, at most the entries sold of the species), matched (of those, paid the
+    bonus), paid (entries paid the bonus), unknown (runs sold whose footfall is not known), used ({species: [predicted,
+    unknown]} this sale adds)}, or None for an empty sale. source: this sale's journal line (bio_sales' key), so a
+    line handled twice is not its own earlier sale. Journal state only: a re-read rebuilds it."""
     if not bio_data:
         return None
-    sold, paid, x5, unknown = (collections.Counter() for _ in range(4))
-    for b in bio_data:
-        sp = (b.get("Species") or "").lower()
-        sold[sp] += 1
-        if b.get("Bonus"):
-            paid[sp] += 1
-    for r in organic_replay(db, ts)[1]:
+    death = db.execute("SELECT max(ts) FROM deaths WHERE ts <= ?", (ts,)).fetchone()[0] or ""
+    visit, last = [], ts
+    for r in db.execute("SELECT ts, source, bio_data FROM bio_sales WHERE ts <= ? AND ts > ? ORDER BY ts DESC, rowid DESC",
+                        (ts, death)):
+        if r["ts"] == ts and r["source"] == source:
+            continue
+        if r["bio_data"] is None or ts_seconds(last) - ts_seconds(r["ts"]) >= SALE_SESSION_S:
+            break   # another visit (or an old sale whose entries are not known): the visit starts after it
+        visit.append(r)
+        last = r["ts"]
+    start = visit[-1]["ts"] if visit else ts
+    pool = list(organic_replay(db, start)[1]) + list(db.execute(
+        "SELECT o.system, o.body_id, o.species, o.done_ts, f.was_footfalled FROM own_organic o "
+        "LEFT JOIN own_firsts f ON f.system = o.system AND f.body_id = o.body_id "
+        "WHERE o.done_ts >= ? AND o.done_ts < ?", (start, ts)))
+    x5, unknown = collections.Counter(), collections.Counter()
+    for r in pool:
         sp = (r["species"] or "").lower()
         if r["was_footfalled"] == 0:
             x5[sp] += 1
         elif r["was_footfalled"] is None:
             unknown[sp] += 1
-    predicted = {sp: max(0, min(x5[sp], n)) for sp, n in sold.items()}
-    unk = {sp: max(0, min(unknown[sp], n - predicted[sp])) for sp, n in sold.items()}
-    return {"sold": sum(sold.values()), "predicted": sum(predicted.values()),
-            "matched": sum(min(predicted[sp], paid[sp]) for sp in sold), "paid": sum(paid.values()),
-            "unknown": sum(unk.values()), "used": {sp: [predicted[sp], unk[sp]] for sp in sold}}
+
+    def tally(entries):
+        """Per species: [sold, paid, predicted, matched, unknown] for these [species, bonus] entries."""
+        sold, paid = collections.Counter(), collections.Counter()
+        for sp, bonus in entries:
+            sold[sp] += 1
+            paid[sp] += bool(bonus)
+        out = {}
+        for sp, n in sold.items():
+            pred = min(x5[sp], n)
+            out[sp] = [n, paid[sp], pred, min(pred, paid[sp]), min(unknown[sp], n - pred)]
+        return out
+    earlier = [e for r in reversed(visit) for e in json.loads(r["bio_data"])]
+    mine = sale_species(bio_data)
+    before, after = tally(earlier), tally(earlier + mine)
+    add = {sp: [a - b for a, b in zip(v, before.get(sp, [0] * 5))] for sp, v in after.items()}
+    total = lambda i: sum(v[i] for v in add.values())
+    return {"sold": total(0), "predicted": total(2), "matched": total(3), "paid": total(1), "unknown": total(4),
+            "used": {sp: [add[sp][2], add[sp][4]] for sp, _b in mine}}
 
 
 def organic_state(db, done_ts, run=None):
@@ -6827,7 +6868,7 @@ class State:
         first and last jump; from is where its window for counting what you did starts (the latest login at or
         before the first jump and after the previous session's last one, else the first jump: work done after
         logging in, before jumping, belongs to this session, as on the Last session card); until is the next
-        session's from."""
+        session's from. A login that no jump followed, 2 h+ after anything else, opens a session with no jumps."""
         jumps = [dict(r) for r in self.db.execute(
             "SELECT ts, id64, name, x, y, z, kind FROM jumps WHERE ts >= ? ORDER BY ts", (since,))]
         sessions, cur = [], None
@@ -6853,10 +6894,31 @@ class State:
         for s_ in sessions:
             s_["from"] = next((t for t in reversed(logins) if prev_end < t <= s_["start"]), s_["start"])
             prev_end = s_["end"]
+        # a login 2 h+ after anything else that no jump followed (a sampling or Rhino evening in one system) is a
+        # session of its own, not more of the one before it (review F31); logins within 2 h of it join it
+        idle = []
+        for t in logins:
+            if t < since or any(s_["from"] <= t <= s_["end"] for s_ in sessions):
+                continue
+            nxt = next((s_ for s_ in sessions if s_["from"] > t), None)
+            if nxt and ts_seconds(nxt["from"]) - ts_seconds(t) <= 7200:
+                nxt["from"] = t   # a relog shortly before that session's first jump: it started here
+                continue
+            last = max([s_["end"] for s_ in sessions if s_["end"] < t] + [x["end"] for x in idle], default="")
+            if last and ts_seconds(t) - ts_seconds(last) <= 7200:
+                if idle and idle[-1]["end"] == last:
+                    idle[-1]["end"] = t
+                continue
+            at = self.db.execute("SELECT ts, id64, name, x, y, z FROM jumps WHERE ts <= ? ORDER BY ts DESC LIMIT 1",
+                                 (t,)).fetchone()
+            idle.append({"start": t, "end": t, "from": t, "jumps": 0, "ly": 0.0,
+                         "max_sol": math.sqrt(at["x"] ** 2 + at["y"] ** 2 + at["z"] ** 2) if at else 0.0,
+                         "systems": [{"ts": t, "id": str(at["id64"]), "name": at["name"], "kind": "Location"}] if at else []})
+        sessions = sorted(sessions + idle, key=lambda x: x["start"])
         for s_, nxt in zip(sessions, sessions[1:] + [None]):
             s_["ly"] = round(s_["ly"], 1); s_["max_sol"] = round(s_["max_sol"])
             s_["until"] = nxt and nxt["from"]   # where the next session's window starts (None: the latest)
-            del s_["_last"], s_["_prev"]
+            s_.pop("_last", None); s_.pop("_prev", None)
         sessions.reverse()
         return sessions
 

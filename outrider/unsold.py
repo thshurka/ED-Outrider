@@ -577,12 +577,15 @@ def analyse(events, args):
     system_name = {}                # SystemAddress -> name, for events that carry only the address
     organics = []                   # completed (Analyse) samples still aboard: not in a sale, not lost to a death
     footfalled = {}                 # (system, bodyid) -> WasFootfalled from your first Scan of it that says
+    saa = []                        # (key, ts, efficient): mappings, judged once every system name is known
     death_in_window = None
 
     for ts, cmdr, ev in events:
         if args.commander and cmdr and cmdr.lower() != args.commander.lower():
             continue
         name = ev.get("event")
+        if ev.get("StarSystem") and ev.get("SystemAddress") is not None:   # any line naming it (a nav beacon's too)
+            system_name[ev["SystemAddress"]] = ev["StarSystem"]
 
         if name == "Scan":
             if ev.get("ScanType") in NAV_BEACON_SCANS:
@@ -594,8 +597,6 @@ def analyse(events, args):
             if not (ev.get("StarType") or ev.get("PlanetClass")):
                 continue  # belt clusters and rings: no cartographic value, don't count them
             key = (ev.get("SystemAddress"), ev.get("BodyID"))
-            if ev.get("StarSystem"):
-                system_name[ev.get("SystemAddress")] = ev["StarSystem"]
             if hard_cut and ts <= hard_cut:
                 continue
             if key in sold_at and sold_at[key] < ts:
@@ -621,19 +622,10 @@ def analyse(events, args):
                 continue  # probing a ring is not mapping a body
             if hard_cut and ts <= hard_cut:
                 continue
-            key = (ev.get("SystemAddress"), ev.get("BodyID"))
-            if key in map_sold_at and map_sold_at[key] < ts:
-                # the mapping was already sold: Universal Cartographics pays nothing for a remap
-                continue
-            sysname = system_name.get(ev.get("SystemAddress"))
-            f = fate(sysname, ts)
-            if f == "aboard":
-                probes, target = ev.get("ProbesUsed"), ev.get("EfficiencyTarget")
-                mapped[key] = bool(probes and target and probes <= target)
-            else:
-                mapped.pop(key, None)
-                if f == "sold":
-                    map_sold_at[key] = next_sale(sysname, ts)
+            # judged after the loop: a body mapped before any line named its system (a carrier jump, then the DSS
+            # straight away) would otherwise find no sale for it and stay "aboard" for good (review F36)
+            probes, target = ev.get("ProbesUsed"), ev.get("EfficiencyTarget")
+            saa.append(((ev.get("SystemAddress"), ev.get("BodyID")), ts, bool(probes and target and probes <= target)))
 
         elif name == "ScanOrganic":
             if ev.get("ScanType") != "Analyse":
@@ -660,6 +652,20 @@ def analyse(events, args):
             earliest_cut = min([c for c in (explo_cut, bio_cut) if c], default=None)
             if earliest_cut and ts > earliest_cut:
                 death_in_window = ts
+
+    for key, ts, efficient in saa:
+        if key in map_sold_at and map_sold_at[key] < ts:
+            continue   # the mapping was already sold: Universal Cartographics pays nothing for a remap
+        sysname = system_name.get(key[0])
+        if sysname is None:
+            continue   # never named in these journals: neither aboard nor sold, so not counted
+        f = fate(sysname, ts)
+        if f == "aboard":
+            mapped[key] = efficient
+        else:
+            mapped.pop(key, None)
+            if f == "sold":
+                map_sold_at[key] = next_sale(sysname, ts)
 
     # A body whose scan was already sold but which you mapped afterwards is worth the
     # mapping alone.
@@ -899,7 +905,10 @@ def calibrate(events, args):
     gap, the comparison is meaningless rather than wrong."""
     import collections
 
-    batches = sale_batches(events)
+    # the commander filter applies to the sales too, not only to the scans (Codex F8): another commander's sale in the
+    # same five minutes would be counted into this one's batch
+    mine = lambda cmdr: not (args.commander and cmdr and cmdr.lower() != args.commander.lower())
+    batches = sale_batches([e for e in events if mine(e[1])])
     if len(batches) < 2:
         print("Not enough past exploration sales in these journals to calibrate.")
         return

@@ -128,6 +128,12 @@ upstream project's choices, not rules of the game.
   Status.json, and the virtual keyboard, the co-pilot button and the clipboard are off whatever the config says.
 - **Here's bio items never break inside themselves,** and a compact table shows a codex entry as 📖 ✦ with the name
   in its tooltip (the run beside it already names the species), so a row stays one or two lines beside an open panel.
+- **History's sessions are split by 2 h without a jump.** A session's window runs from its login (the latest one
+  within 2 h before its first jump) to the next session's; a login no jump followed, 2 h or more after anything
+  else, opens a session with no jumps (review F31), whose "end" is its last login (nothing later is known).
+- **A Vista Genomics visit is one x5 check** (sales under 5 minutes apart): the runs aboard before its first sale
+  against everything it sold; each sale stores what it adds, so the ledger's sum is the visit's check whatever order
+  the entries came in (review F21).
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

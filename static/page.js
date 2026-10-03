@@ -2233,8 +2233,10 @@ function bioRunsText(b) {
 function unsoldHtml(u) {
   if (!u || u.error) return "";
   const c = u.carto, b = u.bio, cr = n => Math.round(n).toLocaleString("en-US") + " cr";
-  const from = x => x.cutoff && x.last_sold && x.cutoff > x.last_sold
-    ? `since your ship was lost ${day(x.cutoff)}` : x.last_sold ? `since you last sold ${day(x.last_sold)}` : "all on record";
+  // the cutoff first (a loss with no sale before it still starts the count); bio counts from any death, on foot too
+  // (review F45)
+  const from = (x, bio) => x.cutoff && (!x.last_sold || x.cutoff > x.last_sold)
+    ? `${bio ? "since you died" : "since your ship was lost"} ${day(x.cutoff)}` : x.last_sold ? `since you last sold ${day(x.last_sold)}` : "all on record";
   const cx = data.carrier, where = cx && cx.has_uc ? (cx.here ? ` Your carrier (with UC) is right here.` :
     cx.distance != null ? ` Your carrier has UC and is ${cx.distance.toLocaleString("en-US", {maximumFractionDigits: 0})} ly away at ${esc(cx.system)}.` : "") : "";
   const [tw, tu] = unsoldThresholds(u), lvl = unsoldLevel(u);
@@ -2249,7 +2251,7 @@ function unsoldHtml(u) {
     (u.firsts ? `<li><span class="bn">🏁 ${u.firsts.systems} systems (arrival star) · ${u.firsts.stars} stars · ` +
                 `${u.firsts.planets} planets first discovered · ${u.firsts.mapped} first mapped</span></li>` : "") +
     `</ul></div>` +
-    `<div class="sec"><div class="lbl">🧬 Exobiology · ${from(b)}</div><ul>` +
+    `<div class="sec"><div class="lbl">🧬 Exobiology · ${from(b, true)}</div><ul>` +
     `<li><span>${b.samples} sample${b.samples === 1 ? "" : "s"}</span><b>${cr(b.estimated_value)}</b></li>` +
     (b.samples ? `<li><span class="bn">${[bioRunsText(b), `range ${cr(b.base_value)} – ${cr(b.max_value)}`].filter(Boolean).join(" · ")}</span></li>` : "") +
     u.species.map(r => `<li><span class="bn">${esc(r.species)} ×${r.count}</span><b>${cr(r.value)}</b></li>`).join("") +

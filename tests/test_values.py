@@ -51,6 +51,37 @@ class UnsoldEstimate(unittest.TestCase):
         ev = [stats("2026-01-01T00:00:00Z", 1, 0), cut]
         self.assertAlmostEqual(outrider.unsold.analyse(ev, ARGS)["exploration"]["payout_ratio"], 0.91)
 
+    def test_mapping_before_the_system_is_named_is_sold_with_it(self):   # F36
+        saa = lambda ts: (T(ts), None, {"event": "SAAScanComplete", "timestamp": ts, "SystemAddress": 1, "BodyID": 7,
+                                        "BodyName": "Asgara 7", "ProbesUsed": 4, "EfficiencyTarget": 6})
+        for first in ("Detailed", "NavBeaconDetail"):
+            sc = scan("2026-01-01T00:05:00Z", "Asgara", 1, 7, "Asgara 7")
+            sc[2]["ScanType"] = first
+            ev = [saa("2026-01-01T00:00:00Z"), sc, sale("2026-01-02T00:00:00Z", ["Asgara"])]
+            ex = outrider.unsold.analyse(ev, ARGS)["exploration"]
+            self.assertEqual((ex["rows"], ex["mapped"]), ([], 0), first)
+        # still aboard when no sale named it; and never named at all: not counted either way
+        ex = outrider.unsold.analyse([saa("2026-01-01T00:00:00Z"), scan("2026-01-01T00:05:00Z", "Asgara", 1, 7, "Asgara 7")], ARGS)["exploration"]
+        self.assertEqual(ex["mapped"], 1)
+        self.assertEqual(outrider.unsold.analyse([saa("2026-01-01T00:00:00Z")], ARGS)["exploration"]["mapped"], 0)
+
+    def test_calibrate_filters_the_sales_by_commander_too(self):   # Codex F8
+        import argparse, contextlib, io
+        who = lambda e, c: (e[0], c, e[2])
+        alice = [who(sale("2026-01-01T00:00:00Z", []), "Alice"),
+                 who(scan("2026-01-02T00:00:00Z", "A", 1, 0, "A", star=True), "Alice"),
+                 who(sale("2026-01-03T00:00:00Z", ["A"]), "Alice")]
+        bob = [who(sale("2026-01-03T00:01:00Z", ["A"]), "Bob")]   # within the five minutes of Alice's sale
+        args = argparse.Namespace(**dict(vars(ARGS), commander="Alice"))
+
+        def aggregate(events):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                outrider.unsold.calibrate(sorted(events, key=lambda e: e[0]), args)
+            return next(line for line in out.getvalue().splitlines() if line.startswith("AGGREGATE")).split()
+        self.assertEqual(aggregate(alice + bob), aggregate(alice))   # Bob's sale is not in Alice's batch
+        self.assertEqual(aggregate(alice)[1], "1,000")
+
     def test_journal_dirs_env_override(self):
         os.environ["ED_JOURNALS"] = os.pathsep.join([os.getcwd(), "/nonexistent/xyz"])
         try:
@@ -1169,6 +1200,62 @@ class BatchEExobio(unittest.TestCase):
                (json.loads(r[0]) for r in self.db.execute("SELECT x5_check FROM sale_events WHERE kind = 'bio' ORDER BY ts"))]
         self.assertEqual(got, [{"sold": 1, "predicted": 1, "matched": 1, "unknown": 0}, {"sold": 1, "predicted": 1, "matched": 1, "unknown": 0},
                                {"sold": 2, "predicted": 0, "matched": 0, "unknown": 1}])
+
+    def visit(self, sales, gap=11):
+        """Body 1 not footfalled (x5 predicted), body 2 footfalled (x1), a Stratum run done on each; then the sales,
+        `gap` s apart. -> the x5_check rows, in journal order, and the trip's x5."""
+        journal = [self.body_scan("2026-01-01T00:00:00Z", 1, False), self.body_scan("2026-01-01T00:00:01Z", 2, True),
+                   self.organic("2026-01-01T01:00:00Z", 1, "Analyse", self.STRATUM, "Stratum Tectonicas"),
+                   self.organic("2026-01-01T01:10:00Z", 2, "Analyse", self.STRATUM, "Stratum Tectonicas")]
+        for k, bonus in enumerate(sales):
+            journal.append({"event": "SellOrganicData", "timestamp": ed_outrider.iso_ts(ed_outrider.ts_seconds("2026-01-02T00:00:00Z") + k * gap),
+                            "BioData": [{"Species": self.STRATUM, "Value": 100, "Bonus": 400 if bonus else 0}]})
+        journal.append({"event": "MultiSellExplorationData", "timestamp": "2026-01-02T01:00:00Z", "TotalEarnings": 1000,
+                        "BaseValue": 1000, "Bonus": 0, "Discovered": []})
+        for i, e in enumerate(journal):
+            self.j.line_source = f"j:{i}"
+            self.j.handle(e)
+        rows = [{k: c[k] for k in ("sold", "predicted", "matched")} for c in
+                (json.loads(r[0]) for r in self.db.execute("SELECT x5_check FROM sale_events WHERE kind = 'bio' ORDER BY ts, source"))]
+        return rows, self.state.ledger()["trips"][0]["x5"]
+
+    def test_a_visit_in_several_goes_is_one_check(self):   # F21
+        rows, trip = self.visit([False, False])   # the prediction was wrong: no bonus on either
+        self.assertEqual([r["predicted"] for r in rows], [1, 0])
+        self.assertEqual({k: trip[k] for k in ("sold", "predicted", "matched")}, {"sold": 2, "predicted": 1, "matched": 0})
+
+    def test_x1_sold_before_the_x5_is_no_false_miss(self):   # F21, the skeptic's case: the prediction was right
+        _rows, trip = self.visit([False, True])
+        self.assertEqual({k: trip[k] for k in ("sold", "predicted", "matched")}, {"sold": 2, "predicted": 1, "matched": 1})
+
+    def test_two_vista_sales_in_one_second(self):   # Codex C1: both kept, each takes its own run
+        rows, trip = self.visit([True, False], gap=0)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM bio_sales").fetchone()[0], 2)
+        self.assertEqual({k: trip[k] for k in ("sold", "predicted", "matched")}, {"sold": 2, "predicted": 1, "matched": 1})
+        states = sorted(r["state"] for r in self.state.organics(36500)["rows"])
+        self.assertEqual(states, ["sold", "sold"])
+
+    def test_old_bio_sales_table_is_rebuilt(self):   # Codex C1: the old key could not keep two sales in one second
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "old.sqlite")
+        try:
+            old = sqlite3.connect(path)
+            old.executescript("""CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE bio_sales (ts TEXT PRIMARY KEY, species INTEGER, bio_data TEXT);
+                INSERT INTO meta VALUES ('parser_version', '37');
+                INSERT INTO bio_sales VALUES ('2026-01-02T00:00:00Z', 1, '[]');""")
+            old.commit()
+            old.close()
+            db = ed_outrider.open_db(path)
+            try:
+                pk = [r["name"] for r in db.execute("PRAGMA table_info(bio_sales)") if r["pk"]]
+                self.assertEqual(pk, ["ts", "source"])
+                self.assertEqual(db.execute("SELECT count(*) FROM bio_sales").fetchone()[0], 0)   # re-read from the journals
+            finally:
+                db.close()
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
     def test_old_sale_events_gain_the_column(self):
         import tempfile
