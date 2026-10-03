@@ -456,8 +456,12 @@ def button_fake_evdev(self, script):
         def __init__(self, path):
             if path == "/dev/input/event9":
                 raise PermissionError(13, "Permission denied")
-            self.path, self.name, self.closed = path, "Saitek X-56 Throttle" if path.endswith("5") else "Keyboard", False
+            self.path, self.closed = path, False
+            self.name = "Saitek X-56 Throttle" if path.endswith("5") else "Saitek X-56 Stick" if path.endswith("4") else "Keyboard"
             Dev.opened.append(self)
+
+        def capabilities(self):   # the throttle has the button (300); the stick, listed first, does not
+            return {1: [300, 301]} if self.path.endswith("5") else {1: [288]}
 
         def grab(self):
             test.fail("the button must never grab the device")
@@ -479,7 +483,8 @@ def button_fake_evdev(self, script):
     ecodes = types.SimpleNamespace(EV_KEY=1, ecodes={"BTN_TRIGGER_HAPPY5": 300, "KEY_F13": 183},
                                    BTN={300: "BTN_TRIGGER_HAPPY5"}, KEY={183: "KEY_F13"})
     return types.SimpleNamespace(ecodes=ecodes, InputDevice=Dev, UInput=uinput,
-                                 list_devices=lambda: ["/dev/input/event3", "/dev/input/event5", "/dev/input/event9"]), Dev
+                                 list_devices=lambda: ["/dev/input/event3", "/dev/input/event4", "/dev/input/event5",
+                                                       "/dev/input/event9"]), Dev
 
 
 # shared from BatchDFuel.MANDALAY_JUMPS (an alias there)

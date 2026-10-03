@@ -466,6 +466,54 @@ class BatchGHonkBackups(unittest.TestCase):
             self.assertIn("also in the zip, not restored: speech.json", lines[-1])
             self.assertFalse([f for f in os.listdir(d) if f.endswith(".part")])
 
+    def test_restore_a_database_not_named_sqlite(self):   # F33
+        import tempfile, zipfile
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "mydata.db")
+            self.make_db(dbp, 3)
+            src = os.path.join(d, "src.db")
+            self.make_db(src, 10)
+            z = os.path.join(d, "mydata-20260101-000000Z.zip")
+            with zipfile.ZipFile(z, "w") as zf:
+                zf.write(src, "mydata.db")   # as make_backup names the member: after the database's own file
+            lines = ed_outrider.restore_backup(z, dbp, "127.0.0.1", 0, now=0)
+            self.assertIn("(mydata.db)", lines[0])
+            con = sqlite3.connect(dbp)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 10)
+            con.close()
+
+    def test_restore_when_the_defaults_cannot_be_written(self):   # F34
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "x.sqlite")
+            self.make_db(dbp, 3)
+            defaults = ed_outrider.browser_defaults_path(dbp)
+            ed_outrider.write_browser_defaults(defaults, {"version": 1, "settings": {"sound": False}})
+            os.makedirs(defaults + ".part")   # the write fails (as a full disk would)
+            z = self.make_zip(d, rows=10, defaults={"version": 1, "settings": {"sound": True}})
+            lines = ed_outrider.restore_backup(z, dbp, "127.0.0.1", 0, now=0)
+            self.assertTrue(lines[0].startswith(f"restored {dbp}"))
+            self.assertTrue(any("could not be written" in x and "the old one stays" in x for x in lines), lines)
+            with open(defaults) as f:
+                self.assertEqual(json.load(f)["settings"], {"sound": False})   # still there, unchanged
+
+    def test_restore_refuses_defaults_that_are_not_settings(self):   # Codex F9
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "x.sqlite")
+            self.make_db(dbp, 3)
+            for bad in ([], 42, "x"):   # (make_zip writes no file for None: JSON null is in the read check below)
+                z = self.make_zip(d, name=f"outrider-x-{type(bad).__name__}.zip", rows=10, defaults=bad)
+                with self.assertRaisesRegex(RuntimeError, "is not a settings document"):
+                    ed_outrider.restore_backup(z, dbp, "127.0.0.1", 0, now=0)
+            con = sqlite3.connect(dbp)
+            self.assertEqual(con.execute("SELECT count(*) FROM t").fetchone()[0], 3)   # nothing replaced
+            con.close()
+            for bad in (None, [], 42, "x"):   # and in place: the page still loads, with no defaults
+                with open(ed_outrider.browser_defaults_path(dbp), "w") as f:
+                    json.dump(bad, f)
+                self.assertIsNone(ed_outrider.read_browser_defaults(ed_outrider.browser_defaults_path(dbp)))
+
     def test_restore_refuses_while_the_port_is_bound(self):
         import socket, tempfile
         with tempfile.TemporaryDirectory() as d, socket.socket() as sock:
@@ -612,9 +660,11 @@ class BatchBVoiceControl(unittest.TestCase):
         self.assertEqual(outrider.button.button_code(ev, 300), 300)
         self.assertIsNone(outrider.button.button_code(ev, "BTN_NOPE"))
         self.assertIsNone(outrider.button.button_code(ev, ""))
-        dev, why = outrider.button.find_device(ev, "x-56")
-        self.assertEqual((dev.path, why), ("/dev/input/event5", None))
+        dev, why = outrider.button.find_device(ev, "x-56", 300)
+        self.assertEqual((dev.path, why), ("/dev/input/event5", None))      # the throttle: the stick has no button 300
         self.assertTrue(all(d.closed for d in Dev.opened if d is not dev))   # the others are let go
+        self.assertEqual(outrider.button.find_device(ev, "x-56", 999)[0].path, "/dev/input/event4")   # none has it: the first
+        self.assertEqual(outrider.button.find_device(ev, "x-56")[0].path, "/dev/input/event4")        # no code: the first
         dev, why = outrider.button.find_device(ev, "Rhino")
         self.assertIsNone(dev)
         self.assertIn("1 could not be opened", why)                           # the unreadable one is counted

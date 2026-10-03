@@ -234,6 +234,7 @@ SPANSH_MAX_PAGES = 10
 SPANSH_CONCURRENCY = 4     # body-detail fetches after an arrival
 SPANSH_INTERACTIVE = 2     # separate lane for target/body lookups so they never queue behind the above
 LONG_POLL_SECONDS = 25     # s: how long /api/nearby holds a request with nothing new before answering 204
+EDSM_SPHERE_MAX = 100     # ly: EDSM's sphere-systems answers no further out ("radius", max 100, in its API docs)
 ON_DEMAND_MAX_AGE = 86400  # s: a system fetched for Search/bookmarks/pins is fetched again after a day
 UNSOLD_LOG = 3             # recent unsold estimates kept to stamp a sale with the one made before it
 NO_DUMP_RETRY = 3600       # s: a dump 404 for a system whose search lists bodies is asked again after this
@@ -761,7 +762,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "speech_speed": min(2.0, max(0.5, num("defaults", df, "speech_speed", float, SPEECH_SPEED))),
         "speech_names": ", ".join(str(x) for x in df["speech_names"]) if isinstance(df.get("speech_names"), list)
                         else str(df.get("speech_names", SPEECH_NAMES)),
-        "speech_file": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("speech_file") or SPEECH_FILE))),
+        "speech_file": speech_file_path(sv.get("speech_file")),
         "server_player": num("speech", spk, "server_player", _config_player, SERVER_PLAYER),
         "backup_dir": os.path.join(SCRIPT_DIR, os.path.expanduser(str(sv.get("backup_dir") or BACKUP_DIR))),
         "backup_keep": max(1, num("server", sv, "backup_keep", int, BACKUP_KEEP)),
@@ -836,7 +837,7 @@ def config_text(st):
 
 [journals]
 {"live = " + lst(st["live"]) if st["live"] else "# live = []"}      # folders holding Journal.*.log that are tailed live (auto-detected when absent)
-{"" if st["live"] else "# "}legacy = {lst(st["legacy"])}  # folders of older journals, imported once and never re-read ([] = none; auto-detected when absent)
+{"" if st["live"] else "# "}legacy = {lst(st["legacy"])}  # folders of older journals, imported once and never re-read ([] = none; auto-detected only when live is absent too)
 
 [server]
 host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on your network
@@ -4253,7 +4254,9 @@ class Spansh:
         return d if isinstance(d, dict) and d.get("name") else None
 
     async def edsm_sphere(self, pos, radius):
-        params = {"x": pos["x"], "y": pos["y"], "z": pos["z"], "radius": radius,
+        """EDSM's systems within `radius` (at most EDSM_SPHERE_MAX: its API's documented limit; a larger radius is
+        cut to it, and the refresh's status says so: review F48)."""
+        params = {"x": pos["x"], "y": pos["y"], "z": pos["z"], "radius": min(radius, EDSM_SPHERE_MAX),
                   "showId": 1, "showCoordinates": 1, "showPrimaryStar": 1}
         async with self.sem:
             async with self.session.get(EDSM_SPHERE, params=params) as r:
@@ -4307,7 +4310,16 @@ def base_from_edsm(d):
                         "scoopable": bool(ps.get("isScoopable")), "terraformable": False, "full": False,
                         "placeholder": True})
     return {"v": CACHE_VERSION, "name": d["name"], "x": c.get("x"), "y": c.get("y"), "z": c.get("z"),
-            "body_count": None, "records": records}
+            "body_count": None, "records": records, "edsm": True}
+
+
+def cached_source(b):
+    """Whose a cached base is: "edsm" for one made from EDSM (find_system's fallback; an older cache entry is told by
+    its placeholder-only records and unknown body count), else "spansh" (review F27)."""
+    if b.get("edsm") or (b.get("body_count") is None and all((r or {}).get("placeholder") for r in b.get("records") or [])
+                         and b.get("records")):
+        return "edsm"
+    return "spansh"
 
 
 def base_from_search(s):
@@ -4353,9 +4365,11 @@ def read_browser_defaults(path):
             print(f"{path}: ignoring settings no longer shared: {', '.join(stale)}", file=sys.stderr)
             doc = dict(doc, settings={k: v for k, v in doc["settings"].items() if k in BROWSER_SETTINGS})
     ok, _ = check_browser_defaults(doc)
+    if not ok:   # null, [], 42, a string: valid JSON, but no settings document (Codex F9: the page must still load)
+        return None
     # 'saved' is shown as a date on the page: a hand-edited number or object there would stop the page's script
     saved = doc.get("saved") if isinstance(doc.get("saved"), str) else None
-    return dict(ok, saved=saved) if ok else None
+    return dict(ok, saved=saved)
 
 
 def write_browser_defaults(path, doc):
@@ -7464,11 +7478,13 @@ class State:
             for row in self.near("spansh_systems", pos, r):
                 b = json.loads(row["summary"])
                 if b.get("v") == CACHE_VERSION and dist(pos, b) <= r:
-                    self.bases[row["id64"]] = ("cache", b)
+                    # Spansh's own record, from an earlier search: still Spansh's (not "not in Spansh", F27)
+                    self.bases[row["id64"]] = (cached_source(b), b)
                     cached_n += 1
             delay = self.schedule_retry()
             self.status = (f"Spansh search failed ({spansh_failed}); showing {cached_n} cached systems"
-                           f"{' plus EDSM’s list' if edsm else ''} — retrying in {delay}s")
+                           f"{(' plus EDSM’s list' + (f' (to {EDSM_SPHERE_MAX} ly, its limit)' if r > EDSM_SPHERE_MAX else '')) if edsm else ''}"
+                           f" — retrying in {delay}s")
         for d in edsm:
             if d.get("id64") and d.get("coords") and d["id64"] not in self.bases:
                 self.bases[d["id64"]] = ("edsm", base_from_edsm(d))
@@ -7489,9 +7505,13 @@ class State:
                 # asked again once NO_DUMP_RETRY has passed (every refresh before that reuses the answer)
                 current = False
             if current:
-                base = cached
+                if not (cached.get("no_dump") and len(cached.get("records") or []) < len(base["records"])):
+                    base = cached   # (a no-dump answer with fewer bodies than the search lists now: the search's, F29)
             elif base["records"]:
                 need_dump.append((id64, s.get("updated_at"), base))
+                # a full dump cached for an older updated_at shows meanwhile, and stays if the new one fails (F28)
+                if cached and not cached.get("no_dump") and len(cached.get("records") or []) >= len(base["records"]):
+                    base = cached
             else:
                 self.spansh.store(id64, s.get("updated_at"), base)
             self.bases[id64] = ("spansh", base)
@@ -10154,16 +10174,76 @@ async def check_bio_rules(state):
         print(f"exobiology rules: {info['species']} species from BioScan, up to date")
 
 
-def port_free(host, port):
-    """Can we listen on host:port? Checked before the journal import so a second copy fails fast."""
+def speech_file_path(name, root=None, resources=None):
+    """[server] speech_file, resolved: relative to the repository folder, ~ expanded; the shipped file when unset.
+    A relative name missing there but present in resources/ (a config written before the layout move, with
+    speech_file = "speech.json") is taken from resources/, with a warning (review F22)."""
+    root, resources = root or SCRIPT_DIR, resources or outrider.RESOURCES_DIR
+    if not name:
+        return SPEECH_FILE
+    raw = os.path.expanduser(str(name))
+    path = os.path.join(root, raw)
+    moved = os.path.join(resources, raw)
+    if not os.path.isabs(raw) and not os.path.exists(path) and os.path.exists(moved):
+        print(f"[server] speech_file = {name!r}: not found in {root}; using {moved} (it moved to resources/). "
+              f"Change the config to say so.", file=sys.stderr)
+        return moved
+    return path
+
+
+def migrate_old_layout(db_path, root=None, data=None, log=print):
+    """Before the data/ folder (2026-10-01) your files sat in the repository folder: the database, its
+    browser_defaults.json, speech_banned.json, backups/ and piper-voices/. When the database is the default one in
+    data/ and missing there, but the old one is at the root, they move into data/, each once, saying so (review
+    F22). Nothing is overwritten: what already exists in data/ stays, and the old copy with it. -> what moved."""
+    import shutil
+    root, data = root or SCRIPT_DIR, data or outrider.DATA_DIR
+    old_db = os.path.join(root, os.path.basename(db_path))
+    if os.path.exists(db_path) or not os.path.isfile(old_db) or \
+            os.path.normcase(os.path.abspath(os.path.dirname(db_path))) != os.path.normcase(os.path.abspath(data)):
+        return []
+    os.makedirs(data, exist_ok=True)
+    moved = []
+    names = [os.path.basename(db_path) + x for x in ("", "-wal", "-shm")] + \
+        [BROWSER_DEFAULTS_FILE, "speech_banned.json", "backups", "piper-voices"]
+    for n in names:
+        src, dst = os.path.join(root, n), os.path.join(data, n)
+        if os.path.exists(src) and not os.path.exists(dst):
+            shutil.move(src, dst)
+            moved.append(n)
+    if moved:
+        log(f"moved from the repository folder into {data} (the new layout): {', '.join(moved)}")
+    return moved
+
+
+def listen_problem(host, port):
+    """Why we cannot listen on host:port, in words, or None. Checked before the journal import so a second copy fails
+    fast. A port in use says "already running?"; an address that is not this machine's (a LAN address DHCP has
+    changed, a typo, a name that does not resolve) says so, not that the port is taken (review F20)."""
+    import errno
     import socket
+    here = f"cannot listen on {host}:{port}"
+    not_mine = (' (is [server] host this machine\'s address or name? "127.0.0.1" is this PC only, '
+                '"0.0.0.0" every address it has)')
     try:
         with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((host, port))
-        return True
-    except OSError:
-        return False
+        return None
+    except socket.gaierror as e:
+        return f"{here}: {e.strerror or e}{not_mine}"
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            return (f"port {port} is already in use: is ED Outrider already running? "
+                    f"(open http://127.0.0.1:{port}/, or start this one with --port N)")
+        if e.errno == errno.EADDRNOTAVAIL:
+            return f"{here}: {e.strerror or e}{not_mine}"
+        return f"{here}: {e.strerror or e}"
+
+
+def port_free(host, port):
+    """Can we listen on host:port?"""
+    return listen_problem(host, port) is None
 
 
 def list_backups(folder, db_path):
@@ -10204,7 +10284,8 @@ def restore_backup(zip_path, db_path, host, port, now=None):
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
         dbs = [n for n in names if n.endswith(".sqlite") and "/" not in n]
-        member = os.path.basename(db_path) if os.path.basename(db_path) in dbs else dbs[0] if len(dbs) == 1 else None
+        # the zip names the database after the file it was made from, whatever its extension (--db mydata.db: F33)
+        member = os.path.basename(db_path) if os.path.basename(db_path) in names else dbs[0] if len(dbs) == 1 else None
         if not member:
             raise RuntimeError(f"{zip_path} holds no single database ({', '.join(names) or 'empty'})")
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
@@ -10219,9 +10300,11 @@ def restore_backup(zip_path, db_path, host, port, now=None):
             if BROWSER_DEFAULTS_FILE in names:
                 doc = z.read(BROWSER_DEFAULTS_FILE)
                 try:
-                    json.loads(doc)
+                    parsed = json.loads(doc)
                 except ValueError:
                     raise RuntimeError(f"{BROWSER_DEFAULTS_FILE} in {zip_path} is not JSON") from None
+                if not (isinstance(parsed, dict) and isinstance(parsed.get("settings"), dict)):   # Codex F9
+                    raise RuntimeError(f"{BROWSER_DEFAULTS_FILE} in {zip_path} is not a settings document")
             lines = []
             if os.path.exists(db_path):
                 aside = f"{db_path}.pre-restore-{stamp}"
@@ -10239,14 +10322,25 @@ def restore_backup(zip_path, db_path, host, port, now=None):
                 pass
     lines.insert(0, f"restored {db_path} from {zip_path} ({member})")
     if doc is not None:
-        if os.path.exists(defaults):
-            os.replace(defaults, f"{defaults}.pre-restore-{stamp}")
-            lines.append(f"restored {defaults} (the old one is kept as {defaults}.pre-restore-{stamp})")
+        # the new file first, then the old one aside: a write that fails (a full disk) leaves the old defaults in
+        # place, and the database, already restored, is reported as restored (review F34)
+        try:
+            with open(defaults + ".part", "wb") as f:
+                f.write(doc)
+        except OSError as e:
+            lines.append(f"the database is restored, but {defaults} could not be written ({e.strerror or e}); "
+                         + ("the old one stays" if os.path.exists(defaults) else "there is none"))
+            try:
+                os.remove(defaults + ".part")
+            except OSError:
+                pass
         else:
-            lines.append(f"restored {defaults}")
-        with open(defaults + ".part", "wb") as f:
-            f.write(doc)
-        os.replace(defaults + ".part", defaults)
+            if os.path.exists(defaults):
+                os.replace(defaults, f"{defaults}.pre-restore-{stamp}")
+                lines.append(f"restored {defaults} (the old one is kept as {defaults}.pre-restore-{stamp})")
+            else:
+                lines.append(f"restored {defaults}")
+            os.replace(defaults + ".part", defaults)
     rest = [n for n in names if n not in (member, BROWSER_DEFAULTS_FILE)]
     if rest:
         lines.append(f"also in the zip, not restored: {', '.join(rest)} (unzip one by hand if you want it back)")
@@ -10290,10 +10384,11 @@ async def run(args, st):
               "ED_JOURNALS.", file=sys.stderr)
     else:
         print("journals: " + ", ".join(LIVE_DIRS) + (f"  (legacy: {', '.join(LEGACY_DIRS)})" if LEGACY_DIRS else ""))
-    if not port_free(args.host, args.port):
-        print(f"port {args.port} is already in use: is ED Outrider already running? "
-              f"(open http://127.0.0.1:{args.port}/, or start this one with --port N)", file=sys.stderr)
+    problem = listen_problem(args.host, args.port)
+    if problem:
+        print(problem, file=sys.stderr)
         raise SystemExit(1)
+    migrate_old_layout(args.db)   # an upgrade from before data/: your database and files come along
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)   # data/ on a fresh copy
     db = open_db(args.db, rescan=args.rescan)
     journals = Journals(db)
@@ -10430,7 +10525,7 @@ async def run(args, st):
         if state.targeter:
             state.targeter.cancel.set()   # a sequence pressing keys lets go and stops now
         tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task, state.seller_task,
-                             state.carrier_task, state.searcher.task, state.honk_test_task, state.backup_wait_task, button_task,
+                             state.carrier_task, state.searcher.task, state.honk_test_task, button_task,   # the quit backup: finish_backup
                              firsts_task, state.highway_task, state.autotarget_task, state.autotarget_test_task) if t]
         for t in tasks:
             t.cancel()
@@ -10450,9 +10545,17 @@ BACKUP_SHUTDOWN_WAIT = 300   # s a backup running at shutdown (the quit backup) 
 
 
 async def finish_backup(state, wait=None):
-    """At shutdown: let a running backup finish and record its result before the database closes. Left alone,
-    its worker thread still writes the zip and rotates old ones, but last_backup is never updated (the next
-    start then backs up again at once and rotates out one more good zip). Past the wait it is cancelled."""
+    """At shutdown: a quit backup still in its SHUTDOWN_BACKUP_DELAY starts now (closing Outrider right after the
+    game used to drop it: review F32); a running backup finishes and its result is recorded before the database
+    closes. Left alone, its worker thread still writes the zip and rotates old ones, but last_backup is never updated
+    (the next start then backs up again at once and rotates out one more good zip). Past the wait it says so and
+    keeps waiting: the process waits for that thread to end whatever is done here, so giving up would only lose the
+    result (review F35)."""
+    w = state.backup_wait_task
+    if w is not None and not w.done():
+        w.cancel()
+        await asyncio.gather(w, return_exceptions=True)
+        state.start_backup(auto=True)
     t = state.backup_task
     if not t or t.done():
         return
@@ -10460,8 +10563,7 @@ async def finish_backup(state, wait=None):
     try:
         await asyncio.wait_for(asyncio.shield(t), BACKUP_SHUTDOWN_WAIT if wait is None else wait)
     except asyncio.TimeoutError:
-        print("backup still running at shutdown: not recorded", file=sys.stderr)
-        t.cancel()
+        print("the backup is still running: waiting for it (the program cannot end before it does)", file=sys.stderr)
         await asyncio.gather(t, return_exceptions=True)
 
 
@@ -10481,7 +10583,8 @@ def main(argv=None):
     p.add_argument("--journals", action="append", metavar="PATH",
                    help="Journal folder to tail (repeatable). Default: auto-detected.")
     p.add_argument("--legacy", action="append", metavar="PATH",
-                   help="Folder of older journals to import once (repeatable). Default: auto-detected.")
+                   help="Folder of older journals to import once (repeatable). Default: auto-detected, unless "
+                        "--journals, ED_JOURNALS or [journals] live names the live folders.")
     p.add_argument("--rescan", action="store_true",
                    help="Forget which journals were read and rebuild visits from scratch, "
                         "including the legacy directories. Spansh cache is kept.")

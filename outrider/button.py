@@ -94,8 +94,10 @@ def code_name(evdev, code):
     return (n[0] if isinstance(n, (list, tuple)) else n) or str(code)
 
 
-def find_device(evdev, spec):
+def find_device(evdev, spec, code=None):
     """The input device `spec` names: a /dev/input path (a by-id link too) or a part of its name, case ignored.
+    With `code` (the button), of the devices whose names match, the first that can send it: "X-56" matches the stick
+    and the throttle of a two-part HOTAS, and only one has the button (review F41); none of them saying so, the first.
     (device, None), or (None, why not)."""
     spec = str(spec or "").strip()
     if not spec:
@@ -105,7 +107,7 @@ def find_device(evdev, spec):
             return evdev.InputDevice(spec), None
         except OSError as e:
             return None, f"{spec}: {e.strerror or e}"
-    found, unreadable = None, 0
+    found, first, unreadable = None, None, 0
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
@@ -113,13 +115,27 @@ def find_device(evdev, spec):
             unreadable += 1
             continue
         if found is None and spec.lower() in (dev.name or "").lower():
-            found = dev
-        else:
-            dev.close()
-    if found:
-        return found, None
+            if code is None or code in _keys(evdev, dev):
+                found = dev
+                continue
+            if first is None:
+                first = dev
+                continue
+        dev.close()
+    if found and first:
+        first.close()
+    if found or first:
+        return found or first, None
     return None, f"no input device named like {spec!r}" + (
         f" ({unreadable} could not be opened: joysticks need the uaccess tag, keyboards the input group)" if unreadable else "")
+
+
+def _keys(evdev, dev):
+    """The key and button codes a device can send (empty when it cannot say)."""
+    try:
+        return set((dev.capabilities() or {}).get(evdev.ecodes.EV_KEY, []))
+    except (AttributeError, OSError, TypeError):
+        return set()
 
 
 class ButtonWatch:
@@ -149,7 +165,7 @@ class ButtonWatch:
                            "(python3 -m outrider.button --listen prints them)")
             return
         while True:
-            dev, why = find_device(ev, self.device)
+            dev, why = find_device(ev, self.device, code)
             if dev is None:
                 self.status = f"{why}; looking again every {RETRY:g} s"
             else:

@@ -2,6 +2,27 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Spansh, config, backups and restore, start-up (fix plan, batch 9)
+- With Spansh down, systems cached from its earlier searches still read as Spansh's, not "not in Spansh"; EDSM's own
+  records stay EDSM's (review F27). A failed body refetch keeps the cached full dump instead of the search's partial
+  one (F28); a "no dump" answer gives way to the bodies the search now lists (F29). EDSM's fallback list asks for at
+  most 100 ly, its limit, and the status says so (F48).
+- The example config, `--write-config` and `--legacy`'s help say what the code does: legacy folders are
+  auto-detected only while `live` is unset too (F18). The README says what plain `python3 ed_outrider.py` finds in a
+  `.venv` (Piper and evdev, not aiohttp) (F47).
+- A `[server] host` that is not this machine's (a changed LAN address, a typo) says so at start, not "port already in
+  use" (F20).
+- Upgrading from before the data/ folder: the database, browser_defaults.json, speech_banned.json, backups/ and
+  piper-voices/ move from the repository folder into data/ once, saying so; an old config's
+  `speech_file = "speech.json"` finds resources/speech.json, with a warning (F22).
+- Closing Outrider within 10 s of the game quitting still makes the quit backup (F32); a backup still running at
+  shutdown past 5 minutes is waited for and recorded, not dropped (F35).
+- `--restore` restores a database not named *.sqlite (F33); a browser_defaults.json that cannot be written leaves the
+  old one and reports the database as restored (F34); a defaults file of the wrong type is refused by --restore and
+  ignored by the page instead of stopping it (Codex F9).
+- The co-pilot button picks, of the devices whose names match, the one that can send the button (the throttle of a
+  two-part X-56, not the stick) (F41).
+
 ## 2026-10-03 · Speech, voice, wording and page details (fix plan, batch 8)
 - A map's "Next" says the body's whole mapped value, without and with your bonuses: "Next: map 7 (771k/2.2M)",
   spoken "771 thousand, 2.2 million with bonuses" (one number when no bonus applies), on Now, in the mapped call-out

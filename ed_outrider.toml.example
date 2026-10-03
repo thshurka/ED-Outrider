@@ -23,7 +23,8 @@
 
 # Folders of older journals (an old PC, a backup) imported once on the first run and never re-read.
 # legacy = ["D:/old-pc/Saved Games/Frontier Developments/Elite Dangerous"]
-# legacy = []  turns off the auto-detected legacy folders (a missing key auto-detects; the same goes for live).
+# legacy = []  turns off the auto-detected legacy folders. A missing live auto-detects; a missing legacy auto-detects
+# only while live is missing too: once you set live (here, --journals or ED_JOURNALS), list your legacy folders here.
 
 [server]
 # host = "127.0.0.1"   # "0.0.0.0" makes the page reachable from other devices on your network

@@ -68,7 +68,7 @@ Open **<http://127.0.0.1:8025/>** and go fly.
 - **evdev** (Linux only) for auto honk and the co-pilot button. It is built from source, so it needs your
   distribution's Python development headers.
 
-A `.venv` in the Outrider folder is found even when you start Outrider with plain `python3 ed_outrider.py`.
+Start Outrider with the `.venv`'s Python (`.venv/bin/python ed_outrider.py`, as above): plain `python3 ed_outrider.py` finds Piper and evdev in a `.venv` in the Outrider folder, but aiohttp must then be installed for that `python3` too.
 Your own files (the database, backups, downloaded voices, banned lines) all go in `data/`.
 
 ## 🖥️ The views
@@ -515,7 +515,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 
 | Section | What it holds |
 |---|---|
-| `[journals]` | `live` and `legacy` folders, when auto-detection misses them |
+| `[journals]` | `live` and `legacy` folders, when auto-detection misses them (setting `live` turns off legacy auto-detection: list `legacy` too) |
 | `[server]` | `host`, `port`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
 | `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |

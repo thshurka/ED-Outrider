@@ -20,6 +20,78 @@ import outrider.speech  # noqa: E402
 
 
 class Config(unittest.TestCase):
+    def test_docs_say_when_legacy_is_auto_detected(self):   # F18: the code's rule, in every place that describes it
+        import subprocess, sys
+        with open(os.path.join(os.path.dirname(ed_outrider.__file__), "ed_outrider.toml.example"), encoding="utf-8") as f:
+            self.assertIn("only while live is missing too", f.read())
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        st = ed_outrider.settings_from({"journals": {"live": ["/mine"]}}, args, None, ([], ["/old"]))
+        self.assertEqual(st["legacy"], [])                    # the rule itself, unchanged
+        self.assertIn("auto-detected only when live is absent too", ed_outrider.config_text(st))
+        out = subprocess.run([sys.executable, ed_outrider.__file__, "--help"], capture_output=True, text=True, timeout=60)
+        self.assertIn("[journals] live names the live", " ".join(out.stdout.split()))
+
+    def test_listen_problem_names_the_cause(self):   # F20
+        import socket
+        with socket.socket() as busy:
+            busy.bind(("127.0.0.1", 0))
+            busy.listen()
+            port = busy.getsockname()[1]
+            self.assertIn("already in use", ed_outrider.listen_problem("127.0.0.1", port))
+        for host in ("10.255.255.254", "no.such.host.invalid"):   # not this machine's address; a name that does not resolve
+            msg = ed_outrider.listen_problem(host, port)
+            self.assertNotIn("already in use", msg, host)
+            self.assertIn(f"cannot listen on {host}:{port}", msg)
+            self.assertIn("[server] host", msg)
+        self.assertIsNone(ed_outrider.listen_problem("127.0.0.1", port))   # free again
+
+    def test_old_layout_moves_into_data(self):   # F22: temp folders only, never the repository's own
+        import contextlib, io, tempfile
+        with tempfile.TemporaryDirectory() as root:
+            data = os.path.join(root, "data")
+            db = ed_outrider.open_db(os.path.join(root, "ed_outrider.sqlite"))
+            ed_outrider.meta_set(db, "marker", "old rows")
+            db.commit()
+            db.close()
+            for n in ("browser_defaults.json", "speech_banned.json"):
+                with open(os.path.join(root, n), "w") as f:
+                    f.write("{}")
+            os.makedirs(os.path.join(root, "piper-voices"))
+            lines = []
+            moved = ed_outrider.migrate_old_layout(os.path.join(data, "ed_outrider.sqlite"), root, data, log=lines.append)
+            self.assertEqual(moved, ["ed_outrider.sqlite", "browser_defaults.json", "speech_banned.json", "piper-voices"])
+            self.assertEqual(len(lines), 1)
+            db = ed_outrider.open_db(os.path.join(data, "ed_outrider.sqlite"))
+            try:
+                self.assertEqual(ed_outrider.meta_get(db, "marker"), "old rows")   # the old rows, not a fresh file
+            finally:
+                db.close()
+            # once moved (or with a database already in data/), nothing more happens
+            self.assertEqual(ed_outrider.migrate_old_layout(os.path.join(data, "ed_outrider.sqlite"), root, data, log=lines.append), [])
+            # a database somewhere else (--db) is never touched
+            self.assertEqual(ed_outrider.migrate_old_layout(os.path.join(root, "other", "x.sqlite"), root, data), [])
+            # an old config's speech_file = "speech.json" finds the moved file in resources/
+            res = os.path.join(root, "resources")
+            os.makedirs(res)
+            with open(os.path.join(res, "speech.json"), "w") as f:
+                f.write("{}")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                got = ed_outrider.speech_file_path("speech.json", root, res)
+            self.assertEqual(got, os.path.join(res, "speech.json"))
+            self.assertIn("moved to resources/", err.getvalue())
+            self.assertEqual(ed_outrider.speech_file_path("mine.json", root, res), os.path.join(root, "mine.json"))
+
+    def test_readme_says_what_plain_python_finds(self):   # F47: aiohttp is imported before any .venv lookup
+        root = os.path.dirname(ed_outrider.__file__)
+        with open(os.path.join(root, "ed_outrider.py"), encoding="utf-8") as f:
+            head = f.read().split("from aiohttp import", 1)[0]
+        self.assertNotIn(".venv", head.split('"""', 2)[-1])   # no .venv on sys.path before the aiohttp import
+        with open(os.path.join(root, "README.md"), encoding="utf-8") as f:
+            readme = " ".join(f.read().split())
+        self.assertIn("aiohttp must then be installed for that `python3` too", readme)
+        self.assertNotIn("is found even when you start Outrider with plain", readme)
+
     def test_precedence_flag_env_file_detect(self):
         cfg = {"journals": {"live": ["/from/file"]}, "server": {"port": 9000}, "defaults": {"bio_min": 5}}
         args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)

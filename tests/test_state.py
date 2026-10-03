@@ -1452,8 +1452,26 @@ class BatchAIntegrity(unittest.TestCase):
             return self.state.backup_task.cancelled()
         self.assertFalse(asyncio.run(go(0.05, 5)))
         self.assertEqual(done, [0.05])
-        self.assertTrue(asyncio.run(go(5, 0.05)))          # past the wait: cancelled, not left to a closed database
-        self.assertEqual(done, [0.05])
+        # past the wait: still waited for, and its result kept (the thread would hold the exit anyway: F35)
+        self.assertFalse(asyncio.run(go(0.3, 0.05)))
+        self.assertEqual(done, [0.05, 0.3])
+
+    def test_closing_right_after_the_game_still_backs_up(self):   # F32
+        import asyncio, contextlib, io
+        started = []
+
+        async def go():
+            async def backup():
+                started.append("ran")
+            self.state.start_backup = lambda auto=False: (started.append(auto),
+                                                          setattr(self.state, "backup_task", asyncio.create_task(backup())))
+            self.state.backup_task = None
+            self.state.backup_wait_task = asyncio.create_task(asyncio.sleep(10))   # the quit backup's 10 s wait
+            await asyncio.sleep(0)
+            with contextlib.redirect_stdout(io.StringIO()):
+                await ed_outrider.finish_backup(self.state, 5)
+        asyncio.run(go())
+        self.assertEqual(started, [True, "ran"])
 
     # ---- config: F42 / F40 ----
     def test_config_section_that_is_not_a_table(self):   # F42
@@ -2268,6 +2286,88 @@ class FableServer(unittest.TestCase):
         self.assertEqual(calls, [7])
         asyncio.run(self.state._refresh(self.j.pos))                    # then the sphere: no second fetch
         self.assertEqual(calls, [7])
+
+    def spansh2(self, dump, updated="u1", fail=None):
+        """A fake Spansh whose sphere lists S7 (updated_at `updated`), or raises while fail["sphere"]; its dump lookup
+        raises while fail["dump"]."""
+        calls, fail = [], fail if fail is not None else {}
+
+        class FakeSpansh(ed_outrider.Spansh):
+            async def lookup(self, id64, interactive=True):
+                calls.append(id64)
+                if fail.get("dump"):
+                    raise ed_outrider.ClientError("down")
+                return dump
+
+            async def sphere(self, pos, r):
+                if fail.get("sphere"):
+                    raise ed_outrider.ClientError("down")
+                return [{"id64": 7, "name": "S7", "x": 1, "y": 0, "z": 0, "updated_at": fail.get("updated", updated),
+                         "body_count": 2, "bodies": [{"name": "S7 1", "type": "Planet", "subtype": "Icy body"},
+                                                     {"name": "S7 2", "type": "Planet", "subtype": "Icy body"}]}]
+
+            async def edsm_sphere(self, pos, r):
+                return []
+        sp = FakeSpansh(self.db)
+        self.state.spansh, self.state.center = sp, self.j.pos
+        return sp, calls, fail
+
+    DUMP2 = {"system": {"bodyCount": 2, "bodies": [{"name": "S7 1", "type": "Planet", "subType": "Icy body", "bodyId": 1},
+                                                   {"name": "S7 2", "type": "Planet", "subType": "Icy body", "bodyId": 2}]}}
+
+    def test_spansh_down_keeps_cached_spansh_records_as_spansh(self):   # F27
+        import asyncio
+        sp, calls, fail = self.spansh2(self.DUMP2)
+        asyncio.run(self.state._refresh(self.j.pos))
+        sp.store(8, None, ed_outrider.base_from_edsm({"name": "S8", "coords": {"x": 2, "y": 0, "z": 0},
+                                                       "primaryStar": {"type": "K", "isScoopable": True}}))
+        self.db.commit()
+        fail["sphere"] = True
+        asyncio.run(self.state._refresh(self.j.pos))
+        self.assertEqual((self.state.bases[7][0], self.state.systems[7]["in_spansh"]), ("spansh", True))
+        self.assertEqual(self.state.bases[8][0], "edsm")   # an EDSM record stays EDSM's
+
+    def test_failed_refetch_keeps_the_cached_dump(self):   # F28
+        import asyncio
+        sp, calls, fail = self.spansh2(self.DUMP2)
+        asyncio.run(self.state._refresh(self.j.pos))
+        full = self.state.bases[7][1]["records"]
+        fail.update(updated="u2", dump=True)               # Spansh updated it, and its dump fails now
+        asyncio.run(self.state._refresh(self.j.pos))
+        self.assertEqual(calls, [7, 7])
+        self.assertEqual(self.state.bases[7][1]["records"], full)
+
+    def test_no_dump_answer_gives_way_to_the_search(self):   # F29
+        import asyncio
+        sp, calls, fail = self.spansh2(self.DUMP2)
+        sp.store(7, None, {"v": ed_outrider.CACHE_VERSION, "name": "S7", "x": 1, "y": 0, "z": 0, "body_count": None,
+                           "records": [], "no_dump": True})   # Find asked an hour ago: no dump then
+        self.db.commit()
+        asyncio.run(self.state._refresh(self.j.pos))
+        self.assertEqual(calls, [])                          # not asked again within the hour
+        self.assertEqual(len(self.state.bases[7][1]["records"]), 2)   # but the search's bodies show
+
+    def test_edsm_sphere_is_cut_to_its_limit(self):   # F48
+        import asyncio
+        sent = []
+
+        class Resp:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            def raise_for_status(self):
+                pass
+
+            async def json(self):
+                return []
+        sp = ed_outrider.Spansh(self.db)
+        sp.session = type("S", (), {"get": lambda self_, url, params=None: sent.append(params["radius"]) or Resp()})()
+        asyncio.run(sp.edsm_sphere({"x": 0, "y": 0, "z": 0}, 150))
+        asyncio.run(sp.edsm_sphere({"x": 0, "y": 0, "z": 0}, 40))
+        self.assertEqual(sent, [100, 40])
 
     # ---- F23: History refetches on jumps and sales, not scans ----
     def test_history_version(self):   # F23
