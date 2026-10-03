@@ -31,6 +31,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/honk.py` | Auto honk (Linux): reads Primary Fire's binding (`keyboard_bindings` reads any controls) and presses it through a uinput virtual keyboard (`Honker`: its `owners`, "honk", "target" and "target-test", keep it open; its `lock` is held for a whole press or auto-target sequence; `press(check, cancel)` runs `check` under the lock just before the first key (a reason raises `NotNow`, nothing pressed) and `cancel` is that feature's own token, so switching one feature off stops its run while the other keeps the device open) |
 | `outrider/target.py` | The Highway's auto-target: `build_steps` (the sequence; its configurable parts are `DEFAULT_SEARCH`, `DEFAULT_SUBMIT` and `DEFAULT_PLOT`, lists of `parse_step` strings found in game, see `DESIGN_NOTES.md`), `guard` (when it must not start) / `targeted` (already the target: Status.json's `Destination.System`, or NavRoute.json ending at it for a waypoint several jumps away), `Targeter` (resolves keys from the preset and `autotarget_keys`, `run`: the step runner on honk's device and lock, aborts, a cancel token, dry run), `US_KEYMAP` (typing), `ACTIONS` (the controls it may read, galaxy map camera included) |
 | `outrider/button.py` | Co-pilot button (Linux): reads one HOTAS/keyboard button from `/dev/input`, read-only |
+| `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
 | `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip); `hwyAutoStart(kind)` (test now, and Target next / Retry via POST `/api/highway/target`), `hwyAimBtn` (🎯 beside "Next:"), `hwySpoken` (the Highway clause of the status report); `linkState`/`drawLinkPill` (the link pill); `outVolume` (Volume, per device); `ownSounds` (your own sound files) |
 | `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
@@ -67,7 +68,8 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    surface map, speech info and more. Other views fetch their own endpoints: `/api/system/{id64}`,
    `/api/body`, `/api/history`, `/api/organics`, `/api/log`, `/api/materials`, `/api/map`, `/api/search`,
    `/api/firsts`, `/api/left`, `/api/find`, `/api/export`, `/api/highway` (+ `/systems?q=`, `/background`; POST `/plot`,
-   `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`, `/target` {countdown?}: Target next / Retry), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`. The payload carries only the highway line's facts
+   `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`, `/target` {countdown?}: Target next / Retry), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`, `/api/version`, `/api/auth/signin`
+   and `/signout` (see the app's contract below). The payload carries only the highway line's facts
    (`highway_summary`); the Highway tab fetches the route itself.
 7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
@@ -175,7 +177,17 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
 - **Endpoints.** Every request passes `request_guard`: unknown Host names are refused, and a request another
   site's page sends is refused (Origin / `Sec-Fetch-Site`). Only `OPEN_GETS` (`/api/status`,
   `/api/status.txt`) may be read cross-site. Anything that changes state must be a POST. Don't widen
-  `OPEN_GETS`; validate every input (ids with `parse_id64`, JSON with `json_object`).
+  `OPEN_GETS`; validate every input (ids with `parse_id64`, JSON with `json_object`). Then `session_guard`: with
+  `[server] password` set, a request not from loopback needs a session, except `AUTH_OPEN` and `OPEN_GETS`; without
+  one, 401 `signin_required` for `/api/`, `/static/` and the app's User-Agent (`OutriderApp/`), else a redirect to
+  `/signin`. Don't add to `AUTH_OPEN`. Tests reach "another device" by patching `outrider.auth.is_loopback`
+  (`tests/test_auth.py`).
+- **The Android app's contract** (`project/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
+  `{outrider, api, min_app, password, signed_in}`; `POST /api/auth/signin` {password} gives `{ok, token}` and the
+  cookie; `POST /api/auth/signout`; errors are `{error, code}` (`signin_required`, `bad_password`, `rate_limited`,
+  `bad_request`, `app_too_old`, `server_error`). Bump `API_VERSION` when an endpoint the app uses changes shape
+  incompatibly, `MIN_APP_VERSION` when an older app can no longer work (426 `app_too_old` for its
+  `X-Outrider-App` header), and `outrider.__version__` with each release. The app's tests depend on these shapes.
 - **Devices.** Never exercise auto honk (uinput key presses: they go to whatever window has focus, including
   a running game) or the co-pilot button (reads `/dev/input`) against a real game or device from tests or a
   scratch server, and the same for auto-target (it opens the galaxy map and types): tests use `FakeGame` (a fake

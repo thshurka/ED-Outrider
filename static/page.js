@@ -6532,11 +6532,19 @@ let lastHeard = 0, woke = false;
 // lastHeard moves only on an answer (200/204): a server or network outage is a minute without hearing from it too,
 // and the retries every 2 s meanwhile must not keep it fresh (the moments missed would replay as live speech)
 const heard = (answered) => { const now = Date.now(); if (lastHeard && now - lastHeard > SLEPT_MS) woke = true; if (answered) lastHeard = now; };
+// The session is gone (only a device on the network has one): in the Android app, its own sign-in (the bridge);
+// in a browser, the sign-in page, back here afterwards
+function signInAgain() {
+  const app = typeof window !== "undefined" && window.OutriderApp;
+  if (app && typeof app.signInRequired === "function") { app.signInRequired(); return; }
+  location.href = "signin?next=" + encodeURIComponent(location.pathname + location.search);
+}
 async function poll(once = false) {
   let ok = false, fresh = false;
   heard(false);   // a request sent long after the last answer: timers were frozen, or the server was unreachable
   try {
     const r = await fetch(`api/nearby?since=${runId}:${version}`);
+    if (r.status === 401) return signInAgain();   // the session ended ([server] password changed, signed out)
     if (r.status === 200 || r.status === 204) heard(true);   // an answer long after it was asked: the page slept meanwhile
     if (r.status === 200) { data = await r.json(); version = data.version; fresh = true; }
     else if (r.status === 204 && woke) version = -1;   // no news, but come back with the whole payload to re-baseline on

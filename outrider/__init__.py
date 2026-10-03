@@ -11,6 +11,10 @@ banned lines; git-ignored as a whole).
 """
 import os
 
+# CalVer, bumped with each CHANGELOG entry. The Android app reads it from /api/version (with API_VERSION, the
+# native-facing contract's own number, in ed_outrider.py).
+__version__ = "2026.10.3"
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESOURCES_DIR = os.path.join(ROOT, "resources")
 DATA_DIR = os.path.join(ROOT, "data")

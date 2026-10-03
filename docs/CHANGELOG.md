@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · A password for devices on your network (tablet plan, phase 1)
+- `[server] password`: a tablet or phone signs in once on a small sign-in page and stays signed in, across Outrider
+  restarts, until the password changes or it signs out. This PC itself never needs it. Empty (the default) asks
+  nobody, as before. Five wrong tries a minute per device, then a wait.
+- The Android app's side of it: `GET /api/version` (Outrider's version, the API level, the oldest app it works with,
+  whether a password is set, whether you are signed in), `POST /api/auth/signin` and `/api/auth/signout`, a Bearer
+  token as well as the cookie, and every error as `{error, code}`. An app that is too old gets 426.
+- The page sends you to sign in again if its session ends (a changed password) instead of showing a dead link.
+
 ## 2026-10-03 · Split Here in halves; every table's sort reverses; Materials side by side
 - Here in split: the body list and the schematic each take half the pane and scroll on their own.
 - Every sortable table (Nearby, My firsts, Bookmarks, Search, Here): a second click on a heading reverses it, a

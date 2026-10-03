@@ -28,8 +28,11 @@
 
 [server]
 # host = "127.0.0.1"   # "0.0.0.0" makes the page reachable from other devices on your network
-                       # (no authentication: it exposes your journals' contents and lets anyone edit bookmarks)
+                       # (without a password below, anyone on it can read your journals' contents and edit bookmarks)
 # port = 8025
+# password = ""        # devices on your network (a tablet, the Android app) sign in with it once; this PC itself
+#                      # never needs it. "" = no sign-in. It crosses your network unencrypted (plain http), so use
+#                      # one you use nowhere else. Changing it signs every device out.
 # allowed_hosts = ["mypc.lan"]   # extra names the page may be opened by. Outrider answers to any IP address,
 #                      # but by name only to localhost and the host above (with "0.0.0.0": this machine's own
 #                      # name too), so another web site cannot read it through DNS rebinding; list the names a

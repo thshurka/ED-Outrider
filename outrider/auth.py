@@ -1,0 +1,115 @@
+"""Sign-in for devices on the network: [server] password (the tablet and its Android app).
+
+Requests from this PC itself (loopback) never need it. From any other address every page and /api/ route needs a
+session, except the few that must stay open (/api/version, the sign-in itself, the overlays' /api/status).
+
+A session token is "<id>.<signature>": the id is random, the signature an HMAC of it under a key made from the
+password and a per-install secret (kept in the database). So a token survives an Outrider restart (no list of tokens
+in memory), every token dies when the password changes, and signing out puts that one id on a revoked list.
+"""
+import hashlib
+import hmac
+import ipaddress
+import secrets
+import time
+
+COOKIE = "outrider_session"
+SIGNIN_TRIES = 5        # failed sign-ins per address...
+SIGNIN_WINDOW = 60      # ...in this many seconds, then 429 until the oldest failure is a window old
+TOKEN_SIG_HEX = 32
+
+
+def new_secret():
+    return secrets.token_hex(32)
+
+
+def _key(secret, password):
+    return hmac.new(secret.encode(), b"outrider-session|" + password.encode(), hashlib.sha256).digest()
+
+
+def _sign(secret, password, sid):
+    return hmac.new(_key(secret, password), sid.encode(), hashlib.sha256).hexdigest()[:TOKEN_SIG_HEX]
+
+
+def make_token(secret, password):
+    """A new session token for this password."""
+    sid = secrets.token_urlsafe(12)
+    return f"{sid}.{_sign(secret, password, sid)}"
+
+
+def token_id(token):
+    """The id part of a token (for signing out), or None for something that is not one."""
+    if not isinstance(token, str) or token.count(".") != 1:
+        return None
+    sid, sig = token.split(".")
+    return sid if sid and len(sig) == TOKEN_SIG_HEX else None
+
+
+def check_token(secret, password, token, revoked=()):
+    """Whether `token` is a live session for this password (constant-time on the signature)."""
+    sid = token_id(token)
+    if not sid or not password or not secret or sid in revoked:
+        return False
+    return hmac.compare_digest(token.split(".")[1], _sign(secret, password, sid))
+
+
+def password_ok(given, password):
+    """Constant-time comparison of a sign-in attempt with the configured password."""
+    return isinstance(given, str) and bool(password) and hmac.compare_digest(given.encode(), password.encode())
+
+
+def is_loopback(remote):
+    """Whether a peer address is this machine (127.0.0.0/8, ::1, or an IPv4-mapped loopback)."""
+    try:
+        ip = ipaddress.ip_address(str(remote or "").split("%")[0])
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_loopback or bool(mapped and mapped.is_loopback)
+
+
+def request_token(headers, cookies):
+    """The session token a request carries: `Authorization: Bearer <token>` (the app's own calls) or the cookie."""
+    auth = headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None
+    return cookies.get(COOKIE) or None
+
+
+def version_tuple(v):
+    """'1.2.10' -> (1, 2, 10); anything unreadable -> () (older than every version)."""
+    try:
+        return tuple(int(x) for x in str(v).strip().split("."))
+    except ValueError:
+        return ()
+
+
+class RateLimit:
+    """Failed sign-ins per address: SIGNIN_TRIES in SIGNIN_WINDOW seconds, then wait."""
+
+    def __init__(self, tries=SIGNIN_TRIES, window=SIGNIN_WINDOW, clock=time.monotonic):
+        self.tries, self.window, self.clock = tries, window, clock
+        self.failures = {}
+
+    def _recent(self, who):
+        now = self.clock()
+        kept = [t for t in self.failures.get(who, []) if now - t < self.window]
+        if kept:
+            self.failures[who] = kept
+        else:
+            self.failures.pop(who, None)
+        return kept
+
+    def wait(self, who):
+        """Seconds until `who` may try again (0: now)."""
+        recent = self._recent(who)
+        if len(recent) < self.tries:
+            return 0
+        return max(1, int(self.window - (self.clock() - recent[0])) + 1)
+
+    def failed(self, who):
+        self._recent(who)
+        self.failures.setdefault(who, []).append(self.clock())
+
+    def clear(self, who):
+        self.failures.pop(who, None)

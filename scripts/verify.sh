@@ -82,6 +82,7 @@ legacy = []
 [server]
 host = "127.0.0.1"
 port = $PORT
+password = "smoke"   # the page still loads from this PC (loopback needs no sign-in)
 db = "$TMP/scratch.sqlite"
 backup_dir = "$TMP/backups"
 backup_every_days = 0

@@ -29,8 +29,16 @@ upstream project's choices, not rules of the game.
 - **One window speaks** with the page open in several, so nothing is said twice.
 - **Auto honk is off until ticked,** because its key presses go to whichever window has focus.
 - **The co-pilot button only reads the device,** never grabs it; unbinding it in the game is the player's job.
-- **Listens on 127.0.0.1 by default, no password.** Opening it to the network is an explicit setting; the Host
-  and cross-site guards stop other web sites, not people on your network.
+- **Listens on 127.0.0.1 by default; a password is optional.** Opening it to the network is an explicit setting; the
+  Host and cross-site guards stop other web sites, not people on your network. `[server] password` stops those: a
+  device that is not this PC needs a session (the `outrider_session` cookie, or `Authorization: Bearer` for the
+  Android app's own calls). Loopback never does, so the desktop page, curl, OBS and a local MCP bridge work as before.
+  A token is `<id>.<HMAC>` under a key made from the password and a per-install secret (DB meta `session_secret`),
+  so sessions survive a restart with nothing kept in memory, all end when the password changes, and signing out
+  revokes one id (meta `revoked_sessions`, the last 500). Plain http: the password crosses the network in clear,
+  and the docs say so rather than pretending otherwise (TLS on a LAN means certificate pain for little gain). Five
+  failed sign-ins a minute per address, then 429. `/api/version`, the sign-in page and calls, the tab icon and
+  `OPEN_GETS` stay open (the app must learn whether a password is wanted before it has one).
 - **Only `/api/status` and `/api/status.txt` are readable cross-site,** for stream overlays: they alone send
   `Access-Control-Allow-Origin: *` (no credentials are involved), so a fetch from an overlay page on another origin or
   a local file can read them (review F6).

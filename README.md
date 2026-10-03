@@ -534,7 +534,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | Section | What it holds |
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them (setting `live` turns off legacy auto-detection: list `legacy` too) |
-| `[server]` | `host`, `port`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
+| `[server]` | `host`, `port`, `password`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
 | `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `codex_interesting`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
@@ -559,8 +559,11 @@ Command-line flags override the file for a single run:
 otherwise (`"0.0.0.0"` for your network). It answers to any IP address, but by name only to `localhost`,
 the configured host and this machine's name; add others (a router's `mypc.lan`, say) to
 `[server] allowed_hosts`. This, and refusing changes sent by other web sites, stops a malicious page
-from reading your journals or pressing keys. There is no password, though: on `0.0.0.0` anything on your
-network can read the page.
+from reading your journals or pressing keys. It does not stop people on your network, so set
+`[server] password` as well: a tablet or phone then shows a sign-in page once and stays signed in (also across
+Outrider restarts) until you change the password. This PC itself never asks. The page is plain http, so the password
+crosses your network unencrypted: pick one you use nowhere else. Without one, anything on your network can read
+the page and change bookmarks.
 
 </details>
 
@@ -585,6 +588,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `outrider/speech.py` | Loads and checks `speech.json` |
 | `voice_lab.py` | A window for trying voices and lines, and downloading Piper voices |
 | `outrider/button.py` | The co-pilot button (Linux, optional); `--listen` |
+| `outrider/auth.py` | Sign-in for other devices: `[server] password`, session tokens, the sign-in rate limit |
 | `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
 | `outrider/target.py` | The Highway's auto-target (Linux, optional); `--show` |
 | `outrider/bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |

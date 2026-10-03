@@ -163,6 +163,7 @@ import outrider.speech     # the words for spoken alerts, per personality (resou
 import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
 import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
+import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
 from outrider.core import iso_ts, ts_seconds   # journal timestamps
 from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
     FSD_RANGE_MODS, GUARDIAN_BOOST, conservative_optimal_mass, conservative_range, fleet_figures, fleet_range, fsd_range,
@@ -720,6 +721,10 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         print(f"config: [server] allowed_hosts = {hosts!r} must be a list of names, e.g. [\"mypc.lan\", \"192.168.1.20\"]; "
               "ignored", file=sys.stderr)
         hosts = []
+    password = sv.get("password", "")
+    if not isinstance(password, str):
+        print("config: [server] password must be a string in quotes; ignored (no password)", file=sys.stderr)
+        password = ""
     if args.journals:
         live = list(args.journals)
     elif env_journals:
@@ -739,6 +744,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "host": pick(args.host, num("server", sv, "host", _config_str, None), "127.0.0.1"),
         "port": pick(args.port, num("server", sv, "port", _config_port, None), 8025),
         "allowed_hosts": [h.strip() for h in hosts if h.strip()],
+        "password": password,
         # at least 1 ly: a bad config value is reported above; a --radius 0 flag is clamped
         "radius": max(1.0, pick(args.radius, num("server", sv, "radius", _config_radius, None), 25.0)),
         "radius_choices": radius_choices,
@@ -858,6 +864,7 @@ def config_text(st):
 host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on your network
 port = {st["port"]}
 allowed_hosts = {lst(st["allowed_hosts"])}   # extra names the page may be opened by (a LAN setup; see the README)
+password = {q(st["password"])}   # devices on your network sign in with it ("" = none); this PC itself never needs it
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
 radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
 backup_dir = {q(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
@@ -4705,6 +4712,8 @@ class State:
         self.autotarget_test = None
         self.autotarget_test_task = None
         self.autotarget_test_countdown = AUTOTARGET_TEST_COUNTDOWN
+        self.password = ""   # [server] password: "" asks no device for one (set by run())
+        self.signin_limit = outrider.auth.RateLimit()
         self._suggest = collections.OrderedDict()   # typed name -> Spansh's system names (HIGHWAY_SUGGEST_CACHE kept)
         self._hw_near = (None, None)   # ((route id, position id64), the nearest route row) while off the route
         # too much fuel for the next jump (highway_heavy_check): {key: (route id, row, arrival), live, said, t, look,
@@ -9064,6 +9073,36 @@ class State:
             self.tail_error = f"{type(e).__name__}: {e}"
             self.bump()
 
+    # ---- [server] password: sessions for devices on the network (outrider/auth.py) ----
+    def session_secret(self):
+        """The per-install secret session tokens are signed with (kept in the database, made on first use)."""
+        sec = meta_get(self.db, "session_secret")
+        if not (isinstance(sec, str) and len(sec) >= 32):
+            sec = outrider.auth.new_secret()
+            meta_set(self.db, "session_secret", sec)
+            self.db.commit()
+        return sec
+
+    def new_session(self):
+        return outrider.auth.make_token(self.session_secret(), self.password)
+
+    def session_ok(self, token):
+        """Whether a request's token is a live session (the password set, the token signed for it, not signed out)."""
+        if not self.password or not token:
+            return False
+        return outrider.auth.check_token(self.session_secret(), self.password, token,
+                                         set(meta_get(self.db, "revoked_sessions") or []))
+
+    def end_session(self, token):
+        """Sign out: that token's id joins the revoked list (kept over restarts), the others stay signed in."""
+        sid = outrider.auth.token_id(token)
+        if not sid or not self.session_ok(token):
+            return False
+        revoked = [x for x in meta_get(self.db, "revoked_sessions") or [] if x != sid] + [sid]
+        meta_set(self.db, "revoked_sessions", revoked[-REVOKED_KEEP:])
+        self.db.commit()
+        return True
+
     def follow_up_failed(self, name, e):
         """One of tick()'s follow-ups raised: its traceback printed once (not every second), what it wrote rolled
         back and the reader's memory reloaded (the sales already read are kept for note_sale_estimates), and the
@@ -9566,6 +9605,48 @@ def load_page():
     return html
 
 
+# The Android app's contract (project notes: PLAN-tablet): API_VERSION goes up only on a breaking change to the
+# native-facing endpoints (/api/version, /api/auth/*) or the page <-> app bridge; MIN_APP_VERSION is the oldest app
+# this Outrider still serves (an older one gets 426 app_too_old and says "update the app").
+API_VERSION = 1
+MIN_APP_VERSION = "1.0.0"
+# open from the network without a session: what the app needs before signing in, the sign-in itself, the tab icon
+AUTH_OPEN = ("/api/version", "/api/auth/signin", "/api/auth/signout", "/signin", "/static/favicon.svg")
+SESSION_COOKIE_AGE = 10 * 365 * 86400   # s: a session lasts until the password changes or you sign out
+REVOKED_KEEP = 500   # signed-out session ids remembered (the oldest forgotten first)
+
+# The sign-in page a browser on the network is sent to without a session: self-contained (no script or style from
+# /static/, which needs the session), the page's dark colours, back to where it was going once signed in.
+SIGNIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>ED Outrider · sign in</title>
+<link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+<style>
+body { background: #0b0d12; color: #d8dbe2; font: 15px system-ui, sans-serif; display: grid; place-items: center; min-height: 90vh; margin: 0; }
+form { background: #151922; border: 1px solid #2a3040; border-radius: 10px; padding: 24px 28px; width: min(340px, 86vw); }
+h1 { color: #ff7100; font-size: 20px; margin: 0 0 6px; } p { color: #8a93a6; font-size: 13px; margin: 0 0 16px; }
+input { width: 100%; box-sizing: border-box; padding: 9px 10px; font: inherit; color: inherit; background: #0b0d12;
+  border: 1px solid #2a3040; border-radius: 6px; } input:focus { outline: 1px solid #ff7100; }
+button { margin-top: 14px; width: 100%; padding: 9px; font: inherit; font-weight: 600; color: #0b0d12; background: #ff7100;
+  border: 0; border-radius: 6px; cursor: pointer; } #msg { color: #e05555; font-size: 13px; min-height: 1.2em; margin-top: 10px; }
+</style></head><body>
+<form id="f"><h1>ED Outrider</h1><p>This Outrider asks devices on the network for its password ([server] password in
+ed_outrider.toml).</p><input type="password" id="pw" autocomplete="current-password" placeholder="password" autofocus>
+<button type="submit">Sign in</button><div id="msg" role="status"></div></form>
+<script>
+const q = new URLSearchParams(location.search), nxt = q.get("next") || "/";
+const safe = nxt.startsWith("/") && !nxt.startsWith("//") ? nxt : "/";
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const msg = document.getElementById("msg"); msg.textContent = "";
+  try {
+    const r = await fetch("api/auth/signin", {method: "POST", headers: {"Content-Type": "application/json"},
+                                               body: JSON.stringify({password: document.getElementById("pw").value})});
+    const j = await r.json();
+    if (r.ok) location.href = safe; else msg.textContent = j.error || "could not sign in";
+  } catch { msg.textContent = "could not reach Outrider"; }
+};
+</script></body></html>"""
+
 WILDCARD_HOSTS = ("0.0.0.0", "::", "")
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 # The only reads under /api/ another site may make (request_guard): the small read-only status an OBS browser
@@ -9685,10 +9766,90 @@ def make_app(state, hosts=None):
             import traceback
             traceback.print_exc()
             if request.path.startswith("/api/"):
-                return web.json_response({"error": f"{type(e).__name__}: {e}"}, status=500)
+                return web.json_response({"error": f"{type(e).__name__}: {e}", "code": "server_error"}, status=500)
             raise
 
-    app = web.Application(middlewares=[request_guard(hosts), json_errors])
+    def signin_needed(request):
+        """No session: the app (its User-Agent says OutriderApp/) and every /api/ or /static/ call get 401
+        signin_required, so the app shows its own sign-in; a browser is sent to the sign-in page."""
+        if request.path.startswith(("/api/", "/static/")) or "OutriderApp/" in (request.headers.get("User-Agent") or ""):
+            return web.json_response({"error": "sign in first: this Outrider asks devices on the network for its password",
+                                      "code": "signin_required"}, status=401)
+        nxt = request.path_qs if request.path_qs.startswith("/") and not request.path_qs.startswith("//") else "/"
+        raise web.HTTPFound("/signin?next=" + urllib.parse.quote(nxt, safe=""))
+
+    @web.middleware
+    async def session_guard(request, handler):
+        """[server] password: a request from another device needs a session (a cookie, or the app's Bearer token)
+        except AUTH_OPEN and the overlays' OPEN_GETS. This PC itself (loopback) never needs one: the desktop page,
+        curl, OBS and the MCP bridge work as before. request_guard's checks run first, whatever the session."""
+        if not state.password or outrider.auth.is_loopback(request.remote) or request.path in AUTH_OPEN \
+                or request.path in OPEN_GETS:
+            return await handler(request)
+        if state.session_ok(outrider.auth.request_token(request.headers, request.cookies)):
+            return await handler(request)
+        return signin_needed(request)
+
+    app = web.Application(middlewares=[request_guard(hosts), session_guard, json_errors])
+
+    def app_too_old(request):
+        """A 426 for an app older than MIN_APP_VERSION (its X-Outrider-App header), else None."""
+        v = request.headers.get("X-Outrider-App")
+        if v is not None and outrider.auth.version_tuple(v) < outrider.auth.version_tuple(MIN_APP_VERSION):
+            return web.json_response({"error": f"this app ({v}) is too old for this Outrider: update the app "
+                                               f"(at least {MIN_APP_VERSION})", "code": "app_too_old"}, status=426)
+        return None
+
+    def signed_in(request):
+        """What /api/version reports: whether this request may use Outrider now (no password asked of it, or a
+        live session)."""
+        return not state.password or outrider.auth.is_loopback(request.remote) or \
+            state.session_ok(outrider.auth.request_token(request.headers, request.cookies))
+
+    async def version_view(request):
+        """GET /api/version, open: what the app needs before signing in ("update the app", "update Outrider", "sign
+        in"), and nothing else."""
+        return web.json_response({"outrider": outrider.__version__, "api": API_VERSION, "min_app": MIN_APP_VERSION,
+                                  "password": bool(state.password), "signed_in": bool(signed_in(request))})
+
+    async def signin_view(request):
+        """POST /api/auth/signin {password} -> {ok, token} and the same token as an HttpOnly cookie. 401 bad_password,
+        429 rate_limited (Retry-After), 400 bad_request, 426 app_too_old."""
+        old = app_too_old(request)
+        if old:
+            return old
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("password"), str):
+            return web.json_response({"error": "expected {\"password\": \"...\"}", "code": "bad_request"}, status=400)
+        if not state.password:   # nothing to sign in to: every device may use it
+            return web.json_response({"ok": True, "token": ""})
+        who = str(request.remote)
+        wait = state.signin_limit.wait(who)
+        if wait:
+            return web.json_response({"error": f"too many wrong passwords: try again in {wait} s", "code": "rate_limited"},
+                                     status=429, headers={"Retry-After": str(wait)})
+        if not outrider.auth.password_ok(body["password"], state.password):
+            state.signin_limit.failed(who)
+            return web.json_response({"error": "wrong password", "code": "bad_password"}, status=401)
+        state.signin_limit.clear(who)
+        token = state.new_session()
+        resp = web.json_response({"ok": True, "token": token})
+        resp.set_cookie(outrider.auth.COOKIE, token, max_age=SESSION_COOKIE_AGE, path="/", httponly=True, samesite="Strict")
+        return resp
+
+    async def signout_view(request):
+        """POST /api/auth/signout: that session stops working (others stay signed in); the cookie is cleared."""
+        old = app_too_old(request)
+        if old:
+            return old
+        state.end_session(outrider.auth.request_token(request.headers, request.cookies))
+        resp = web.json_response({"ok": True})
+        resp.del_cookie(outrider.auth.COOKIE, path="/")
+        return resp
+
+    async def signin_page(request):
+        """GET /signin: the password form a browser on the network is sent to (the app has its own)."""
+        return web.Response(text=SIGNIN_PAGE, content_type="text/html")
 
     def parse_id64(raw):
         v = int(raw)
@@ -10280,6 +10441,10 @@ def make_app(state, hosts=None):
                             headers={"Content-Disposition": f'attachment; filename="{what}-{stamp}.csv"'})
 
     app.router.add_get("/api/nearby", nearby)
+    app.router.add_get("/api/version", version_view)
+    app.router.add_post("/api/auth/signin", signin_view)
+    app.router.add_post("/api/auth/signout", signout_view)
+    app.router.add_get("/signin", signin_page)
     app.router.add_get("/api/map", map_view)
     app.router.add_get("/api/system/{id64}", system_view)
     app.router.add_get("/api/history", history_view)
@@ -10598,6 +10763,7 @@ async def run(args, st):
     chosen = meta_get(db, "radius_choice")   # picked from the page's Where tile; survives a restart
     usable = chosen and radius_flag is None and float(chosen) in RADIUS_CHOICES   # the config may have dropped it
     state = State(db, journals, spansh, float(chosen) if usable else args.radius)
+    state.password = st["password"]
     state.searcher = Searcher(state)
     state.db_path = args.db
     state.speech_path, state.config_path = st["speech_file"], args.config
