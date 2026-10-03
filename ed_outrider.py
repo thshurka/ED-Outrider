@@ -132,13 +132,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import contextlib
 import functools
 import hashlib
+import io
 import json
 import math
 import os
 import random
 import re
+import shutil
 import sqlite3
 import sys
 import threading
@@ -166,6 +169,7 @@ import outrider.button     # the co-pilot button: tap, double tap, hold on a HOT
 import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
 import outrider.rail       # the tablet's control rail: contexts, default sets, button states
 import outrider.ask        # questions by voice (POST /api/ask): fixed phrases, then an optional AI layer
+import outrider.config_edit  # the Settings dialog's Server settings: every config key, edited in place
 import outrider.mcp        # the MCP bridge's [mcp] settings (the bridge itself runs as python3 -m outrider.mcp)
 from outrider.core import iso_ts, ts_seconds   # journal timestamps
 from outrider.fsd import (   # the frame shift drive's maths: range, fuel per jump, the fuel model, fleet figures
@@ -869,7 +873,7 @@ def config_text(st):
 
 [server]
 host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on your network
-port = {st["port"]}
+port = {st["port"]}   # the page's port: http://<this PC>:<port>/
 allowed_hosts = {lst(st["allowed_hosts"])}   # extra names the page may be opened by (a LAN setup; see the README)
 password = {q(st["password"])}   # devices on your network sign in with it ("" = none); this PC itself never needs it
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
@@ -878,13 +882,13 @@ backup_dir = {q(st["backup_dir"])}   # backups: dated database zips, and every l
 backup_keep = {st["backup_keep"]}   # dated database zips kept (the journal archive is never pruned)
 backup_every_days = {st["backup_every_days"]:g}   # automatic backup at start when the last is older than this, and when the game quits (0 = off)
 speech_file = {q(_root_relative(st["speech_file"]))}   # the spoken alerts' lines, per personality
-db = {q(_root_relative(st["db"]))}
+db = {q(_root_relative(st["db"]))}   # the database: everything Outrider knows (relative paths start at the Outrider folder)
 
 [defaults]   # what a browser uses until its user changes it (page settings stay per browser)
 unsold_warn = {st["unsold_warn"]}     # amber "worth selling soon", credits on board
 unsold_urgent = {st["unsold_urgent"]}   # red "go sell"
 bio_min = {st["bio_min"]}         # a body only counts as unfinished bio if it could pay over this
-sounds = {"true" if st["sounds"] else "false"}
+sounds = {"true" if st["sounds"] else "false"}   # the alert sounds on (the page's 🔊)
 body_highlight_level = {st["body_highlight"]}     # Here: a body's row turns green if scan + map pays this, no bonuses
 biology_highlight_value = {st["bio_highlight"]}  # Here: a body's bio turns violet if it could pay this, no x5 bonus
 body_max_value_include_bonus = {"true" if st["max_include_bonus"] else "false"}  # Here: Max counts first-discovery/mapped/footfall bonuses
@@ -921,7 +925,7 @@ server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay,
 [autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see outrider/honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
 # and Primary Fire needs a keyboard binding (key = "auto" reads it, modifiers too, from your controls preset).
-enabled = {"true" if st["autohonk"]["enabled"] else "false"}   # the page's alerts dialog can switch it on and off too
+enabled = {"true" if st["autohonk"]["enabled"] else "false"}   # the page's Settings can switch it on and off too
 key = {q(st["autohonk"]["key"])}   # "auto": Primary Fire's keyboard binding from your controls preset; or e.g. KEY_KP0, KEY_LEFTALT+KEY_K
 delay = {st["autohonk"]["delay"]:g}   # seconds after arriving before the press (the jump tunnel ignores input)
 hold = {st["autohonk"]["hold"]:g}    # seconds to hold the trigger (the scanner fires once charged)
@@ -931,7 +935,7 @@ announce = {"true" if st["autohonk"]["announce"] else "false"}   # say "System s
 [copilot]   # one HOTAS or keyboard button for the voice (Linux, read-only; see outrider/button.py): tap a status report, double tap the last line again, hold hush until the next jump
 # Unbind the button in Elite's controls. On an X-56 avoid the latching toggles and the mode wheel (they read as held).
 # Joysticks are readable through uaccess; a keyboard or mouse needs the input group.
-enabled = {"true" if st["copilot"]["enabled"] else "false"}
+enabled = {"true" if st["copilot"]["enabled"] else "false"}   # read the button below
 device = {q(st["copilot"]["device"])}   # a part of the device's name, or a /dev/input/by-id/... path (python3 -m outrider.button --listen lists them)
 button = {q(st["copilot"]["button"])}   # the button's evdev name (e.g. BTN_TRIGGER_HAPPY5) or code number, as --listen prints it
 hold_ms = {st["copilot"]["hold_ms"]}   # ms held (or more) that make a hold
@@ -943,7 +947,7 @@ clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving 
 # in the galaxy map to make the next route system the target (outrider/target.py; python3 -m outrider.target --show
 # prints the steps with your keys). The keys go to whichever window has focus. It is key-press automation of the same
 # kind as auto honk: check Frontier's rules for yourself.
-autotarget = {"true" if st["highway"]["autotarget"] else "false"}
+autotarget = {"true" if st["highway"]["autotarget"] else "false"}   # auto-target the next route system after a supercharge (the Highway tab switches it too)
 autotarget_delay = {st["highway"]["autotarget_delay"]:g}   # seconds after the supercharge (0 to 60)
 autotarget_entry = {q(st["highway"]["autotarget_entry"])}   # "type" the name on the virtual keyboard (US layout), or "paste" it (wl-copy/xclip, then Ctrl+V)
 autotarget_map_wait = {st["highway"]["autotarget_map_wait"]:g}   # seconds to wait for the galaxy map to open (and close) before giving up
@@ -4851,6 +4855,79 @@ class State:
         }
 
     # ---- the voice's hush and the co-pilot channel ----
+
+    # ---- the config file from the page (the Settings dialog's Server settings; GET/POST /api/config) ----
+    def config_file(self):
+        return self.config_path or CONFIG_PATH
+
+    @staticmethod
+    def _config_settings(cfg):
+        """settings_from on a parsed config alone (no flags, no environment, no auto-detected folders): what the file
+        says, and the problems settings_from reports on stderr (as a list)."""
+        args = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            st = settings_from(cfg, args, None, ([], []))
+        return st, [x for x in err.getvalue().splitlines() if x.strip()]
+
+    def config_info(self):
+        """Every config key the server knows, with its value (as the file has it, or the default), its kind and help;
+        the password and the AI key only as set or not. Applied at the next start."""
+        path = self.config_file()
+        st, problems = self._config_settings(load_config(path) if os.path.exists(path) else {})
+        secs = outrider.config_edit.entries(config_text(st))
+        for sec in secs:
+            for k in sec["keys"]:
+                if (sec["section"], k["key"]) in outrider.config_edit.SECRETS:
+                    k.update(secret=True, set=bool(k["value"]), value=None)
+        return {"path": path, "exists": os.path.exists(path), "sections": secs, "problems": problems}
+
+    def config_save(self, changes):
+        """POST /api/config {section: {key: value}}: those keys written into the config file in place (comments kept,
+        the old file kept as .bak), only if the result reads back and settings_from finds nothing new wrong with it.
+        (answer, status); the server uses the new values at its next start."""
+        if not isinstance(changes, dict) or not changes or not all(isinstance(v, dict) for v in changes.values()):
+            return {"error": "expected {section: {key: value}}"}, 400
+        path = self.config_file()
+        cfg_now = load_config(path) if os.path.exists(path) else {}
+        st, before = self._config_settings(cfg_now)
+        kinds = {(s["section"], k["key"]): k["kind"] for s in outrider.config_edit.entries(config_text(st)) for k in s["keys"]}
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except FileNotFoundError:
+            text = config_text(st)
+        except OSError as e:
+            return {"error": f"cannot read {path}: {e}"}, 500
+        n = 0
+        for sec, keys in changes.items():
+            for key, value in keys.items():
+                kind = kinds.get((sec, key))
+                if kind is None:
+                    return {"error": f"[{sec}] {key} is not a setting"}, 400
+                try:
+                    text = outrider.config_edit.set_key(text, sec, key, outrider.config_edit.coerce(kind, value))
+                except ValueError as e:
+                    return {"error": f"[{sec}] {key} {e}"}, 400
+                n += 1
+        try:
+            cfg = outrider.config_edit.tomllib.loads(text)
+        except (outrider.config_edit.tomllib.TOMLDecodeError, ValueError) as e:
+            return {"error": f"the change would not read back ({e}); nothing written"}, 400
+        _, after = self._config_settings(cfg)
+        new = [x for x in after if x not in before]
+        if new:
+            return {"error": "nothing written: " + "; ".join(x.removeprefix("config: ") for x in new), "problems": new}, 400
+        try:
+            if os.path.exists(path):
+                shutil.copy2(path, path + ".bak")
+            tmp = path + ".new"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text if text.endswith("\n") else text + "\n")
+            os.replace(tmp, path)
+        except OSError as e:
+            return {"error": f"cannot write {path}: {e}"}, 500
+        return {"ok": True, "path": path, "changed": n, "backup": path + ".bak" if cfg_now or os.path.exists(path + ".bak") else None,
+                "restart": True}, 200
 
     SPEAKER_SEEN_S = 60   # a window that speaks asks for the payload at least every 25 s (the long poll)
 
@@ -10672,6 +10749,16 @@ def make_app(state, hosts=None):
                 return {"error": f"{path} answered no JSON"}
         return get
 
+    async def config_get_view(_):
+        """GET /api/config: every config key for the Settings dialog's Server settings (secrets only as set or not)."""
+        return web.json_response(state.config_info())
+
+    async def config_post_view(request):
+        """POST /api/config {section: {key: value}}: written into the config file (applied at the next start)."""
+        body = await json_object(request)
+        out, status = state.config_save(body)
+        return web.json_response(out, status=status)
+
     async def ask_view(request):
         """POST /api/ask {text, source?} (the tablet app's voice; native-facing contract): {answer, spoken, matched,
         command}; errors {error, code}: bad_request, app_too_old, ai_off / ai_timeout / ai_error."""
@@ -10810,6 +10897,8 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/highway", highway_view)
     app.router.add_get("/api/rail", rail_view)
     app.router.add_post("/api/ask", ask_view)
+    app.router.add_get("/api/config", config_get_view)
+    app.router.add_post("/api/config", config_post_view)
     app.router.add_post("/api/rail/press", rail_press_view)
     app.router.add_post("/api/rail/sets", rail_sets_view)
     app.router.add_get("/api/highway/systems", highway_systems_view)

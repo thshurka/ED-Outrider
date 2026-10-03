@@ -2997,7 +2997,7 @@ const settle = async maxMs => {
     const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], sortCycle: ["dist", "-dist rev", "max"],
       nearCycle: ["value", "-value", "distance"], treeSort: "max", halves: [true, true, true], halvesOff: false, matRow: true, link: ["linked · 2 s", "linked"],
       stale: ["stale · 48 s", "stale"], none: ["no link · retrying since 14:02", "none"], pill: true,
-      chips: ["Alerts", "Voice", "Auto honk", "Sounds", "Thresholds", "Settings", "Spoken lines"],
+      chips: ["Alerts", "Voice", "What is said", "Sounds", "Values", "Risk & warnings", "Surface map", "Auto honk", "Display", "Sharing", "Server", "Spoken lines"],
       autoSmall: true, autoBig: false, line: true, cut: true};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodB12 = !bad.length && errors.length === before;
@@ -3463,6 +3463,39 @@ const settle = async maxMs => {
     console.log(goodT ? "OK" : "FAIL", "| tablet layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, pinch, settings", terr);
     tw.close();
+  }
+  // Settings (was the alerts dialog): folding sections remembered per device, open/close all, and Server settings drawn
+  // from the config file (GET api/config) with only the keys you change sent; never saved here (no POST)
+  {
+    const w = dom.window, before = errors.length;
+    const got = JSON.parse(await (async () => {
+      // jsdom has no modal dialogs; earlier steps here opened sections, so start as a device that never has
+      if (!w.HTMLDialogElement.prototype.showModal) w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+      w.localStorage.removeItem("settingsOpen");
+      w.eval(`document.getElementById("alertsBtn").click()`);
+      await sleep(300);
+      return w.eval(`JSON.stringify([document.getElementById("settingsTitle").textContent, document.getElementById("alertsBtn").title.startsWith("settings"),
+        document.querySelectorAll("#alertDialog details.setsec").length,
+        [...document.querySelectorAll("#alertDialog details.setsec")].filter(d => d.open).map(d => d.dataset.secKey)])`);
+    })());
+    w.eval(`document.getElementById("setOpenAll").click()`);
+    await sleep(100);
+    got.push(w.eval(`[...document.querySelectorAll("#alertDialog details.setsec")].every(d => d.open)`));
+    await settle(2500);   // the Server section opened: its keys fetched
+    got.push(w.eval(`JSON.stringify([document.querySelectorAll("#serverSettingsBody details.srvsec").length >= 10,
+      document.querySelectorAll("#serverSettingsBody [data-key]").length >= 80, !!document.querySelector('#serverSettingsBody [data-key="password"][data-secret]'),
+      document.querySelector('#serverSettingsBody [data-key="password"]').value])`));
+    got.push(w.eval(`(() => { const port = document.querySelector('#serverSettingsBody [data-sec="server"][data-key="port"]'); const was = port.value;
+      port.value = "9999"; const box = document.querySelector('#serverSettingsBody [data-sec="autohonk"][data-key="enabled"]'); box.checked = !box.checked;
+      const c = srvChanges(); port.value = was; box.checked = !box.checked; return JSON.stringify(c); })()`));
+    w.eval(`document.getElementById("setCloseAll").click()`);
+    await sleep(100);
+    got.push(w.eval(`JSON.stringify(Object.values(JSON.parse(localStorage.getItem("settingsOpen"))).some(Boolean))`));
+    w.eval(`document.getElementById("alertDialog").close ? document.getElementById("alertDialog").close() : document.getElementById("alertDialog").removeAttribute("open")`);
+    const want = ["Settings", true, 12, ["alerts"], true, '[true,true,true,""]', JSON.stringify({server: {port: "9999"}, autohonk: {enabled: true}}), "false"];
+    const goodS = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
+    allOk = allOk && goodS;
+    console.log(goodS ? "OK" : "FAIL", "| settings |", goodS ? "12 folding sections, remembered; server settings from the config file; only changes sent" : JSON.stringify(got), errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

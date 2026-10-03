@@ -159,7 +159,7 @@ stop</b>.
 The **Overview** at the top shows Here and Nearby together: drag the divider, swap sides or stack them.
 
 On a window of at least about 900 × 600 the page fits the window: the header stays put and each list scrolls
-in its own box. **▴** folds the tiles into one line (remembered on this device; the alerts dialog's Settings can fold
+in its own box. **▴** folds the tiles into one line (remembered on this device; Settings → Display can fold
 them only on a small window). A table too wide for its box
 switches to short forms ("HMC", "G star"; hover for the full text) rather than scroll sideways.
 
@@ -265,7 +265,7 @@ It can only read: it never presses keys, plots, bookmarks or hushes anything. No
 ## 🔔 Alerts
 
 Alerts fire only for something out of the ordinary. Each can play a sound (🔊), show a desktop
-notification and be spoken (🗣), chosen per alert in the **🔔 alerts** dialog:
+notification and be spoken (🗣), chosen per alert in **⚙ Settings → Alerts**:
 
 - a new discovery targeted, or arriving somewhere nobody has been
 - leaving with mapping or bio over your levels undone, or a first-discovered Earth-like, water, ammonia or
@@ -399,7 +399,7 @@ config file) downloads into `data/piper-voices/` the first time; the dialog swit
 
 **Spoken lines: what was said, and banning lines**
 
-Open the 🔔 alerts dialog and scroll to the very bottom. The collapsed **Spoken lines** section lists this
+Open ⚙ Settings and its **Spoken lines** section (the last one). It lists this
 window's last 100 alerts and what became of each: said, cut short, dropped or silent, and why. **copy**
 puts it on the clipboard.
 
@@ -522,7 +522,7 @@ targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own aler
 
 On Linux, Outrider can fire the Discovery Scanner for you. On arriving by hyperspace it waits a moment,
 holds Primary Fire, and says how it went ("System Scan Completed, 12 Bodies discovered"). It is off until
-you tick it in the 🔔 alerts dialog.
+you tick it in ⚙ Settings.
 
 - It waits while a map or panel is open, and while the HUD is in combat mode (switch to analysis mode).
 - It learns which fire groups the scanner is in, per ship, and waits on a group where it has missed twice in a
@@ -559,7 +559,7 @@ Set it up under `[copilot]` in `ed_outrider.toml`: `enabled = true`, the `device
 as `"X-56 Rhino Throttle"`, or a `/dev/input/by-id/…` path; of several devices that match, the one that has the
 button is used) and the `button`. Run
 `python3 -m outrider.button --listen` to find the button's name. `hold_ms` and `double_ms` tune the gestures. The
-alerts dialog shows whether it is listening.
+Settings shows whether it is listening.
 
 - **Unbind the button in Elite's controls.** Outrider only reads it, so the game would act on it too.
 - **X-56 users:** avoid the latching toggles and the mode wheel. They report as buttons held down, which
@@ -589,8 +589,8 @@ alerts dialog shows whether it is listening.
 - **Small things worth knowing:** the pill at the top right says whether the page is linked to Outrider ("stale"
   after 30 s without an answer); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
   its colony distance; Search's mining list includes minerals you have refined, with those bodies first; the
-  alerts dialog's chips jump to its sections; and the dialog's Settings choose whether the header tiles fold to
-  one line on a small window, on this device.
+  Settings' chips jump to its sections; and Settings → Display chooses whether the header tiles fold to one line on a
+  small window, on this device.
 
 ## ⚙️ Settings
 
@@ -598,8 +598,16 @@ alerts dialog shows whether it is listening.
 <summary>Outrider needs no configuration — but everything can be changed.</summary>
 <br>
 
-Copy `ed_outrider.toml.example` to `ed_outrider.toml` next to the script and edit the lines you need.
-The example explains every key. Relative paths in it (`db`, `backup_dir`, `speech_file`) are relative to the
+**⚙ Settings** (top right) holds everything, in folding sections: Alerts, Voice, What is said, Sounds, Values, Risk
+and warnings, Surface map, Auto honk, Display, Sharing, **Server settings** and Spoken lines. Most are this browser's
+own (Sharing exports them or makes them the defaults for new browsers). **Server settings** is the config file
+itself, every key of it: the network and the client password, the journal folders, paths, backups, Spansh, the
+Highway, the voice's AI layer and more. Saving there writes `ed_outrider.toml` (only the keys you changed; its
+comments stay, and the previous file is kept as `ed_outrider.toml.bak`), and Outrider uses them from its next start.
+The password and the AI key are never shown, only whether they are set.
+
+You can also edit the file by hand: copy `ed_outrider.toml.example` to `ed_outrider.toml` next to the script and
+edit the lines you need. The example explains every key. Relative paths in it (`db`, `backup_dir`, `speech_file`) are relative to the
 Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `resources/speech.json`.
 `python3 ed_outrider.py --write-config` writes one with the settings in effect. Switches take a bare `true` or
 `false`; a wrong value is reported at start and the default kept.

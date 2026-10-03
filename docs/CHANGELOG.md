@@ -2,6 +2,16 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Settings (was the alerts dialog): folding sections, the whole config file, a wider window
+- ⚙ Settings replaces 🔔 "Alerts & thresholds" (asked by the author). Its controls are in twelve sections that fold:
+  Alerts, Voice, What is said, Sounds, Values, Risk and warnings, Surface map, Auto honk, Display, Sharing, Server
+  settings, Spoken lines. Open all and close all are in the head; this device remembers which are open.
+- **Server settings**: every key of the config file, from network, password and paths to Spansh, the Highway, the
+  voice's AI and the MCP bridge, each with its help. Saving writes ed_outrider.toml, only the changed keys (its
+  comments stay; the old file is kept as .bak), after checking the result; Outrider uses them from its next start.
+  The password and the AI key are never shown.
+- On a big screen Settings is far wider, its sections in two columns (three on a very wide one).
+
 ## 2026-10-03 · Two more tablet themes: Elite and Babylon 5
 - Elite: the cockpit HUD's orange on black, thin-line panels with cut corners, cyan for what is selected.
 - Babylon 5: Earthforce navy, steel-blue panels with angled header tabs, blue-white text, amber for warnings.

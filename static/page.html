@@ -16,7 +16,7 @@
     <h1>ED Outrider</h1>
     <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hwy" title="the Neutron Highway: plot a route with Spansh and follow it as you fly">Highway</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
     <span class="icons"><span id="linkPill" class="linkpill" role="status" title="the page's link to Outrider"></span><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
-      <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="alerts &amp; thresholds">🔔</button><span id="lastSaidLine" class="lastsaid" hidden><button type="button" id="lastSaidBtn" class="icon" title="say it again">▶</button><span id="lastSaidText"></span></span></span>
+      <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="settings: alerts, voice, thresholds, the server">⚙</button><span id="lastSaidLine" class="lastsaid" hidden><button type="button" id="lastSaidBtn" class="icon" title="say it again">▶</button><span id="lastSaidText"></span></span></span>
   </div>
   <div class="tilewrap">
   <div class="tiles" id="tiles">
@@ -328,7 +328,7 @@
       <div class="hint">The keys go to whichever window has focus: stay in the game until it is done. It opens the galaxy map,
         searches for the next system, plots the route, closes the map and checks the target in Status.json; it stops if
         anything else opens, a step takes too long or you jump. The plot-route keys must be confirmed in game
-        ([highway] autotarget_plot). Results are spoken under "Auto-target" in the alerts dialog.</div>
+        ([highway] autotarget_plot). Results are spoken under "Auto-target" in Settings.</div>
       <details id="hwyAutoStepsBox"><summary>the steps, with your keys</summary><ul id="hwyAutoSteps"></ul></details>
     </details>
     <div id="hwyMapBox">
@@ -483,145 +483,165 @@
 </dialog>
 <div id="toast"></div>
 <div id="pop"></div>
-<dialog id="alertDialog">
+<dialog id="alertDialog" class="settingsdlg" aria-labelledby="settingsTitle">
   <form method="dialog">
-    <h3>Alerts &amp; thresholds</h3>
-    <nav id="alertChips" class="chips" aria-label="sections"></nav>
-    <h4 data-chip="Alerts">What happens for each alert</h4>
-    <label class="master"><input type="checkbox" data-alert="enabled"> Desktop notifications (the browser will ask permission once)</label>
-    <table id="alertTable" class="alerttable"><thead><tr><th>Alert</th><th title="desktop notification">notify</th>
-      <th title="its sound (when 🔊 is on)">sound</th><th title="spoken (when 🗣 is on)">speak</th></tr></thead><tbody id="alertOpts"></tbody></table>
-    <div class="hint">Alerts only fire for something out of the ordinary. The tab title also carries the current state, so a background tab still tells you something.</div>
-    <h4 data-chip="Voice">Spoken alerts <span id="ttsEngine" class="unk"></span></h4>
-    <label class="mod">Voice <select id="ttsVoice"></select> <span id="ttsStatus" class="hint"></span></label>
-    <div class="hint" id="ttsHint"></div>
-    <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
-      <span class="profrow"><label><input type="checkbox" id="speechProfanity"> with profanity <span id="speechProfanityWho" class="unk"></span></label>
-      <label title="how often a line comes from the swearing versions instead of the clean ones"><input type="number" id="speechProfanityPct" min="0" max="100" step="5" style="width:4.5em">% of the time</label></span></div>
-    <label class="mod"><input type="checkbox" id="speechShift"> One personality per system
-      <span class="hint">the personality (and its own voice) changes at each arrival and at game start, not at every line; with one personality ticked it changes nothing</span></label>
-    <label class="mod"><input type="checkbox" id="speechDangerBusiness"> Danger alerts always down to business
-      <span class="hint">hull, heat, interdiction, low fuel or an unscoopable star, your carrier leaving without you, the ship-loss debrief: only the business lines, never swearing</span></label>
-    <div class="mod inlineopts">This screen speaks: <select id="speakMode">
-        <option value="auto">auto: one window at a time</option><option value="always">always</option><option value="never">never</option></select>
-      <span id="speakerStatus" class="hint"></span> <button type="button" class="try" id="speakerClaim" hidden>speak from this window</button>
-      <div class="hint">With the page open in several windows (a second screen at ?mode=now), auto lets only one of them speak and play the alert sounds; every window still shows the alerts. Remembered per browser: always makes every window of it speak, never keeps this browser quiet. The ▶ try buttons always work.</div></div>
-    <label class="mod"><input type="checkbox" id="serverPlay"> Play speech and sounds on this PC <span id="serverPlayStatus" class="unk"></span>
-      <span class="hint">the PC running Outrider plays the spoken lines (Piper) and the alert sounds through its own player, so the page needs no click to allow audio; a page must still be open, since it chooses what to say. Whatever the PC cannot play, this browser plays instead. Per browser; Linux only</span></label>
-    <div class="mod inlineopts">Say signals as the FSS finds them:
-      <label><input type="checkbox" id="sayBio"> biological</label>
-      <label><input type="checkbox" id="sayGeo"> geological</label>
-      <span class="hint">"2 Biological and 1 Geological Signals found on body A 3" (when 🗣 is on)</span></div>
-    <label class="mod"><input type="checkbox" id="routineQuiet"> Routine systems: sound only
-      <span class="hint">arriving somewhere known with every body already found, a scoopable star, and nothing over your body or bio levels: a soft two-note sound instead of the arrival briefing (and of "nothing worth staying for" after the FSS); the card stays</span></label>
-    <label class="mod"><input type="checkbox" id="sayHazard"> Say the hazard when the FSD charges for a neutron star, white dwarf or black hole
-      <span class="hint">"… Neutron star ahead: throttle down on arrival, mind the jet cone" (part of the jump line)</span></label>
-    <label class="mod"><input type="checkbox" id="sayMapped"> Say when a planet is mapped
-      <span class="hint">"A 2 mapped efficiently, 3.4M. Next: biology on C 2, up to 19M." after each DSS mapping (or "2 probes over target, no efficiency bonus"; or "Nothing else here over your levels"); its row in the table above chooses the card, notification and voice. Off by default ([defaults] speak_mapped)</span></label>
-    <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
-      <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
-      <span class="hint">1× is the voice's own pace; reset goes back to the config file's speech_speed</span></label>
-    <div class="hint" id="soundFiles"></div>
-    <label class="mod">Volume <input type="range" id="speechVolume" min="0" max="100" step="5" style="width:12em;vertical-align:middle">
-      <span id="speechVolumeOut"></span>
-      <span class="hint">Outrider's own voice and alert sounds, on this device (or on the PC when it plays them); the game's sound is its own</span></label>
-    <label class="mod">Call me <input type="text" id="speechNames" style="width:18em" placeholder="Boss, Hefay, Sir">
-      <span class="hint">comma separated; each line uses one at random, in place of your commander name (which a voice often cannot say); empty goes back to the default</span></label>
-    <div class="hint" id="speechHint"></div>
-    <div class="hint" id="speechTried"></div>
-    <h4 data-chip="Auto honk">Auto honk</h4>
-    <label class="mod"><input type="checkbox" id="autoHonk"> Honk automatically on arriving in a system by hyperspace
-      <span id="autoHonkStatus" class="hint"></span></label>
-    <label class="mod"><input type="checkbox" id="autoHonkSay"> When it completes, say how many bodies it found
-      <span class="hint">"System Scan Completed, 12 Bodies discovered", or "System scan complete, and all bodies were found" when the honk found everything</span></label>
-    <div class="hint"><b>The Discovery Scanner must be on primary fire</b> in the fire group that is active when you jump.
-      Outrider presses Primary Fire's keyboard binding from your controls preset (<b id="autoHonkKey"></b>); give Primary
-      Fire one as its second binding if it has none, keeping your trigger as the first ([autohonk] key in the config file
-      overrides it). Systems you have already honked are left alone. The keys go to whichever window has focus, so switch
-      this off before alt-tabbing away mid-jump.
-      <button type="button" class="try" id="autoHonkTest" title="press Primary Fire once, 5 seconds from now">▶ test in 5 s</button>
-      <span id="autoHonkTestMsg"></span></div>
-    <div class="hint" id="autoHonkGroups" hidden><span id="autoHonkGroupsText"></span>
-      <a href="#" id="autoHonkForget" title="clear what auto honk learned about this ship's fire groups">forget</a></div>
-    <div class="hint" id="copilotLine" hidden></div>
-    <h4 data-chip="Sounds">Sounds</h4>
-    <div class="opts inline">Try them:
-      <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>
-      <button type="button" class="try" data-try="upbeat" title="known but not fully scanned">▶ unscanned</button>
-      <button type="button" class="try" data-try="thud" title="visited or fully scanned">▶ known</button>
-      <button type="button" class="try" data-try="alert" title="leaving with unfinished work, fuel">▶ alert</button>
-      <button type="button" class="try" data-try="find" title="a valuable body just scanned">▶ find</button>
-      <button type="button" class="try" data-try="cash" title="docked with data to sell, a sale">▶ cash</button>
-      <button type="button" class="try" data-try="chime" title="carrier, codex">▶ chime</button>
-      <button type="button" class="try" data-try="routine" title="a routine system (Routine systems: sound only)">▶ routine</button>
-      <button type="button" class="try" data-try="danger" title="hull, heat, interdiction">▶ danger</button>
-      <button type="button" class="try" id="trySpeak" title="spoken alerts">▶ voice</button>
-    </div>
-    <h4 data-chip="Thresholds">Thresholds (these also drive the header colours and the leaving warning)</h4>
-    <label class="mod">Exobiology: only count a body as unfinished if it could pay over
-      <input type="number" id="bioMin" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="bioMin">reset</span>
-      <span class="hint">straight Vista Genomics payout, no first-log bonus; sampling you have already started always counts; a body the rules cannot price always counts</span></label>
-    <div class="hint" id="bioRules"></div>
-    <label class="mod"><input type="checkbox" id="codexNewCounts"> Codex finds count: a body whose likeliest species is new to your codex in this region (✦) is worth stopping for whatever its value (Now's next stops, the leaving warnings; [defaults] codex_interesting)
-      <span class="hint">codex entries earn vouchers and are per region and per colour variant; where the colour can be told (the surface materials, or the parent star once every star in the system is known and agrees) a new colour of a logged species is flagged too, otherwise only a new species is</span></label>
-    <label class="mod">Highlight a body in Here when its scan + map data pays over
-      <input type="number" id="hlBody" min="0" step="100000" style="width:9em"> cr<span class="reset" data-reset="hlBody">reset</span>
-      <span class="hint">the row turns green; straight Universal Cartographics value, no first-discovery, first-mapped or efficiency bonus</span></label>
-    <label class="mod">Highlight a body's bio when its species could pay over
-      <input type="number" id="hlBio" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="hlBio">reset</span>
-      <span class="hint">the Bio cell and the body name turn violet; straight Vista Genomics value, no first-footfall ×5</span></label>
-    <label class="mod"><input type="checkbox" id="maxBonus"> Here's <b>Max</b> column counts first-discovery, first-mapped and first-footfall bonuses<span class="reset" data-reset="maxBonus">reset</span>
-      <span class="hint">off shows plain payouts, for comparing bodies on their own merits; <b>Now</b> always includes the bonuses you have earned, since that is what a sale pays</span></label>
-    <label class="mod">…or as a multiple of your ship's rebuy: amber at
-      <input type="number" id="rebuyWarn" min="0" step="1" style="width:5em">× , red at
-      <input type="number" id="rebuyUrgent" min="0" step="1" style="width:5em">× your rebuy <span class="reset" data-reset="rebuy">reset</span>
-      <span class="hint">blank = off; either rule can turn the header amber or red (a cheap ship carrying a fortune is the risk)</span></label>
-    <label class="mod">Approach warning: a landable body of
-      <input type="number" id="highG" min="0" step="0.1" style="width:5em"> g or more<span class="reset" data-reset="highG">reset</span>
-      <span class="hint">said when you drop into orbital cruise there with unsold data over the amber level or the rebuy multiple below ("2.6 g, 480 million aboard, 3.2 rebuys"); the approach alert above switches it off</span></label>
-    <label class="mod">Core modules: show them next to hull under
-      <input type="number" id="moduleWarn" min="1" max="100" step="1" style="width:4.5em"> % health<span class="reset" data-reset="moduleWarn">reset</span>
-      <span class="hint">FSD, power plant, thrusters, life support, sensors, fuel scoop and the AFMU, as of their last reading in the journal (a Loadout, an AFMU repair or a repair at a station),
-        with the jet-cone boosts since; also in the welcome back and the co-pilot's status report. Nothing shows while all are over it. Blank = the config file's <code>module_warn</code> (80).</span></label>
-    <label class="mod">Fuel alerts: also warn under
-      <input type="number" id="fuelJumps" min="0" max="99" step="1" style="width:4.5em"> jumps of fuel left<span class="reset" data-reset="fuelJumps">reset</span>
-      <span class="hint">blank = off (the default). Once when the jumps left at your pace fall under it (said like the game's low fuel warning), and the low-fuel warnings for an unscoopable arrival star or target then count it as well as under 30%; it also becomes the level for the "top up here" warning, which otherwise asks for two of your usual gaps between scoopable stars (at least 4 jumps)</span></label>
-    <label class="mod">Surface map (Now): show it below
-      <input type="number" id="surfAlt" min="10" step="100" style="width:6em"> m, never narrower than
-      <input type="number" id="surfMin" min="50" step="100" style="width:6em"> m across, rig spacing ring
-      <input type="number" id="surfSpacing" min="0" step="1" style="width:5em"> m, a rig far away at
-      <input type="number" id="surfWarn" min="100" max="4900" step="100" style="width:6em"> m<span class="reset" data-reset="surfaceCfg">reset</span>
-      <span class="hint">the map shows while you are on the ground, or flying below the altitude (it hides again 100 m higher). The rig ring is an estimate
-        (rigs closer than about 50 m may not deploy; 0 = no ring). A rig past the far distance turns red on the map and in the legend; the spoken
-        warning for it uses the config file's <code>rig_warn</code>, since the server says it for every window. Blank = the config file's value.</span></label>
-    <label class="mod"><input type="checkbox" id="surfStrip"> Also a small copy of the surface map in the on-body strip (under the header), with a one-line legend</label>
-    <label class="mod">Unsold data on board: amber "worth selling soon" at
-      <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
-      <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>
-      <span class="hint">compared with the header total: cartographics after any NPC crew cut plus the exobiology estimate; crossing a level also sends a notification. Blank = default.</span></label>
-    <label class="mod">Discovery streak: say so at
-      <input type="number" id="streakKnown" min="0" max="99" step="1" style="width:4.5em"> fully known systems in a row, and at
-      <input type="number" id="streakNew" min="0" max="99" step="1" style="width:4.5em"> undiscovered ones in a row<span class="reset" data-reset="streak">reset</span>
-      <span class="hint">once per streak, as part of the arrival alert ("10 known systems in a row, maybe change heading"; the new-streak line replaces "undiscovered"); a system with unreported bodies or one you visited before ends a known run; 0 = off, and the smallest streak is 2</span></label>
-    <label class="mod">Here's suggested order: mark an item "skip?" under
-      <input type="number" id="skipFloor" min="0" step="10000" style="width:8em"> cr per minute of supercruise<span class="reset" data-reset="skipFloor">reset</span>
-      <span class="hint">supercruise time from the arrival star on a rough community curve (about 40 s at 2,000 ls, 6 min at 100,000 ls); started samples and first-discovery Earth-likes, water worlds, ammonia worlds and terraformables are never marked</span></label>
-    <h4 data-chip="Settings">Settings</h4>
-    <label class="mod">Header tiles on this device <select id="tilesMode">
-        <option value="">as ▴/▾ sets them (shared)</option><option value="auto">one line on a small window</option>
-        <option value="six">always the six tiles</option><option value="line">always one line</option></select>
-      <span class="hint">"small" is under 800 px high or 1200 px wide; ▴/▾ beside the tiles still folds or unfolds them, and makes that this device's choice</span></label>
-    <div class="opts inline">
-      <button type="button" class="try" id="settingsExport" title="download this browser's settings as a file">Export settings</button>
-      <button type="button" class="try" id="settingsImport" title="load settings from an exported file (the page reloads)">Import settings…</button>
-      <input type="file" id="settingsFile" accept=".json,application/json" hidden>
-      <button type="button" class="try" id="settingsServer" title="save these settings on the server: a browser uses them for anything it has not set itself">Use these for new browsers</button>
-      <button type="button" class="try" id="settingsServerClear" hidden>stop</button>
-    </div>
-    <div class="hint" id="settingsHint">Thresholds, alert choices, personalities, "Call me" names, speed, sorts and filters live in this browser.
-      Export them to a file (Import on another browser or after clearing the cache), or save them on the server so a new browser (a tablet running Now) starts with them.
-      The view, layouts, the search form and which screen speaks stay per device. The voice is kept by the server already.</div>
-    <details id="speechLogBox" class="speechlog" data-chip="Spoken lines"><summary>Spoken lines: the last 100 alerts in this window and what became of each</summary>
+    <div class="sethead"><h3 id="settingsTitle">Settings</h3>
+      <span class="setfold"><button type="button" id="setOpenAll" title="open every section">open all</button><button type="button" id="setCloseAll" title="close every section">close all</button></span>
+      <button value="close" class="primary">Done</button>
+      <nav id="alertChips" class="chips" aria-label="sections"></nav></div>
+    <div class="setbody">
+    <details class="setsec" data-sec-key="alerts" data-chip="Alerts"><summary>Alerts <span class="sum-note">what happens for each alert</span></summary>
+      <label class="master"><input type="checkbox" data-alert="enabled"> Desktop notifications (the browser will ask permission once)</label>
+      <table id="alertTable" class="alerttable"><thead><tr><th>Alert</th><th title="desktop notification">notify</th>
+        <th title="its sound (when 🔊 is on)">sound</th><th title="spoken (when 🗣 is on)">speak</th></tr></thead><tbody id="alertOpts"></tbody></table>
+      <div class="hint">Alerts only fire for something out of the ordinary. The tab title also carries the current state, so a background tab still tells you something.</div>
+    </details>
+    <details class="setsec" data-sec-key="voice" data-chip="Voice"><summary>Voice <span id="ttsEngine" class="unk"></span> <span class="sum-note">the voice, its personality, pace and volume, which screen speaks</span></summary>
+      <label class="mod">Voice <select id="ttsVoice"></select> <span id="ttsStatus" class="hint"></span></label>
+      <div class="hint" id="ttsHint"></div>
+      <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
+        <span class="profrow"><label><input type="checkbox" id="speechProfanity"> with profanity <span id="speechProfanityWho" class="unk"></span></label>
+        <label title="how often a line comes from the swearing versions instead of the clean ones"><input type="number" id="speechProfanityPct" min="0" max="100" step="5" style="width:4.5em">% of the time</label></span></div>
+      <label class="mod"><input type="checkbox" id="speechShift"> One personality per system
+        <span class="hint">the personality (and its own voice) changes at each arrival and at game start, not at every line; with one personality ticked it changes nothing</span></label>
+      <label class="mod"><input type="checkbox" id="speechDangerBusiness"> Danger alerts always down to business
+        <span class="hint">hull, heat, interdiction, low fuel or an unscoopable star, your carrier leaving without you, the ship-loss debrief: only the business lines, never swearing</span></label>
+      <div class="mod inlineopts">This screen speaks: <select id="speakMode">
+          <option value="auto">auto: one window at a time</option><option value="always">always</option><option value="never">never</option></select>
+        <span id="speakerStatus" class="hint"></span> <button type="button" class="try" id="speakerClaim" hidden>speak from this window</button>
+        <div class="hint">With the page open in several windows (a second screen at ?mode=now), auto lets only one of them speak and play the alert sounds; every window still shows the alerts. Remembered per browser: always makes every window of it speak, never keeps this browser quiet. The ▶ try buttons always work.</div></div>
+      <label class="mod"><input type="checkbox" id="serverPlay"> Play speech and sounds on this PC <span id="serverPlayStatus" class="unk"></span>
+        <span class="hint">the PC running Outrider plays the spoken lines (Piper) and the alert sounds through its own player, so the page needs no click to allow audio; a page must still be open, since it chooses what to say. Whatever the PC cannot play, this browser plays instead. Per browser; Linux only</span></label>
+      <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
+        <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
+        <span class="hint">1× is the voice's own pace; reset goes back to the config file's speech_speed</span></label>
+      <div class="hint" id="soundFiles"></div>
+      <label class="mod">Volume <input type="range" id="speechVolume" min="0" max="100" step="5" style="width:12em;vertical-align:middle">
+        <span id="speechVolumeOut"></span>
+        <span class="hint">Outrider's own voice and alert sounds, on this device (or on the PC when it plays them); the game's sound is its own</span></label>
+      <label class="mod">Call me <input type="text" id="speechNames" style="width:18em" placeholder="Boss, Hefay, Sir">
+        <span class="hint">comma separated; each line uses one at random, in place of your commander name (which a voice often cannot say); empty goes back to the default</span></label>
+      <div class="hint" id="speechHint"></div>
+      <div class="hint" id="speechTried"></div>
+    </details>
+    <details class="setsec" data-sec-key="said" data-chip="What is said"><summary>What is said <span class="sum-note">signals, routine systems, hazards, mapping</span></summary>
+      <div class="mod inlineopts">Say signals as the FSS finds them:
+        <label><input type="checkbox" id="sayBio"> biological</label>
+        <label><input type="checkbox" id="sayGeo"> geological</label>
+        <span class="hint">"2 Biological and 1 Geological Signals found on body A 3" (when 🗣 is on)</span></div>
+      <label class="mod"><input type="checkbox" id="routineQuiet"> Routine systems: sound only
+        <span class="hint">arriving somewhere known with every body already found, a scoopable star, and nothing over your body or bio levels: a soft two-note sound instead of the arrival briefing (and of "nothing worth staying for" after the FSS); the card stays</span></label>
+      <label class="mod"><input type="checkbox" id="sayHazard"> Say the hazard when the FSD charges for a neutron star, white dwarf or black hole
+        <span class="hint">"… Neutron star ahead: throttle down on arrival, mind the jet cone" (part of the jump line)</span></label>
+      <label class="mod"><input type="checkbox" id="sayMapped"> Say when a planet is mapped
+        <span class="hint">"A 2 mapped efficiently, 3.4M. Next: biology on C 2, up to 19M." after each DSS mapping (or "2 probes over target, no efficiency bonus"; or "Nothing else here over your levels"); its row in the table above chooses the card, notification and voice. Off by default ([defaults] speak_mapped)</span></label>
+    </details>
+    <details class="setsec" data-sec-key="sounds" data-chip="Sounds"><summary>Sounds <span class="sum-note">try each alert sound</span></summary>
+      <div class="opts inline">Try them:
+        <button type="button" class="try" data-try="fanfare" title="a brand-new discovery">▶ new</button>
+        <button type="button" class="try" data-try="upbeat" title="known but not fully scanned">▶ unscanned</button>
+        <button type="button" class="try" data-try="thud" title="visited or fully scanned">▶ known</button>
+        <button type="button" class="try" data-try="alert" title="leaving with unfinished work, fuel">▶ alert</button>
+        <button type="button" class="try" data-try="find" title="a valuable body just scanned">▶ find</button>
+        <button type="button" class="try" data-try="cash" title="docked with data to sell, a sale">▶ cash</button>
+        <button type="button" class="try" data-try="chime" title="carrier, codex">▶ chime</button>
+        <button type="button" class="try" data-try="routine" title="a routine system (Routine systems: sound only)">▶ routine</button>
+        <button type="button" class="try" data-try="danger" title="hull, heat, interdiction">▶ danger</button>
+        <button type="button" class="try" id="trySpeak" title="spoken alerts">▶ voice</button>
+      </div>
+    </details>
+    <details class="setsec" data-sec-key="values" data-chip="Values"><summary>What is worth stopping for <span class="sum-note">these also drive the header colours and the leaving warning</span></summary>
+      <label class="mod">Exobiology: only count a body as unfinished if it could pay over
+        <input type="number" id="bioMin" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="bioMin">reset</span>
+        <span class="hint">straight Vista Genomics payout, no first-log bonus; sampling you have already started always counts; a body the rules cannot price always counts</span></label>
+      <div class="hint" id="bioRules"></div>
+      <label class="mod"><input type="checkbox" id="codexNewCounts"> Codex finds count: a body whose likeliest species is new to your codex in this region (✦) is worth stopping for whatever its value (Now's next stops, the leaving warnings; [defaults] codex_interesting)
+        <span class="hint">codex entries earn vouchers and are per region and per colour variant; where the colour can be told (the surface materials, or the parent star once every star in the system is known and agrees) a new colour of a logged species is flagged too, otherwise only a new species is</span></label>
+      <label class="mod">Highlight a body in Here when its scan + map data pays over
+        <input type="number" id="hlBody" min="0" step="100000" style="width:9em"> cr<span class="reset" data-reset="hlBody">reset</span>
+        <span class="hint">the row turns green; straight Universal Cartographics value, no first-discovery, first-mapped or efficiency bonus</span></label>
+      <label class="mod">Highlight a body's bio when its species could pay over
+        <input type="number" id="hlBio" min="0" step="1000000" style="width:9em"> cr<span class="reset" data-reset="hlBio">reset</span>
+        <span class="hint">the Bio cell and the body name turn violet; straight Vista Genomics value, no first-footfall ×5</span></label>
+      <label class="mod"><input type="checkbox" id="maxBonus"> Here's <b>Max</b> column counts first-discovery, first-mapped and first-footfall bonuses<span class="reset" data-reset="maxBonus">reset</span>
+        <span class="hint">off shows plain payouts, for comparing bodies on their own merits; <b>Now</b> always includes the bonuses you have earned, since that is what a sale pays</span></label>
+      <label class="mod">Here's suggested order: mark an item "skip?" under
+        <input type="number" id="skipFloor" min="0" step="10000" style="width:8em"> cr per minute of supercruise<span class="reset" data-reset="skipFloor">reset</span>
+        <span class="hint">supercruise time from the arrival star on a rough community curve (about 40 s at 2,000 ls, 6 min at 100,000 ls); started samples and first-discovery Earth-likes, water worlds, ammonia worlds and terraformables are never marked</span></label>
+    </details>
+    <details class="setsec" data-sec-key="risk" data-chip="Risk & warnings"><summary>Risk and warnings <span class="sum-note">unsold data, rebuy, gravity, modules, fuel, streaks</span></summary>
+      <label class="mod">…or as a multiple of your ship's rebuy: amber at
+        <input type="number" id="rebuyWarn" min="0" step="1" style="width:5em">× , red at
+        <input type="number" id="rebuyUrgent" min="0" step="1" style="width:5em">× your rebuy <span class="reset" data-reset="rebuy">reset</span>
+        <span class="hint">blank = off; either rule can turn the header amber or red (a cheap ship carrying a fortune is the risk)</span></label>
+      <label class="mod">Approach warning: a landable body of
+        <input type="number" id="highG" min="0" step="0.1" style="width:5em"> g or more<span class="reset" data-reset="highG">reset</span>
+        <span class="hint">said when you drop into orbital cruise there with unsold data over the amber level or the rebuy multiple below ("2.6 g, 480 million aboard, 3.2 rebuys"); the approach alert above switches it off</span></label>
+      <label class="mod">Core modules: show them next to hull under
+        <input type="number" id="moduleWarn" min="1" max="100" step="1" style="width:4.5em"> % health<span class="reset" data-reset="moduleWarn">reset</span>
+        <span class="hint">FSD, power plant, thrusters, life support, sensors, fuel scoop and the AFMU, as of their last reading in the journal (a Loadout, an AFMU repair or a repair at a station),
+          with the jet-cone boosts since; also in the welcome back and the co-pilot's status report. Nothing shows while all are over it. Blank = the config file's <code>module_warn</code> (80).</span></label>
+      <label class="mod">Fuel alerts: also warn under
+        <input type="number" id="fuelJumps" min="0" max="99" step="1" style="width:4.5em"> jumps of fuel left<span class="reset" data-reset="fuelJumps">reset</span>
+        <span class="hint">blank = off (the default). Once when the jumps left at your pace fall under it (said like the game's low fuel warning), and the low-fuel warnings for an unscoopable arrival star or target then count it as well as under 30%; it also becomes the level for the "top up here" warning, which otherwise asks for two of your usual gaps between scoopable stars (at least 4 jumps)</span></label>
+      <label class="mod">Unsold data on board: amber "worth selling soon" at
+        <input type="number" id="unsoldWarn" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldWarn">reset</span>, red "go sell" at
+        <input type="number" id="unsoldUrgent" min="0" step="10000000" style="width:10em"> cr<span class="reset" data-reset="unsoldUrgent">reset</span>
+        <span class="hint">compared with the header total: cartographics after any NPC crew cut plus the exobiology estimate; crossing a level also sends a notification. Blank = default.</span></label>
+      <label class="mod">Discovery streak: say so at
+        <input type="number" id="streakKnown" min="0" max="99" step="1" style="width:4.5em"> fully known systems in a row, and at
+        <input type="number" id="streakNew" min="0" max="99" step="1" style="width:4.5em"> undiscovered ones in a row<span class="reset" data-reset="streak">reset</span>
+        <span class="hint">once per streak, as part of the arrival alert ("10 known systems in a row, maybe change heading"; the new-streak line replaces "undiscovered"); a system with unreported bodies or one you visited before ends a known run; 0 = off, and the smallest streak is 2</span></label>
+    </details>
+    <details class="setsec" data-sec-key="surface" data-chip="Surface map"><summary>Surface map</summary>
+      <label class="mod">Surface map (Now): show it below
+        <input type="number" id="surfAlt" min="10" step="100" style="width:6em"> m, never narrower than
+        <input type="number" id="surfMin" min="50" step="100" style="width:6em"> m across, rig spacing ring
+        <input type="number" id="surfSpacing" min="0" step="1" style="width:5em"> m, a rig far away at
+        <input type="number" id="surfWarn" min="100" max="4900" step="100" style="width:6em"> m<span class="reset" data-reset="surfaceCfg">reset</span>
+        <span class="hint">the map shows while you are on the ground, or flying below the altitude (it hides again 100 m higher). The rig ring is an estimate
+          (rigs closer than about 50 m may not deploy; 0 = no ring). A rig past the far distance turns red on the map and in the legend; the spoken
+          warning for it uses the config file's <code>rig_warn</code>, since the server says it for every window. Blank = the config file's value.</span></label>
+      <label class="mod"><input type="checkbox" id="surfStrip"> Also a small copy of the surface map in the on-body strip (under the header), with a one-line legend</label>
+    </details>
+    <details class="setsec" data-sec-key="honk" data-chip="Auto honk"><summary>Auto honk and the co-pilot button</summary>
+      <label class="mod"><input type="checkbox" id="autoHonk"> Honk automatically on arriving in a system by hyperspace
+        <span id="autoHonkStatus" class="hint"></span></label>
+      <label class="mod"><input type="checkbox" id="autoHonkSay"> When it completes, say how many bodies it found
+        <span class="hint">"System Scan Completed, 12 Bodies discovered", or "System scan complete, and all bodies were found" when the honk found everything</span></label>
+      <div class="hint"><b>The Discovery Scanner must be on primary fire</b> in the fire group that is active when you jump.
+        Outrider presses Primary Fire's keyboard binding from your controls preset (<b id="autoHonkKey"></b>); give Primary
+        Fire one as its second binding if it has none, keeping your trigger as the first ([autohonk] key in the config file
+        overrides it). Systems you have already honked are left alone. The keys go to whichever window has focus, so switch
+        this off before alt-tabbing away mid-jump.
+        <button type="button" class="try" id="autoHonkTest" title="press Primary Fire once, 5 seconds from now">▶ test in 5 s</button>
+        <span id="autoHonkTestMsg"></span></div>
+      <div class="hint" id="autoHonkGroups" hidden><span id="autoHonkGroupsText"></span>
+        <a href="#" id="autoHonkForget" title="clear what auto honk learned about this ship's fire groups">forget</a></div>
+      <div class="hint" id="copilotLine" hidden></div>
+    </details>
+    <details class="setsec" data-sec-key="display" data-chip="Display"><summary>Display <span class="sum-note">this device</span></summary>
+      <label class="mod">Header tiles on this device <select id="tilesMode">
+          <option value="">as ▴/▾ sets them (shared)</option><option value="auto">one line on a small window</option>
+          <option value="six">always the six tiles</option><option value="line">always one line</option></select>
+        <span class="hint">"small" is under 800 px high or 1200 px wide; ▴/▾ beside the tiles still folds or unfolds them, and makes that this device's choice</span></label>
+    </details>
+    <details class="setsec" data-sec-key="sharing" data-chip="Sharing"><summary>Sharing these settings <span class="sum-note">export, import, defaults for new browsers</span></summary>
+      <div class="opts inline">
+        <button type="button" class="try" id="settingsExport" title="download this browser's settings as a file">Export settings</button>
+        <button type="button" class="try" id="settingsImport" title="load settings from an exported file (the page reloads)">Import settings…</button>
+        <input type="file" id="settingsFile" accept=".json,application/json" hidden>
+        <button type="button" class="try" id="settingsServer" title="save these settings on the server: a browser uses them for anything it has not set itself">Use these for new browsers</button>
+        <button type="button" class="try" id="settingsServerClear" hidden>stop</button>
+      </div>
+      <div class="hint" id="settingsHint">Thresholds, alert choices, personalities, "Call me" names, speed, sorts and filters live in this browser.
+        Export them to a file (Import on another browser or after clearing the cache), or save them on the server so a new browser (a tablet running Now) starts with them.
+        The view, layouts, the search form and which screen speaks stay per device. The voice is kept by the server already.</div>
+    </details>
+    <details class="setsec" data-sec-key="server" data-chip="Server" id="serverSettings"><summary>Server settings <span class="sum-note">the config file: network, password, paths, backups, Spansh, the Highway, the voice's AI and more</span></summary>
+      <div id="serverSettingsBody" class="srvset"><div class="hint">loading…</div></div>
+    </details>
+    <details id="speechLogBox" class="speechlog setsec" data-sec-key="log" data-chip="Spoken lines"><summary>Spoken lines <span class="sum-note">the last 100 alerts in this window and what became of each</span></summary>
       <div class="hint">Newest first: said, cut short, dropped (waited too long, you left the system, replaced by newer news, a cooldown, hushed) or
         silent (speech off, not ticked, another window speaks, hushed). Only this window's, and a reload starts afresh.
         👎 on a line from the lines file means never say that one again (for every browser and the voice lab; the last line of a list stays).
@@ -629,7 +649,7 @@
       <div id="speechTally" class="hint"></div>
       <div id="speechBans" class="hint"></div>
       <div id="speechLog"></div></details>
-    <div class="btns"><span class="grow"></span><button value="close" class="primary">Done</button></div>
+    </div>
   </form>
 </dialog>
 <dialog id="bmDialog">

@@ -1,5 +1,5 @@
 // Settings live in this browser's localStorage. A setting it has never set comes from the server's copy
-// ("use these for new browsers" in the alerts dialog, inlined into the page as SERVER_DEFAULTS), then from
+// ("use these for new browsers" in Settings, inlined into the page as SERVER_DEFAULTS), then from
 // the config file's [defaults] (data.defaults) where the page asks for one. Only SETTINGS_KEYS are shared:
 // per-device ones (the view, layouts, the search form, which screen speaks) never are. ed_outrider.py has the
 // same list (BROWSER_SETTINGS).
@@ -222,7 +222,7 @@ function hullLine() {
   const cls = h.pct < 25 ? "noscoop" : h.pct < 50 ? "warnc" : "";
   return `<div class="ln" title="hull integrity, from the journal">hull <b class="${cls}">${h.pct}%</b></div>`;
 }
-// Core module health (S5): the current ship's core modules under your level (the alerts dialog's, else the config
+// Core module health (S5): the current ship's core modules under your level (Settings's, else the config
 // file's module_warn, 80%), in a fixed order (FSD first); [] when all are fine or before a Loadout. The values are as of each module's
 // last reading (a Loadout, an AFMU repair, a repair at a station): boosts since then wear them further unseen.
 const moduleWarn = () => { const v = Number(store.get("moduleWarn", null) ?? (data && data.defaults && data.defaults.module_warn) ?? 80);
@@ -238,7 +238,7 @@ function modulesText() {
 const modulesSpoken = () => lowModules().map((m, i) => `${i && !/^[A-Z]+$/.test(m.label) ? m.label.toLowerCase() : m.label} ${m.pct} percent`).join(", ");
 function moduleLine() {
   const t = modulesText(); if (!t) return "";
-  return `<div class="ln" id="moduleLine" title="core modules under ${moduleWarn()}% (alerts dialog), as of their last reading in the journal (UTC): a Loadout, an AFMU repair or a repair at a station. Jet-cone boosts since then wear the FSD further; the game's Modules panel has the live figure. AFMU ammunition is not in the journal."><b class="warnc">${esc(t)}</b></div>`;
+  return `<div class="ln" id="moduleLine" title="core modules under ${moduleWarn()}% (Settings), as of their last reading in the journal (UTC): a Loadout, an AFMU repair or a repair at a station. Jet-cone boosts since then wear the FSD further; the game's Modules panel has the live figure. AFMU ammunition is not in the journal."><b class="warnc">${esc(t)}</b></div>`;
 }
 function boostLine() {
   const m = data.materials; if (!m || !m.boosts) return "";
@@ -1411,7 +1411,7 @@ function fitSoon() {
   if (!ro) window.addEventListener("resize", fitSoon);
 }
 // Alert kinds: [key, what triggers it, its sound]. Each can notify, play its sound and be spoken, chosen
-// per kind in the alerts dialog. Everything here fires for something out of the ordinary, never routine.
+// per kind in Settings. Everything here fires for something out of the ordinary, never routine.
 const ALERTS = [["discovery", "targeting a system: the fanfare if nobody has reported it (upbeat or thud if it is known)", "fanfare"],
   ["arrival", "arriving somewhere undiscovered (first visit), and a run of new or fully known systems in a row (the streak thresholds below); the first jump into a galactic region this session, when the briefing (which opens with it) is not spoken; the sound only corrects a targeting call that was wrong", null],
   ["game", "loading into the game and quitting it", null],
@@ -1481,7 +1481,7 @@ function mappedText(m) {
 // only one of them speaks and plays the alert sounds; every window still shows the cards and notifications.
 // The browser's Web Locks pick it: the first window holds "ed-speaker" until it closes, then the next one in
 // line gets it, with no heartbeats to go stale. Without Web Locks (an old browser, a plain-http LAN address,
-// the jsdom smoke test) every window speaks, as before. "This screen speaks" in the alerts dialog (per browser)
+// the jsdom smoke test) every window speaks, as before. "This screen speaks" in Settings (per browser)
 // can make this browser always speak or never.
 let isSpeaker = !TABLET && !(typeof navigator !== "undefined" && navigator.locks && navigator.locks.request);
 let speakerWait = null;   // this window's place in the queue for the lock (an AbortController)
@@ -1525,7 +1525,7 @@ const HUSH_SAID = {"10m": "Quiet for 10 minutes.", "30m": "Quiet for 30 minutes.
 // Sound and speech only in the speaking window. `tag` (a speech.json key) and `still` go to the speech queue.
 // Returns whether the alert reached you: spoken (queued) or notified.
 let lastAlert = null;
-// ---- the spoken-line transcript ("Spoken lines" at the bottom of the alerts dialog): the last 100 alerts and
+// ---- the spoken-line transcript ("Spoken lines" at the bottom of Settings): the last 100 alerts and
 // lines in this window, each with its fate (said, cut short, dropped and why, silent and why), so the first live
 // session can answer "why did it not say X". In memory only: a reload starts it afresh.
 const SPEECH_LOG_MAX = 100;
@@ -5521,7 +5521,7 @@ function drawSoundBtn() {
   soundBtn.textContent = soundOn ? "🔊" : "🔇";
   soundBtn.title = !soundOn ? "sounds off — click to turn on" : blocked ? "sounds on, but the browser needs one click on the page to allow audio" : "sounds on — click to turn off";
   // a silent second window should not look broken
-  if (!speakerHere()) soundBtn.title += speakMode() === "never" ? " (this browser never plays alert sounds: see the alerts dialog)" : " (another window is speaking)";
+  if (!speakerHere()) soundBtn.title += speakMode() === "never" ? " (this browser never plays alert sounds: see Settings)" : " (another window is speaking)";
   soundBtn.style.opacity = speakerHere() ? "" : .45;
   soundBtn.classList.toggle("on", !!soundOn);
   soundBtn.classList.toggle("blocked", !!blocked);
@@ -5549,7 +5549,7 @@ function scoopHint() {
 }
 // Jumps of fuel left: at your pace (the fuel model's, else your recent burn), else at max range.
 const fuelJumps = f => f ? f.jumps_recent ?? f.jumps_max ?? null : null;
-// "Fuel alerts also under N jumps" (the alerts dialog; blank = off, the default): the % rules stay as they are
+// "Fuel alerts also under N jumps" (Settings; blank = off, the default): the % rules stay as they are
 const fuelJumpsCfg = () => { const v = store.get("fuelJumps", null), n = Number(v);
   return v != null && v !== "" && isFinite(n) && n > 0 ? Math.round(n) : null; };
 const fuelUnderJumps = f => { const n = fuelJumpsCfg(), j = fuelJumps(f); return n != null && j != null && j < n; };
@@ -5701,7 +5701,7 @@ function onData() {
   if (!(f0 && f0.live && f0.in_ship === false)) {
     const low = !!(f0 && f0.low_flag);
     if (low && !lastLowFlag) alertOut("fuel", "Fuel low", scoopHint(), {tag: "fuel_low", say: () => line("fuel_low", {pct: f0 && f0.pct}, "Fuel low.")});
-    // "under N jumps" (off unless set in the alerts dialog): once on crossing it, like the game's own warning
+    // "under N jumps" (off unless set in Settings): once on crossing it, like the game's own warning
     const under = !!(f0 && f0.live && fuelUnderJumps(f0));
     if (under && !lastUnderJumps && !(low && !lastLowFlag)) {
       const jn = fuelJumps(f0);
@@ -6012,7 +6012,7 @@ function onData() {
     lastCodexTs = k.ts;
   }
 }
-// ---- the spoken-line transcript, drawn only while its section of the alerts dialog is open ----
+// ---- the spoken-line transcript, drawn only while its section of Settings is open ----
 function fateGroup(f) {   // hoisted: setFate counts by it
   return !f ? "wait" : /^said/.test(f) ? "said" : /^(cut|timed)/.test(f) ? "cut"
     : /^(dropped|replaced|refused|not said|nothing)/.test(f) ? "dropped" : "silent";
@@ -6127,7 +6127,7 @@ function drawSpeechBtn() {
   const t = data && data.tts;
   speechBtn.title = (speechOn ? "spoken alerts on" : "spoken alerts off") + " — " +
     (t && t.engine === "piper" ? `Piper voice ${t.voice}` : t && t.available ? `Piper: ${t.status}; browser speech meanwhile` : "browser speech (install Piper for a better voice: see outrider/tts.py)") +
-    (speakerHere() ? "" : speakMode() === "never" ? " — this browser never speaks (see the alerts dialog)" : " — another window is speaking");
+    (speakerHere() ? "" : speakMode() === "never" ? " — this browser never speaks (see Settings)" : " — another window is speaking");
 }
 // "This screen speaks": the setting, whether this window is the one, and a way to take over
 function drawSpeaker() {
@@ -6616,8 +6616,21 @@ document.querySelectorAll("[data-reset]").forEach(r => r.onclick = e => {
   render();
 });
 function drawAlertsBtn() { document.getElementById("alertsBtn").classList.toggle("on", !!alertCfg.enabled); }
-// the dialog's section chips (review S43): one per section, scrolling to it; the last one used reopens there (per device)
+// Settings (the dialog the 🔔 used to open): collapsible sections, each remembered open or closed on this device
+// (store "settingsOpen"; Alerts is open the first time), with chips that open one and scroll to it (review S43)
 const alertChips = document.getElementById("alertChips");
+const setSecs = [...alertDialog.querySelectorAll("details.setsec")];
+function setSecsRestore() {
+  const open = store.get("settingsOpen", null);
+  setSecs.forEach(d => { d.open = open && typeof open === "object" ? !!open[d.dataset.secKey] : d.dataset.secKey === "alerts"; });
+}
+setSecs.forEach(d => d.addEventListener("toggle", () => {
+  const open = Object.fromEntries(setSecs.map(x => [x.dataset.secKey, x.open]));
+  store.set("settingsOpen", open);
+  if (d.id === "serverSettings" && d.open) loadServerSettings();
+}));
+document.getElementById("setOpenAll").onclick = () => setSecs.forEach(d => { d.open = true; });
+document.getElementById("setCloseAll").onclick = () => setSecs.forEach(d => { d.open = false; });
 const alertSections = [...alertDialog.querySelectorAll("[data-chip]")];
 alertChips.innerHTML = alertSections.map((s, i) => `<button type="button" data-sec="${i}">${esc(s.dataset.chip)}</button>`).join("");
 function showAlertSection(i, remember = true) {
@@ -6629,11 +6642,76 @@ function showAlertSection(i, remember = true) {
 }
 alertChips.addEventListener("click", e => { const b = e.target.closest("[data-sec]"); if (b) showAlertSection(Number(b.dataset.sec)); });
 document.getElementById("alertsBtn").onclick = () => {
+  setSecsRestore();
   drawSpeechStyles(); fillThresholds(); alertDialog.showModal(); drawSpeechLog();
   const last = Number(store.get("alertSection", 0));
   if (last > 0) showAlertSection(last, false);
 };
 drawAlertsBtn();
+// ---- Server settings: every key of the config file (GET api/config), saved into it (POST api/config) and used from
+// Outrider's next start. Grouped by the file's sections, each folding; the password and the AI key are never shown,
+// only whether they are set. Only the keys you change are written: the file keeps its comments and other keys.
+const SRV_SET_OPEN = {};   // which config sections are open in this window
+async function loadServerSettings() {
+  const box = document.getElementById("serverSettingsBody");
+  let c;
+  try { c = await apiJson("api/config"); } catch { c = {error: "Outrider not reachable"}; }
+  if (!c || c.error) { box.innerHTML = `<div class="hint warnc">Cannot read the server's settings: ${esc((c && c.error) || "?")}</div>`; return; }
+  const human = k => k.replace(/_/g, " ").replace(/^./, x => x.toUpperCase());
+  const field = (sec, k) => {
+    const id = `srv-${sec}-${k.key}`, data = `id="${id}" data-sec="${esc(sec)}" data-key="${esc(k.key)}" data-kind="${k.kind}"`;
+    const v = k.value;
+    if (k.secret) return `<input type="password" ${data} data-secret="1" autocomplete="new-password" placeholder="${k.set ? "set (type to change)" : "not set"}">` +
+      (k.set ? ` <label class="inl"><input type="checkbox" data-clear="${id}"> remove it</label>` : "");
+    if (k.kind === "bool") return `<input type="checkbox" ${data}${v ? " checked" : ""}>`;
+    if (k.kind === "int" || k.kind === "float") return `<input type="number" step="any" ${data} value="${esc(v)}">`;
+    if (k.kind === "lines") return `<textarea rows="${Math.min(6, Math.max(2, v.length + 1))}" ${data} placeholder="one per line">${esc(v.join("\n"))}</textarea>`;
+    if (k.kind === "numbers") return `<input type="text" ${data} value="${esc(v.join(", "))}" placeholder="numbers, comma separated">`;
+    if (k.kind === "table") return `<textarea rows="2" ${data} placeholder='{"Name": "KEY_..."}'>${esc(Object.keys(v).length ? JSON.stringify(v) : "")}</textarea>`;
+    return `<input type="text" ${data} value="${esc(v)}">`;
+  };
+  box.innerHTML = `<div class="hint">Saved in <code>${esc(c.path)}</code>${c.exists ? "" : " (made when you first save)"}. Outrider uses them from its next start;
+    the previous file is kept beside it as <code>.bak</code>. Paths may be relative to the Outrider folder.</div>` +
+    (c.problems && c.problems.length ? `<div class="hint warnc">The file has problems (defaults used): ${c.problems.map(esc).join("; ")}</div>` : "") +
+    c.sections.map(sec => `<details class="srvsec" data-srvsec="${esc(sec.section)}"${SRV_SET_OPEN[sec.section] ? " open" : ""}><summary>${esc(sec.title)} <code>[${esc(sec.section)}]</code></summary>` +
+      sec.keys.map(k => `<div class="srvrow"><label for="srv-${esc(sec.section)}-${esc(k.key)}">${esc(human(k.key))} <code>${esc(k.key)}</code>` +
+        `${k.set || k.secret ? "" : ` <span class="unk">(default)</span>`}</label><div class="srvin">${field(sec.section, k)}` +
+        `${k.help ? `<div class="hint">${esc(k.help)}</div>` : ""}</div></div>`).join("") + `</details>`).join("") +
+    `<div class="btns"><button type="button" id="srvSave" class="primary">Save server settings</button><span id="srvMsg" class="hint"></span></div>`;
+  box.querySelectorAll("[data-key]").forEach(el => { el.dataset.orig = srvValue(el); });
+  box.querySelectorAll("details.srvsec").forEach(d => d.addEventListener("toggle", () => { SRV_SET_OPEN[d.dataset.srvsec] = d.open; }));
+  document.getElementById("srvSave").onclick = saveServerConfig;
+}
+// a field's value as it is sent (and compared with what it was when drawn: only changes are saved)
+function srvValue(el) {
+  const k = el.dataset.kind;
+  if (el.dataset.secret) return el.value;
+  if (k === "bool") return el.checked;
+  return el.value;
+}
+function srvChanges() {
+  const out = {}, box = document.getElementById("serverSettingsBody");
+  box.querySelectorAll("[data-key]").forEach(el => {
+    let v = srvValue(el);
+    if (el.dataset.secret) {
+      const clear = box.querySelector(`[data-clear="${el.id}"]`);
+      if (clear && clear.checked) v = ""; else if (!v) return;   // empty: unchanged
+    } else if (String(v) === el.dataset.orig) return;
+    (out[el.dataset.sec] = out[el.dataset.sec] || {})[el.dataset.key] = v;
+  });
+  return out;
+}
+async function saveServerConfig() {
+  const changes = srvChanges(), msg = document.getElementById("srvMsg");
+  if (!Object.keys(changes).length) { msg.textContent = "nothing changed"; return; }
+  let r;
+  try { r = await apiJson("api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(changes)}); }
+  catch { r = {error: "Outrider not reachable"}; }
+  if (r.error) { msg.textContent = `Not saved: ${r.error}`; msg.className = "hint warnc"; return; }
+  await loadServerSettings();
+  const m = document.getElementById("srvMsg");
+  m.textContent = `Saved ${r.changed} setting${r.changed === 1 ? "" : "s"}: restart Outrider to use ${r.changed === 1 ? "it" : "them"}.`; m.className = "hint ok";
+}
 
 let disconnected = null, disconnectedAt = 0, lostSaid = false;
 // The link pill (review S41, the author's version): "linked · 2 s" since the last answer; "stale · 48 s" past what

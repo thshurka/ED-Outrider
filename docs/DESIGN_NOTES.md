@@ -39,6 +39,11 @@ upstream project's choices, not rules of the game.
   and the docs say so rather than pretending otherwise (TLS on a LAN means certificate pain for little gain). Five
   failed sign-ins a minute per address, then 429. `/api/version`, the sign-in page and calls, the tab icon and
   `OPEN_GETS` stay open (the app must learn whether a password is wanted before it has one).
+- **Settings writes the config file** (the author, 2026-10-03: Outrider is becoming an always-on service). Server
+  settings lists every key `config_text` knows, so nothing is left out and no second list drifts; a save edits only
+  the changed keys in place (the file's comments and unknown keys stay), keeps the old file as `.bak`, and writes
+  nothing unless the result reads back and settings_from finds nothing new wrong. Changes apply at the next start
+  (no live reload yet). Secrets (the password, the AI key) never leave the server.
 - **The tablet layout is the same page, not a second app** (PLAN-tablet phase 3): `/tablet` serves page.html with
   `body.tablet`, and page.js draws a shell round the views it already has (6,000 lines of rendering are not worth
   duplicating). Themes are only for the tablet (the author, 2026-10-03): the desktop page keeps its look and has no

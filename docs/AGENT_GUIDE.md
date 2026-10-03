@@ -34,6 +34,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/rail.py` | The tablet's control rail, pure: `CONTEXTS` and `context_of(status, vehicle_type)`, `CATALOGUE` (each context's buttons: action, Status.json state spec, amber) and `DEFAULT_IDS` (the agreed sets), `state_of`, `check_set` (the editor's input). `State.rail_info`/`rail_press`/`rail_save`/`rail_device` and `/api/rail*` use it; `Honker.tap` presses; `keyboard_bindings(..., category=)` reads the SRV and on-foot presets |
 | `outrider/tools.py` | The AI's read-only tools, defined once: `TOOLS` (name, description, JSON-schema params, an async handler `(get, args, rows)`), `READ_ROUTES` (the GETs a handler may read; `guarded()` refuses the rest), `listing()`, `call(name, args, get, rows)`, `Unavailable` -> `NOT_RUNNING` |
 | `outrider/ask.py` | The voice (`POST /api/ask`, `State.ask`): `load_phrases`/`match` (resources/ask.json, in its order), `fixed_answer` (from the tools registry, in-process through `make_app`'s `local_get`), `assistant_settings` and `ai_answer` (OpenAI-compatible chat with the registry as tools; `AIError` codes `ai_off`/`ai_timeout`/`ai_error`). The answer goes out as a co-pilot action (`say`, or `caption` for hush/unhush) |
+| `outrider/config_edit.py` | Settings' Server settings: `entries()` (every key, its value, kind and help, read from `config_text`'s output), `set_key()` (one key changed in the file in place: comments kept, a commented-out key switched on, a missing one appended), `coerce()`. `State.config_info`/`config_save` and GET/POST `/api/config` use it (save: validated with settings_from, written atomically, the old file kept as `.bak`) |
 | `outrider/mcp.py` | The MCP bridge (`python3 -m outrider.mcp`): MCP's stdio JSON-RPC written directly (`handle`, `serve`; no SDK), `http_get` to the running server on 127.0.0.1, `mcp_settings` (`[mcp]`, also read by `settings_from`) |
 | `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
@@ -154,7 +155,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   error on the page) and the next one still runs; `sqlite3.Error` propagates.
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
-  screen speaks, `volume`, `tilesMode`, the alerts dialog's `alertSection`, the tablet's `tabletView`, `tabletTheme` and
+  screen speaks, `volume`, `tilesMode`, Settings' `alertSection` and `settingsOpen` (its open sections), the tablet's `tabletView`, `tabletTheme` and
   `tabletDim`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
 - **An open page reloads itself on newer page files:** the payload's `page_stamp` (`page_stamp()`: sizes and
   modification times of `PAGE_FILES`) against the `__PAGE_STAMP__` it was served with; `pageStampTick` reloads once
@@ -191,7 +192,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   the two `_profane` lists; unit tests check coverage, placeholders and at least 10 per list. Danger keys
   (`DANGER` in page.js) are spoken only from business lines by default.
 - **Config keys.** A new key needs: parsing in `settings_from` (with a sane default and a warning on a bad
-  value), `config_text` (so `--write-config` writes it), `ed_outrider.toml.example`, and the README
+  value), `config_text` (so `--write-config` writes it, WITH a `# help` comment on its line: Settings' Server
+  settings lists every key from `config_text` through `outrider/config_edit.py` and shows that comment as its help;
+  `test_settings.py` checks every key has one and can be written back), `ed_outrider.toml.example`, and the README
   Settings section. Server defaults for browser settings also go in `payload()["defaults"]` and `run()`.
 - **Endpoints.** Every request passes `request_guard`: unknown Host names are refused, and a request another
   site's page sends is refused (Origin / `Sec-Fetch-Site`). Only `OPEN_GETS` (`/api/status`,
@@ -247,7 +250,7 @@ If it is filled from journals, write it in the handler and bump `PARSER_VERSION`
 bump `CACHE_VERSION`. Old rows have NULL: code must cope.
 
 **A new setting.** Page-only: a `store.get(key, default)`/`store.set` pair, the key in `SETTINGS_KEYS` and
-`BROWSER_SETTINGS` (same position), a control in the alerts dialog. With a config default: the four config
+`BROWSER_SETTINGS` (same position), a control in the Settings dialog (in the section it belongs to). With a config default: the four config
 places above plus `data.defaults`.
 
 **A new spoken line.** `outrider.speech.KEYS["key"] = "when it is said: {placeholders}"`, `SAMPLES["key"]`, an entry
