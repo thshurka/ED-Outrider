@@ -1,0 +1,74 @@
+/* Elite, a tablet theme (data-theme="elite"): the cockpit HUD's look, evoked, not copied. Orange on black, thin-line
+   panels with chamfered (cut) corners instead of LCARS elbows and pills, a little cyan for what is selected or active.
+   Fonts: Michroma (headings) and Saira Semi Condensed (text), both SIL OFL 1.1, in static/fonts/ with their licences.
+   Your own heading font goes first if you drop it in as data/fonts/elite-display.ttf (served at /userfonts/; never
+   committed; a Eurostile-style face suits it); without it, Michroma. No game assets. */
+@font-face { font-family: "Elite Display"; font-display: swap;
+  src: url("../../userfonts/elite-display.ttf") format("truetype"), url("../fonts/Michroma-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Saira Semi Condensed"; font-weight: 400; font-display: swap; src: url("../fonts/SairaSemiCondensed-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Saira Semi Condensed"; font-weight: 500; font-display: swap; src: url("../fonts/SairaSemiCondensed-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Saira Semi Condensed"; font-weight: 600 700; font-display: swap; src: url("../fonts/SairaSemiCondensed-SemiBold.ttf") format("truetype"); }
+
+:root[data-theme="elite"] {
+  --el-orange: #FF7A00; --el-orange2: #B85500; --el-cyan: #3FC8F4; --el-text: #FFA040; --el-ink: #000000; --el-alert: #FF3B30;
+  --el-panel: #120A02; --el-line: #5A3000; --el-cut: 10px;
+  /* page.css's colours, so the views take the theme too */
+  --bg: #000000; --panel: var(--el-panel); --line: var(--el-line); --text: var(--el-text); --muted: #C8732A;
+  --accent: var(--el-orange); --good: var(--el-cyan); --warn: #FFC400; --bad: var(--el-alert); --info: var(--el-cyan);
+  --hot: var(--el-cyan); --biohot: #B49CFF;
+  --tb-font: "Saira Semi Condensed", system-ui, sans-serif; --tb-font-display: "Elite Display", "Saira Semi Condensed", sans-serif;
+  --tb-case: uppercase; --tb-track: 1.5px; --tb-size: 17px;
+  --tb-title: var(--el-orange);
+  --tb-chip-bg: transparent; --tb-chip-k: var(--el-orange2); --tb-chip-v: var(--el-text); --tb-chip-radius: 0;
+  --tb-group-bg: transparent; --tb-group-fg: var(--el-orange); --tb-group-open-bg: var(--el-orange); --tb-group-open-fg: var(--el-ink);
+  --tb-group-radius: 0; --tb-page-radius: 0;
+  --tb-page-bg: transparent; --tb-page-fg: var(--el-text); --tb-page-on-bg: rgba(63, 200, 244, .14); --tb-page-on-fg: var(--el-cyan);
+  --tb-fill: transparent;
+  --tb-btn-bg: transparent; --tb-btn-fg: var(--el-orange); --tb-btn-on-bg: var(--el-cyan); --tb-btn-on-fg: var(--el-ink); --tb-btn-radius: 0;
+  --tb-link-ok: var(--el-cyan); --tb-link-stale: #FFC400; --tb-link-none: var(--el-alert);
+  --tb-rail-border: var(--el-line); --tb-sheet-bg: #070400; --tb-sheet-border: var(--el-orange); --tb-sheet-radius: 0;
+  --tb-banner-bg: #070400; --tb-banner-fg: var(--el-text); --tb-banner-border: var(--el-orange); --tb-danger: var(--el-alert);
+  --tb-rb-on-bg: var(--el-orange); --tb-rb-on-fg: var(--el-ink); --tb-rb-off-bg: transparent; --tb-rb-off-fg: var(--el-orange);
+  --tb-rb-high-bg: #FFB060; --tb-rb-pend-bg: transparent; --tb-rb-pend-fg: var(--el-cyan); --tb-rb-unk-border: var(--el-orange2);
+  --tb-rb-unk-fg: var(--el-orange2); --tb-rb-dim: #4A2800; --tb-rb-dim-fg: #9A5A1E; --tb-rb-amber: #FFC400; --tb-rb-radius: 0;
+  color-scheme: dark;
+}
+:root[data-theme="elite"] body.tablet { background: #000; color: var(--text); }
+/* chamfered corners: the top-left and bottom-right cut, as the HUD's panels are */
+[data-theme="elite"] .tb-chip, [data-theme="elite"] .tb-link, [data-theme="elite"] .tb-group, [data-theme="elite"] .tb-page,
+[data-theme="elite"] .tb-btn, [data-theme="elite"] .tb-rb, [data-theme="elite"] .tb-sheet, [data-theme="elite"] .tb-banner,
+[data-theme="elite"] .tb-voice, [data-theme="elite"] body.tablet .pane, [data-theme="elite"] body.tablet main button {
+  clip-path: polygon(var(--el-cut) 0, 100% 0, 100% calc(100% - var(--el-cut)), calc(100% - var(--el-cut)) 100%, 0 100%, 0 var(--el-cut)); }
+/* thin lines, never fills, except what is on */
+[data-theme="elite"] .tb-chip { border: 1px solid var(--el-line); }
+[data-theme="elite"] .tb-group { border: 1px solid var(--el-orange); }
+[data-theme="elite"] .tb-page { border-left: 3px solid var(--el-line); }
+[data-theme="elite"] .tb-page.on { border-left-color: var(--el-cyan); }
+[data-theme="elite"] .tb-pages { padding-left: 14px; }
+[data-theme="elite"] .tb-btn { border: 1px solid var(--el-orange); }
+[data-theme="elite"] .tb-rb { border: 1px solid var(--el-orange); }
+[data-theme="elite"] .tb-rb.on { border-color: var(--el-orange); }
+/* the head and foot: a bar under the strip and over the footer, a bracket for a corner */
+[data-theme="elite"] .tb-head .tb-corner, [data-theme="elite"] .tb-foot .tb-corner { border: 2px solid var(--el-orange); border-right: 0;
+  margin: 8px 0; }
+[data-theme="elite"] .tb-head .tb-corner { border-bottom: 0; }
+[data-theme="elite"] .tb-foot .tb-corner { border-top: 0; }
+[data-theme="elite"] .tb-head .tb-bar { border-bottom: 2px solid var(--el-orange); }
+[data-theme="elite"] .tb-foot .tb-bar { border-top: 2px solid var(--el-orange); }
+[data-theme="elite"] .tb-title { font-size: 18px; letter-spacing: 2px; }
+/* the views: orange tables with cyan headings of what is selected */
+[data-theme="elite"] body.tablet th { color: var(--el-orange2); }
+[data-theme="elite"] body.tablet tr.target td { background: rgba(63, 200, 244, .12); }
+[data-theme="elite"] body.tablet #nowView .now-sys { color: var(--el-orange); font-family: var(--tb-font-display); text-transform: uppercase;
+  letter-spacing: 2px; font-size: 32px; }
+[data-theme="elite"] .tb-sheet h2 { color: var(--el-orange); }
+/* a wide display face: smaller sizes where room is short */
+[data-theme="elite"] .tb-chip .tb-k { font-size: 11px; letter-spacing: 1px; }
+[data-theme="elite"] .tb-chip .tb-v { font-size: 17px; }
+[data-theme="elite"] .tb-link { font-size: 12px; letter-spacing: 1px; }
+[data-theme="elite"] .tb-railtitle { font-size: 13px; }
+[data-theme="elite"] .tb-rbl b { font-size: 12.5px; letter-spacing: .5px; }
+[data-theme="elite"] .tb-rbs { font-size: 11px; letter-spacing: .5px; }
+[data-theme="elite"] .tb-group { font-size: 15px; } [data-theme="elite"] .tb-page { font-size: 12px; letter-spacing: .5px; }
+[data-theme="elite"] .tb-btn { font-size: 12px; } [data-theme="elite"] .tb-voice { font-size: 12px; }
+[data-theme="elite"] .tb-rbl b { font-family: var(--tb-font); font-size: 15px; font-weight: 600; letter-spacing: 1px; }

@@ -1,0 +1,67 @@
+/* Babylon 5, a tablet theme (data-theme="babylon5"): Earthforce consoles, evoked, not copied. Dark navy, steel-blue
+   panels with thin borders and angled header tabs, light blue-white text, amber for warnings.
+   Fonts: Orbitron (headings) and Exo 2 (text), both SIL OFL 1.1, in static/fonts/ with their licences. Your own
+   heading font goes first if you drop it in as data/fonts/babylon5-display.ttf (served at /userfonts/; never
+   committed; best for titles only); without it, Orbitron. No show assets. */
+@font-face { font-family: "B5 Display"; font-weight: 400 900; font-display: swap;
+  src: url("../../userfonts/babylon5-display.ttf") format("truetype"), url("../fonts/Orbitron-VF.ttf") format("truetype"); }
+@font-face { font-family: "B5 Heading"; font-weight: 400 900; font-display: swap; src: url("../fonts/Orbitron-VF.ttf") format("truetype"); }
+@font-face { font-family: "Exo 2"; font-weight: 100 900; font-display: swap; src: url("../fonts/Exo2-VF.ttf") format("truetype"); }
+
+:root[data-theme="babylon5"] {
+  --b5-navy: #050B14; --b5-steel: #4A7FB5; --b5-grey: #8FA3B8; --b5-cyan: #6FD3FF; --b5-text: #D8E6F2; --b5-amber: #FFB020;
+  --b5-panel: #0B1726; --b5-line: #22405F;
+  /* page.css's colours, so the views take the theme too */
+  --bg: var(--b5-navy); --panel: var(--b5-panel); --line: var(--b5-line); --text: var(--b5-text); --muted: var(--b5-grey);
+  --accent: var(--b5-cyan); --good: #7FE0B0; --warn: var(--b5-amber); --bad: #FF6B5E; --info: var(--b5-cyan);
+  --hot: #7FE0B0; --biohot: #C8A8FF;
+  --tb-font: "Exo 2", system-ui, sans-serif; --tb-font-display: "B5 Heading", "Exo 2", sans-serif;
+  --tb-case: uppercase; --tb-track: 1px; --tb-size: 17px;
+  --tb-title: var(--b5-text);
+  --tb-chip-bg: var(--b5-panel); --tb-chip-k: var(--b5-grey); --tb-chip-v: var(--b5-text); --tb-chip-radius: 4px;
+  --tb-group-bg: var(--b5-panel); --tb-group-fg: var(--b5-grey); --tb-group-open-bg: var(--b5-steel); --tb-group-open-fg: var(--b5-navy);
+  --tb-group-radius: 4px; --tb-page-radius: 4px;
+  --tb-page-bg: transparent; --tb-page-fg: var(--b5-text); --tb-page-on-bg: var(--b5-cyan); --tb-page-on-fg: var(--b5-navy);
+  --tb-fill: transparent;
+  --tb-btn-bg: var(--b5-steel); --tb-btn-fg: var(--b5-navy); --tb-btn-on-bg: var(--b5-amber); --tb-btn-on-fg: var(--b5-navy); --tb-btn-radius: 4px;
+  --tb-link-ok: var(--b5-cyan); --tb-link-stale: var(--b5-amber); --tb-link-none: #FF6B5E;
+  --tb-rail-border: var(--b5-line); --tb-sheet-bg: #08111D; --tb-sheet-border: var(--b5-steel); --tb-sheet-radius: 4px;
+  --tb-banner-bg: #08111D; --tb-banner-fg: var(--b5-text); --tb-banner-border: var(--b5-steel); --tb-danger: var(--b5-amber);
+  --tb-rb-on-bg: var(--b5-cyan); --tb-rb-on-fg: var(--b5-navy); --tb-rb-off-bg: var(--b5-panel); --tb-rb-off-fg: var(--b5-text);
+  --tb-rb-high-bg: #B8ECFF; --tb-rb-pend-bg: var(--b5-panel); --tb-rb-pend-fg: var(--b5-amber); --tb-rb-unk-border: var(--b5-grey);
+  --tb-rb-unk-fg: var(--b5-grey); --tb-rb-dim: var(--b5-line); --tb-rb-dim-fg: #6E8399; --tb-rb-amber: var(--b5-amber); --tb-rb-radius: 4px;
+  color-scheme: dark;
+}
+:root[data-theme="babylon5"] body.tablet { background: var(--b5-navy); color: var(--text); }
+/* the head: a steel band with an angled tab for the title; the foot a thin steel rule */
+[data-theme="babylon5"] .tb-head .tb-corner { background: linear-gradient(var(--b5-steel), var(--b5-steel)) left top / 100% 6px no-repeat;
+  border-left: 6px solid var(--b5-steel); }
+[data-theme="babylon5"] .tb-head .tb-bar { border-top: 6px solid var(--b5-steel); background: linear-gradient(180deg, #0D1B2C, transparent); }
+[data-theme="babylon5"] .tb-title { font-family: "B5 Display", "B5 Heading", sans-serif; background: var(--b5-steel); color: var(--b5-navy);
+  padding: 4px 34px 4px 14px; font-size: 17px; clip-path: polygon(0 0, 100% 0, calc(100% - 22px) 100%, 0 100%); }
+[data-theme="babylon5"] .tb-foot .tb-bar { border-top: 2px solid var(--b5-line); }
+[data-theme="babylon5"] .tb-foot .tb-corner { border-left: 6px solid var(--b5-steel); border-bottom: 2px solid var(--b5-line); }
+[data-theme="babylon5"] .tb-chip, [data-theme="babylon5"] .tb-link { border: 1px solid var(--b5-line); }
+/* the nav: angled header tabs for the groups, thin-bordered pages under them */
+[data-theme="babylon5"] .tb-group { clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 100%, 0 100%); justify-content: flex-start;
+  padding: 0 26px 6px 12px; border-bottom: 2px solid var(--b5-steel); }
+[data-theme="babylon5"] .tb-page { border: 1px solid var(--b5-line); }
+[data-theme="babylon5"] .tb-page.on { border-color: var(--b5-cyan); }
+[data-theme="babylon5"] .tb-pages { padding-left: 10px; }
+[data-theme="babylon5"] .tb-rb { border: 1px solid var(--b5-steel); }
+[data-theme="babylon5"] .tb-railtitle { color: var(--b5-grey); }
+/* the views */
+[data-theme="babylon5"] body.tablet th { color: var(--b5-grey); }
+[data-theme="babylon5"] body.tablet tr.target td { background: rgba(111, 211, 255, .12); }
+[data-theme="babylon5"] body.tablet #nowView .now-sys { color: var(--b5-text); font-family: var(--tb-font-display); text-transform: uppercase;
+  letter-spacing: 2px; font-size: 32px; }
+[data-theme="babylon5"] .tb-sheet h2 { color: var(--b5-cyan); }
+/* a wide display face: smaller sizes where room is short */
+[data-theme="babylon5"] .tb-chip .tb-k { font-size: 11px; letter-spacing: 1px; }
+[data-theme="babylon5"] .tb-chip .tb-v { font-size: 17px; }
+[data-theme="babylon5"] .tb-link { font-size: 12px; letter-spacing: 1px; }
+[data-theme="babylon5"] .tb-railtitle { font-size: 13px; }
+[data-theme="babylon5"] .tb-rbl b { font-size: 12.5px; letter-spacing: .5px; }
+[data-theme="babylon5"] .tb-rbs { font-size: 11px; letter-spacing: .5px; }
+[data-theme="babylon5"] .tb-group { font-size: 15px; } [data-theme="babylon5"] .tb-page { font-size: 13px; }
+[data-theme="babylon5"] .tb-btn { font-size: 12px; } [data-theme="babylon5"] .tb-voice { font-size: 12px; }

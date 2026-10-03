@@ -193,7 +193,8 @@ known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the galaxy 
 ## 📱 On a tablet
 
 Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
-the same pages in a cockpit layout, here with its first theme, LCARS.
+the same pages in a cockpit layout, in one of three themes: LCARS (below), Elite (the cockpit HUD's orange, with
+cut corners) or Babylon 5 (Earthforce navy and steel). Settings picks one per tablet.
 
 <p align="center">
   <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
@@ -225,8 +226,9 @@ the same pages in a cockpit layout, here with its first theme, LCARS.
 
 Outrider must listen on your network for this (`[server] host = "0.0.0.0"`). With `[server] password` set, the tablet
 signs in once: see "Opening the page from another device" under Settings. The fonts are Antonio and Barlow Condensed,
-both under the SIL Open Font License and shipped with Outrider. If you have an LCARS font of your own, save it as
-`data/fonts/lcars-display.ttf` and the theme uses it for its headings. It stays in your git-ignored `data/` folder.
+both under the SIL Open Font License and shipped with Outrider (Elite: Michroma and Saira; Babylon 5: Orbitron and
+Exo 2). A heading font of your own goes in your git-ignored `data/` folder and is never shared:
+`data/fonts/lcars-display.ttf`, `elite-display.ttf` (a Eurostile-style face) or `babylon5-display.ttf`.
 
 ## 🎙️ Ask Outrider by voice
 

@@ -42,8 +42,8 @@ upstream project's choices, not rules of the game.
 - **The tablet layout is the same page, not a second app** (PLAN-tablet phase 3): `/tablet` serves page.html with
   `body.tablet`, and page.js draws a shell round the views it already has (6,000 lines of rendering are not worth
   duplicating). Themes are only for the tablet (the author, 2026-10-03): the desktop page keeps its look and has no
-  picker. LCARS is a theme, not the structure: the shell's parts are neutral and every look is custom properties, so
-  Elite and Babylon 5 can follow as stylesheets.
+  picker. LCARS is a theme, not the structure: the shell's parts are neutral and every look is custom properties, and
+  Elite and Babylon 5 are stylesheets of their own (evoked, never a game's or the show's assets).
 - **The tablet never speaks or plays sounds.** The PC's voice is the cockpit's; a tablet that also spoke would double
   every line, and on a plain-http LAN address there are no Web Locks to pick one speaker. Alerts are a banner there.
 - **One automatic page switch on the tablet:** to Now when the surface map shows, back when it hides (only if you

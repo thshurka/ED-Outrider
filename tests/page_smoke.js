@@ -3425,6 +3425,10 @@ const settle = async maxMs => {
         k("Class I gas giant", {atmosphere: "Hydrogen"}).tint, star.kind, star.glow, ns.dark, ns.r < star.r, ringed.rings.length, ringed.r <= 0.21,
         k("Icy body", {radius_km: 500}).r < k("Icy body", {radius_km: 6000}).r, /impression from scan data/.test(html) && /landable · terraformable · 🧬 3/.test(html)]);
     })()`));
+    // the themes: each one picked sets data-theme and tells the app (its own screens follow); an unknown one is LCARS
+    got.themes = JSON.parse(tw.eval(`(() => { const told = []; window.OutriderApp = {setTheme(n) { told.push(n); }};
+      const seen = ["elite", "babylon5", "nope", "lcars"].map(t => { tabTheme(t); return document.documentElement.dataset.theme; });
+      delete window.OutriderApp; return JSON.stringify([seen, told, [...document.querySelectorAll("#tabTheme option")].map(o => o.value)]); })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3444,6 +3448,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
+      themes: [["elite", "babylon5", "lcars", "lcars"], ["elite", "babylon5", "lcars", "lcars"], ["lcars", "elite", "babylon5"]],
       bodies: [true, true, ["gas", "elw", "water", "ammonia", "ice", "ice", "metal", "metal", "rock", "gas"], true, null, null, "star", true, true, true, 2, true, true, true],
       ask: [true, "Fuel at 41 percent.", 0, false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",

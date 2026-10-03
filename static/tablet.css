@@ -217,3 +217,7 @@ body.tablet #hereHead { max-height: 24vh; overflow-y: auto; }
 body.tablet.app #hereLeaving { max-height: 16vh; }
 body.tablet.app main > #hereView.detail { grid-template-rows: auto auto minmax(260px, 1fr); }
 body.tablet.app main.nearPinned > #hereView.detail > #bodyPanel, body.tablet.app main.nearPinned > #hereView > #hereMain { min-height: 200px; }
+/* the strip: only the system's name gives way (ellipsis); fuel and unsold always show in full */
+#tabFuel, #tabUnsold, .tb-link { flex-shrink: 0; }
+.tb-railhead > div { min-width: 0; }
+.tb-rbl { overflow: hidden; } .tb-rbl b { overflow: hidden; text-overflow: ellipsis; }   /* a long label never runs under its state */

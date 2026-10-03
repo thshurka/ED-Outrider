@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Two more tablet themes: Elite and Babylon 5
+- Elite: the cockpit HUD's orange on black, thin-line panels with cut corners, cyan for what is selected.
+- Babylon 5: Earthforce navy, steel-blue panels with angled header tabs, blue-white text, amber for warnings.
+- Picked per tablet in Settings; the app's own screens follow, through OutriderApp.setTheme.
+- Fonts (SIL OFL, shipped): Michroma and Saira Semi Condensed; Orbitron and Exo 2. Your own heading font can go
+  first: data/fonts/elite-display.ttf or babylon5-display.ttf.
+
 ## 2026-10-03 · Drawn bodies (tablet plan, phase 7)
 - A body's details (Here, Search) have a picture of it, drawn from its scan data:
   - its class's colours, with bands on gas giants and clouds and continents on Earth-likes and water worlds;
