@@ -1,22 +1,50 @@
 // Page smoke test: node tests/page_smoke.js <port> [path-to-node_modules-with-jsdom]
 // Needs jsdom (npm install jsdom). Loads the page from a running server, checks it renders, then opens
 // every view in turn and fails on any script error or a view that stays empty.
-const port = process.argv[2] || 8025;
+// It clicks and POSTs, so it only ever runs against a SCRATCH server (scripts/verify.sh starts one): the port is
+// required, and 8025 (a real Outrider's default) is refused.
+const port = process.argv[2];
+if (!/^\d+$/.test(port || "")) {
+  console.error("usage: node tests/page_smoke.js <port of a scratch server> [node_modules]  (scripts/verify.sh starts one)");
+  process.exit(2);
+}
+if (port === "8025") {
+  console.error("refusing port 8025: that is a real Outrider's default port, and this test clicks and POSTs");
+  process.exit(2);
+}
 const mods = process.argv[3] || "node_modules";
 const {JSDOM} = require(require("path").resolve(mods, "jsdom"));
 const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => setTimeout(r, ms));
+// The page's own requests in flight (the long poll, always open, does not count) and when the last one started or
+// ended: settle(maxMs) returns once none has been in flight for QUIET ms (the page has had its answers and drawn
+// them, late script errors included), or after maxMs at the latest (the old fixed sleep, now a ceiling).
+let inflight = 0, lastNet = Date.now();
+const QUIET = 400;
+const settle = async maxMs => {
+  const end = Date.now() + maxMs;
+  await sleep(50);
+  while (Date.now() < end) {
+    if (inflight === 0 && Date.now() - lastNet >= QUIET) return;
+    await sleep(25);
+  }
+};
 (async () => {
   const html = await (await fetch(base)).text(); const errors = [];
   const dom = new JSDOM(html, {url: base, runScripts: "dangerously", resources: "usable", pretendToBeVisual: true,
     beforeParse(w) {
-      w.fetch = (u, o) => fetch(new URL(u, base), o); w.addEventListener("error", e => errors.push(e.message));
+      w.fetch = (u, o) => {
+        const poll = /api\/nearby\?since=/.test(String(u));
+        if (!poll) { inflight++; lastNet = Date.now(); }
+        return fetch(new URL(u, base), o).finally(() => { if (!poll) { inflight--; lastNet = Date.now(); } });
+      };
+      w.addEventListener("error", e => errors.push(e.message));
       w.localStorage.clear();
       w.scrollBy = () => {};
       w.HTMLCanvasElement.prototype.getContext = () => null;   // no canvas in jsdom: the page draws nothing and says nothing
     }});
   const d = dom.window.document;
   for (let i = 0; i < 60 && !d.querySelector("#sub") ; i++) await sleep(500);
-  await sleep(3000);
+  await settle(3000);
   const ok = errors.length === 0 && /known within/.test(d.querySelector("#sub").textContent);
   console.log(ok ? "OK" : "FAIL", "| header |", d.querySelector("#sub").textContent.slice(0, 80), "| errors:", errors);
   // every view: [button, element that must end up with content]
@@ -28,7 +56,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     if (!btn) { console.log("FAIL | no view button", v); allOk = false; continue; }
     const before = errors.length;
     btn.click();
-    await sleep(2500);
+    await settle(2500);
     const el = d.querySelector(sel);
     const filled = el && el.textContent.trim().length > 0 && !/^loading/.test(el.textContent.trim());
     const good = filled && errors.length === before;
@@ -37,10 +65,10 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
   }
   // the schematic toggle inside Here (Now mode hides the view buttons: ✕ back first)
   if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(500); }
-  d.querySelector('[data-view="here"]').click(); await sleep(1500);
+  d.querySelector('[data-view="here"]').click(); await settle(1500);
   const tog = d.querySelector('[data-mode="schematic"]');
   if (tog) {
-    const before = errors.length; tog.click(); await sleep(1500);
+    const before = errors.length; tog.click(); await settle(1500);
     const sch = d.querySelector("#hereSchematic");
     const good = sch && !sch.hidden && sch.querySelectorAll(".disc").length > 0 && errors.length === before;
     allOk = allOk && good;
@@ -70,7 +98,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
     };
     const before = errors.length, consoleError = w.console.error; w.console.error = () => {};   // the page logs the throw
     w.eval("poll()");   // a second loop, fed the bad payload first
-    await sleep(1500);
+    await settle(1500);
     const status = d.getElementById("statusLine").textContent;
     const goodP = injected && nearby >= 2 && /page error/.test(status);
     allOk = allOk && goodP;
@@ -161,7 +189,7 @@ const base = `http://127.0.0.1:${port}/`; const sleep = ms => new Promise(r => s
       const v = [document.getElementById("unsoldWarn").value, document.getElementById("unsoldUrgent").value]; data.unsold = u; fillThresholds(); return v; })()`);
     const goodT = th.join() === "123,456";
     asked.length = 0; w.fetch = (u, o) => { asked.push(String(u).split("?")[0]); return realFetch(u, o); };
-    d.querySelector('[data-view="mat"]').click(); await sleep(1500);
+    d.querySelector('[data-view="mat"]').click(); await settle(1500);
     const saved = w.eval("data.position.id64");
     w.eval("data.position.id64 = 42; render()"); await sleep(800);
     w.eval(`data.position.id64 = ${JSON.stringify(saved)}; render()`); await sleep(800);

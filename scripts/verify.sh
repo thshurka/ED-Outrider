@@ -8,6 +8,7 @@
 # Needs: pip install -r requirements.txt -r requirements-dev.txt, and npm install (jsdom) in the repo root.
 # Environment: PYTHON (default .venv/bin/python if present, else python3), NODE_MODULES (default ./node_modules),
 # PORT (default: a free one picked at random), VERBOSE=1 (print every smoke line and the server log).
+# ED_JOURNALS is ignored: the scratch server always reads the fixture journals (--journals).
 #
 # Safe by construction: it never reads or writes your own data/ (ed_outrider.sqlite, ...) or ed_outrider.toml, never uses
 # port 8025, never plays audio, never presses keys (auto honk off) or opens input devices (co-pilot off), makes
@@ -37,13 +38,17 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 step "unit tests ($PY)"
-if "$PY" -m unittest discover tests 2>"$TMP/unit.log"; then tail -3 "$TMP/unit.log"; else tail -40 "$TMP/unit.log"; FAIL=1; fi
+# ResourceWarnings shown (they are raised in finalizers, so -W error would not fail the run): any in the log fails it
+if "$PY" -W always::ResourceWarning -m unittest discover tests 2>"$TMP/unit.log"; then tail -3 "$TMP/unit.log"; else tail -40 "$TMP/unit.log"; FAIL=1; fi
+if grep -q "ResourceWarning" "$TMP/unit.log"; then
+  echo "the tests leak resources (close every database and file a test opens):"; grep -m 10 -A1 "ResourceWarning" "$TMP/unit.log"; FAIL=1
+fi
 
-step "pyflakes (warnings are shown, not fatal)"
+step "pyflakes (any warning fails)"
 if "$PY" -m pyflakes --version >/dev/null 2>&1; then
-  "$PY" -m pyflakes ed_outrider.py outrider/*.py voice_lab.py tests/test_units.py && echo "no warnings"
+  if "$PY" -m pyflakes ed_outrider.py outrider/*.py voice_lab.py tests/*.py; then echo "no warnings"; else FAIL=1; fi
 elif command -v pyflakes >/dev/null 2>&1; then
-  pyflakes ed_outrider.py outrider/*.py voice_lab.py tests/test_units.py && echo "no warnings"
+  if pyflakes ed_outrider.py outrider/*.py voice_lab.py tests/*.py; then echo "no warnings"; else FAIL=1; fi
 else
   echo "pyflakes not installed: skipped (pip install -r requirements-dev.txt)"
 fi
@@ -96,7 +101,8 @@ enabled = false
 EOF
   # Offline: every outside service goes to a closed local port, the bio-rules check keeps the shipped copy
   # (it would otherwise rewrite resources/bio_rules.json) and a missing Piper voice is not downloaded.
-  "$PY" - --config "$TMP/scratch.toml" --db "$TMP/scratch.sqlite" --port "$PORT" --host 127.0.0.1 \
+  # --journals: the fixture copy, whatever ED_JOURNALS says (the flag beats the environment, which beats the config)
+  "$PY" - --config "$TMP/scratch.toml" --db "$TMP/scratch.sqlite" --port "$PORT" --host 127.0.0.1 --journals "$TMP/journals" \
       >"$TMP/server.log" 2>&1 <<'EOF' &
 import sys
 sys.path.insert(0, ".")

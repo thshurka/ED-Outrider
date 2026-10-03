@@ -37,7 +37,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `ed_outrider.toml.example` | Every config key, commented. The real `ed_outrider.toml` is git-ignored |
 | `data/` | The player's own files, git-ignored as a whole: `ed_outrider.sqlite` (default `db`), `browser_defaults.json` (beside the database), `speech_banned.json`, `backups/` (default `backup_dir`), `piper-voices/`. Created on first start |
 | `docs/` | These notes; `docs/images/` the README screenshots |
-| `tests/test_units.py` | Unit tests (unittest, in-memory SQLite, fakes for devices, Spansh and Piper) |
+| `tests/test_*.py`, `tests/support.py` | Unit tests by subject (`test_state`, `test_values`, `test_spansh`, `test_speech`, `test_devices`, `test_fuel`, `test_highway`, `test_config`, `test_pages`; unittest, in-memory SQLite). `support.py` holds the shared fixtures and fakes (`FakeGame`, `_fake_evdev`, `_HwSession`, `scan`, `T`...) and the helpers test classes share; import from it, never import a test class into another file (it would run twice). One file runs alone as `python3 -m unittest tests.test_highway` |
 | `tests/page_smoke.js` | Loads the page in jsdom from a running server, opens every view, drives many page functions |
 | `tests/fixtures/journals/` | Synthetic sample journals, `Status.json` and `NavRoute.json` (made-up commander and systems) |
 | `scripts/verify.sh` | Runs everything below in one go against a throwaway server |
@@ -79,12 +79,17 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   (piper-tts and evdev are optional: delete their lines if you don't want them).
 - `npm install` in the repo root (Node.js 22.22.2+ or 24.15+ for jsdom 30; jsdom runs the smoke test,
   playwright is only for optional screenshots and downloads no browser by itself).
-- **One command:** `scripts/verify.sh`. It runs the unit tests, pyflakes (warnings shown, not fatal), `node
+- **One command:** `scripts/verify.sh`. It runs the unit tests (a ResourceWarning, such as a database a test never
+  closes, fails the run: `self.addCleanup(db.close)`), pyflakes (any warning fails), `node
   --check static/page.js`, then starts a scratch server on a free port with a fresh database built from
   `tests/fixtures/journals`, a temporary config and no network, runs `tests/page_smoke.js`, and stops the
   server by its PID. All of it happens in a `mktemp` folder that is deleted afterwards. `VERBOSE=1` prints
   every smoke line and the server log.
-- By hand: `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [node_modules]`.
+- By hand: `python3 -m unittest discover tests` (one file: `python3 -m unittest tests.test_highway`);
+  `node tests/page_smoke.js <port> [node_modules]` against a scratch server only: it clicks and POSTs, needs the port
+  and refuses 8025. Waits in it: `settle(maxMs)` (the page's requests answered and quiet) rather than a fixed sleep,
+  except where the page itself is on a timer. Runner (auto-target) tests can run on fake time: `use_fake_time`
+  (`tests/support.py`).
 - **The sample journals** (`tests/fixtures/journals`) are synthetic: commander "Sample Pilot", made-up systems
   Hesperine (a station; a sale), Corvane (a Rhino mining run) and Talvik Reach (honk, scans, a mapped body, bio
   signals, a completed and an in-progress sample run; the current system), a plotted route to Ossia, and a
@@ -164,7 +169,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   scratch server, and the same for auto-target (it opens the galaxy map and types): tests use `FakeGame` (a fake
   device that plays the galaxy map) with `_fake_evdev()` (key codes, no `UInput`), never `Honker.open()` on real evdev.
   Never POST to `/api/highway/autotarget/test` on a server that sees a live game. Use the existing fakes (`FakeHonker`, `FakeUI`, stand-in `evdev` namespaces in
-  `tests/test_units.py`). Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
+  `tests/support.py`). Never POST to `/api/autohonk` or `/api/autohonk/test` on a server that sees a live game.
 - **No stray side effects.** Don't download Piper voices into the real `data/piper-voices/`, don't let a test
   rewrite `resources/bio_rules.json`, and don't write the real `data/speech_banned.json` (use a speech file in a
   temp folder: its bans go beside it).

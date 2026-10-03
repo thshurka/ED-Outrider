@@ -183,6 +183,10 @@ class Targeter:
         self.copy = copy   # copy(text) -> bool: the desktop clipboard, for the paste entry
         self.log = log
         self.cancel = threading.Event()   # set to stop a run (shutdown): checked between keys and while waiting
+        # time, injectable so tests can run on a fake clock that moves only when something waits (the defaults are
+        # the real ones): clock() for deadlines, wait(secs) an interruptible pause (True once cancelled), sleep(secs)
+        # the short gaps between the keys of one combination
+        self.clock, self.wait, self.sleep = time.monotonic, self.cancel.wait, time.sleep
 
     def configure(self, cfg):
         self.cfg.update({k: v for k, v in cfg.items() if k in DEFAULTS})
@@ -363,8 +367,8 @@ class Targeter:
                 ui.write(e.EV_KEY, honk.key_code(ev, n), 1)
                 ui.syn()
                 down.append(n)
-                time.sleep(gap if n != names[-1] else 0)
-            if (self.cancel.wait(secs) or h.stop.is_set()) and check:
+                self.sleep(gap if n != names[-1] else 0)
+            if (self.wait(secs) or h.stop.is_set()) and check:
                 raise Abort(st, "stopped")
         finally:
             for n in reversed(down):
@@ -372,36 +376,36 @@ class Targeter:
                 ui.syn()
 
     def _sleep(self, secs, st, status, system, here, expect):
-        end = time.monotonic() + secs
+        end = self.clock() + secs
         while True:
             self._check(st, status, system, here, expect)
-            left = end - time.monotonic()
+            left = end - self.clock()
             if left <= 0:
                 return
-            self.cancel.wait(min(POLL_S, left))
+            self.wait(min(POLL_S, left))
 
     def _wait_focus(self, st, status, system, here, expect):
-        end = time.monotonic() + st["timeout"]
+        end = self.clock() + st["timeout"]
         while True:
             if ((status() or {}).get("gui_focus") or 0) == st["value"]:
                 return
             self._check(st, status, system, here, expect)
-            if time.monotonic() >= end:
+            if self.clock() >= end:
                 raise Abort(st, "the galaxy map did not open" if st["value"] == GUI_GALAXY_MAP
                             else "the galaxy map did not close")
-            self.cancel.wait(POLL_S)
+            self.wait(POLL_S)
 
     def _verify(self, st, id64, status, system, here, expect):
-        end = time.monotonic() + VERIFY_WAIT
+        end = self.clock() + VERIFY_WAIT
         while True:
             dest = (status() or {}).get("destination")
             if isinstance(dest, dict) and dest.get("System") == id64:
                 return
             self._check(st, status, system, here, expect)
-            if time.monotonic() >= end:
+            if self.clock() >= end:
                 got = dest.get("Name") if isinstance(dest, dict) else None
                 raise Abort(st, f"the target is {got}, not the next system" if got else "no system was targeted")
-            self.cancel.wait(POLL_S)
+            self.wait(POLL_S)
 
 
 def main(argv=None):

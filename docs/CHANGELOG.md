@@ -2,6 +2,21 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Test safety and test tooling (fix plan, batch 0)
+- The page smoke test needs an explicit port and refuses 8025: run bare, it used to default to a real Outrider's
+  port, and it clicks and POSTs (found by the Codex review).
+- verify.sh's scratch server always reads the fixture journals: an exported ED_JOURNALS used to win over the scratch
+  config (review F19).
+- verify.sh fails on any ResourceWarning in the unit tests (24 test set-ups left in-memory databases open: now closed)
+  and on any pyflakes warning.
+- tests/test_units.py (11,200 lines) is split by subject into tests/test_*.py with the shared fixtures and fakes in
+  tests/support.py; one file runs alone as `python3 -m unittest tests.test_highway`.
+- New guard tests: an old database (the first public schema, frozen in tests/fixtures/schema_0046634.sql) upgrades to
+  today's, x/y/z backfill included; every Journals attribute a failed tick could leave wrong, and every meta key a
+  re-read could double, is accounted for, with the reasons written down.
+- The auto-target runner's tests run on a fake clock (instant instead of seconds), and the smoke test waits for the
+  page's requests to settle instead of fixed sleeps: unit tests 46 s -> 34 s, the smoke test about 70 s -> 35 s.
+
 ## 2026-10-02 · Highway screenshot with refuel stops; two unused lines removed
 - The README's Highway screenshot shows an exact-plotter route: fuel used and left per jump, a ⛽ refuel stop in the
   list and its ring on the map (the old one was a neutron-plotter route, which has no refuel stops).
