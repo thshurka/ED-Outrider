@@ -1086,6 +1086,23 @@ class MinedPreviously(unittest.TestCase):
         self.assertEqual(got[(19, "Water")][1:], ("2026-09-30T03:00:15Z", "2026-09-30T03:00:16Z"))
         self.assertIsNone(self.j.srv_state[""]["srv"])       # docked
 
+    def test_nomad_first_then_the_rhino(self):   # F5: LaunchVessel kept the body; it used to forget it
+        sys_, n = self.SYS, iter(range(10, 60))
+        t = lambda: f"2026-09-30T05:00:{next(n):02d}Z"
+        body = lambda ev, bid, **kw: dict({"event": ev, "timestamp": t(), "StarSystem": "S", "SystemAddress": sys_,
+                                           "Body": f"B {bid}", "BodyID": bid}, **kw)
+        for ev in (body("ApproachBody", 7), body("Touchdown", 7, PlayerControlled=True),
+                   {"event": "LaunchVessel", "timestamp": t(), "VesselType": "lander01", "ID": 49, "PlayerControlled": True}):
+            self.j.handle(ev)
+        self.assertEqual(self.j.srv_state[""]["srv"]["body_id"], 7)
+        self.assertEqual(self.j.body_here["body_id"], 7)
+        for ev in ({"event": "DockSRV", "timestamp": t(), "SRVType": "lander01", "ID": 49},
+                   {"event": "LaunchSRV", "timestamp": t(), "SRVType": "mev_rhino", "ID": 51, "PlayerControlled": True},
+                   {"event": "MiningRefined", "timestamp": t(), "Type": "$bauxite_name;", "Type_Localised": "Bauxite"},
+                   {"event": "MiningRefined", "timestamp": t(), "Type": "$bauxite_name;", "Type_Localised": "Bauxite"}):
+            self.j.handle(ev)
+        self.assertEqual({k: v[0] for k, v in self.mined().items()}, {(7, "Bauxite"): 2})
+
     def test_refined_with_no_known_body_is_ignored(self):
         ts = iter(f"2026-09-30T04:00:{i:02d}Z" for i in range(10, 60))
         # a ring: the ship's refinery
@@ -1430,7 +1447,22 @@ class SurfaceRigs(unittest.TestCase):
         self.status(4, 6, 0, heading=359)
         self.assertTrue(self.state.surface_moved(102.5))      # a 16 degree turn across north
         self.status(5, 6, 0, heading=359, flags=0, alt=5000)
-        self.assertFalse(self.state.surface_moved(104.0))     # the map is hidden: no bumps
+        self.assertTrue(self.state.surface_moved(104.0))      # it just stopped showing: the page hears that once (F24)
+        self.status(6, 6, 0, heading=359, flags=0, alt=6000)
+        self.assertFalse(self.state.surface_moved(105.0))     # the map is hidden: no bumps
+
+    def test_climbing_past_the_altitude_wakes_the_page(self):   # F24: in the air, nothing else changes as you climb
+        self.status(1, 0, 0, heading=10, flags=0, alt=900)
+        self.assertTrue(self.state.surface_moved(100.0))
+        self.status(2, 0, 0, heading=10, flags=0, alt=1050)   # inside the hide margin: still shown, not moved
+        self.assertFalse(self.state.surface_moved(101.0))
+        self.status(3, 0, 0, heading=10, flags=0, alt=1200)
+        self.assertTrue(self.state.surface_moved(102.0))
+        self.assertFalse(self.state.surface_summary()["show"])
+        self.status(4, 0, 0, heading=10, flags=0, alt=3000)
+        self.assertFalse(self.state.surface_moved(103.0))
+        self.status(5, 0, 0, heading=10, flags=0, alt=800)    # down again: shows, and says so
+        self.assertTrue(self.state.surface_moved(104.0))
 
     def test_ship_marker_survives_an_srv_or_on_foot_liftoff(self):
         td = {"event": "Touchdown", "StarSystem": "S", "SystemAddress": self.SYS, "Body": self.NAME, "BodyID": self.BODY,
@@ -1486,6 +1518,14 @@ class SurfaceRigs(unittest.TestCase):
         self.state.watch_surface(self.base + 80)
         self.assertEqual(self.texts(("rig_leash",))[-1], "Rig 1 lost: over 5 kilometres from the Rhino.")
         self.assertEqual(self.out(), {})
+        # a lost rig that collected is kept as a site, and says it was lost, not picked up (F43)
+        self.status(81, 5100, 0, heading=180)
+        self.state.mark_rig(self.base + 81)
+        self.status(82, 5107, 0)
+        self.refine(83, "Gold", 3)
+        self.status(84, 10300, 0)
+        self.state.watch_surface(self.base + 84)
+        self.assertEqual([(s["tons"], s["lost"]) for s in self.state.surface_sites(self.SYS, self.BODY)], [(3, True)])
         # leaving the body loses the rigs too; one that collected keeps its site
         self.status(90, 0, 0, heading=180)
         self.state.mark_rig(self.base + 90)
@@ -1493,7 +1533,8 @@ class SurfaceRigs(unittest.TestCase):
         self.refine(101, "Gold", 2)
         self.ev(200, {"event": "LeaveBody", "StarSystem": "S", "SystemAddress": self.SYS, "Body": self.NAME, "BodyID": self.BODY})
         self.assertEqual(self.out(), {})
-        self.assertEqual([(s["kind"], s["tons"]) for s in self.state.surface_sites(self.SYS, self.BODY)], [("rig", 2)])
+        self.assertEqual(sorted((s["kind"], s["tons"], s["lost"]) for s in self.state.surface_sites(self.SYS, self.BODY)),
+                         [("rig", 2, True), ("rig", 3, True)])
 
     def test_mining_location_marker_and_sites_grouped_by_it(self):
         dest = {"System": self.SYS, "Body": self.BODY, "Name": "$SAA_Unknown_Signal:#type=$PlanetaryMiningLocation_Name;:#index=3;"}

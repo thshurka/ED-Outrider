@@ -31,7 +31,14 @@ upstream project's choices, not rules of the game.
 - **The co-pilot button only reads the device,** never grabs it; unbinding it in the game is the player's job.
 - **Listens on 127.0.0.1 by default, no password.** Opening it to the network is an explicit setting; the Host
   and cross-site guards stop other web sites, not people on your network.
-- **Only `/api/status` and `/api/status.txt` are readable cross-site,** for stream overlays.
+- **Only `/api/status` and `/api/status.txt` are readable cross-site,** for stream overlays: they alone send
+  `Access-Control-Allow-Origin: *` (no credentials are involved), so a fetch from an overlay page on another origin or
+  a local file can read them (review F6).
+- **The surface map's altitude in a browser is capped at the server's** (`[defaults] surface_alt`, review F24): the
+  server sends positions only below its own altitude, so a browser set higher would show a frozen map. A lower one
+  hides sooner, as before. Climbing past the altitude wakes the page once, so the map goes away on time.
+- **A HullDamage line with no `Fighter` key is the SRV's or the Nomad's,** not the ship's (review F25): every ship
+  line in the author's journals carries `"Fighter": false`, and the vehicle lines never do.
 - **The journal archive in backups is never pruned;** database zips rotate. `--restore` leaves `speech.json`,
   bans and the config alone.
 - **The firsts watch is gentle to Spansh:** each system daily for a month, then weekly, at most 150 checks a day,

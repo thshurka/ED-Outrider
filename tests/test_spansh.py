@@ -590,8 +590,14 @@ class ReviewBatchE(unittest.TestCase):
                     r1 = await c.get("/api/history", headers={"Sec-Fetch-Site": "cross-site"})
                     called = h.called
                 r2 = await c.get("/api/status.txt", headers={"Sec-Fetch-Site": "cross-site"})
-                return r1.status, called, r2.status
-        self.assertEqual(asyncio.run(go()), (403, False, 200))
+                # an overlay's page on another origin may read these two (F6); nothing else says so
+                acao = {}
+                for path in ("/api/status", "/api/status.txt", "/api/nearby", "/api/speech"):
+                    r = await c.get(path, headers={"Origin": "http://overlay.local"} if path.startswith("/api/status") else {})
+                    acao[path] = (r.status, r.headers.get("Access-Control-Allow-Origin"))
+                return r1.status, called, r2.status, acao
+        self.assertEqual(asyncio.run(go()), (403, False, 200, {"/api/status": (200, "*"), "/api/status.txt": (200, "*"),
+                                                               "/api/nearby": (200, None), "/api/speech": (200, None)}))
 
     # ---- R22: a port out of range is reported, not a traceback ----
     def test_bad_port_is_reported(self):

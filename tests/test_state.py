@@ -253,11 +253,12 @@ class Batch1Server(unittest.TestCase):
                        "StarPos": [0, 0, 0]})
 
     def test_hull_only_counts_your_ship(self):
-        self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:01:00Z", "Health": 0.48, "PlayerPilot": True})
+        # the game's line shapes: the ship's carry "Fighter": false; a fighter's says PlayerPilot false or Fighter true
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:01:00Z", "Health": 0.48, "PlayerPilot": True, "Fighter": False})
         self.assertEqual(self.j.hull["pct"], 48)
         self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:02:00Z", "Health": 0.1, "PlayerPilot": True, "Fighter": True})
         self.j.handle({"event": "HullDamage", "timestamp": "2026-01-01T00:02:00Z", "Health": 0.2, "PlayerPilot": False})
-        self.assertEqual(self.j.hull["pct"], 48)                       # a fighter or the SRV is not the ship
+        self.assertEqual(self.j.hull["pct"], 48)                       # a fighter is not the ship
         self.j.handle({"event": "RepairAll", "timestamp": "2026-01-01T00:03:00Z", "Cost": 100})
         self.assertEqual(self.j.hull["pct"], 100)
 
@@ -567,6 +568,32 @@ class Batch1Alerts(unittest.TestCase):
         self.state.reconcile_arrival()               # settled: nothing more to do
         self.assertEqual(self.state.version, v)
 
+    def test_second_scan_of_the_arrival_star_is_not_a_new_arrival(self):   # F30
+        self.jump = lambda ts, id64, x: self.j.handle({"event": "FSDJump", "timestamp": ts, "StarSystem": f"S{id64}",
+                                                       "SystemAddress": id64, "StarPos": [x, 0, 0]})
+        self.jump("2026-01-01T00:10:00Z", 7, 70)
+        self.j.handle(scan("2026-01-01T00:10:05Z", "S7", 7, 0, "S7", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        a = dict(self.state.arrival)
+        v = self.state.version
+        # the Detailed scan after the honk, then a nav beacon's, at later seconds: the same arrival
+        self.j.handle(scan("2026-01-01T00:10:08Z", "S7", 7, 0, "S7", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        self.j.handle(scan("2026-01-01T00:11:30Z", "S7", 7, 0, "S7", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        self.assertEqual((self.state.arrival["seq"], self.state.version), (a["seq"], v))
+        # a relog in the same system keeps the arrival; a new jump (even back here) is a new one
+        self.j.handle({"event": "Location", "timestamp": "2026-01-01T00:20:00Z", "StarSystem": "S7", "SystemAddress": 7,
+                       "StarPos": [70, 0, 0]})
+        self.j.handle(scan("2026-01-01T00:20:05Z", "S7", 7, 0, "S7", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        self.assertEqual(self.state.arrival["seq"], a["seq"])
+        self.jump("2026-01-01T00:30:00Z", 8, 80)
+        self.jump("2026-01-01T00:40:00Z", 7, 70)
+        self.j.handle(scan("2026-01-01T00:40:05Z", "S7", 7, 0, "S7", disc=False, star=True)[2])
+        self.state.reconcile_arrival()
+        self.assertEqual(self.state.arrival["seq"], a["seq"] + 1)
+
 
 class Batch3Journal(unittest.TestCase):
     """Second review, batch 3: the journal reader (order, repairs, duplicate files)."""
@@ -601,7 +628,7 @@ class Batch3Journal(unittest.TestCase):
             self.jump("2026-05-01T10:01:00Z", 100),
             {"timestamp": "2026-05-01T10:02:00Z", "event": "Docked", "StationName": "Stn", "StationType": "Coriolis",
              "MarketID": 5, "StarSystem": "S100", "SystemAddress": 100, "StationServices": []},
-            {"timestamp": "2026-05-01T10:03:00Z", "event": "HullDamage", "Health": 0.6, "PlayerPilot": True},
+            {"timestamp": "2026-05-01T10:03:00Z", "event": "HullDamage", "Health": 0.6, "PlayerPilot": True, "Fighter": False},
             {"timestamp": "2026-05-01T10:04:00Z", "event": "FuelScoop", "Scooped": 5.0, "Total": 32.0},
             {"timestamp": "2026-05-01T10:05:00Z", "event": "MultiSellExplorationData", "TotalEarnings": 1000,
              "BaseValue": 1000, "Bonus": 0, "Discovered": []},
@@ -615,7 +642,7 @@ class Batch3Journal(unittest.TestCase):
             {"timestamp": "2025-01-01T10:02:00Z", "event": "Undocked", "StationName": "Stn"},
             {"timestamp": "2025-01-01T10:02:30Z", "event": "Docked", "StationName": "Old", "StationType": "Outpost",
              "MarketID": 6, "StarSystem": "S50", "SystemAddress": 50, "StationServices": []},
-            {"timestamp": "2025-01-01T10:03:00Z", "event": "HullDamage", "Health": 0.2, "PlayerPilot": True},
+            {"timestamp": "2025-01-01T10:03:00Z", "event": "HullDamage", "Health": 0.2, "PlayerPilot": True, "Fighter": False},
             {"timestamp": "2025-01-01T10:04:00Z", "event": "FuelScoop", "Scooped": 5.0, "Total": 32.0},
             {"timestamp": "2025-01-01T10:04:30Z", "event": "JetConeBoost", "BoostValue": 4.0},
             {"timestamp": "2025-01-01T10:04:40Z", "event": "SupercruiseDestinationDrop", "Type": "$Fixed_Event_Life_Cloud;"},
@@ -639,21 +666,21 @@ class Batch3Journal(unittest.TestCase):
         self.assertEqual((j.docked["station"], j.hull["pct"], j.carrier["fuel"]), ("Stn", 60, 800))
 
     def test_station_repair_lists_items(self):   # F13
-        self.j.handle({"timestamp": "2026-01-01T00:00:00Z", "event": "HullDamage", "Health": 0.57, "PlayerPilot": True})
+        self.j.handle({"timestamp": "2026-01-01T00:00:00Z", "event": "HullDamage", "Health": 0.57, "PlayerPilot": True, "Fighter": False})
         self.j.handle({"timestamp": "2026-01-01T00:01:00Z", "event": "Repair", "Items": ["Paint"], "Cost": 2})
         self.assertEqual(self.j.hull["pct"], 57)
         self.j.handle({"timestamp": "2026-01-01T00:02:00Z", "event": "Repair", "Items": ["Hull"], "Cost": 3134})
         self.assertEqual(self.j.hull["pct"], 100)
-        self.j.handle({"timestamp": "2026-01-01T00:03:00Z", "event": "HullDamage", "Health": 0.5, "PlayerPilot": True})
+        self.j.handle({"timestamp": "2026-01-01T00:03:00Z", "event": "HullDamage", "Health": 0.5, "PlayerPilot": True, "Fighter": False})
         self.j.handle({"timestamp": "2026-01-01T00:04:00Z", "event": "Repair", "Item": "Hull", "Cost": 10})   # the older form
         self.assertEqual(self.j.hull["pct"], 100)
 
     def test_limpet_repair_makes_hull_unknown(self):   # F14; fourth review F4: Synthesis "Repair Basic" is the SRV's
         self.assertIn(b'"event":"RepairDrone"', ed_outrider.WANTED)
-        self.j.handle({"timestamp": "2026-01-01T00:00:00Z", "event": "HullDamage", "Health": 0.38, "PlayerPilot": True})
+        self.j.handle({"timestamp": "2026-01-01T00:00:00Z", "event": "HullDamage", "Health": 0.38, "PlayerPilot": True, "Fighter": False})
         self.j.handle({"timestamp": "2026-01-01T00:01:00Z", "event": "RepairDrone", "HullRepaired": 58.5})
         self.assertEqual(self.j.hull, {"pct": None, "ts": "2026-01-01T00:01:00Z", "repaired": True})
-        self.j.handle({"timestamp": "2026-01-01T00:02:00Z", "event": "HullDamage", "Health": 0.7, "PlayerPilot": True})
+        self.j.handle({"timestamp": "2026-01-01T00:02:00Z", "event": "HullDamage", "Health": 0.7, "PlayerPilot": True, "Fighter": False})
         self.assertEqual(self.j.hull["pct"], 70)
         self.j.handle({"timestamp": "2026-01-01T00:03:00Z", "event": "Synthesis", "Name": "Repair Basic",
                        "Materials": [{"Name": "iron", "Count": 2}, {"Name": "nickel", "Count": 1}]})
@@ -1459,6 +1486,17 @@ class BatchAIntegrity(unittest.TestCase):
         self.assertEqual((st["fuel_main"], st["cargo"], st["away"]), (150.2, 3, None))
         self.assertIsNone(st["vehicle_fuel"])
 
+    def test_first_reading_on_foot_or_in_the_srv(self):   # F9: the game runs; the ship's tank is simply not read yet
+        state = ed_outrider.State(self.db, self.j, None, 25)
+        self.j.status_json = {"fuel_main": None, "live": True, "flags2": 9, "ts": "2026-10-03T00:00:00Z"}   # on foot
+        self.assertEqual(state.fuel_summary(), {"live": True, "main": None, "ts": "2026-10-03T00:00:00Z", "in_ship": False,
+                                                "vehicle": None})
+        self.j.status_json = {"fuel_main": None, "away": "SRV", "vehicle_fuel": 0.43, "live": True, "ts": "x"}
+        self.j.vehicle = {"srv_type": "mev_rhino", "label": "SRV Rhino", "ts": "x"}
+        self.assertEqual(state.fuel_summary()["vehicle"], {"label": "SRV Rhino", "fuel": 0.43})
+        self.j.status_json = {"fuel_main": None, "live": False, "ts": "x"}    # the game closed: as before
+        self.assertEqual(state.fuel_summary(), {"live": False})
+
     def test_simulate_shows_the_last_values_as_live(self):
         """--simulate (screenshots): with the game closed the panels read as live, with the last jump's fuel, while
         the real Status.json, which every guard reads, still says the game is not running."""
@@ -1499,6 +1537,20 @@ class BatchAIntegrity(unittest.TestCase):
         import subprocess   # the flag is on the command line (--help prints and exits before anything starts)
         out = subprocess.run([sys.executable, ed_outrider.__file__, "--help"], capture_output=True, text=True, timeout=60)
         self.assertIn("--simulate", out.stdout)
+
+    def test_vehicle_damage_is_not_the_ships_hull(self):   # F25: the SRV's and the Nomad's lines have no Fighter key
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-10-01T00:00:00Z", "Health": 0.94, "PlayerPilot": True, "Fighter": False})
+        self.j.handle({"event": "LaunchVessel", "timestamp": "2026-10-01T00:01:00Z", "VesselType": "lander01",
+                       "VesselType_Localised": "Nomad", "ID": 49, "PlayerControlled": True})
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-10-01T00:02:00Z", "Health": 0.480464, "PlayerPilot": True})
+        self.assertEqual(self.j.hull["pct"], 94)
+        self.j.handle({"event": "DockSRV", "timestamp": "2026-10-01T00:03:00Z", "SRVType": "lander01", "ID": 49})
+        self.j.handle({"event": "LaunchSRV", "timestamp": "2026-10-01T00:04:00Z", "SRVType": "mev_rhino", "ID": 51})
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-10-01T00:05:00Z", "Health": 0.2, "PlayerPilot": True})
+        self.assertEqual(self.j.hull["pct"], 94)
+        self.j.handle({"event": "DockSRV", "timestamp": "2026-10-01T00:06:00Z", "SRVType": "mev_rhino", "ID": 51})
+        self.j.handle({"event": "HullDamage", "timestamp": "2026-10-01T00:07:00Z", "Health": 0.5, "PlayerPilot": True, "Fighter": False})
+        self.assertEqual(self.j.hull["pct"], 50)
 
     def test_nomad_launch_names_the_vehicle(self):
         self.j.handle({"event": "LaunchVessel", "timestamp": "2026-10-01T00:00:00Z", "VesselType": "lander01",
@@ -1702,6 +1754,13 @@ class BatchBState(unittest.TestCase):
         self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:07:00Z", "Commander": "X", "Ship": "Explorer_NX",
                        "Ship_Localised": "Caspian Explorer", "ShipID": 39, "ShipName": "Wanderer II"})
         self.assertEqual([m["ship"] for m in self.j.moments if m["kind"] == "game_start"], ["Wanderer", "Wanderer", "Wanderer II"])
+
+    def test_login_in_the_nomad_names_your_ship(self):   # F26
+        self.assertTrue(ed_outrider.not_a_ship("Lander01"))
+        self.j.ship = {"name": "Wanderer", "ship_id": 39}
+        self.j.handle({"event": "LoadGame", "timestamp": "2026-01-01T00:05:00Z", "Commander": "X", "Ship": "Lander01",
+                       "Ship_Localised": "Nomad", "ShipID": 49, "ShipName": ""})
+        self.assertEqual([m["ship"] for m in self.j.moments if m["kind"] == "game_start"], ["Wanderer"])
 
     def test_relog_then_honk_gives_no_second_briefing(self):   # F44
         self.jump("2026-01-01T00:10:00Z", 5, 30)
@@ -1922,7 +1981,7 @@ class FableServer(unittest.TestCase):
 
     # ---- F4: "Repair Basic" is the SRV's repair ----
     def test_srv_repair_leaves_the_ship_hull(self):   # F4
-        self.j.handle({"timestamp": "2026-01-01T00:00:30Z", "event": "HullDamage", "Health": 0.62, "PlayerPilot": True})
+        self.j.handle({"timestamp": "2026-01-01T00:00:30Z", "event": "HullDamage", "Health": 0.62, "PlayerPilot": True, "Fighter": False})
         self.j.handle({"event": "Materials", "timestamp": "2026-01-01T00:00:40Z", "Raw": [{"Name": "iron", "Count": 9},
                        {"Name": "nickel", "Count": 9}], "Manufactured": [], "Encoded": []})
         self.j.handle({"timestamp": "2026-01-01T00:01:00Z", "event": "Synthesis", "Name": "Repair Basic",

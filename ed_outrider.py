@@ -996,7 +996,8 @@ WANTED = tuple(f'"event":"{e}"'.encode()
 # 34: nav-beacon scans make no own_firsts rows; Vista Genomics sales keep their BioData species (bio_sales.bio_data).
 # 35: every ship's latest Loadout (fleet_loadouts: the Highway's ship list and the exact plotter's figures).
 # 36: fleet_loadouts' figures again: a MaxJumpRange without the Guardian booster keeps the drive's optimal mass.
-PARSER_VERSION = 36
+# 37: the Nomad's LaunchVessel keeps the body you are on: a Rhino launched after it records its mining (own_mined).
+PARSER_VERSION = 37
 # Scans read off a nav beacon (as outrider.unsold.NAV_BEACON_SCANS): their Was* flags are not the game's record of the body.
 NAV_BEACON_SCANS = ("NavBeaconDetail", "NavBeacon")
 
@@ -1292,9 +1293,9 @@ def open_db(path, rescan=False):
 
 def not_a_ship(kind):
     """True for a journal 'Ship' value that is not a ship of yours: a suit (ExplorationSuit_Class1), an SRV
-    (TestBuggy, Combat_Multicrew_SRV_01) or an Apex/Frontline shuttle (adder_taxi)."""
+    (TestBuggy, Combat_Multicrew_SRV_01), the Nomad (Lander01) or an Apex/Frontline shuttle (adder_taxi)."""
     k = (kind or "").lower()
-    return "suit_class" in k or k.endswith("_taxi") or k == "testbuggy" or "_srv_" in k
+    return "suit_class" in k or k.endswith("_taxi") or k == "testbuggy" or "_srv_" in k or k.startswith("lander")
 
 
 def stamp_next_stop(db):
@@ -2607,7 +2608,7 @@ class Journals:
             at = here if ev.get("BodyType") == "Planet" else None
             if name == "Location":
                 srv = dict(at, ts=ts) if at and ev.get("InSRV") else None
-        elif name == "LaunchSRV":
+        elif name in ("LaunchSRV", "LaunchVessel"):   # the Nomad (LaunchVessel) too: it must not forget the body (F5)
             srv = dict(at, ts=ts) if at else None
         elif name in ("DockSRV", "SRVDestroyed", "SupercruiseEntry"):
             if name == "DockSRV":   # DockSRV names no body: the SRV's, before it is cleared
@@ -2943,8 +2944,10 @@ class Journals:
 
     def handle_ship(self, name, ev, ts):
         if name == "HullDamage":
-            # your own ship only: the same event reports fighters and SRVs, and repeats
-            if ev.get("PlayerPilot") is False or ev.get("Fighter") or ev.get("Health") is None:
+            # your own ship only: the same event reports fighters (PlayerPilot false or Fighter true) and the SRV or the
+            # Nomad you drive, whose lines carry no Fighter key at all (every ship line in the author's journals has
+            # "Fighter": false; review F25)
+            if ev.get("PlayerPilot") is False or ev.get("Fighter") or "Fighter" not in ev or ev.get("Health") is None:
                 return
             if ts >= (self.hull or {}).get("ts", ""):
                 self.hull = {"pct": round(ev["Health"] * 100), "ts": ts}
@@ -4574,6 +4577,7 @@ class State:
         # mining location marker was taken from
         self._surface_show = False
         self._surface_sent = None
+        self._surface_told = False   # whether the page was last told the surface map shows (a flip either way wakes it)
         self._rig_leash = {}
         self._location_landing = None
         # the Neutron Highway: [highway] settings, the plot under way ({state: running | failed | done, plotter, from,
@@ -4905,11 +4909,14 @@ class State:
 
     def surface_moved(self, now):
         """True when the page should hear of your new position on the surface map: a move of SURFACE_BUMP_M or a turn
-        of SURFACE_BUMP_DEG since the last one it was sent, at most every SURFACE_BUMP_S, and only while it shows."""
+        of SURFACE_BUMP_DEG since the last one it was sent, at most every SURFACE_BUMP_S, and only while it shows; and
+        once when it stops showing (climbing past the altitude changes nothing else the tick watches: review F24)."""
         h = self.surface_here()
-        if not self.surface_show(h):
+        show = self.surface_show(h)
+        told, self._surface_told = self._surface_told, show
+        if not show:
             self._surface_sent = None
-            return False
+            return told
         last = self._surface_sent
         if last:
             if now - last[3] < SURFACE_BUMP_S:
@@ -4929,9 +4936,9 @@ class State:
         out = []
         rows = [dict(r, kind="rig") for r in self.db.execute(
             "SELECT id, n, coalesce(site_lat, lat) AS lat, coalesce(site_lon, lon) AS lon, minerals, tons, "
-            "coalesce(last_ts, picked_ts) AS last_ts FROM surface_rigs WHERE system=? AND body_id=? AND picked_ts IS NOT NULL",
+            "coalesce(last_ts, picked_ts) AS last_ts, lost FROM surface_rigs WHERE system=? AND body_id=? AND picked_ts IS NOT NULL",
             (system, body_id))]
-        rows += [dict(r, kind="site", n=None) for r in self.db.execute(
+        rows += [dict(r, kind="site", n=None, lost=0) for r in self.db.execute(
             "SELECT id, lat, lon, minerals, tons, last_ts FROM surface_sites WHERE system=? AND body_id=?", (system, body_id))]
         for r in rows:
             loc = None
@@ -4940,7 +4947,7 @@ class State:
                 loc = near if dl <= LOCATION_NEAR_M else None
             out.append({"id": r["id"], "kind": r["kind"], "n": r["n"], "lat": r["lat"], "lon": r["lon"],
                         "minerals": json.loads(r["minerals"] or "{}"), "tons": r["tons"], "last_ts": r["last_ts"],
-                        "location": loc,
+                        "location": loc, "lost": bool(r["lost"]),   # a rig past the leash or left behind (F43)
                         "dist": round(surface_m(h["lat"], h["lon"], r["lat"], r["lon"], radius)) if h else None})
         # in a stable order (the page numbers the tags U1, S1... from it): not by the latest ton, which moves as you mine
         return sorted(out, key=lambda x: (x["location"] is None, x["location"] or 0, x["kind"], x["id"]))
@@ -5676,8 +5683,16 @@ class State:
     def fuel_summary(self):
         j = self.journals
         st, ship = self.shown_status(), j.ship or {}
-        if not st or st.get("fuel_main") is None:   # no reading yet (or on foot before any)
+        if not st:   # no reading yet
             return {"live": False}
+        if st.get("fuel_main") is None:
+            if not st.get("live"):
+                return {"live": False}
+            # the game is running but the first reading is on foot or in the SRV, which carry no ship fuel: say so,
+            # with the vehicle's own tank (review F9)
+            return {"live": True, "main": None, "ts": st.get("ts"), "in_ship": False,
+                    "vehicle": {"label": (j.vehicle or {}).get("label") or st["away"], "fuel": st.get("vehicle_fuel")}
+                    if st.get("away") else None}
         cap = ship.get("fuel_main")
         # Fuel per jump at your recent pace, and per max-range jump (fuel use ~ dist^2.x, so a
         # max jump costs far more than a short hop): both are shown.
@@ -7471,7 +7486,10 @@ class State:
         scan, t, pos = self.journals.arrival_scan, self.last_target, self.journals.pos
         if not (scan and pos) or pos["id64"] != scan["id64"]:
             return
-        if self.arrival and self.arrival["ts"] == scan["ts"]:
+        # one arrival per visit (pos ts is the arrival's, kept through a relog): a second Scan of the arrival star (a
+        # Detailed one after the honk, a nav beacon's) must not announce it again (review F30)
+        if self.arrival and (self.arrival["ts"] == scan["ts"] or (
+                self.arrival.get("visit") == pos.get("ts") and self.arrival["id64"] == str(scan["id64"]))):
             # Already reconciled, unless the target's lookup was slower than the jump: its verdict lands after
             # the arrival scan. Fill it in so the page can say "Spansh just hadn't heard of it", but in place
             # (same seq, no sound): nothing was announced when you targeted it, so there is no call to correct.
@@ -7492,7 +7510,7 @@ class State:
         # are in: if either fails (the database busy during a backup), the next tick reconciles it again
         self.arrival_seq += 1
         arrival = {"name": pos.get("name") or (t or {}).get("name"), "id64": str(scan["id64"]),
-                        "ts": scan["ts"], "seq": self.arrival_seq,
+                        "ts": scan["ts"], "seq": self.arrival_seq, "visit": pos.get("ts"),
                         "announced": announced, "undiscovered": actually_new,
                         # your own unsold discovery still reads as undiscovered: only the first visit is news
                         "first_visit": self.visit_count(scan["id64"]) <= 1,
@@ -8871,6 +8889,7 @@ def compute_unsold():
     """outrider.unsold's estimate of the cartographic and exobiology data on board, trimmed for the page."""
     args = argparse.Namespace(commander=None, since=None, ignore_deaths=False, bonus_rate=None,
                               efficiency_bonus=False, no_odyssey=False, top=0)
+    started = iso_ts(time.time())   # before the journals are read: a sale stamped after it may not be counted
     result = outrider.unsold.analyse(outrider.unsold.read_events(LIVE_DIRS + LEGACY_DIRS), args)
     ex, bio = result["exploration"], result["exobiology"]
     total = ex["estimated_payout"] + bio["estimated_value"]
@@ -8900,6 +8919,7 @@ def compute_unsold():
         "level": "urgent" if total >= UNSOLD_URGENT else "warn" if total >= UNSOLD_WARN else "ok",
         "thresholds": [UNSOLD_WARN, UNSOLD_URGENT],
         "computed": time.strftime("%H:%M:%S"),
+        "computed_at": started,   # comparable with journal times: the page knows an estimate from before a sale (F39)
     }
 
 
@@ -9640,15 +9660,18 @@ def make_app(state, hosts=None):
                                ("clear" if s["sampling"]["clear"] else f"{s['sampling']['to_go']} m to go")) if s["sampling"] and s["sampling"]["to_go"] is not None else "",
     }
 
+    # readable by another site's page (a stream overlay): the only responses that say so (review F6); no credentials
+    OPEN_HEADERS = {"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"}
+
     async def status_view(_):
-        return web.json_response(status_small(), headers={"Cache-Control": "no-store"})
+        return web.json_response(status_small(), headers=OPEN_HEADERS)
 
     async def status_txt_view(request):
         """One line for an OBS text source: /api/status.txt?fields=system,fuel,target (the default set)."""
         s_ = status_small()
         fields = [f for f in (request.query.get("fields") or "system,fuel,target,unsold").split(",") if f in STATUS_FIELDS]
         line = " · ".join(x for x in (STATUS_FIELDS[f](s_) for f in fields) if x)
-        return web.Response(text=line + "\n", content_type="text/plain", headers={"Cache-Control": "no-store"})
+        return web.Response(text=line + "\n", content_type="text/plain", headers=OPEN_HEADERS)
 
     async def next_stop_view(request):
         try:

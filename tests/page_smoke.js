@@ -1639,7 +1639,12 @@ const settle = async maxMs => {
       data.surface = surf({alt: 1150}); render(); o.above = hidden();
       data.surface = surf({alt: 30000, down: true}); render(); o.down = !hidden();   // on the ground: always
       data.surface = surf({alt: 500, alt_avg: true}); render(); o.avg = hidden();
-      store.set("surfaceCfg", {alt: 2000}); data.surface = surf({alt: 1500}); render(); o.ownAlt = !hidden();   // this browser's altitude
+      // this browser's altitude: a lower one hides sooner; a higher one is capped at the server's (F24: no positions above it)
+      data.surface = surf({alt: 900}); render();
+      store.set("surfaceCfg", {alt: 500}); data.surface = surf({alt: 700}); render(); const lower = hidden();
+      data.surface = surf({alt: 300}); render(); const lowerShows = !hidden();
+      store.set("surfaceCfg", {alt: 2000}); const top = data.defaults.surface_alt; data.surface = surf({alt: top + 400}); render();
+      o.ownAlt = lower && lowerShows && hidden() && top === 1000;
       localStorage.removeItem("surfaceCfg");
       data.surface = surf({alt: 900}); render();
       const L = surfaceLayout(data.surface, surfaceCfg(), 400), it = t => L.items.find(i => i.kind === "rig" && i.tag === t);
@@ -1654,6 +1659,12 @@ const settle = async maxMs => {
       o.slot5 = lg.querySelector('[data-rig="5"]').className;
       o.ship = lg.querySelector(".lg-ship").textContent; o.site = (lg.querySelector('[data-tag="U1"]') || {}).textContent;
       o.loc = (lg.querySelector('[data-tag="L3"]') || {}).textContent;
+      // a rig lost past the leash, kept as a site for its tons, says so (F43)
+      data.surface = surf({alt: 900, sites: [{id: 4, kind: "rig", n: 1, ...at(150, 40), minerals: {Gold: 3}, tons: 3, location: null, dist: 155, lost: true},
+                                              {id: 5, kind: "rig", n: 2, ...at(-150, 40), minerals: {Gold: 2}, tons: 2, location: null, dist: 155, lost: false}]});
+      render();
+      o.lostRig = [...document.getElementById("nowMapLegend").querySelectorAll(".lg-row")].map(e => /rig lost/.test(e.textContent) ? "lost" : /rig picked up/.test(e.textContent) ? "picked" : "").filter(Boolean).sort().join();
+      data.surface = surf({alt: 900}); render();
       // the strip's copy: off Now, with the setting ticked
       store.set("surfaceCfg", {strip: true}); view = "here"; render();
       o.strip = !document.getElementById("obMap").hidden && document.getElementById("obMapLine").textContent;
@@ -1673,7 +1684,7 @@ const settle = async maxMs => {
       showSurfCfg(); view = v0; data.surface = s0; render();
       return JSON.stringify(o);
     })()`));
-    const want = {show: got.below && got.between && got.above && got.down && got.avg && got.ownAlt,
+    const want = {show: got.below && got.between && got.above && got.down && got.avg && got.ownAlt && got.lostRig === "lost,picked",
       rotation: got.rig1.sx > got.c + 20 && Math.abs(got.rig1.sy - got.c) < 1,
       ring: Math.abs(got.ring.px - got.ring.want) < 1e-6 && Math.abs(got.ring.bar - got.ring.scale) < 1e-9 && Math.abs(got.ring.spacing - got.ring.scale) < 1e-9,
       rigState: got.rig1.hollow === true && got.rig2.tag === "2" && got.rig2.hollow === false,
@@ -2714,6 +2725,50 @@ const settle = async maxMs => {
     allOk = allOk && goodAT;
     console.log(goodAT ? "OK" : "FAIL", "| highway auto-target box |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
       : "toggle and delay posted (a bad delay refused here), test refused in its words, countdown, done, last result, missing bindings, steps", errors.slice(before));
+  }
+  // review batch 6 on the page: Here follows the in-game target without a scan (F4); the fuel tile when the first
+  // reading is on foot or in the SRV (F9); no "still aboard" on an undock from an estimate made before the sale (F39)
+  {
+    const w = dom.window, before = errors.length;
+    if (!d.getElementById("nowView").hidden) { d.getElementById("nowBack").click(); await sleep(300); }
+    d.querySelector('[data-view="here"]').click(); await sleep(1500);
+    const got = JSON.parse(w.eval(`(() => {
+      const o = {}, keep = ["destination", "fuel", "unsold", "last_sale", "moments"], saved = Object.fromEntries(keep.map(k => [k, data[k]]));
+      const hd = hereData;
+      if (hd && !hd.error && hd.bodies.length && hd.id64 === posId()) {
+        data.destination = null; render();
+        const b = hd.bodies[hd.bodies.length - 1];
+        data.destination = {body_id: b.body_id, name: b.name, near: null}; render();   // render(), as the poll does
+        o.on = [!!document.querySelector(".destline"), document.querySelectorAll("#hereRows tr.dest").length];
+        data.destination = null; render();
+        o.off = [!!document.querySelector(".destline"), document.querySelectorAll("#hereRows tr.dest").length];
+      } else o.on = o.off = "no Here data";
+      data.fuel = {live: true, main: null, ts: "x", in_ship: false, vehicle: {label: "SRV Rhino", fuel: 0.43}}; render();
+      const ft = document.getElementById("fuelLine").textContent;
+      o.fuel = [/ship's tank not read yet/.test(ft), /Current vehicle: SRV Rhino · 0\.43 t fuel/.test(ft), /game not running/.test(ft)];
+      const realAO = alertOut, cards = [], lvl = lastUnsoldLevel, s0 = lastMomentSeq;
+      alertOut = (k, t) => { cards.push(k + ": " + t); };
+      lastUnsoldLevel = "urgent";
+      const mk = (i, m) => Object.assign({seq: s0 + i, ts: new Date().toISOString()}, m);
+      const undock = {kind: "undocked", station: "Port", has_uc: true, has_vista: true, dock_ts: "2026-10-03T11:59:00Z"};
+      data.unsold = {total: 480000000, thresholds: [50000000, 250000000], carto: {estimated_payout: 300000000},
+                     bio: {estimated_value: 180000000}, computed_at: "2026-10-03T11:59:58Z"};
+      data.last_sale = {ts: "2026-10-03T12:00:04Z", carto: 300000000, bio: 180000000};
+      data.moments = [mk(1, undock)]; onData();
+      o.stale = cards.filter(c => /still aboard/.test(c)).length;
+      data.unsold = Object.assign({}, data.unsold, {computed_at: "2026-10-03T12:00:20Z"});   // made after the sale: it stands
+      data.moments = [mk(2, undock)]; onData();
+      o.fresh = cards.filter(c => /^sell: Undocked with .* still aboard/.test(c)).length;
+      alertOut = realAO; lastUnsoldLevel = lvl; lastMomentSeq = s0;
+      Object.assign(data, saved); render();
+      return JSON.stringify(o);
+    })()`));
+    const want = {on: [true, 1], off: [false, 0], fuel: [true, true, false], stale: 0, fresh: 1};
+    const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
+    const goodB6 = !bad.length && errors.length === before;
+    allOk = allOk && goodB6;
+    console.log(goodB6 ? "OK" : "FAIL", "| batch 6 page fixes |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
+      : "Here follows the in-game target, the fuel tile on foot / in the SRV, no stale undock call-out after a sale", errors.slice(before));
   }
   // Target next (review Q4): the line's button and the box's (POST api/highway/target; the countdown on the button; the
   // tab not opened, the name not copied), a row's Retry while the failed run's row is still the one to target; and

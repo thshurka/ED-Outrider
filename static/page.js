@@ -373,6 +373,10 @@ function renderStrip() {
   tf.className = "tile"; tf.title = "";
   if (!f) el.innerHTML = val(`<span class="unk">—</span>`);
   else if (!f.live) el.innerHTML = val(`<span class="unk">${f.main != null ? f.main.toFixed(1) + " t (last reading)" : "no reading"}</span>`) + ln("game not running") + boostLine();
+  else if (f.main == null)   // the game runs, but on foot or in the SRV since it started: no reading of the ship's tank yet (F9)
+    el.innerHTML = val(`<span class="unk">ship's tank not read yet</span>`) +
+      (f.vehicle ? ln(`Current vehicle: <b>${esc(f.vehicle.label)}</b>${f.vehicle.fuel != null ? ` · ${f.vehicle.fuel.toFixed(2)} t fuel` : ""}`) : "") +
+      ln(`<span class="unk">read when you are back aboard</span>`) + hullLine() + moduleLine() + boostLine();
   else {
     tf.className = "tile " + (f.pct == null ? "" : f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : "");   // null < 15 is true
     const md = f.model, sr = f.scoop_rate, j = fuelJumps(f), hsc = fuelLow(f) ? hereScoopText(f) : "";
@@ -757,7 +761,9 @@ const surfaceCfg = () => {
           strip: typeof c.strip === "boolean" ? c.strip : !!d.surface_map_strip};
 };
 // shown below your surface altitude, hidden 100 m above it, unchanged between (no flicker); always on the ground,
-// never on an altitude from the average radius. A server without `down` decides with its own altitude.
+// never on an altitude from the average radius. A server without `down` decides with its own altitude. Your altitude
+// is capped at the server's ([defaults] surface_alt): above it the server sends no positions, so a map shown there
+// would sit frozen (review F24).
 let surfShown = false;
 function surfaceShows(s) {
   if (!s) return (surfShown = false);
@@ -765,7 +771,7 @@ function surfaceShows(s) {
   if (s.alt_avg) return (surfShown = false);
   if (s.down) return (surfShown = true);
   if (s.alt == null) return (surfShown = false);
-  const a = surfaceCfg().alt;
+  const top = data && data.defaults && data.defaults.surface_alt, a = Math.min(surfaceCfg().alt, top > 0 ? top : Infinity);
   return (surfShown = s.alt < a ? true : s.alt > a + 100 ? false : surfShown);
 }
 const SPECIES_COLOURS = ["#5cc98a", "#6aa8ff", "#d9a8ff", "#e3b341", "#ff7bb0", "#5ce1e6", "#ff9a5c", "#b9e06a"];
@@ -792,7 +798,7 @@ function surfaceLayout(s, cfg, S) {
          ringM: cfg.spacing > 0 ? cfg.spacing : 0}, r.lat, r.lon); }
   let ui = 0, si = 0;
   for (const x of s.sites || []) { const t = surfTons(x), tag = x.kind === "rig" ? `S${++si}` : `U${++ui}`;
-    add({kind: "site", tag, site: x.kind, mineral: t.mineral, tons: t.tons, location: x.location}, x.lat, x.lon); }
+    add({kind: "site", tag, site: x.kind, lost: !!x.lost, mineral: t.mineral, tons: t.tons, location: x.location}, x.lat, x.lon); }
   for (const l of s.locations || []) add({kind: "loc", tag: `L${l.n}`, n: l.n}, l.lat, l.lon);
   const colours = speciesColours(s.bio);
   for (const b of s.bio || []) {
@@ -928,7 +934,7 @@ function surfaceLegend(s, L, cfg) {
   const sites = by("site");
   if (sites.length) rows.push(`<div class="lg-h">Sites</div>` + sites.map(it =>
     `<div class="lg-row" data-tag="${it.tag}"><span class="tg">${it.tag}</span> ${it.mineral ? esc(it.mineral) : `<span class="unk">?</span>`} <b>${it.tons} t</b>` +
-    ` <span class="unk">${it.site === "rig" ? "rig picked up" : "unmarked"}${it.location ? ` · L${it.location}` : ""} · ${surfDist(it.dist)}</span></div>`).join(""));
+    ` <span class="unk">${it.site === "rig" ? (it.lost ? "rig lost" : "rig picked up") : "unmarked"}${it.location ? ` · L${it.location}` : ""} · ${surfDist(it.dist)}</span></div>`).join(""));
   const locs = by("loc");
   if (locs.length) rows.push(`<div class="lg-h">Mining locations</div>` + locs.map(it =>
     `<div class="lg-row" data-tag="${it.tag}"><span class="tg loc">${it.tag}</span> ${surfWhere(it)}</div>`).join(""));
@@ -2301,7 +2307,8 @@ function render() {
   if (view === "bio") loadBio();
   if (view === "here" || nearPinned || (view === "overview" && !ovState.collapsed) || view === "now") {   // Now reads Here's data
     loadHere();
-    if (hereData && lastHereCtx !== hereCtx()) renderHere();   // tab and pane keep different modes
+    // tab and pane keep different modes; and the in-game target moves without a scan (review F4): redraw, no refetch
+    if (hereData && (lastHereCtx !== hereCtx() || lastHereDest !== hereDestKey())) renderHere();
   }
   if (view === "hist") { renderLastSession(); loadHistory(); }
   renderStrip();
@@ -2602,7 +2609,7 @@ function renderHere() {
   const firstsBlock = h.firsts ? firstsHtml(h.firsts).replace(/<div class="lbl">Your firsts<\/div>/, "") : "";
   lv.innerHTML = firstsBlock + (pinned ? (!h.firsts ? `<span class="unk">${row ? esc(row.status) : ""}${row && row.visited ? " · you have been here" : ""}</span>` : "")
     : !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : checklistHtml(l));
-  lastHereCtx = hereCtx();
+  lastHereCtx = hereCtx(); lastHereDest = hereDestKey();
   const hm = h.tree ? hereMode() : {top: "list", split: false};
   const showTable = hm.top !== "schematic", showSch = hm.top === "schematic" || hm.split;
   document.getElementById("hereTable").hidden = !showTable;
@@ -2703,7 +2710,9 @@ function setHereMode(mode) {
   else m.top = mode;   // list or tree: swaps the top half, split stays as it was
   store.set("hereModes", hereModes);
 }
-let lastHereCtx = null;
+let lastHereCtx = null, lastHereDest = null;
+// the body targeted in-game, as Here last drew it (its heading-to line and highlighted row follow the target)
+const hereDestKey = () => { const d = data && data.destination; return d ? `${posId()}|${d.body_id ?? ""}` : ""; };
 // Tree mode: the same table rows in orbital order, each child indented under its parent. A barycentre
 // (two or more bodies circling a shared centre of mass rather than each other) gets a row of its own.
 function treeRowsHtml(h, rowHtml) {
@@ -5491,7 +5500,10 @@ function onData() {
         const mult = `${Number(m.mult) || 4} times`;
         alertOut("supercharge", `FSD supercharged ×${Number(m.mult) || 4}`, "the next jump's range", {say: () => line("supercharged", {mult}, `Frame Shift Drive supercharged, ${mult} range.`)});
       }
-      else if (m.kind === "undocked" && unsoldLevel(data.unsold) === "urgent") {   // the journal's Undocked, with a red-level haul aboard
+      else if (m.kind === "undocked" && unsoldLevel(data.unsold) === "urgent" &&
+               !(data.unsold.computed_at && data.last_sale && data.last_sale.ts >= data.unsold.computed_at)) {
+        // the journal's Undocked, with a red-level haul aboard; not on an estimate made before the latest sale (an undock
+        // within ~15 s of selling: the fresh estimate is still to come, and carries the news itself; review F39)
         const u = data.unsold, sold = data.last_sale && m.dock_ts && data.last_sale.ts >= m.dock_ts;
         // "nothing was sold" only where you could have: a carrier or settlement without UC or Vista (a fuel
         // stop) says nothing, and one with only one of them counts only what it buys

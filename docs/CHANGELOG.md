@@ -2,6 +2,23 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Play fixes outside the Highway (fix plan, batch 6)
+- Launching the Nomad no longer forgets the body you are on: a Rhino launched after it records its mining again
+  (review F5). PARSER_VERSION 37: the next start re-reads the journals once to rebuild Mined previously.
+- The SRV's and the Nomad's damage is not the ship's hull, nor a spoken danger line (F25); a login in the Nomad names
+  your ship (F26).
+- Here's "➜ Heading to" line and highlighted row follow the in-game target as it changes, without waiting for a scan
+  (F4).
+- Climbing past the surface map's altitude hides it at once; a browser's own altitude is capped at the server's
+  (F24). A rig lost past the 5 km leash says "rig lost", not "rig picked up" (F43).
+- The fuel tile no longer says "game not running" when the first reading is on foot or in the SRV: "ship's tank not
+  read yet", with the vehicle's fuel (F9).
+- A second scan of the arrival star (after the honk, or a nav beacon) no longer repeats the arrival call-out and its
+  sound (F30).
+- Undocking within seconds of a sale no longer announces the pre-sale total as still aboard (F39).
+- `/api/status` and `/api/status.txt` send `Access-Control-Allow-Origin: *`, so a stream overlay on another origin can
+  read them, as documented (F6).
+
 ## 2026-10-03 · Target next highway system, Retry, and the Highway in the status report (fix plan, batch 5)
 - 🎯 Target next: in the Highway tab's auto-target box and beside "Next:" in the route line, it targets the next route
   system (off the route, the closest one) after a 5-second countdown, whether or not auto-target is on. A failed
