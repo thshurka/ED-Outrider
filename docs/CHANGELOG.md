@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Split Here in halves; every table's sort reverses; Materials side by side
+- Here in split: the body list and the schematic each take half the pane and scroll on their own.
+- Every sortable table (Nearby, My firsts, Bookmarks, Search, Here): a second click on a heading reverses it, a
+  third goes back to the table's default. Here's tree is never sorted (it keeps the orbits' order).
+- Materials: Mining sites beside "Where to find FSD-injection materials" (one above the other on a narrow window).
+- The lost-contact line is two sentences with a clear pause between them.
+
 ## 2026-10-03 · Codex finds as a reason to stay is a config option; a tab icon
 - `[defaults] codex_interesting` (on by default; also the alerts dialog's tick, per browser): off, a species new to
   your codex here (✦) no longer puts a body on Now's next stops or in the leaving warnings, nor in the leaving card's

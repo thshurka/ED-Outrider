@@ -340,6 +340,7 @@ th[data-sort]:hover { color: var(--text); }
 th[data-sort].on { color: var(--accent); }
 th[data-sort].on::after { content: " ▾"; }
 th[data-sort].on.rev::after { content: " ▴"; }
+.nosort th[data-sort] { cursor: auto; } .nosort th[data-sort].on { color: inherit; } .nosort th[data-sort].on::after { content: none; }
 .ovmenu { position: relative; font-size: 13px; }
 .ovmenu summary { cursor: pointer; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
 .ovmenu summary::-webkit-details-marker { display: none; }
@@ -465,6 +466,10 @@ main.nearPinned #hereSchematic .sbody { width: 64px; }
 
 /* ---- Here: split and tree ---- */
 #hereSchematic.split { border-top: 2px solid var(--line); margin-top: 12px; padding-top: 8px; }
+/* split in app mode: the list and the schematic share the pane half and half, each scrolling on its own */
+body.app #hereMain.halves { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+body.app #hereMain.halves > .pane { flex: 1 1 50%; min-height: 0; margin: 0; border: 0; padding: 0 8px 8px; }
+body.app #hereMain.halves > #hereSchematic { border-top: 2px solid var(--line); padding-top: 8px; }
 .tind { color: var(--accent); opacity: .6; letter-spacing: 3px; margin-right: 4px; font-family: ui-monospace, monospace; }
 #hereRows tr.bary td { padding-top: 3px; padding-bottom: 3px; font-size: 12px; }
 
@@ -693,6 +698,10 @@ body.nowmode header, body.nowmode main { display: none; }
 .profrow label { display: inline-flex !important; align-items: center; gap: 4px; margin: 0; }
 /* the alerts dialog holds a lot: wider, so it is less of a scroll */
 #alertDialog { width: min(820px, calc(100vw - 32px)); }
+/* Materials: where to find FSD-injection materials, and beside it the mining sites (one above the other when narrow) */
+#matTables { display: flex; flex-wrap: wrap; gap: 0 28px; align-items: flex-start; }
+#matTables > div { flex: 1 1 440px; min-width: 0; }
+#matTables > div:empty { display: none; }
 /* the dialog's sections as chips, kept in view while it scrolls (review S43) */
 #alertDialog .chips { position: sticky; top: -1px; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 6px;
   background: var(--panel); border-bottom: 1px solid var(--line); }

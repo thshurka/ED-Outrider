@@ -2288,6 +2288,7 @@ const settle = async maxMs => {
       o.body = cs(document.body).overflow;
       o.tabbable = [...document.querySelectorAll(".pane")].every(p => p.tabIndex === 0);
       // each view's main pane: overflow auto, its first table heading sticky
+      const hmKeep = JSON.stringify(hereModes); hereModes.tab = {top: "list", split: false};   // the plain list (split: the batch 12 check)
       o.panes = Object.entries(VIEW_PANE).map(([v, id]) => { view = v; render(); const p = document.getElementById(id), th = p.querySelector("thead th");
         return v + ":" + cs(p).overflow + ":" + (th ? cs(th).position : "-"); });
       // Overview: the map in the system pane under the body table, Nearby its own pane, no inline window height
@@ -2309,6 +2310,7 @@ const settle = async maxMs => {
       fake(hm, {top: 400, bottom: 700}, {clientHeight: 300, scrollTop: 100});
       fake(row, {top: 900, bottom: 930});
       revealIn(row); o.jump = hm.scrollTop;
+      Object.assign(hereModes, JSON.parse(hmKeep));
       // the Log: new rows above keep your place in the pane; near the end of the pane, the next page is fetched
       view = "log"; render();
       const lp = document.getElementById("logPane");
@@ -2947,6 +2949,25 @@ const settle = async maxMs => {
       sortKeys.here = "max";
       for (let i = 0; i < 3; i++) { dth.click(); seq.push(sortKeys.here + (dth.classList.contains("rev") ? " rev" : "")); }
       o.sortCycle = seq;
+      // every sortable table: Nearby's Value heading, then reverse, then back to its default (distance)
+      const nth = document.querySelector('#nearTable th[data-sort="value"]'), n0 = sortKeys.near, nseq = [];
+      sortKeys.near = "distance";
+      for (let i = 0; i < 3; i++) { nth.click(); nseq.push(sortKeys.near); }
+      o.nearCycle = nseq; sortKeys.near = n0;
+      // the tree is never sorted: a heading click does nothing there
+      const hm0 = JSON.parse(JSON.stringify(hereModes)), ctx = hereCtx();
+      hereModes[ctx].top = "text"; sortKeys.here = "max"; dth.click(); o.treeSort = sortKeys.here;
+      // split: the list and the schematic as two halves, each its own pane
+      const v0 = view; view = "here"; hereModes.tab = {top: "list", split: true};
+      if (hereData && !hereData.error) { renderHere();
+        o.halves = [document.getElementById("hereMain").classList.contains("halves"),
+                    document.getElementById("hereTableBox").classList.contains("pane"),
+                    document.getElementById("hereSchematic").classList.contains("pane")]; }
+      else o.halves = "no Here data";
+      hereModes.tab = {top: "list", split: false}; if (hereData && !hereData.error) renderHere();
+      o.halvesOff = document.getElementById("hereMain").classList.contains("halves");
+      Object.assign(hereModes, hm0); view = v0;
+      o.matRow = !!document.querySelector("#matTables > #matSources + #matSites");
       // S41
       const lh = lastHeard, dc = disconnected;
       lastHeard = Date.now() - 2000; disconnected = null; o.link = [linkState().text, linkState().state];
@@ -2973,7 +2994,8 @@ const settle = async maxMs => {
                 titleCutLines(); o.cut = !!ln.title && ln.dataset.autoTitle === "1" && ln.textContent.includes(ln.title.slice(0, 5)); }
       sortKeys.here = s0; hereData = h0;
       return JSON.stringify(o); })()`));
-    const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], sortCycle: ["dist", "-dist rev", "max"], link: ["linked · 2 s", "linked"],
+    const want = {colony: [500, null, " · 1,000 m"], sortTh: ["dist", "grav", "now", "max"], sortCycle: ["dist", "-dist rev", "max"],
+      nearCycle: ["value", "-value", "distance"], treeSort: "max", halves: [true, true, true], halvesOff: false, matRow: true, link: ["linked · 2 s", "linked"],
       stale: ["stale · 48 s", "stale"], none: ["no link · retrying since 14:02", "none"], pill: true,
       chips: ["Alerts", "Voice", "Auto honk", "Sounds", "Thresholds", "Settings", "Spoken lines"],
       autoSmall: true, autoBig: false, line: true, cut: true};

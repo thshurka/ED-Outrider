@@ -38,6 +38,10 @@ const posId = () => data && data.position ? data.position.id ?? String(data.posi
 const sysId = x => !x ? null : x.id != null ? String(x.id) : x.id64 != null ? String(x.id64) : null;
 // Each sortable table keeps its own sort (a value sort chosen in My firsts must not re-sort Nearby).
 const SORT_TABLES = {nearTable: "near", firstsTable: "firsts", bmTable: "bm", sTable: "search", hereTable: "here"};
+// A heading sorts its table; clicked again it reverses ("-key", ▴); a third time the table goes back to its default
+const SORT_DEFAULT = {near: "distance", firsts: "distance", bm: "distance", search: "distance", here: "max"};
+const sortKey = t => String(sortKeys[t] || SORT_DEFAULT[t]).replace(/^-/, "");
+const sortWith = (t, cmp) => String(sortKeys[t] || "").startsWith("-") ? (a, b) => cmp(b, a) : cmp;
 const sortKeys = Object.assign({near: store.get("sort", "distance"), firsts: "distance", bm: "distance", search: "distance", here: "max"},
                                store.get("sorts", {}));
 const showVisited = document.getElementById("showVisited");
@@ -2434,10 +2438,10 @@ function render() {
     .filter(s => showVisited.checked || !s.visited)
     .filter(s => showExplored.checked || s.status !== "explored")
     .filter(s => !oneJump.checked || !jr || s.distance <= jr);
-  rows.sort(sortKeys.near === "name"
+  rows.sort(sortWith("near", sortKey("near") === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-    : sortKeys.near === "value" ? (a, b) => (b.value_max || 0) - (a.value_max || 0) || a.distance - b.distance
-    : (a, b) => a.distance - b.distance);
+    : sortKey("near") === "value" ? (a, b) => (b.value_max || 0) - (a.value_max || 0) || a.distance - b.distance
+    : (a, b) => a.distance - b.distance));
   // Fuel: the nearest scoopable star you can reach (visited or not) gets a tag when the tank is low.
   const fuel = data.fuel, lowFuel = fuel && fuel.live && fuel.pct != null && fuel.pct < 30;
   const scoopNext = lowFuel && data.systems.filter(s => sysId(s) !== sysId(p) && s.main_scoopable && (!jr || s.distance <= jr))
@@ -2532,9 +2536,9 @@ function emptyMessage(rows) {
 
 function renderBookmarks(bms) {
   const list = Object.values(bms);
-  list.sort(sortKeys.bm === "name"
+  list.sort(sortWith("bm", sortKey("bm") === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-    : (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9));
+    : (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)));
   const fk = focusKey("bmRows");
   document.getElementById("bmRows").innerHTML = list.map(b => `<tr>
       <td class="bmcell">${bmIcon(b.id, b.name, bms)}</td>
@@ -2713,9 +2717,18 @@ function renderHere() {
     : !l ? `<span class="unk">Nothing of yours scanned here yet.</span>` : checklistHtml(l));
   lastHereCtx = hereCtx(); lastHereDest = hereDestKey();
   const hm = h.tree ? hereMode() : {top: "list", split: false};
+  document.getElementById("hereTable").classList.toggle("nosort", hm.top === "text");   // the tree is never sorted
   const showTable = hm.top !== "schematic", showSch = hm.top === "schematic" || hm.split;
   document.getElementById("hereTable").hidden = !showTable;
   document.getElementById("hereHint").hidden = !showTable;
+  document.getElementById("hereTableBox").hidden = !showTable;
+  // split: the table and the schematic each half the pane, each scrolling on its own (in app mode: two panes)
+  const halves = showTable && showSch;
+  document.getElementById("hereMain").classList.toggle("halves", halves);
+  for (const el of [document.getElementById("hereTableBox"), document.getElementById("hereSchematic")]) {
+    el.classList.toggle("pane", halves);
+    if (halves && appOn()) el.tabIndex = 0; else el.removeAttribute("tabindex");
+  }
   const sEl = document.getElementById("hereSchematic");
   sEl.hidden = !showSch; sEl.classList.toggle("split", showTable && showSch);
   if (showSch) sEl.innerHTML = schematicHtml(h);
@@ -3144,13 +3157,13 @@ function renderFirsts() {
   if (within != null) list = list.filter(x => checklist(x) && x.distance != null && x.distance <= within);
   // show lost adds the Lost value columns; Lost total sorts the most valuable trips first (with or without "within",
   // which is otherwise nearest first); without show lost that sort falls back to the unsold value
-  const lostCols = fShowLost.checked, byLost = lostCols && sortKeys.firsts === "lost";
+  const lostCols = fShowLost.checked, byLost = lostCols && sortKey("firsts") === "lost";
   const lostOf = x => (x.recover && x.recover.lost_total) || 0, byDist = (a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9);
   document.getElementById("firstsTable").classList.toggle("lostcols", lostCols);
-  list.sort(byLost ? (a, b) => lostOf(b) - lostOf(a) || byDist(a, b)
-          : within != null || sortKeys.firsts === "distance" ? byDist
-          : sortKeys.firsts === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-          : (a, b) => (b.value || 0) - (a.value || 0));
+  list.sort(sortWith("firsts", byLost ? (a, b) => lostOf(b) - lostOf(a) || byDist(a, b)
+          : within != null || sortKey("firsts") === "distance" ? byDist
+          : sortKey("firsts") === "name" ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
+          : (a, b) => (b.value || 0) - (a.value || 0)));
   const unsold = f.firsts.filter(x => (x.sale || x.state) === "unsold"), lost = f.firsts.filter(x => x.state === "lost");
   const redone = f.firsts.filter(x => x.state === "rescanned");
   const back = redone.length ? ` · ${redone.length} rescanned` : "";
@@ -4983,9 +4996,9 @@ function renderSearch(bms) {
   if (ob) ob.onclick = () => { sForm.querySelector('input[name=sSource][value=spansh]').checked = true; saveForm(); sForm.requestSubmit(); };
   const rows = [...(search.results || [])];
   table.hidden = !rows.length;
-  rows.sort(sortKeys.search === "name"
+  rows.sort(sortWith("search", sortKey("search") === "name"
     ? (a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})
-    : (a, b) => a.distance - b.distance);
+    : (a, b) => a.distance - b.distance));
   document.getElementById("sRows").innerHTML = rows.map(r => `<tr>
       <td class="bmcell">${bmIcon(r.id, r.name, bms || bmMap())}</td>
       <td class="name" data-name="${esc(r.name)}" title="click to copy">${nameWords(r.name)}${firstsIcon(r.firsts)}${r.visited
@@ -5045,9 +5058,10 @@ pollSearch();  // show the last search's results after a reload
 
 document.querySelectorAll("th[data-sort]").forEach(b => b.onclick = () => {
   const t = SORT_TABLES[b.closest("table").id]; if (!t) return;
-  // Here's table: a second click on the same heading reverses it, a third goes back to the default (Max, most first)
-  const k = b.dataset.sort, cur = sortKeys[t];
-  sortKeys[t] = t !== "here" ? k : cur === k ? "-" + k : cur === "-" + k ? "max" : k;
+  if (t === "here" && hereMode().top === "text") return;   // the tree keeps the orbits' order
+  // a second click on the same heading reverses it, a third goes back to the table's default
+  const k = b.dataset.sort, cur = sortKeys[t] || SORT_DEFAULT[t];
+  sortKeys[t] = cur === k ? "-" + k : cur === "-" + k ? SORT_DEFAULT[t] : k;
   store.set("sorts", sortKeys);
   if (t === "firsts") renderFirsts();
   if (t === "here" && hereData) renderHere();
@@ -6431,8 +6445,10 @@ setInterval(drawLinkPill, 1000);
 // journal-silence half was left out: the game is often quiet that long.
 // Piper is the server's, so the "lost" line is made in advance while the link is up (lostLine: your voice and speed)
 // and played from the page; without it, the alert sound, never the browser's robotic voice. "Back" is said as usual.
-const LOST_SAY_MS = 30000, LOST_TEXT = "Lost contact with Outrider: no alerts until it is back.";
-const lostLine = {key: null, buf: null};
+// two sentences, made as two clips and played with LOST_GAP_S between them (a clear pause, the author's ask)
+const LOST_SAY_MS = 30000, LOST_PARTS = ["Lost contact with Outrider.", "No alerts until it is back."], LOST_GAP_S = 0.7;
+const LOST_TEXT = LOST_PARTS.join(" ");
+const lostLine = {key: null, buf: null};   // buf: [AudioBuffer, ...], one per sentence
 async function prepareLostLine() {
   const t = data && data.tts;
   if (!t || t.engine !== "piper") return;
@@ -6442,9 +6458,13 @@ async function prepareLostLine() {
   if (lostLine.key === key) return;
   lostLine.key = key;
   try {
-    const r = await fetch(`api/say?text=${encodeURIComponent(spokenText(LOST_TEXT))}&speed=${speed}`);
-    if (!r.ok) throw new Error(r.status);
-    lostLine.buf = await ctx.decodeAudioData(await r.arrayBuffer());
+    const bufs = [];
+    for (const part of LOST_PARTS) {
+      const r = await fetch(`api/say?text=${encodeURIComponent(spokenText(part))}&speed=${speed}`);
+      if (!r.ok) throw new Error(r.status);
+      bufs.push(await ctx.decodeAudioData(await r.arrayBuffer()));
+    }
+    lostLine.buf = bufs;
   } catch { lostLine.key = null; }   // asked again with the next payload
 }
 // -> what was played: "piper", "sound" or "" (speech off, another window speaks, or the audio not allowed yet).
@@ -6460,8 +6480,12 @@ async function sayLost() {
   }
   toast(LOST_TEXT);
   if (lostLine.buf) {
-    const src = ctx.createBufferSource(), vol = ctx.createGain(); src.buffer = lostLine.buf;
-    vol.gain.value = outVolume(); src.connect(vol); vol.connect(ctx.destination); src.start();
+    const vol = ctx.createGain(); vol.gain.value = outVolume(); vol.connect(ctx.destination);
+    let at = ctx.currentTime;
+    for (const buf of lostLine.buf) {   // one after the other, with a pause between
+      const src = ctx.createBufferSource(); src.buffer = buf; src.connect(vol); src.start(at);
+      at += buf.duration + LOST_GAP_S;
+    }
     addCaption(LOST_TEXT); entry.engine = "Piper (made in advance)"; setFate(entry, "said");
     return "piper";
   }
@@ -6553,7 +6577,9 @@ document.addEventListener("keydown", e => {
   if (step === undefined || !appOn() || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const a = document.activeElement;
   if (a && a !== document.body && (a.closest(".pane, dialog, [contenteditable]") || /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))) return;
-  const p = document.getElementById(VIEW_PANE[view]);
+  // Here in split: its list half is the one the keys scroll (the pane around both halves does not scroll)
+  const main = document.getElementById(VIEW_PANE[view]);
+  const p = main && main.classList.contains("halves") ? document.getElementById("hereTableBox") : main;
   if (!p || !p.getClientRects().length) return;
   e.preventDefault();
   p.scrollTop = isFinite(step) ? p.scrollTop + step * p.clientHeight : step > 0 ? p.scrollHeight : 0;
