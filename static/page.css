@@ -215,9 +215,12 @@ main > #hereView.detail > #bodyPanel { position: sticky; top: calc(var(--head-h,
 .sp.lost { color: var(--bad); }
 dialog h4 { margin: 12px 0 4px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
 dialog .reset { color: var(--info); cursor: pointer; font-size: 11px; margin-left: 6px; }
-.views { display: inline-flex; }
-.views button { border-radius: 0; margin-left: -1px; }
-.views button:first-child { border-radius: 6px 0 0 6px; } .views button:last-child { border-radius: 0 6px 6px 0; }
+/* the view buttons: orange pills on the dark page (the HUD's colours), the view you are on filled */
+.views { display: inline-flex; gap: 4px; }
+.views button { border-radius: 999px; margin: 0; padding: 3px 11px; font: inherit; font-size: 13px; cursor: pointer;
+  background: transparent; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+.views button:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); }
+.views button.on { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
 #nearOpts { display: inline-flex; gap: 16px; }
 #searchView { margin-top: 12px; }
 .srow { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
@@ -461,7 +464,6 @@ main.nearPinned #hereSchematic .sbody { width: 64px; }
 .views { flex-wrap: wrap; row-gap: 4px; max-width: 100%; }
 @media (max-width: 720px) {
   .topbar .views { margin-left: 0; }
-  .views button { border-radius: 6px !important; margin: 0 4px 0 0; }
 }
 
 /* ---- Here: split and tree ---- */

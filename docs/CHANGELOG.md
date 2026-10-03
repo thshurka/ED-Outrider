@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · The view buttons are orange pills
+- The row of view buttons (Overview … Now) was the browser's plain white buttons, glaring on the dark page: each is
+  now a pill in the HUD's orange, outlined, with the view you are on filled (asked by the author).
+
 ## 2026-10-03 · Tablet fixes from the Android app's test
 - System-name and search fields (Find, the Highway's from and to, the Log, Materials and Samples filters) are no
   longer capitalised or corrected by a tablet's keyboard.
