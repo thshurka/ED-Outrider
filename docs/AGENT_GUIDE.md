@@ -152,6 +152,11 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
   screen speaks, `volume`, `tilesMode`, the alerts dialog's `alertSection`, the tablet's `tabletView`, `tabletTheme` and
   `tabletDim`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+- **An open page reloads itself on newer page files:** the payload's `page_stamp` (`page_stamp()`: sizes and
+  modification times of `PAGE_FILES`) against the `__PAGE_STAMP__` it was served with; `pageStampTick` reloads once
+  nothing was touched for `RELOAD_IDLE_MS` and nothing is said, open or typed in. A new file the page loads goes in
+  `PAGE_FILES` (a theme in `TABLET_STYLES` is in it already). State worth keeping across that reload belongs in
+  per-device storage, as the view is.
 - **The tablet layout** (`body.tablet`, `TABLET` in page.js) is the same views in another shell, never a copy of them:
   a view change works on both. The tablet never speaks, plays sounds or joins the one-speaker lock (`speakMode()` is
   "never" there): keep any new sound or speech path behind `speakerHere()`. It has no Overview. The desktop page must

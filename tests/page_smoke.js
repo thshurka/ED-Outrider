@@ -3369,6 +3369,14 @@ const settle = async maxMs => {
       pop.dispatchEvent(new TouchEvent("touchstart", {bubbles: true, touches: []}));
       pop.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: 5, clientY: 5}));
       const kept = pop.style.display === "block"; hidePop(); return JSON.stringify(kept); })()`));
+    // newer page files: the page reloads, but only once nothing has been touched for a minute (and only for a new stamp)
+    got.reload = JSON.parse(tw.eval(`(() => { let n = 0; pageReload = () => { n++; };
+      const o = [typeof PAGE_STAMP === "string" && PAGE_STAMP.length === 12, data.page_stamp === PAGE_STAMP];
+      o.push(pageStampTick());   // the same stamp: nothing
+      const keep = data.page_stamp; data.page_stamp = "newer0000000";
+      lastInputAt = Date.now(); o.push(pageStampTick(), n);   // touched just now: waits
+      lastInputAt = 0; o.push(pageStampTick(), n);   // a quiet minute: reloads
+      data.page_stamp = keep; return JSON.stringify(o); })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3388,7 +3396,7 @@ const settle = async maxMs => {
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
-      hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      reload: [true, true, false, false, 0, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};

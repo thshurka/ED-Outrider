@@ -6647,6 +6647,30 @@ async function poll(once = false) {
 }
 poll();
 
+// ---- newer page files: an open page reloads itself ----
+// Outrider updated and restarted (or the files edited): a page left open for hours (a tablet, the Now window) would go
+// on running what it loaded. The payload's page_stamp differs from the one this page was served with, so it reloads
+// at a quiet moment: nothing touched for RELOAD_IDLE_MS, nothing being said or waiting to be, no dialog or sheet open,
+// no field being typed in. The page you are on comes back (the view is kept per device); a toast says why, once.
+const PAGE_STAMP = (typeof window !== "undefined" && window.__PAGE_STAMP__) || null;
+const RELOAD_IDLE_MS = 60000;
+let lastInputAt = Date.now(), pageStale = false;
+for (const t of ["pointerdown", "keydown", "wheel", "touchstart"]) addEventListener(t, () => { lastInputAt = Date.now(); }, {capture: true, passive: true});
+let pageReload = () => location.reload();   // the smoke test replaces it
+function pageQuiet(now = Date.now()) {
+  const a = document.activeElement;
+  return now - lastInputAt >= RELOAD_IDLE_MS && !speechBusy && !speechItems.length && !document.querySelector("dialog[open]") &&
+    !(a && (/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) || a.isContentEditable));
+}
+function pageStampTick(now = Date.now()) {
+  if (!PAGE_STAMP || !data || !data.page_stamp || data.page_stamp === PAGE_STAMP) return false;
+  if (!pageStale) { pageStale = true; toast("Outrider has a newer page: it reloads once you leave it alone for a minute"); }
+  if (!pageQuiet(now)) return false;
+  pageReload();
+  return true;
+}
+setInterval(() => pageStampTick(), 5000);
+
 // ---- keyboard reachability ----
 // Clickable things that are not real buttons (sort headers, ☆, ⌖/🔍 links, Bodies pin cells, copyable
 // names, bodies in search results) get focus and act on Enter/Space like a click. Not shortcuts: Tab to it.

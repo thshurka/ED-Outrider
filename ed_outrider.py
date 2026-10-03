@@ -4749,7 +4749,7 @@ class State:
     def payload(self):
         pos, jr = self.journals.pos, self.journals.jump_range
         return {
-            "version": self.version, "run_id": RUN_ID, "status": self.status, "radius": self.radius,
+            "version": self.version, "run_id": RUN_ID, "page_stamp": page_stamp(), "status": self.status, "radius": self.radius,
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
             "tts": self.speaker.info() if self.speaker else None,
@@ -9662,6 +9662,32 @@ FONT_DIR = os.path.join(outrider.DATA_DIR, "fonts")
 USER_FONT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}\.(ttf|otf|woff2?)")
 
 
+# The page's files: an open page compares their stamp (in every payload) with the one it was served with, and reloads
+# itself when Outrider has newer ones (a tablet runs for hours; a restart after an update must reach it). Statted at
+# most every PAGE_STAMP_S seconds (the payload is built often).
+PAGE_FILES = ("page.html", "page.js", "page.css", "sounds.json") + TABLET_STYLES
+PAGE_STAMP_S = 5.0
+_page_stamp = {"at": None, "value": None}
+
+
+def page_stamp(static_dir=None, now=None):
+    """A short stamp of the page's files (their sizes and modification times): changes when any of them does."""
+    now = time.monotonic() if now is None else now
+    if static_dir is None and _page_stamp["at"] is not None and now - _page_stamp["at"] < PAGE_STAMP_S:
+        return _page_stamp["value"]
+    parts = []
+    for name in PAGE_FILES:
+        try:
+            st = os.stat(os.path.join(static_dir or STATIC_DIR, name))
+            parts.append(f"{name}:{st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            parts.append(f"{name}:-")
+    value = hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
+    if static_dir is None:
+        _page_stamp.update(at=now, value=value)
+    return value
+
+
 def load_page(tablet=False):
     """page.html with its script and stylesheet links stamped by modification time, so a browser fetches
     the new copy as soon as either file changes instead of running a cached one. tablet: the /tablet layout."""
@@ -9941,7 +9967,8 @@ def make_app(state, hosts=None):
         saved = read_browser_defaults(browser_defaults_path(state.db_path)) if state.db_path else None
         return web.Response(text=load_page(tablet=request.path == "/tablet").replace("/*SEARCH_OPTIONS*/null", options)
                             .replace("/*SERVER_DEFAULTS*/null", json.dumps(saved).replace("<", "\\u003c"))
-                            .replace("/*SOUNDS*/null", sounds_json()),
+                            .replace("/*SOUNDS*/null", sounds_json())
+                            .replace("/*PAGE_STAMP*/null", json.dumps(page_stamp())),
                             content_type="text/html")
 
     async def defaults_get(_):

@@ -62,6 +62,27 @@ class Tablet(unittest.TestCase):
             for attr in ('autocapitalize="off"', 'autocorrect="off"', 'spellcheck="false"'):
                 self.assertIn(attr, tag, id_)
 
+    def test_page_stamp(self):
+        """An open page reloads itself when Outrider has newer page files (a tablet left open over a restart kept its
+        old Search): the stamp it is served with, the same in every payload, changes with any page file."""
+        async def go(c):
+            pages = [await (await c.get(u)).text() for u in ("/", "/tablet")]
+            return pages, (await (await c.get("/api/nearby")).json())["page_stamp"]
+        pages, stamp = self.client(go)
+        self.assertRegex(stamp, r"^[0-9a-f]{12}$")
+        for html in pages:
+            self.assertIn(f'window.__PAGE_STAMP__ = "{stamp}";', html)
+        with tempfile.TemporaryDirectory() as d:
+            for name in ed_outrider.PAGE_FILES:
+                os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("x")
+            a = ed_outrider.page_stamp(d)
+            self.assertEqual(ed_outrider.page_stamp(d), a)
+            path = os.path.join(d, "themes", "lcars.css")
+            os.utime(path, ns=(1, os.stat(path).st_mtime_ns + 10 ** 9))
+            self.assertNotEqual(ed_outrider.page_stamp(d), a)
+
     def test_fonts_are_ofl_and_shipped_with_their_licences(self):
         fonts = os.path.join(ed_outrider.STATIC_DIR, "fonts")
         files = os.listdir(fonts)

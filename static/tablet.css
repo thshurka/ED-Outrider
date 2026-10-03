@@ -155,7 +155,7 @@ body.tablet #searchForm .sgrid > fieldset { height: 252px; }
 body.tablet #searchForm .sstack { display: flex; flex-direction: column; gap: 8px; height: 252px; min-width: 0; }
 body.tablet #searchForm .sstack > fieldset { flex: 1 1 0; min-height: 0; }
 body.tablet #searchForm .opts label, body.tablet #searchForm fieldset > label { display: flex; align-items: center; gap: 8px; font-size: 15px;
-  padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  padding: 3px 0; white-space: normal; line-height: 1.2; }   /* a long label wraps inside its card, never clipped */
 body.tablet #searchForm .opts.inline { margin: 2px 0 4px; gap: 0 10px; }
 body.tablet #searchForm .opts.inline label { display: inline-flex; }
 body.tablet #searchForm fieldset select { max-width: 100%; }

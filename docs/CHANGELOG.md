@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · An open page picks up a new Outrider by itself
+- After Outrider is updated and restarted, a page left open (the tablet, the Now window) reloads by itself once
+  nothing has been touched for a minute and nothing is being said. The page you were on comes back. Before, it went
+  on running what it had loaded until someone reloaded it (found on the tablet).
+- Tablet Search: a long label (⛏ bodies with mining locations) wraps inside its card instead of being cut off.
+
 ## 2026-10-03 · Tablet: a compact Search, Show in Here from results, cards and panels that fit
 Found by the author on the tablet:
 - Search: its five sections sit side by side in four columns, each scrolling on its own, with the results right under
