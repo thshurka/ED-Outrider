@@ -33,6 +33,9 @@
 # password = ""        # devices on your network (a tablet, the Android app) sign in with it once; this PC itself
 #                      # never needs it. "" = no sign-in. It crosses your network unencrypted (plain http), so use
 #                      # one you use nowhere else. Changing it signs every device out.
+# game_pc = "auto"     # is this the PC the game runs on? auto (off inside a container such as Docker), true or false.
+#                      # Off (a server): no auto honk, auto-target, tablet rail, co-pilot button, clipboard or sound
+#                      # played on this PC; the pages leave them out.
 # allowed_hosts = ["mypc.lan"]   # extra names the page may be opened by. Outrider answers to any IP address,
 #                      # but by name only to localhost and the host above (with "0.0.0.0": this machine's own
 #                      # name too), so another web site cannot read it through DNS rebinding; list the names a

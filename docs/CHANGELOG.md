@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Server mode: [server] game_pc (the Docker plan, D1)
+- `[server] game_pc` (auto, true or false): whether this Outrider runs on the PC the game runs on. Auto turns it off
+  inside a container (Docker). Off, nothing touches a game PC: no auto honk, auto-target, tablet rail, co-pilot button,
+  clipboard or sound played on this PC; those routes answer "needs Outrider on the PC the game runs on".
+- The payload and /api/version carry `game_pc` (the app's about screen says "Outrider on a server").
+
 ## 2026-10-03 · A seventh tablet theme: Dark (modern)
 - A modern app's dark mode: slate greys rather than black, flat cards with rounded corners and subtle borders, blue
   for what is on or chosen, switches instead of ticks, Inter (SIL OFL) with tabular figures.

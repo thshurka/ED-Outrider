@@ -415,11 +415,28 @@ def simulate_settings(st):
     return dict(st, copilot=dict(st["copilot"], enabled=False), highway=dict(st["highway"], clipboard=False))
 
 
-def simulate_keyboard_off(honker):
-    """--simulate: no virtual keyboard at all, so every open, press, test and auto-target run is refused (the page
-    acts as if the game were running, and nothing may press a key into whatever window has focus)."""
-    honker.evdev, honker.status = None, "off (--simulate)"
+def simulate_keyboard_off(honker, why="--simulate"):
+    """--simulate, and a server away from the game PC: no virtual keyboard at all, so every open, press, test and
+    auto-target run is refused (nothing may press a key into whatever window has focus)."""
+    honker.evdev, honker.status = None, f"off ({why})"
     return honker
+
+
+NOT_GAME_PC = "needs Outrider on the PC the game runs on (this one is a server: [server] game_pc)"
+
+
+def in_container(dockerenv="/.dockerenv", env=None):
+    """Whether this runs inside a container: Docker's /.dockerenv, or OUTRIDER_CONTAINER=1 (the image sets it)."""
+    env = os.environ if env is None else env
+    return os.path.exists(dockerenv) or env.get("OUTRIDER_CONTAINER") == "1"
+
+
+def resolve_game_pc(setting, container=None):
+    """[server] game_pc -> (whether this is the game PC, why): true / false as set; auto: not inside a container."""
+    if setting is True or setting is False:
+        return setting, "set in the config ([server] game_pc)"
+    inside = in_container() if container is None else container
+    return (False, "running in a container ([server] game_pc = auto)") if inside else (True, "auto")
 
 
 def status_fresh(status, now):
@@ -729,6 +746,12 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         print(f"config: [server] allowed_hosts = {hosts!r} must be a list of names, e.g. [\"mypc.lan\", \"192.168.1.20\"]; "
               "ignored", file=sys.stderr)
         hosts = []
+    game_pc = sv.get("game_pc", "auto")   # "auto": off inside a container (see resolve_game_pc)
+    if isinstance(game_pc, str) and game_pc.strip().lower() in ("auto", "true", "false", "on", "off", "yes", "no"):
+        game_pc = {"auto": "auto", "true": True, "on": True, "yes": True}.get(game_pc.strip().lower(), False)
+    elif not isinstance(game_pc, bool):
+        print(f"config: [server] game_pc = {game_pc!r} must be auto, true or false; using auto", file=sys.stderr)
+        game_pc = "auto"
     password = sv.get("password", "")
     if not isinstance(password, str):
         print("config: [server] password must be a string in quotes; ignored (no password)", file=sys.stderr)
@@ -752,7 +775,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "host": pick(args.host, num("server", sv, "host", _config_str, None), "127.0.0.1"),
         "port": pick(args.port, num("server", sv, "port", _config_port, None), 8025),
         "allowed_hosts": [h.strip() for h in hosts if h.strip()],
-        "password": password,
+        "password": password, "game_pc": game_pc,
         # at least 1 ly: a bad config value is reported above; a --radius 0 flag is clamped
         "radius": max(1.0, pick(args.radius, num("server", sv, "radius", _config_radius, None), 25.0)),
         "radius_choices": radius_choices,
@@ -876,6 +899,7 @@ host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on yo
 port = {st["port"]}   # the page's port: http://<this PC>:<port>/
 allowed_hosts = {lst(st["allowed_hosts"])}   # extra names the page may be opened by (a LAN setup; see the README)
 password = {q(st["password"])}   # devices on your network sign in with it ("" = none); this PC itself never needs it
+game_pc = {q(st["game_pc"]) if st["game_pc"] == "auto" else ("true" if st["game_pc"] else "false")}   # is this the PC the game runs on? auto (off inside a container, e.g. Docker), true or false. Off: no auto honk, auto-target, tablet rail, co-pilot button, clipboard or playing on this PC
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
 radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
 backup_dir = {q(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
@@ -4650,6 +4674,7 @@ class State:
         self.speech = None         # outrider.speech.SpeechLines, set at start (None in tests)
         self.honker = None         # outrider.honk.Honker, set at start (None in tests)
         self.simulate = False      # --simulate: the panels act as if the game were running (shown_status)
+        self.game_pc = True        # [server] game_pc: False on a server away from the game PC (no keys, devices, clipboard, PC sound)
         self.button = None         # outrider.button.ButtonWatch when [copilot] enabled (None otherwise and in tests)
         # the voice's hush ({mode, until, sys}): here, not per browser, so the co-pilot button, a tablet and the
         # window that is speaking all see the same one. In memory only: a restart ends it
@@ -4778,6 +4803,7 @@ class State:
         pos, jr = self.journals.pos, self.journals.jump_range
         return {
             "version": self.version, "run_id": RUN_ID, "page_stamp": page_stamp(), "restart_needed": restart_needed(),
+            "game_pc": self.game_pc,   # False: the page leaves out what needs the game PC
             "status": self.status, "radius": self.radius,
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
@@ -8934,6 +8960,8 @@ class State:
 
     def rail_why_not(self):
         """Why no button can be pressed now (None: they can), whatever the context: the keyboard's side."""
+        if not self.game_pc:
+            return NOT_GAME_PC
         if self.simulate:
             return "not with --simulate (nothing is pressed)"
         h = self.honker
@@ -8947,6 +8975,8 @@ class State:
         context's set and catalogue, for the editor (GET /api/rail)."""
         st = self.journals.status_json or {}
         ctx, why = outrider.rail.context_of(st, (self.journals.vehicle or {}).get("srv_type"))
+        if not self.game_pc:
+            ctx, why = None, NOT_GAME_PC
         out = {"context": ctx, "label": outrider.rail.CONTEXT_LABEL.get(ctx), "why": why, "buttons": [],
                "can_press": False, "why_not": None, "confirm_s": outrider.rail.RAIL_CONFIRM_S, "max": outrider.rail.RAIL_MAX}
         if ctx:
@@ -10195,7 +10225,8 @@ def make_app(state, hosts=None):
         """GET /api/version, open: what the app needs before signing in ("update the app", "update Outrider", "sign
         in"), and nothing else."""
         return web.json_response({"outrider": outrider.__version__, "api": API_VERSION, "min_app": MIN_APP_VERSION,
-                                  "password": bool(state.password), "signed_in": bool(signed_in(request))})
+                                  "password": bool(state.password), "signed_in": bool(signed_in(request)),
+                                  "game_pc": bool(state.game_pc)})
 
     async def signin_view(request):
         """POST /api/auth/signin {password} -> {ok, token} and the same token as an HttpOnly cookie. 401 bad_password,
@@ -10781,6 +10812,14 @@ def make_app(state, hosts=None):
                 return {"error": f"{path} answered no JSON"}
         return get
 
+    def pc_only(handler):
+        """A route that presses keys or plays on this PC: refused on a server away from the game PC ([server] game_pc)."""
+        async def guarded(request):
+            if not state.game_pc:
+                return web.json_response({"error": NOT_GAME_PC, "code": "not_game_pc"}, status=409)
+            return await handler(request)
+        return guarded
+
     async def config_get_view(_):
         """GET /api/config: every config key for the Settings dialog's Server settings (secrets only as set or not)."""
         return web.json_response(state.config_info())
@@ -10915,11 +10954,11 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/materials", materials_view)
     app.router.add_post("/api/radius", radius_view)
     app.router.add_get("/api/say", say_view)
-    app.router.add_post("/api/say/play", say_play_view)
+    app.router.add_post("/api/say/play", pc_only(say_play_view))
     app.router.add_post("/api/say/prefetch", say_prefetch_view)
     app.router.add_get("/api/sound/file/{name}", sound_file_view)
     app.router.add_post("/api/say/stop", say_stop_view)
-    app.router.add_post("/api/sound/play", sound_play_view)
+    app.router.add_post("/api/sound/play", pc_only(sound_play_view))
     app.router.add_get("/api/speech", speech_view)
     app.router.add_post("/api/speech/ban", speech_ban_view)
     app.router.add_post("/api/speech/unban", speech_ban_view)
@@ -10931,25 +10970,25 @@ def make_app(state, hosts=None):
     app.router.add_post("/api/ask", ask_view)
     app.router.add_get("/api/config", config_get_view)
     app.router.add_post("/api/config", config_post_view)
-    app.router.add_post("/api/rail/press", rail_press_view)
-    app.router.add_post("/api/rail/sets", rail_sets_view)
+    app.router.add_post("/api/rail/press", pc_only(rail_press_view))
+    app.router.add_post("/api/rail/sets", pc_only(rail_sets_view))
     app.router.add_get("/api/highway/systems", highway_systems_view)
     app.router.add_get("/api/highway/background", highway_background_view)
     app.router.add_get("/api/regions", regions_view)
     app.router.add_post("/api/highway/plot", highway_plot_view)
     app.router.add_post("/api/highway/clear", highway_clear_view)
-    app.router.add_post("/api/highway/autotarget", highway_autotarget_view)
-    app.router.add_post("/api/highway/autotarget/test", highway_autotarget_test_view)
-    app.router.add_post("/api/highway/target", highway_target_view)
+    app.router.add_post("/api/highway/autotarget", pc_only(highway_autotarget_view))
+    app.router.add_post("/api/highway/autotarget/test", pc_only(highway_autotarget_test_view))
+    app.router.add_post("/api/highway/target", pc_only(highway_target_view))
     app.router.add_get("/api/defaults", defaults_get)
     app.router.add_post("/api/defaults", defaults_post)
     app.router.add_post("/api/nextstop", next_stop_view)
     app.router.add_get("/api/status", status_view)
     app.router.add_get("/api/status.txt", status_txt_view)
     app.router.add_post("/api/voice", voice_view)
-    app.router.add_post("/api/autohonk", autohonk_view)
-    app.router.add_post("/api/autohonk/test", autohonk_test_view)
-    app.router.add_post("/api/autohonk/forget", autohonk_forget_view)
+    app.router.add_post("/api/autohonk", pc_only(autohonk_view))
+    app.router.add_post("/api/autohonk/test", pc_only(autohonk_test_view))
+    app.router.add_post("/api/autohonk/forget", pc_only(autohonk_forget_view))
     app.router.add_get("/api/firsts", firsts_view)
     app.router.add_get("/api/left", left_view)
     app.router.add_get("/api/body", body_view)
@@ -11246,6 +11285,11 @@ async def run(args, st):
     print("spoken alerts: " + ("Piper found, preparing a voice" if state.speaker.available else
                                "Piper not installed, the page uses browser speech (see outrider/tts.py)"))
     state.speaker.start()
+    state.game_pc, why = resolve_game_pc(st["game_pc"])
+    if not state.game_pc:   # a server away from the game PC: no keys, devices, clipboard or sound on it
+        st = dict(simulate_settings(st), server_player="off")
+        print(f"server mode ({why}): auto honk, auto-target, the tablet's rail, the co-pilot button, the clipboard and "
+              "playing on this PC are off")
     state.player = outrider.tts.LinePlayer(st["server_player"])
     state.sounds.own_dir = st["sound_dir"] or None
     print("playing on this PC (the page's tick): " + (state.player.name or (
@@ -11261,9 +11305,11 @@ async def run(args, st):
     saved = meta_get(db, "autohonk_enabled")   # the page's toggle beats the config file once used
     if saved is not None:
         state.autohonk["enabled"] = bool(saved)
+    if not state.game_pc:
+        state.autohonk["enabled"] = False
     state.honker = outrider.honk.Honker(state.autohonk["key"], state.autohonk["hold"], LIVE_DIRS)
-    if state.simulate:
-        simulate_keyboard_off(state.honker)
+    if state.simulate or not state.game_pc:
+        simulate_keyboard_off(state.honker, "--simulate" if state.simulate else "server mode")
     if state.autohonk["enabled"]:
         state.honker.open()
     print("auto honk: " + (state.honker.status if state.autohonk["enabled"] else "off")
@@ -11286,6 +11332,8 @@ async def run(args, st):
     state.clipboard = Clipboard(st["highway"]["clipboard"])
     state.targeter = outrider.target.Targeter(state.honker, LIVE_DIRS, state.autotarget_cfg(),
                                               copy=lambda text: state.clipboard.copy(text, force=True))
+    if not state.game_pc:
+        state.highway_cfg["autotarget"] = False
     if state.highway_cfg["autotarget"] and state.honker.available and not state.highway_cfg["autotarget_dry_run"]:
         state.honker.open("target")
     print("highway clipboard: " + (f"{state.clipboard.tool} (the next system is copied on arriving at a route system)"

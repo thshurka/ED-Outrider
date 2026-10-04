@@ -43,7 +43,7 @@ class Auth(unittest.TestCase):
             return r.status, await r.json()
         status, body = self.client(go)
         self.assertEqual(status, 200)
-        self.assertEqual(set(body), {"outrider", "api", "min_app", "password", "signed_in"})
+        self.assertEqual(set(body), {"outrider", "api", "min_app", "password", "signed_in", "game_pc"})   # game_pc: added 2026-10-04
         self.assertEqual((body["outrider"], body["api"], body["min_app"]), (outrider.__version__, 1, "1.0.0"))
         self.assertEqual((body["password"], body["signed_in"]), (True, False))
         self.assertIsInstance(body["outrider"], str)

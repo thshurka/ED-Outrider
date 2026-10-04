@@ -205,6 +205,10 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   one, 401 `signin_required` for `/api/`, `/static/` and the app's User-Agent (`OutriderApp/`), else a redirect to
   `/signin`. Don't add to `AUTH_OPEN`. Tests reach "another device" by patching `outrider.auth.is_loopback`
   (`tests/test_auth.py`).
+- **Server mode** (`[server] game_pc`, `State.game_pc`; `resolve_game_pc`: auto is off inside a container). Off: no
+  virtual keyboard (`simulate_keyboard_off`), no co-pilot button or clipboard (`simulate_settings`), the PC player off;
+  every route that presses keys or plays on this PC is registered through `pc_only()` and answers 409 `not_game_pc`.
+  A new such route goes through `pc_only()` too; the payload's `game_pc` tells the page what to leave out.
 - **The rail presses keys** (like auto honk and auto-target): one tap of one bound key combination per press
   (`Honker.tap`), only for a button in the CURRENT context's set, only while the game is live, never with --simulate,
   and refused (not queued) while auto honk or auto-target hold the keyboard. Never a sequence. Tests use
@@ -217,7 +221,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   (`capped`, the fields that answer the question).
 - **The Android app's contract** (`project/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
   `{outrider, api, min_app, password, signed_in}`; `POST /api/auth/signin` {password} gives `{ok, token}` and the
-  cookie; `POST /api/auth/signout`; `POST /api/ask` {text, source?} gives exactly `{answer, spoken, matched, command}`;
+  cookie; `POST /api/auth/signout`; `POST /api/ask` {text, source?} gives exactly `{answer, spoken, matched, command}`; `/api/version` also has `game_pc`
+  (added 2026-10-04);
   errors are `{error, code}` (`signin_required`, `bad_password`, `rate_limited`,
   `bad_request`, `app_too_old`, `server_error`, `ai_off`, `ai_timeout`, `ai_error`). Bump `API_VERSION` when an endpoint the app uses changes shape
   incompatibly, `MIN_APP_VERSION` when an older app can no longer work (426 `app_too_old` for its
