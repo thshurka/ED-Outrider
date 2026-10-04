@@ -299,7 +299,8 @@ its own database; set `[spansh] watch_firsts = false` on one, or both check the 
    Without a checkout on the server: `scripts/docker_bundle.sh` (on a computer with the checkout and Docker) makes
    `dist/ed-outrider-docker-<version>-<arch>.tgz`, the built image with a compose file that runs it. Copy it over,
    extract it, `docker load -i ed-outrider-image.tar`, set `JOURNALS` in `.env`, then `docker compose up -d`
-   (its INSTALL.txt has the steps). The image is built for the computer that makes it (`PLATFORM=linux/arm64` for
+   (its INSTALL.txt has the steps). A later bundle takes over from it: copy the old folder's `docker/` and `.env`
+   into the new one first (INSTALL.txt again). The image is built for the computer that makes it (`PLATFORM=linux/arm64` for
    an ARM server, if your Docker can build for it).
 
 `[server] game_pc = "auto"` turns all this on inside the container by itself; `false` does the same on a server

@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Docker: one project name, and how to update a bundle
+- `docker-compose.yml` names its project `ed-outrider`, so a newer bundle's `docker compose up -d` replaces the
+  running container instead of failing on its name (and a checkout and a bundle are the same project). A checkout
+  started under its old project name: `docker rm -f ed-outrider` once.
+- The bundle's INSTALL.txt says how to update from an earlier bundle: stop it, copy its `docker/` and `.env` across,
+  load, start. Without `docker/`, a new bundle starts as a new install.
+
 ## 2026-10-04 · Version 2026.10.4; a warning for journals over NFS
 - Outrider warns at start when the journal folder is on an NFS mount that caches file sizes for more than 2 s (the
   default is up to 60 s). There the journal seems not to grow, and alerts come late and all at once, as on the

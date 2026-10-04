@@ -142,6 +142,8 @@ class Packaging(unittest.TestCase):
         compose = self.read("docker-compose.yml").splitlines()
         self.assertIn("    build: .", compose)
         self.assertIn("    image: ed-outrider:local", compose)
+        self.assertLess(compose.index("name: ed-outrider"), compose.index("services:"))   # one project, whichever folder
+        self.assertIn("sed -n '/^name:/,$p' docker-compose.yml", self.read("scripts/docker_bundle.sh"))
         ignored = self.read(".dockerignore").splitlines()
         self.assertTrue({"dist", ".env", "data", "docker/data", "docker/config"} <= set(ignored))
         script = self.read("scripts/docker_bundle.sh")

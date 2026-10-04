@@ -4,6 +4,9 @@
 #   docker compose down                  stop
 # Set JOURNALS (and UID/GID if yours are not 1000) in a .env file beside this one, e.g.
 #   JOURNALS=/mnt/elite-journals
+# one project name wherever it runs from (a checkout or any bundle's folder): a newer bundle's `docker compose up -d`
+# then replaces the running container instead of clashing with its name
+name: ed-outrider
 services:
   outrider:
     build: .

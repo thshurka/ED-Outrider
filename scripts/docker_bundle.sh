@@ -36,11 +36,12 @@ docker save -o "$OUT/ed-outrider-image.tar" "$IMAGE"
   echo "#   docker compose logs -f    its log"
   echo "#   docker compose down       stop"
   echo "# Set JOURNALS (and UID/GID if yours are not 1000, PORT if not 8025) in .env beside this file."
-  sed -n '/^services:/,$p' docker-compose.yml \
+  sed -n '/^name:/,$p' docker-compose.yml \
     | sed -e '/^    build: \.$/d' \
           -e "s|^    image: ed-outrider:local$|    image: $IMAGE\n    pull_policy: never|"
 } > "$OUT/docker-compose.yml"
-grep -q "image: $IMAGE" "$OUT/docker-compose.yml" && ! grep -q "^    build:" "$OUT/docker-compose.yml" \
+grep -q "image: $IMAGE" "$OUT/docker-compose.yml" && grep -q "^name: ed-outrider$" "$OUT/docker-compose.yml" \
+  && ! grep -q "^    build:" "$OUT/docker-compose.yml" \
   || { echo "docker-compose.yml changed shape: update the image line's rewrite in $0" >&2; exit 1; }
 
 cat > "$OUT/.env.example" <<EOF
@@ -84,8 +85,15 @@ rail, the co-pilot button, the clipboard and sound played on the PC. Everything 
 Your database, backups and voices stay in docker/data/, the config in docker/config/. If the container says it
 cannot write them: sudo chown -R \$(id -u):\$(id -g) docker/   then docker compose restart
 
-Updating to a later bundle: docker compose down, extract the new bundle, move docker/data, docker/config and .env
-into it, then steps 1 and 4.
+Updating from an earlier bundle: extract this one beside the old one's folder, then from this folder:
+     OLD=../ed-outrider-docker-<old version>-$ARCH          the old bundle's folder
+     (cd "\$OLD" && docker compose down)                   stop it first, so its database is closed
+     rm -rf docker && cp -a "\$OLD/docker" "\$OLD/.env" .
+     docker load -i ed-outrider-image.tar
+     docker compose up -d
+   Your database, backups, voices and config come along in docker/; without them it starts as a new install. Every
+   bundle uses the project name ed-outrider, so the new one takes the old one's place. Keep the old folder until
+   the new one runs, then delete it and its image (docker rmi ed-outrider:<old version>).
 Removing: docker compose down && docker rmi $IMAGE
 
 Do not expose Outrider to the internet: for access away from home, use a VPN into your network.
