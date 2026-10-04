@@ -279,7 +279,8 @@ its own database; set `[spansh] watch_firsts = false` on one, or both check the 
 1. **Share the journal folder from the game PC**, read-only. Under Proton it is
    `…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`.
    - **NFS:** export it on the game PC (`/etc/exports`: `"/path/to/Elite Dangerous" 192.168.1.0/24(ro,no_subtree_check)`),
-     and on the server mount it with `actimeo=1` (Status.json changes every few seconds), e.g. in `/etc/fstab`:
+     and on the server mount it with `actimeo=1` (without it, NFS can show the journal's growth up to a minute late and
+     the alerts come late and all at once; Outrider warns at start), e.g. in `/etc/fstab`:
      `gamepc:/path/to/Elite\040Dangerous /mnt/elite-journals nfs ro,actimeo=1 0 0`.
    - **CIFS / Samba:** share the folder read-only on the game PC, and mount it on the server
      (`//gamepc/elite-journals /mnt/elite-journals cifs ro,username=you,password=…,vers=3.0 0 0`).

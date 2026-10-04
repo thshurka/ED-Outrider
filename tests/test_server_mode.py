@@ -149,6 +149,39 @@ class Packaging(unittest.TestCase):
         self.assertTrue(os.access(os.path.join(self.ROOT, "scripts", "docker_bundle.sh"), os.X_OK))
 
 
+class NfsCaching(unittest.TestCase):
+    """The journals over NFS (a Docker server): Linux caches a file's size for up to 60 s by default, so the journal
+    seems not to grow and a minute of alerts comes at once (the author's server, 2026-10-04). Start-up warns unless
+    the mount caches for at most a couple of seconds (actimeo=1, or noac)."""
+    MOUNTS = "\n".join([
+        "/dev/nvme0n1p2 / ext4 rw,relatime 0 0",
+        "gamepc:/home/me/Elite\\040Dangerous /mnt/elite nfs4 rw,relatime,vers=4.2,rsize=1048576,hard,proto=tcp,timeo=600,addr=192.168.1.20 0 0",
+        "gamepc:/j /mnt/quick nfs4 ro,relatime,vers=4.2,acregmin=1,acregmax=1,acdirmin=1,acdirmax=1,hard,addr=192.168.1.20 0 0",
+        "gamepc:/j /mnt/noac nfs ro,sync,relatime,vers=3,noac,addr=192.168.1.20 0 0",
+        "gamepc:/j /mnt/slow nfs4 ro,relatime,vers=4.2,acregmin=3,acregmax=30,addr=192.168.1.20 0 0",
+        "//gamepc/elite /mnt/cifs cifs ro,relatime,vers=3.0,actimeo=1 0 0",
+        "/dev/sdb1 /mnt/elite/local ext4 rw 0 0",
+    ])
+
+    def warn(self, d):
+        return ed_outrider.nfs_cache_warnings([d], mounts=self.MOUNTS, realpath=lambda p: p)
+
+    def test_default_nfs_warns(self):
+        w = self.warn("/mnt/elite/Saved Games")
+        self.assertEqual(len(w), 1)
+        self.assertIn("60 s", w[0])
+        self.assertIn("actimeo=1", w[0])
+
+    def test_short_caching_is_fine(self):
+        for d in ("/mnt/quick", "/mnt/noac/x", "/mnt/cifs", "/mnt/elite/local/j", "/home/me/journals"):
+            self.assertEqual(self.warn(d), [], d)
+        self.assertIn("30 s", self.warn("/mnt/slow")[0])
+
+    def test_unreadable_mounts(self):
+        self.assertEqual(ed_outrider.nfs_cache_warnings(["/mnt/elite"], mounts=None, realpath=lambda p: p,
+                                                        read=lambda: (_ for _ in ()).throw(OSError("no /proc"))), [])
+
+
 class StartUp(unittest.TestCase):
     def test_import_keeps_each_file(self):
         """R13: a stop part way through the start-up import keeps the journal files already read (each is committed)."""

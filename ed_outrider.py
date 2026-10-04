@@ -10119,6 +10119,47 @@ def public_name(name):
     return not (ip.is_private or ip.is_loopback or ip.is_link_local)
 
 
+NFS_CACHE_OK = 2   # s: the longest attribute caching (acregmax) that keeps alerts on time over NFS
+
+
+def _read_mounts():
+    with open("/proc/self/mounts", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def nfs_cache_warnings(dirs, mounts=None, realpath=os.path.realpath, read=_read_mounts):
+    """Warnings for journal folders on NFS that cache a file's attributes for longer than NFS_CACHE_OK. Outrider
+    sees a journal grow by its size; NFS keeps the size it knows for up to acregmax (60 s by default), and a
+    minute of alerts then comes at once (found on the author's Docker server). actimeo=1 or noac fixes it. CIFS
+    caches for 1 s by default and is left alone. mounts: /proc/self/mounts' text (read() when None; Linux only)."""
+    if mounts is None:
+        try:
+            mounts = read()
+        except OSError:
+            return []
+    table = []
+    for line in mounts.splitlines():
+        parts = line.split()
+        if len(parts) >= 4:
+            point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), parts[1])   # "\040" is a space
+            table.append((point, parts[2], parts[3].split(",")))
+    out = []
+    for d in dirs:
+        path = realpath(d)
+        inside = [m for m in table if path == m[0] or path.startswith(m[0].rstrip("/") + "/")]
+        if not inside:
+            continue
+        point, fstype, opts = max(inside, key=lambda m: len(m[0]))   # the mount the folder is actually on
+        if not fstype.startswith("nfs") or "noac" in opts:
+            continue
+        acregmax = next((int(o.split("=", 1)[1]) for o in opts if o.startswith("acregmax=") and o.split("=", 1)[1].isdigit()), 60)
+        if acregmax > NFS_CACHE_OK:
+            out.append(f"warning: the journal folder {d} is on NFS ({point}), which may show a journal's growth up to "
+                       f"{acregmax} s late: alerts then come late and all at once. Mount it with actimeo=1 (see the "
+                       "README, \"Running as a server\"), then restart Outrider.")
+    return out
+
+
 def exposure_warnings(host, password, extra):
     """Start-up warnings when the config looks like Outrider is reachable from the internet (the author: do not):
     an allowed_hosts name that is not a LAN one, or listening on the network with no password."""
@@ -11322,6 +11363,8 @@ async def run(args, st):
               "ED_JOURNALS.", file=sys.stderr)
     else:
         print("journals: " + ", ".join(LIVE_DIRS) + (f"  (legacy: {', '.join(LEGACY_DIRS)})" if LEGACY_DIRS else ""))
+        for line in nfs_cache_warnings(LIVE_DIRS):
+            print(line, file=sys.stderr)
     problem = listen_problem(args.host, args.port)
     if problem:
         print(problem, file=sys.stderr)

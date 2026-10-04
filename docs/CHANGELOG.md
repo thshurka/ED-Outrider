@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.4; a warning for journals over NFS
+- Outrider warns at start when the journal folder is on an NFS mount that caches file sizes for more than 2 s (the
+  default is up to 60 s). There the journal seems not to grow, and alerts come late and all at once, as on the
+  author's Docker server. The fix is `actimeo=1` on the mount.
+- The version is now 2026.10.4 (everything since 2026.10.3: the review fixes, Piper-only co-pilot lines, the Docker
+  bundle, Cori and More voices).
+
 ## 2026-10-04 · Cori by default; more voices from Settings
 - The default voice is now Cori (`en_GB-cori-medium`). A voice you picked, or one named in your config, stays.
 - Settings → Voice → **More voices** lists every Piper voice by language, with its quality and size. Pick one and
