@@ -166,7 +166,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   a view change works on both. The tablet never speaks, plays sounds or joins the one-speaker lock (`speakMode()` is
   "never" there): keep any new sound or speech path behind `speakerHere()`. It has no Overview. The desktop page must
   not change: tablet-only rules go under `body.tablet` in `tablet.css`, themes only under their `[data-theme]` (only
-  `/tablet` sets one). A new theme: its stylesheet in `TABLET_STYLES`, its name in `TABLET_THEMES` and `TB.themes`,
+  `/tablet` sets one). The dark theme's icons are CSS masks written into `themes/dark.css` by `scripts/dark_icons.py` from
+  `static/icons/lucide/` (run it after changing its `ICONS`). A new theme: its stylesheet in `TABLET_STYLES`, its name in `TABLET_THEMES` and `TB.themes`,
   an `<option>` in `#tabTheme`. A font: OFL only, with its licence file (`test_tablet.py` checks); a fan font is the
   player's drop-in in `data/fonts/` (`/userfonts/`, `USER_FONT_RE`), listed first in the theme's `@font-face`.
 - **Page layout: scroll the pane, not the window.** On a window of at least 900 × 600 (`appWanted`; not Now) the

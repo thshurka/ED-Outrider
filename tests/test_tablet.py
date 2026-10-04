@@ -119,6 +119,20 @@ class Tablet(unittest.TestCase):
                 for name in re.findall(r'url\("\.\./fonts/([^"]+)"\)', fh.read()):
                     self.assertIn(name, files, css)
 
+    def test_dark_theme_icons(self):
+        """The dark theme's line icons are Lucide's (ISC: its licence ships beside them), inline as CSS masks written by
+        scripts/dark_icons.py (no request per icon), and only under data-theme="dark"."""
+        icons = os.path.join(ed_outrider.STATIC_DIR, "icons")
+        with open(os.path.join(icons, "LICENSE-lucide.txt"), encoding="utf-8") as f:
+            self.assertIn("ISC License", f.read())
+        with open(os.path.join(ed_outrider.STATIC_DIR, "themes", "dark.css"), encoding="utf-8") as f:
+            css = f.read()
+        block = css[css.index("/* ---- icons: written by scripts/dark_icons.py ---- */"):]
+        rules = [r for r in block.splitlines() if "mask:" in r]
+        self.assertGreaterEqual(len(rules), 40)
+        self.assertTrue(all(r.startswith('[data-theme="dark"] body.tablet ') and "data:image/svg+xml," in r for r in rules))
+        self.assertNotIn("url(\"../icons", css)
+
     def test_user_fonts(self):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "lcars-display.ttf"), "wb") as f:

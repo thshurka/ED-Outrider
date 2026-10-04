@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · A seventh tablet theme: Dark (modern)
+- A modern app's dark mode: slate greys rather than black, flat cards with rounded corners and subtle borders, blue
+  for what is on or chosen, switches instead of ticks, Inter (SIL OFL) with tabular figures.
+- Line icons (Lucide, ISC licence) beside the words in the nav, the footer and the rail, and in place of the ☆ 🏁 👣
+  ⛽ markers and the sort arrows; only in this theme.
+
 ## 2026-10-03 · Three more tablet themes: Narn, Sith and Rebel Alliance
 - Narn (Babylon 5's Narn Regime): dark red-brown, rust panels with wedge cuts, ochre accents, parchment text.
 - Sith (Star Wars' Empire): black, crimson for what is on, steel-white text, thin hard lines with cut corners.

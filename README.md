@@ -195,7 +195,8 @@ known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the galaxy 
 Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
 the same pages in a cockpit layout, in one of six themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
 corners), Babylon 5 (Earthforce navy and steel), Narn (rust and ochre, wedge-cut), Sith (black, crimson, thin hard
-lines) or Rebel Alliance (cockpit orange and sand, blue for what is chosen). Settings picks one per tablet.
+lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
+cards, switches and line icons beside the words). Settings picks one per tablet.
 
 <p align="center">
   <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
@@ -228,7 +229,7 @@ lines) or Rebel Alliance (cockpit orange and sand, blue for what is chosen). Set
 Outrider must listen on your network for this (`[server] host = "0.0.0.0"`). With `[server] password` set, the tablet
 signs in once: see "Opening the page from another device" under Settings. The fonts are Antonio and Barlow Condensed,
 both under the SIL Open Font License and shipped with Outrider, as are the other themes' (Michroma, Saira, Orbitron,
-Exo 2, Russo One, Share Tech Mono, Rajdhani, Oxanium). A heading font of your own goes in your git-ignored `data/` folder and is never shared:
+Exo 2, Russo One, Share Tech Mono, Rajdhani, Oxanium, Inter); Dark's icons are Lucide's (ISC licence, in `static/icons/`). A heading font of your own goes in your git-ignored `data/` folder and is never shared:
 `data/fonts/<theme>-display.ttf`: `lcars-display.ttf`, `elite-display.ttf` (a Eurostile-style face), `babylon5-display.ttf`,
 `narn-display.ttf`, `sith-display.ttf` or `alliance-display.ttf`.
 

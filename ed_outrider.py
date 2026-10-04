@@ -9911,8 +9911,8 @@ def sounds_json():
 # shell's stylesheet and every theme's (each scoped to its data-theme, so the per-device picker switches without a
 # reload). Fonts a theme lists first may come from data/fonts/ (fan fonts never committed: FONT_DIR, /userfonts/).
 TABLET_STYLES = ("tablet.css", "themes/lcars.css", "themes/elite.css", "themes/babylon5.css", "themes/narn.css", "themes/sith.css",
-                 "themes/alliance.css")
-TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "sith", "alliance")
+                 "themes/alliance.css", "themes/dark.css")
+TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "sith", "alliance", "dark")
 FONT_DIR = os.path.join(outrider.DATA_DIR, "fonts")
 USER_FONT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}\.(ttf|otf|woff2?)")
 
