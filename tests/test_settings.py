@@ -71,7 +71,9 @@ class ConfigEdit(unittest.TestCase):
                 ce.coerce(kind, bad)
 
 
-class Endpoint(unittest.TestCase):
+class TempConfig(unittest.TestCase):
+    """A State whose config file is a temporary copy of the example (with a password set)."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
@@ -93,6 +95,8 @@ class Endpoint(unittest.TestCase):
                 return await go(c)
         return asyncio.run(run())
 
+
+class Endpoint(TempConfig):
     def test_get_hides_secrets(self):
         async def go(c):
             r = await c.get("/api/config")
@@ -146,6 +150,102 @@ class Endpoint(unittest.TestCase):
         with open(self.path, encoding="utf-8") as f:   # made from the settings in effect, with the change
             cfg = tomllib.loads(f.read())
         self.assertEqual((cfg["server"]["radius"], cfg["server"]["port"]), (40, 8025))
+
+
+class WritingFixes(unittest.TestCase):
+    """The review's batch B (project/REVIEW-2026-10-04.md R2, R5, R8, R9, R10, S1): writing the config file."""
+
+    def test_key_after_a_multiline_list(self):
+        """R5: a key new to a section that ends in a list over several lines goes after its closing bracket."""
+        t = ce.set_key('[server]\nport = 1\nallowed_hosts = [\n  "a",\n  "b",\n]\n\n[spansh]\n', "server", "radius", 40)
+        self.assertEqual(tomllib.loads(t)["server"], {"port": 1, "allowed_hosts": ["a", "b"], "radius": 40})
+
+    def test_whole_numbers(self):
+        """R9: a fraction for a whole-number key is refused, not written as a float settings_from then drops."""
+        with self.assertRaisesRegex(ValueError, "whole number"):
+            ce.coerce("int", 1.5)
+        with self.assertRaisesRegex(ValueError, "whole number"):
+            ce.coerce("int", "2.5")
+        self.assertEqual((ce.coerce("int", "3.0"), ce.coerce("int", 7)), (3, 7))
+        with open(os.path.join(os.path.dirname(ed_outrider.STATIC_DIR), "static", "page.js"), encoding="utf-8") as f:
+            self.assertIn('step="${k.kind === "int" ? "1" : "any"}"', f.read())   # the page's int inputs step by 1
+
+    def test_autotarget_keys_sub_table(self):
+        """R10: [highway.autotarget_keys] written as its own table is replaced by the inline form, not declared twice."""
+        text = '[highway]\nautotarget = true\n\n[highway.autotarget_keys]\nEnter = "KEY_ENTER"   # mine\n\n[mcp]\nmax_rows = 9\n'
+        t = ce.set_key(text, "highway", "autotarget_keys", {"Enter": "KEY_KPENTER"})
+        cfg = tomllib.loads(t)
+        self.assertEqual((cfg["highway"], cfg["mcp"]), ({"autotarget": True, "autotarget_keys": {"Enter": "KEY_KPENTER"}}, {"max_rows": 9}))
+
+    def test_choices(self):
+        """R8: keys with a fixed set of values are listed as choices (game_pc can go back to auto from true)."""
+        secs = ce.entries(ed_outrider.config_text(settings({"server": {"game_pc": True}})), ed_outrider.config_choices())
+        k = {(s["section"], k["key"]): k for s in secs for k in s["keys"]}
+        self.assertEqual((k["server", "game_pc"]["kind"], k["server", "game_pc"]["value"], k["server", "game_pc"]["choices"]),
+                         ("choices", "true", ["auto", "true", "false"]))
+        self.assertEqual(k["highway", "autotarget_entry"]["choices"], ["type", "paste"])
+        self.assertIn("pw-play", k["speech", "server_player"]["choices"])
+        self.assertEqual(ce.coerce("choices", "auto", ["auto", "true", "false"]), "auto")
+        with self.assertRaisesRegex(ValueError, "one of"):
+            ce.coerce("choices", "maybe", ["auto", "true", "false"])
+
+    def test_strings_round_trip(self):
+        """S1: config_text quotes every string properly (a backslash, a newline, a control character); only paths
+        have their backslashes turned into slashes."""
+        st = settings({"server": {"password": 'a\\b"c'}, "defaults": {"speech_names": "Bob\nAlice"},
+                       "assistant": {"model": "m\x7f"}})
+        st["backup_dir"] = "C:\\Users\\me\\backups"
+        cfg = tomllib.loads(ed_outrider.config_text(st))
+        self.assertEqual((cfg["server"]["password"], cfg["defaults"]["speech_names"], cfg["assistant"]["model"], cfg["server"]["backup_dir"]),
+                         ('a\\b"c', "Bob\nAlice", "m\x7f", "C:/Users/me/backups"))
+        self.assertEqual(tomllib.loads(ce.set_key("", "x", "y", "m\x7f"))["x"]["y"], "m\x7f")
+
+
+class WritingFile(TempConfig):
+    """R2, R8, R9 through POST /api/config: the file's mode and a symlinked config."""
+
+    def save(self, body):
+        async def go(c):
+            r = await c.post("/api/config", json=body)
+            return r.status, await r.json()
+        return self.client(go)
+
+    def test_mode_kept(self):
+        os.chmod(self.path, 0o600)
+        self.assertEqual(self.save({"server": {"radius": 40}})[0], 200)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
+    def test_new_file_private(self):
+        os.remove(self.path)
+        self.assertEqual(self.save({"server": {"radius": 40}})[0], 200)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
+    def test_through_a_symlink(self):
+        real = os.path.join(self.tmp, "real", "outrider.toml")
+        os.makedirs(os.path.dirname(real))
+        os.replace(self.path, real)
+        os.symlink(real, self.path)
+        self.assertEqual(self.save({"server": {"radius": 40}})[0], 200)
+        self.assertTrue(os.path.islink(self.path))
+        with open(real, "rb") as f:
+            self.assertEqual(tomllib.load(f)["server"]["radius"], 40)
+        self.assertTrue(os.path.exists(real + ".bak"))
+
+    def test_fraction_refused(self):
+        with open(self.path, encoding="utf-8") as f:
+            before = f.read()
+        status, d = self.save({"server": {"backup_keep": 1.5}})
+        self.assertEqual(status, 400, d)
+        self.assertIn("whole number", d["error"])
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_game_pc_back_to_auto(self):
+        self.assertEqual(self.save({"server": {"game_pc": "true"}})[0], 200)
+        self.assertEqual(self.save({"server": {"game_pc": "auto"}})[0], 200)
+        with open(self.path, "rb") as f:
+            self.assertEqual(tomllib.load(f)["server"]["game_pc"], "auto")
+        self.assertEqual(self.save({"server": {"game_pc": "maybe"}})[0], 400)
 
 
 if __name__ == "__main__":

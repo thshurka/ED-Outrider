@@ -3493,7 +3493,9 @@ const settle = async maxMs => {
     await settle(2500);   // the Server section opened: its keys fetched
     got.push(w.eval(`JSON.stringify([document.querySelectorAll("#serverSettingsBody details.srvsec").length >= 10,
       document.querySelectorAll("#serverSettingsBody [data-key]").length >= 80, !!document.querySelector('#serverSettingsBody [data-key="password"][data-secret]'),
-      document.querySelector('#serverSettingsBody [data-key="password"]').value])`));
+      document.querySelector('#serverSettingsBody [data-key="password"]').value,
+      [...document.querySelectorAll('#serverSettingsBody select[data-key="game_pc"] option')].map(o => o.value).join(" "),
+      document.querySelector('#serverSettingsBody [data-sec="server"][data-key="port"]').step])`));
     got.push(w.eval(`(() => { const port = document.querySelector('#serverSettingsBody [data-sec="server"][data-key="port"]'); const was = port.value;
       port.value = "9999"; const box = document.querySelector('#serverSettingsBody [data-sec="autohonk"][data-key="enabled"]'); box.checked = !box.checked;
       const c = srvChanges(); port.value = was; box.checked = !box.checked; return JSON.stringify(c); })()`));
@@ -3501,10 +3503,10 @@ const settle = async maxMs => {
     await sleep(100);
     got.push(w.eval(`JSON.stringify(Object.values(JSON.parse(localStorage.getItem("settingsOpen"))).some(Boolean))`));
     w.eval(`document.getElementById("alertDialog").close ? document.getElementById("alertDialog").close() : document.getElementById("alertDialog").removeAttribute("open")`);
-    const want = ["Settings", true, 12, ["alerts"], true, '[true,true,true,""]', JSON.stringify({server: {port: "9999"}, autohonk: {enabled: true}}), "false"];
+    const want = ["Settings", true, 12, ["alerts"], true, '[true,true,true,"","auto true false","1"]', JSON.stringify({server: {port: "9999"}, autohonk: {enabled: true}}), "false"];
     const goodS = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
     allOk = allOk && goodS;
-    console.log(goodS ? "OK" : "FAIL", "| settings |", goodS ? "12 folding sections, remembered; server settings from the config file; only changes sent" : JSON.stringify(got), errors.slice(before));
+    console.log(goodS ? "OK" : "FAIL", "| settings |", goodS ? "12 folding sections, remembered; server settings from the config file (choices as a list); only changes sent" : JSON.stringify(got), errors.slice(before));
   }
   // server mode (payload game_pc false): what needs the game PC is left out of the desktop page; back with game_pc true
   {

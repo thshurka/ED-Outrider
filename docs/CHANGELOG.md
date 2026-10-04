@@ -2,6 +2,19 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch B: writing the config file from Settings
+- Saving Server settings keeps the config file's permissions (a `chmod 600` file stays private; a new one is made
+  private, since it may hold passwords) and writes through a symlinked config instead of replacing the link (R2).
+- A key added to a section that ends in a list spread over several lines goes after the list, so the file still reads
+  (R5); a hand-written `[highway.autotarget_keys]` table is replaced by the inline form instead of being declared
+  twice (R10).
+- Whole-number settings refuse a fraction ("must be a whole number") instead of writing a value that was then
+  ignored (R9); their boxes step by 1.
+- `game_pc`, `server_player` and `autotarget_entry` are a list to pick from; `game_pc` is written as text ("auto",
+  "true", "false"), so it can be set back to auto from the page (R8).
+- `--write-config` and Settings write passwords and other text with proper escapes: a backslash, quote or line break
+  survives (S1). Only paths still have Windows backslashes written as slashes.
+
 ## 2026-10-04 · Review fixes, batch A: Docker's first run, stopping during start-up, leftovers
 - Docker's first run works on a fresh clone: `docker/data`, `docker/config` and `docker/journals` come with the
   repository (Docker made missing ones owned by root, and the container restarted forever, unable to write its

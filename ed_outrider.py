@@ -619,6 +619,11 @@ def _config_player(v):
     raise ValueError("not a player: " + ", ".join(outrider.tts.PLAYER_CHOICES))
 
 
+def config_choices():
+    """The config keys with a fixed set of values, for the Settings dialog (config_edit.CHOICES and the PC players)."""
+    return {**outrider.config_edit.CHOICES, ("speech", "server_player"): outrider.tts.PLAYER_CHOICES}
+
+
 def _config_entry(v):
     """[highway] autotarget_entry: "type" or "paste"."""
     if isinstance(v, str) and v.strip().lower() in ("type", "paste"):
@@ -886,28 +891,30 @@ def _root_relative(path):
 
 def config_text(st):
     """The effective settings as a TOML document (what --write-config writes)."""
-    q = lambda v: '"' + str(v).replace("\\", "/").replace('"', '\\"') + '"'
+    q = lambda v: outrider.config_edit.basic_string(str(v))   # a TOML string, properly escaped
+    p = lambda v: q(str(v).replace("\\", "/"))                # a path: Windows' backslashes written as slashes
     lst = lambda vs: "[" + ", ".join(q(v) for v in vs) + "]"
+    plst = lambda vs: "[" + ", ".join(p(v) for v in vs) + "]"
     return f"""# ED Outrider configuration. Every key is optional; command-line flags and the ED_JOURNALS
 # environment variable override this file, and journal folders are auto-detected when absent.
 
 [journals]
-{"live = " + lst(st["live"]) if st["live"] else "# live = []"}      # folders holding Journal.*.log that are tailed live (auto-detected when absent)
-{"" if st["live"] else "# "}legacy = {lst(st["legacy"])}  # folders of older journals, imported once and never re-read ([] = none; auto-detected only when live is absent too)
+{"live = " + plst(st["live"]) if st["live"] else "# live = []"}      # folders holding Journal.*.log that are tailed live (auto-detected when absent)
+{"" if st["live"] else "# "}legacy = {plst(st["legacy"])}  # folders of older journals, imported once and never re-read ([] = none; auto-detected only when live is absent too)
 
 [server]
 host = {q(st["host"])}   # "0.0.0.0" to reach the page from another device on your network
 port = {st["port"]}   # the page's port: http://<this PC>:<port>/
 allowed_hosts = {lst(st["allowed_hosts"])}   # extra names the page may be opened by (a LAN setup; see the README)
 password = {q(st["password"])}   # devices on your network sign in with it ("" = none); this PC itself never needs it
-game_pc = {q(st["game_pc"]) if st["game_pc"] == "auto" else ("true" if st["game_pc"] else "false")}   # is this the PC the game runs on? auto (off inside a container, e.g. Docker), true or false. Off: no auto honk, auto-target, tablet rail, co-pilot button, clipboard or playing on this PC
+game_pc = {q(st["game_pc"] if st["game_pc"] == "auto" else ("true" if st["game_pc"] else "false"))}   # is this the PC the game runs on? "auto" (off inside a container, e.g. Docker), "true" or "false". Off: no auto honk, auto-target, tablet rail, co-pilot button, clipboard or playing on this PC
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
 radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
-backup_dir = {q(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
+backup_dir = {p(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
 backup_keep = {st["backup_keep"]}   # dated database zips kept (the journal archive is never pruned)
 backup_every_days = {st["backup_every_days"]:g}   # automatic backup at start when the last is older than this, and when the game quits (0 = off)
-speech_file = {q(_root_relative(st["speech_file"]))}   # the spoken alerts' lines, per personality
-db = {q(_root_relative(st["db"]))}   # the database: everything Outrider knows (relative paths start at the Outrider folder)
+speech_file = {p(_root_relative(st["speech_file"]))}   # the spoken alerts' lines, per personality
+db = {p(_root_relative(st["db"]))}   # the database: everything Outrider knows (relative paths start at the Outrider folder)
 
 [defaults]   # what a browser uses until its user changes it (page settings stay per browser)
 unsold_warn = {st["unsold_warn"]}     # amber "worth selling soon", credits on board
@@ -945,7 +952,7 @@ watch_firsts = {"true" if st["watch_firsts"] else "false"}   # check your unsold
 
 [speech]   # for the page's "Play speech and sounds on this PC" tick (per browser, off until ticked)
 server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay, aplay, ffplay found), one of those, or off (Linux)
-{"" if st["sound_dir"] else "# "}sound_dir = {q(_root_relative(st["sound_dir"]) if st["sound_dir"] else "my-sounds")}   # your own alert sounds: <name>.wav (fanfare, thud, chime, alert...), up to 3 s each
+{"" if st["sound_dir"] else "# "}sound_dir = {p(_root_relative(st["sound_dir"]) if st["sound_dir"] else "my-sounds")}   # your own alert sounds: <name>.wav (fanfare, thud, chime, alert...), up to 3 s each
 
 [autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see outrider/honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
@@ -986,7 +993,7 @@ autotarget_dry_run = {"true" if st["highway"]["autotarget_dry_run"] else "false"
 efficiency = {st["highway"]["efficiency"]}   # the neutron plotter's efficiency (%): lower takes longer neutron detours
 conservative = {"true" if st["highway"]["conservative"] else "false"}   # the plot form starts with "Conservative range" ticked: plot jumps a margin shorter than the ship's range
 conservative_ly = {st["highway"]["conservative_ly"]:g}   # that margin (ly, 0.5 to 50): about this many ly shorter jumps, times the supercharge on a neutron jump
-background_image = {q(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
+background_image = {p(_root_relative(st["highway"]["background_image"])) if st["highway"]["background_image"] else '""'}   # a top-down galaxy image you downloaded (PNG, JPEG, WebP or GIF) under the map; Outrider ships none
 background_extent = [{", ".join(f"{x:g}" for x in st["highway"]["background_extent"])}]   # ly: the image's edges, [xmin, xmax, zmin, zmax] (the usual galaxy images: -45000, 45000, -20000, 70000)
 background_opacity = {st["highway"]["background_opacity"]:g}   # 0.05 to 1
 
@@ -4906,7 +4913,7 @@ class State:
         the password and the AI key only as set or not. Applied at the next start."""
         path = self.config_file()
         st, problems = self._config_settings(load_config(path) if os.path.exists(path) else {})
-        secs = outrider.config_edit.entries(config_text(st))
+        secs = outrider.config_edit.entries(config_text(st), config_choices())
         for sec in secs:
             for k in sec["keys"]:
                 if (sec["section"], k["key"]) in outrider.config_edit.SECRETS:
@@ -4922,7 +4929,8 @@ class State:
         path = self.config_file()
         cfg_now = load_config(path) if os.path.exists(path) else {}
         st, before = self._config_settings(cfg_now)
-        kinds = {(s["section"], k["key"]): k["kind"] for s in outrider.config_edit.entries(config_text(st)) for k in s["keys"]}
+        kinds = {(s["section"], k["key"]): (k["kind"], k.get("choices", ()))
+                 for s in outrider.config_edit.entries(config_text(st), config_choices()) for k in s["keys"]}
         try:
             with open(path, encoding="utf-8") as f:
                 text = f.read()
@@ -4933,11 +4941,11 @@ class State:
         n = 0
         for sec, keys in changes.items():
             for key, value in keys.items():
-                kind = kinds.get((sec, key))
+                kind, choices = kinds.get((sec, key), (None, ()))
                 if kind is None:
                     return {"error": f"[{sec}] {key} is not a setting"}, 400
                 try:
-                    text = outrider.config_edit.set_key(text, sec, key, outrider.config_edit.coerce(kind, value))
+                    text = outrider.config_edit.set_key(text, sec, key, outrider.config_edit.coerce(kind, value, choices))
                 except ValueError as e:
                     return {"error": f"[{sec}] {key} {e}"}, 400
                 n += 1
@@ -4949,16 +4957,23 @@ class State:
         new = [x for x in after if x not in before]
         if new:
             return {"error": "nothing written: " + "; ".join(x.removeprefix("config: ") for x in new), "problems": new}, 400
+        real = os.path.realpath(path)   # a config that is a symlink: the file it points to is written, the link kept
         try:
-            if os.path.exists(path):
-                shutil.copy2(path, path + ".bak")
-            tmp = path + ".new"
-            with open(tmp, "w", encoding="utf-8") as f:
+            if os.path.exists(real):
+                shutil.copy2(real, real + ".bak")
+            tmp = real + ".new"
+            # the new file only readable by this user while written (it may hold passwords), then given the old one's mode
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(text if text.endswith("\n") else text + "\n")
-            os.replace(tmp, path)
+            if os.path.exists(real):
+                shutil.copymode(real, tmp)
+            else:
+                os.chmod(tmp, 0o600)
+            os.replace(tmp, real)
         except OSError as e:
             return {"error": f"cannot write {path}: {e}"}, 500
-        return {"ok": True, "path": path, "changed": n, "backup": path + ".bak" if cfg_now or os.path.exists(path + ".bak") else None,
+        return {"ok": True, "path": path, "changed": n, "backup": real + ".bak" if cfg_now or os.path.exists(real + ".bak") else None,
                 "restart": True}, 200
 
     SPEAKER_SEEN_S = 60   # a window that speaks asks for the payload at least every 25 s (the long poll)

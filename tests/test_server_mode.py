@@ -28,9 +28,10 @@ class Setting(unittest.TestCase):
         st, err = settings({"server": {"game_pc": 3}})
         self.assertEqual(st["game_pc"], "auto")
         self.assertIn("game_pc", err)
-        for v in ("auto", True, False):   # --write-config and Settings write it back as it was
+        for v in ("auto", True, False):   # --write-config and Settings write it back as it was (always quoted: R8)
             st, _ = settings({"server": {"game_pc": v}})
-            self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["server"]["game_pc"], v)
+            written = tomllib.loads(ed_outrider.config_text(st))
+            self.assertEqual((written["server"]["game_pc"], settings(written)[0]["game_pc"]), (str(v).lower(), v))
 
     def test_auto_and_containers(self):
         self.assertEqual(ed_outrider.resolve_game_pc("auto", container=False), (True, "auto"))

@@ -18,6 +18,8 @@ SECTION_TITLES = {"journals": "Journal folders", "server": "Server: network, pas
                   "autohonk": "Auto honk", "copilot": "Co-pilot button", "highway": "Neutron Highway and auto-target",
                   "assistant": "Voice: the AI layer", "mcp": "MCP bridge (AI clients)"}
 SECRETS = {("server", "password"), ("assistant", "api_key"), ("mcp", "password")}   # never sent to the page, only "set" or not
+# keys with a fixed set of values, shown as a choice (ed_outrider.py adds [speech] server_player's, from outrider.tts)
+CHOICES = {("server", "game_pc"): ("auto", "true", "false"), ("highway", "autotarget_entry"): ("type", "paste")}
 HEADER = re.compile(r"^\s*\[\s*([A-Za-z0-9_.-]+)\s*\]")
 KEYLINE = re.compile(r"^(\s*)(#\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
@@ -46,6 +48,11 @@ def split_value(rest):
     return rest.rstrip(), "", depth
 
 
+def basic_string(s):
+    """A TOML basic string: JSON's escapes are TOML's, and DEL, which JSON leaves alone, escaped too."""
+    return json.dumps(s, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def kind_of(value):
     """The editor a value needs: bool, int, float, text, lines (a list of text), numbers (a list of numbers), table."""
     if isinstance(value, bool):
@@ -61,9 +68,10 @@ def kind_of(value):
     return "text"
 
 
-def entries(text):
+def entries(text, choices=None):
     """[{section, title, keys: [{key, value, kind, help, set}]}] from a config text (config_text's): set is False for a
-    commented-out key (its default shown)."""
+    commented-out key (its default shown). A key in `choices` (default CHOICES) is kind "choices", with its list."""
+    choices = CHOICES if choices is None else choices
     out, cur = [], None
     for line in text.splitlines():
         h = HEADER.match(line)
@@ -81,8 +89,11 @@ def entries(text):
             continue   # a comment line that only looks like a key
         if any(k["key"] == m.group(3) for k in cur["keys"]):
             continue
-        cur["keys"].append({"key": m.group(3), "value": value, "kind": kind_of(value), "set": not m.group(2),
-                            "help": comment.lstrip("#").strip()})
+        k = {"key": m.group(3), "value": value, "kind": kind_of(value), "set": not m.group(2), "help": comment.lstrip("#").strip()}
+        if (cur["section"], m.group(3)) in choices:
+            k.update(kind="choices", choices=list(choices[cur["section"], m.group(3)]),
+                     value=("true" if value else "false") if isinstance(value, bool) else str(value))
+        cur["keys"].append(k)
     return out
 
 
@@ -95,7 +106,7 @@ def literal(v):
     if isinstance(v, float):
         return f"{v:g}" if v == v and abs(v) < 1e15 and "e" not in f"{v:g}" else repr(v)
     if isinstance(v, str):
-        return json.dumps(v, ensure_ascii=False)   # a TOML basic string: the same escapes
+        return basic_string(v)
     if isinstance(v, list):
         return "[" + ", ".join(literal(x) for x in v) + "]"
     if isinstance(v, dict):
@@ -104,33 +115,46 @@ def literal(v):
     raise ValueError(f"cannot write {type(v).__name__}")
 
 
+def value_end(lines, i, depth, end):
+    """The last line of a value starting on line i with `depth` brackets left open (a list over several lines)."""
+    while depth > 0 and i + 1 < end:
+        i += 1
+        depth += split_value(lines[i])[2]
+    return i
+
+
 def set_key(text, section, key, value):
     """`text` with section.key set to `value`, in place: an active line's value replaced (its comment kept), else a
-    commented-out one switched on, else a new line at the end of the section, else a new section at the end."""
+    commented-out one switched on, else a new line at the end of the section, else a new section at the end. A
+    [section.key] table of its own (written by hand) is dropped for the inline form, so the table is not declared twice."""
     lines = text.split("\n")
+    sub = next((i for i, ln in enumerate(lines) if (h := HEADER.match(ln)) and not ln.lstrip().startswith("#")
+                and h.group(1) == f"{section}.{key}"), None)
+    if sub is not None:
+        after = next((i for i in range(sub + 1, len(lines)) if HEADER.match(lines[i]) and not lines[i].lstrip().startswith("#")), len(lines))
+        lines = lines[:sub] + lines[after:]
     start = next((i for i, ln in enumerate(lines) if (h := HEADER.match(ln)) and not ln.lstrip().startswith("#")
                   and h.group(1) == section), None)
     if start is None:
-        return text.rstrip("\n") + f"\n\n[{section}]\n{key} = {literal(value)}\n"
+        return "\n".join(lines).rstrip("\n") + f"\n\n[{section}]\n{key} = {literal(value)}\n"
     end = next((i for i in range(start + 1, len(lines)) if HEADER.match(lines[i]) and not lines[i].lstrip().startswith("#")), len(lines))
-    commented, last_key = None, None
-    for i in range(start + 1, end):
+    commented, last_key, i = None, None, start
+    while i + 1 < end:
+        i += 1
         m = KEYLINE.match(lines[i])
         if not m:
             continue
-        if not m.group(2):
-            last_key = i
-        if m.group(3) != key:
-            continue
         value_text, comment, depth = split_value(m.group(4))
         if m.group(2):   # "# key = default   # help": switched on, the help kept
-            commented = commented if commented is not None else (i, comment)
+            if m.group(3) == key:
+                commented = commented if commented is not None else (i, comment)
             continue
-        j = i
-        while depth > 0 and j + 1 < end:   # a list spread over several lines: up to its closing bracket
-            j += 1
-            _, comment, d = split_value(lines[j])
-            depth += d
+        j = value_end(lines, i, depth, end)   # a list spread over several lines: up to its closing bracket
+        if m.group(3) != key:
+            last_key = i = j   # a new key goes after the last one's whole value
+            continue
+        if j > i:
+            comment = split_value(lines[j])[1]
         new = f"{m.group(1)}{key} = {literal(value)}" + (f"   {comment}" if comment else "")
         return "\n".join(lines[:i] + [new] + lines[j + 1:])
     if commented is not None:
@@ -141,8 +165,13 @@ def set_key(text, section, key, value):
     return "\n".join(lines[:at] + [f"{key} = {literal(value)}"] + lines[at:])
 
 
-def coerce(kind, value):
-    """A value from the page as the key's kind wants it, or ValueError with words for a person."""
+def coerce(kind, value, choices=()):
+    """A value from the page as the key's kind wants it, or ValueError with words for a person. choices: the
+    "choices" kind's values."""
+    if kind == "choices":
+        if isinstance(value, str) and value.strip().lower() in choices:
+            return value.strip().lower()
+        raise ValueError("must be one of " + ", ".join(choices))
     if kind == "bool":
         if isinstance(value, bool):
             return value
@@ -156,7 +185,11 @@ def coerce(kind, value):
             raise ValueError("must be a number") from None
         if x != x or x in (float("inf"), float("-inf")):
             raise ValueError("must be a number")
-        return int(x) if kind == "int" and x == int(x) else x
+        if kind == "int":
+            if x != int(x):
+                raise ValueError("must be a whole number")
+            return int(x)
+        return x
     if kind == "text":
         if not isinstance(value, str):
             raise ValueError("must be text")

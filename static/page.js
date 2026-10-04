@@ -6670,7 +6670,8 @@ async function loadServerSettings() {
     if (k.secret) return `<input type="password" ${data} data-secret="1" autocomplete="new-password" placeholder="${k.set ? "set (type to change)" : "not set"}">` +
       (k.set ? ` <label class="inl"><input type="checkbox" data-clear="${id}"> remove it</label>` : "");
     if (k.kind === "bool") return `<input type="checkbox" ${data}${v ? " checked" : ""}>`;
-    if (k.kind === "int" || k.kind === "float") return `<input type="number" step="any" ${data} value="${esc(v)}">`;
+    if (k.kind === "choices") return `<select ${data}>${k.choices.map(c => `<option value="${esc(c)}"${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+    if (k.kind === "int" || k.kind === "float") return `<input type="number" step="${k.kind === "int" ? "1" : "any"}" ${data} value="${esc(v)}">`;
     if (k.kind === "lines") return `<textarea rows="${Math.min(6, Math.max(2, v.length + 1))}" ${data} placeholder="one per line">${esc(v.join("\n"))}</textarea>`;
     if (k.kind === "numbers") return `<input type="text" ${data} value="${esc(v.join(", "))}" placeholder="numbers, comma separated">`;
     if (k.kind === "table") return `<textarea rows="2" ${data} placeholder='{"Name": "KEY_..."}'>${esc(Object.keys(v).length ? JSON.stringify(v) : "")}</textarea>`;
