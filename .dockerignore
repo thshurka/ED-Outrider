@@ -1,0 +1,12 @@
+# what never goes into the image: your own files, local tools, the plans, caches
+.git
+.venv
+data
+docker/data
+docker/config
+node_modules
+project
+ed_outrider.toml
+ed_outrider.toml.bak
+**/__pycache__
+**/*.pyc

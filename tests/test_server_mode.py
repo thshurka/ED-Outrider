@@ -88,5 +88,31 @@ class ServerMode(unittest.TestCase):
         self.assertEqual((h.available, h.status, h.open("rail")), (False, "off (server mode)", False))
 
 
+class Packaging(unittest.TestCase):
+    """The Docker files (the plan's D4), checked without Docker: the image marks itself a container (so game_pc auto is
+    off), keeps your files out, starts through the entrypoint; compose mounts the journals read-only and keeps the
+    config in a folder (Settings writes it)."""
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def read(self, name):
+        with open(os.path.join(self.ROOT, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_files(self):
+        df, ignore, compose, entry = (self.read(n) for n in ("Dockerfile", ".dockerignore", "docker-compose.yml", "docker/entrypoint.sh"))
+        self.assertIn("OUTRIDER_CONTAINER=1", df)
+        self.assertIn('ENTRYPOINT ["docker/entrypoint.sh"]', df)
+        self.assertIn("/api/version", df)   # the health check uses the open route
+        self.assertTrue(os.access(os.path.join(self.ROOT, "docker", "entrypoint.sh"), os.X_OK))
+        for kept_out in ("data", "ed_outrider.toml", "project", ".venv", "docker/config", "docker/data"):
+            self.assertIn(kept_out, ignore.split())
+        self.assertIn(":/journals:ro", compose)
+        self.assertIn("./docker/config:/config", compose)
+        self.assertIn("./docker/data:/app/data", compose)
+        self.assertIn("--journals /journals", entry)
+        self.assertIn('exec python ed_outrider.py --config "$CONFIG"', entry)
+        self.assertTrue(ed_outrider.in_container("/nonexistent/.dockerenv", env={"OUTRIDER_CONTAINER": "1"}))
+
+
 if __name__ == "__main__":
     unittest.main()

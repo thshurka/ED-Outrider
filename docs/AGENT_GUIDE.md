@@ -205,6 +205,10 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   one, 401 `signin_required` for `/api/`, `/static/` and the app's User-Agent (`OutriderApp/`), else a redirect to
   `/signin`. Don't add to `AUTH_OPEN`. Tests reach "another device" by patching `outrider.auth.is_loopback`
   (`tests/test_auth.py`).
+- **Docker** (`Dockerfile`, `docker-compose.yml`, `docker/entrypoint.sh`, `.dockerignore`): the image sets
+  `OUTRIDER_CONTAINER=1` (so `game_pc` auto is off), writes a first-run config into `/config`, and is checked by
+  `test_server_mode.Packaging` without Docker; build and run it by hand (`docker build`, `docker run` with scratch
+  folders) after changing it. verify.sh never needs Docker.
 - **Stopping.** SIGTERM (docker stop, systemd) sets `run()`'s stop event: the same cleanup as Ctrl-C (tasks
   cancelled, commit, the quit backup, "stopped cleanly", exit 0). `verify.sh` stops its scratch server that way and
   fails if it does not stop cleanly.

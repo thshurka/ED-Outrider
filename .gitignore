@@ -29,3 +29,9 @@ project/
 # Local install and launch scripts
 scripts/install.sh
 run.sh
+
+# Docker: your own files beside the compose file
+docker/data/
+docker/config/
+docker/journals/
+.env

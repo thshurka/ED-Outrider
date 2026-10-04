@@ -266,6 +266,36 @@ It can only read: it never presses keys, plots, bookmarks or hushes anything. No
 - **Privacy:** Outrider uploads nothing, but what the tools answer goes to your AI client's provider like anything
   else you type into it. A client running a local model keeps everything on your PC.
 
+## 🐳 Running as a server (Docker)
+
+Outrider can also run 24/7 on another computer (x86-64 or ARM) in Docker, reading the game's journal folder from a
+network share. Away from the game PC it cannot touch the game, so these are off there and left out of the pages:
+**auto honk, auto-target (and Target next / Retry), the tablet's control rail, the co-pilot button, the Highway's
+clipboard copy, and sound played on the PC** (the voice plays in the browser or on the tablet instead). Everything
+else works: every page, alerts, captions, the voice, Status.json's live fuel and surface map, the Highway's routes,
+Search, backups, the MCP bridge, Ask. You can keep the game-PC install too: they don't affect each other (each keeps
+its own database; set `[spansh] watch_firsts = false` on one, or both check the same firsts on Spansh).
+
+1. **Share the journal folder from the game PC**, read-only. Under Proton it is
+   `…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`.
+   - **NFS:** export it on the game PC (`/etc/exports`: `"/path/to/Elite Dangerous" 192.168.1.0/24(ro,no_subtree_check)`),
+     and on the server mount it with `actimeo=1` (Status.json changes every few seconds), e.g. in `/etc/fstab`:
+     `gamepc:/path/to/Elite\040Dangerous /mnt/elite-journals nfs ro,actimeo=1 0 0`.
+   - **CIFS / Samba:** share the folder read-only on the game PC, and mount it on the server
+     (`//gamepc/elite-journals /mnt/elite-journals cifs ro,username=you,password=…,vers=3.0 0 0`).
+   - Or let Docker mount it: `docker-compose.yml` has NFS and CIFS volume examples.
+2. **On the server**, from a clone of this repository: create `.env` beside `docker-compose.yml` with
+   `JOURNALS=/mnt/elite-journals` (and `UID=`/`GID=` if yours are not 1000), then `docker compose up -d --build`.
+3. **First run:** it writes `docker/config/ed_outrider.toml` (every network address, the journals at `/journals`).
+   Open `http://<server>:8025/`, then ⚙ Settings → Server settings: set a **password** (nothing on a server counts as
+   "this PC", so every device signs in, your own browser too) and add the server's network name to
+   **allowed hosts** if you open it by name. Then `docker compose restart`.
+4. **Updating:** `git pull && docker compose up -d --build`. Your database, backups and Piper voices stay in
+   `docker/data/`, the config in `docker/config/`.
+
+`[server] game_pc = "auto"` turns all this on inside the container by itself; `false` does the same on a server
+without Docker. To ask an AI client about a server elsewhere, give the MCP bridge `[mcp] url` and `password`.
+
 ## 🔔 Alerts
 
 Alerts fire only for something out of the ordinary. Each can play a sound (🔊), show a desktop
@@ -686,6 +716,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `resources/mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page, against a scratch server only (it refuses 8025 and a missing port) |
 | `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
+| `Dockerfile`, `docker-compose.yml`, `docker/` | Running Outrider as a server in Docker (see Running as a server) |
 | `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server |
 | `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/`, `fonts/` |
 | `docs/` | Notes for contributors and their coding agents (code map, rules, journal traps, design notes, changelog); `images/` holds the screenshots |

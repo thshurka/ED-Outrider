@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Running as a server in Docker (the Docker plan, D4)
+- `Dockerfile` and `docker-compose.yml`: Outrider 24/7 on another computer (x86-64 or ARM), built from this checkout
+  (`docker compose up -d --build`), Piper included. The journals come from the game PC over NFS or CIFS, read-only;
+  the database, backups and voices stay in `docker/data/`, the config in `docker/config/` (written on the first run;
+  Settings edits it). Runs as your user, restarts by itself, has a health check, and stops cleanly.
+- The README's "Running as a server (Docker)" says what is off there, how to share the journals, and how to update.
+
 ## 2026-10-04 · Stopping cleanly on SIGTERM; the MCP bridge signs in (the Docker plan, D3)
 - SIGTERM (docker stop, a systemd service) now stops Outrider as Ctrl-C does: its work saved, the quit backup
   finished, exit code 0. It used to end at once.

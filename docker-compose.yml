@@ -1,0 +1,34 @@
+# ED Outrider as a server (see the README, "Running as a server (Docker)"). From this folder:
+#   docker compose up -d --build        start (and rebuild after a git pull)
+#   docker compose logs -f               its log
+#   docker compose down                  stop
+# Set JOURNALS (and UID/GID if yours are not 1000) in a .env file beside this one, e.g.
+#   JOURNALS=/mnt/elite-journals
+services:
+  outrider:
+    build: .
+    image: ed-outrider:local
+    container_name: ed-outrider
+    restart: unless-stopped
+    stop_grace_period: 2m          # a backup running at shutdown gets to finish
+    user: "${UID:-1000}:${GID:-1000}"   # the files in docker/ stay yours
+    ports:
+      - "${PORT:-8025}:8025"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      # the game's journal folder, read-only: a host folder where an NFS or CIFS share is mounted (the README shows
+      # both), or the named volume "journals" below instead
+      - ${JOURNALS:-./docker/journals}:/journals:ro
+      - ./docker/data:/app/data      # the database, backups, Piper voices
+      - ./docker/config:/config      # ed_outrider.toml (written on the first run; Settings edits it)
+# Instead of a host mount, Docker can mount the share itself: replace the JOURNALS line above with
+#   - journals:/journals:ro
+# and uncomment one of these:
+# volumes:
+#   journals:                        # NFS (the game PC exports its journal folder)
+#     driver: local
+#     driver_opts: {type: nfs, o: "addr=192.168.1.20,ro,actimeo=1", device: ":/home/you/.steam/.../Elite Dangerous"}
+#   journals:                        # CIFS / Samba
+#     driver: local
+#     driver_opts: {type: cifs, o: "addr=192.168.1.20,username=you,password=secret,ro,vers=3.0", device: "//192.168.1.20/elite-journals"}
