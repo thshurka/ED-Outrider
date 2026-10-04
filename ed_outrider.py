@@ -10069,8 +10069,14 @@ button { margin-top: 14px; width: 100%; padding: 9px; font: inherit; font-weight
 ed_outrider.toml).</p><input type="password" id="pw" autocomplete="current-password" placeholder="password" autofocus>
 <button type="submit">Sign in</button><div id="msg" role="status"></div></form>
 <script>
-const q = new URLSearchParams(location.search), nxt = q.get("next") || "/";
-const safe = nxt.startsWith("/") && !nxt.startsWith("//") ? nxt : "/";
+// where to go once signed in: only a page of this Outrider ("/\\evil.com" is "//evil.com" to a browser)
+function safeNext(nxt, origin) {
+  try {
+    const u = new URL(nxt, origin);
+    return u.origin === origin && nxt.startsWith("/") && !/[\\\\\\s]/.test(nxt) ? u.pathname + u.search + u.hash : "/";
+  } catch { return "/"; }
+}
+const safe = safeNext(new URLSearchParams(location.search).get("next") || "/", location.origin);
 document.getElementById("f").onsubmit = async e => {
   e.preventDefault();
   const msg = document.getElementById("msg"); msg.textContent = "";
@@ -10084,6 +10090,44 @@ document.getElementById("f").onsubmit = async e => {
 </script></body></html>"""
 
 WILDCARD_HOSTS = ("0.0.0.0", "::", "")
+
+
+def safe_next(nxt):
+    """Is `nxt` a path on this site to go to after signing in? Not "//evil.com", nor "/\\evil.com" (a browser reads
+    a backslash as a slash), nor a whitespace trick (review R6)."""
+    return isinstance(nxt, str) and nxt.startswith("/") and not nxt.startswith("//") \
+        and not any(c == "\\" or c.isspace() or ord(c) < 32 for c in nxt)
+
+
+LAN_SUFFIXES = (".lan", ".local", ".home", ".internal", ".home.arpa", ".localdomain")
+
+
+def public_name(name):
+    """Does a host name (maybe with a port) look like an internet one rather than a LAN one? LAN: no dot, a LAN
+    suffix (.lan, .local, .home, .internal, .home.arpa), or a private, loopback or link-local address."""
+    import ipaddress
+    n = str(name).strip().lower()
+    n = n[1:n.index("]")] if n.startswith("[") and "]" in n else n.rsplit(":", 1)[0] if n.count(":") == 1 else n
+    try:
+        ip = ipaddress.ip_address(n)
+    except ValueError:
+        return "." in n.rstrip(".") and not n.rstrip(".").endswith(LAN_SUFFIXES)
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local)
+
+
+def exposure_warnings(host, password, extra):
+    """Start-up warnings when the config looks like Outrider is reachable from the internet (the author: do not):
+    an allowed_hosts name that is not a LAN one, or listening on the network with no password."""
+    out = []
+    public = [x for x in extra if public_name(x)]
+    if public:
+        out.append(f"warning: [server] allowed_hosts has {', '.join(public)}, which looks like an internet name. Do not "
+                   "expose Outrider to the internet: it serves your journals, its password only stops accidents on your "
+                   "own network, and it gets no security updates (see the README).")
+    if host not in ("127.0.0.1", "localhost", "::1") and not password:
+        out.append("warning: listening on your network with no [server] password: anyone who can reach this computer can "
+                   "read your journals' contents and edit bookmarks. Set one, and never forward this port to the internet.")
+    return out
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 # The only reads under /api/ another site may make (request_guard): the small read-only status an OBS browser
 # source or a stream overlay page (another origin, or a file://) polls. Cheap, and they change nothing.
@@ -10151,10 +10195,11 @@ def allowed_hosts(host, port, extra=(), own=own_addresses):
         has_port = "]:" in x if x.startswith("[") else x.count(":") == 1   # "name:8025"; a bare IPv6 has several
         x = x if has_port else _host_name(x)
         out.add(x if has_port else f"{x}:{port}")
-        if port == 80:   # browsers leave the default port out of Host: "name" and "name:80" both mean it
-            bare = x.rsplit(":", 1)[0] if has_port and x.endswith(":80") else None if has_port else x
-            if bare:
-                out.add(bare)
+        # browsers leave the default port out of Host, and an HTTPS reverse proxy on the LAN forwards it so: a name
+        # you configured is answered bare too (and "name:80" / "name:443" mean the bare name)
+        bare = x.rsplit(":", 1)[0] if has_port and x.endswith((":80", ":443")) else None if has_port else x
+        if bare:
+            out.add(bare)
     return out
 
 
@@ -10172,7 +10217,8 @@ def request_guard(allowed):
         if request.method not in SAFE_METHODS:
             origin = request.headers.get("Origin")
             site = request.headers.get("Sec-Fetch-Site")
-            if (origin is not None and origin.strip().lower() != f"http://{host}") or \
+            # http, or https through a reverse proxy on the LAN (review R7): the same host either way
+            if (origin is not None and origin.strip().lower() not in (f"http://{host}", f"https://{host}")) or \
                     (site and site not in ("same-origin", "none")):
                 return web.json_response({"error": "refused: the request came from another web site"}, status=403)
         elif request.path.startswith("/api/") and request.path not in OPEN_GETS:
@@ -10212,7 +10258,7 @@ def make_app(state, hosts=None):
         if request.path.startswith(("/api/", "/static/", "/userfonts/")) or "OutriderApp/" in (request.headers.get("User-Agent") or ""):
             return web.json_response({"error": "sign in first: this Outrider asks devices on the network for its password",
                                       "code": "signin_required"}, status=401)
-        nxt = request.path_qs if request.path_qs.startswith("/") and not request.path_qs.startswith("//") else "/"
+        nxt = request.path_qs if safe_next(request.path_qs) else "/"
         raise web.HTTPFound("/signin?next=" + urllib.parse.quote(nxt, safe=""))
 
     @web.middleware
@@ -10286,7 +10332,10 @@ def make_app(state, hosts=None):
         return resp
 
     async def signin_page(request):
-        """GET /signin: the password form a browser on the network is sent to (the app has its own)."""
+        """GET /signin: the password form a browser on the network is sent to (the app has its own). A `next` that
+        leaves this site is dropped (the page checks it too)."""
+        if "next" in request.query and not safe_next(request.query["next"]):
+            raise web.HTTPFound("/signin")
         return web.Response(text=SIGNIN_PAGE, content_type="text/html")
 
     def parse_id64(raw):
@@ -11410,10 +11459,11 @@ async def run(args, st):
         state.start_backup(auto=True)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("note: the page is reachable from other machines on your network" + (
-            " (they sign in with [server] password)" if state.password else
-            " (no password set: anyone on it can read your journals' contents and edit bookmarks; see [server] password)"))
+            " (they sign in with [server] password)" if state.password else " (no password set: see below)"))
         print("  it answers to any IP address, and by name only to these (add others to [server] allowed_hosts): "
               + ", ".join(sorted(h for h in hosts if h.endswith(f":{args.port}"))))
+    for line in exposure_warnings(args.host, state.password, st["allowed_hosts"]):
+        print(line, file=sys.stderr)
     # stop as on Ctrl-C when asked to (SIGTERM: docker stop, systemd, verify.sh): the same cleanup below, exit code 0
     stop = asyncio.Event()
     try:

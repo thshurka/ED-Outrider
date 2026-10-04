@@ -684,6 +684,16 @@ Outrider restarts) until you change the password. This PC itself never asks. The
 crosses your network unencrypted: pick one you use nowhere else. Without one, anything on your network can read
 the page and change bookmarks.
 
+An HTTPS reverse proxy on your own network (Caddy, nginx, a NAS's) works too: put its name in
+`[server] allowed_hosts` (say `outrider.lan`); Outrider answers it with or without a port and accepts its `https://`
+pages.
+
+> **Do not expose Outrider to the internet** (no port forwarding, no public name, no tunnel). It serves your
+> journals, its password is there to stop accidents on your own network rather than to keep attackers out, and it
+> gets no security updates. Outrider warns at start when `allowed_hosts` holds a name that looks public, or when it
+> listens on your network with no password. To reach it away from home, use a VPN into your network (WireGuard,
+> Tailscale) instead.
+
 </details>
 
 ## 🔬 For the curious

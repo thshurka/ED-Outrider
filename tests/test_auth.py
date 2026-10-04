@@ -12,7 +12,9 @@ import outrider  # noqa: E402
 import outrider.auth  # noqa: E402
 
 
-class Auth(unittest.TestCase):
+class Base(unittest.TestCase):
+    """A State with a password; client() runs a test client against its app."""
+
     def setUp(self):
         self.db = ed_outrider.open_db(":memory:")
         self.addCleanup(self.db.close)
@@ -34,6 +36,8 @@ class Auth(unittest.TestCase):
                 return await go(c)
         return asyncio.run(run())
 
+
+class Auth(Base):
     # ---- the contract's answers: exact keys and types ----
     def test_version_is_open_and_says_nothing_else(self):
         self.lan()
@@ -185,6 +189,70 @@ class Auth(unittest.TestCase):
         self.assertFalse(A.check_token("s" * 64, "pw2", t))
         self.assertFalse(A.check_token("s" * 64, "pw", t, revoked={A.token_id(t)}))
         self.assertFalse(A.check_token("s" * 64, "pw", t[:-1] + ("0" if t[-1] != "0" else "1")))
+
+
+class Exposure(Base):
+    """The review's batch D: the sign-in page's redirect (R6) and an HTTPS reverse proxy on the LAN (R7), plus the
+    start-up warning when the config looks exposed to the internet (the author: discouraged plainly)."""
+    UNSAFE = ("/\\evil.com", "/\\/evil.com", "//evil.com", "https://evil.com", "/\t/evil.com", "javascript:alert(1)")
+
+    def test_next_stays_on_this_site(self):
+        for nxt in self.UNSAFE:
+            self.assertFalse(ed_outrider.safe_next(nxt), nxt)
+        for nxt in ("/", "/tablet", "/?view=hwy#x", "/tablet?a=%5Cb"):
+            self.assertTrue(ed_outrider.safe_next(nxt), nxt)
+        self.lan()
+
+        async def go(c):
+            out = []
+            for nxt in ("/\\evil.com", "/tablet"):
+                r = await c.get("/signin?next=" + urllib.parse.quote(nxt, safe=""), allow_redirects=False)
+                out.append((r.status, r.headers.get("Location")))
+            return out
+        self.assertEqual(self.client(go), [(302, "/signin"), (200, None)])
+
+    def test_page_guard(self):
+        """The sign-in page's own check, run in node: anything that is not this site goes to "/"."""
+        import json
+        import re
+        import shutil
+        import subprocess
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        fn = re.search(r"function safeNext\(.*?\n}", ed_outrider.SIGNIN_PAGE, re.S).group(0)
+        cases = list(self.UNSAFE) + ["/tablet?x=1", "/settings#s"]
+        js = fn + f"\nconsole.log(JSON.stringify({json.dumps(cases)}.map(n => safeNext(n, 'http://mypc.lan:8025'))));"
+        out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(json.loads(out.stdout), ["/"] * len(self.UNSAFE) + ["/tablet?x=1", "/settings#s"], out.stderr)
+
+    def test_https_proxy_on_the_lan(self):
+        """A reverse proxy serving https://outrider.lan forwards Host without a port: answered, and its https Origin
+        accepted for a change; another site's https Origin still refused."""
+        self.state.password = ""
+        hosts = ed_outrider.allowed_hosts("0.0.0.0", 8025, ["outrider.lan"], own=lambda: set())
+
+        async def go(c):
+            out = []
+            for host, origin in (("outrider.lan", "https://outrider.lan"), ("outrider.lan", "https://evil.example"),
+                                 ("outrider.lan:8025", "http://outrider.lan:8025"), ("other.lan", "https://other.lan")):
+                r = await c.post("/api/hush", json={"mode": "off"}, headers={"Host": host, "Origin": origin})
+                out.append(r.status)
+            return out
+
+        async def run():
+            from aiohttp.test_utils import TestClient, TestServer
+            async with TestClient(TestServer(ed_outrider.make_app(self.state, hosts))) as c:
+                return await go(c)
+        self.assertEqual(asyncio.run(run()), [200, 403, 200, 403])
+
+    def test_exposure_warning(self):
+        W = ed_outrider.exposure_warnings
+        self.assertTrue(any("internet" in w and "outrider.example.com" in w for w in W("0.0.0.0", "pw", ["outrider.example.com"])))
+        self.assertTrue(any("internet" in w for w in W("0.0.0.0", "pw", ["8.8.8.8:8025"])))
+        self.assertEqual(W("0.0.0.0", "pw", ["mypc.lan", "tablet", "box.local", "nas.home.arpa", "192.168.1.9", "10.0.0.2:8025",
+                                             "[fd00::1]", "pc.internal", "pc.home"]), [])
+        self.assertTrue(any("password" in w for w in W("0.0.0.0", "", [])))
+        self.assertEqual((W("127.0.0.1", "", []), W("0.0.0.0", "pw", [])), ([], []))
 
 
 if __name__ == "__main__":

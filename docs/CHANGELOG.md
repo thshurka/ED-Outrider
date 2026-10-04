@@ -2,6 +2,14 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch D: sign-in and the network
+- After signing in, the sign-in page only goes on to a page of this Outrider: a link such as
+  `/signin?next=/\evil.com` could send you to another site (R6). The server drops such a `next` too.
+- An HTTPS reverse proxy on your own network works: a name in `allowed_hosts` is answered without a port, and a
+  change from its `https://` page is accepted (R7). Another site's is still refused.
+- Outrider warns at start when `allowed_hosts` holds a name that looks like an internet one, or when it listens on
+  your network with no password. The README says plainly not to expose it to the internet (a VPN instead).
+
 ## 2026-10-04 · Review fixes, batch C: the self-reloading page after an update
 - An open page no longer reloads onto updated page files a few seconds before Outrider notices its own code changed
   too: both are checked in one go, so it waits for the restart instead (R3). A page loaded just after an update

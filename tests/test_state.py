@@ -1666,7 +1666,10 @@ class BatchAIntegrity(unittest.TestCase):
     def test_port_80_extras_get_the_bare_name(self):   # F54
         h = ed_outrider.allowed_hosts("127.0.0.1", 80, ["mypc", "Box.lan:80"], own=lambda: set())
         self.assertTrue({"mypc", "mypc:80", "box.lan", "box.lan:80"} <= h)
-        self.assertNotIn("mypc", ed_outrider.allowed_hosts("127.0.0.1", 8025, ["mypc"], own=lambda: set()))
+        # on another port a configured name is answered bare too (an HTTPS proxy on the LAN: review R7); the
+        # built-in names still only with the port
+        h = ed_outrider.allowed_hosts("127.0.0.1", 8025, ["mypc"], own=lambda: set())
+        self.assertEqual(("mypc" in h, "localhost" in h), (True, False))
 
     def test_spansh_cache_version(self):   # F45: gravity_raw and body_count need a refetch of older entries
         self.assertGreaterEqual(ed_outrider.CACHE_VERSION, 13)

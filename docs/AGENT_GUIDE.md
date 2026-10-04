@@ -199,7 +199,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   `test_settings.py` checks every key has one and can be written back), `ed_outrider.toml.example`, and the README
   Settings section. Server defaults for browser settings also go in `payload()["defaults"]` and `run()`.
 - **Endpoints.** Every request passes `request_guard`: unknown Host names are refused, and a request another
-  site's page sends is refused (Origin / `Sec-Fetch-Site`). Only `OPEN_GETS` (`/api/status`,
+  site's page sends is refused (Origin / `Sec-Fetch-Site`; `http://` or `https://` of the same Host, for an HTTPS proxy
+  on the LAN; an `allowed_hosts` name is also answered without a port). The sign-in page's `next` passes `safe_next`
+  (server) and `safeNext` (page) or becomes "/". Only `OPEN_GETS` (`/api/status`,
   `/api/status.txt`) may be read cross-site. Anything that changes state must be a POST. Don't widen
   `OPEN_GETS`; validate every input (ids with `parse_id64`, JSON with `json_object`). Then `session_guard`: with
   `[server] password` set, a request not from loopback needs a session, except `AUTH_OPEN` and `OPEN_GETS`; without
