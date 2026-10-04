@@ -2,6 +2,9 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.10
+- The Narn emblem without an orange box.
+
 ## 2026-10-04 · The Narn emblem without an orange box
 - In the Narn theme the free space under the page list was painted rust, so its emblem sat on an orange block. While
   the emblem shows, that space is left unpainted and the emblem is stronger (its own colours show); with Show the
