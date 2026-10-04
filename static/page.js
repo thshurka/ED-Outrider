@@ -7173,7 +7173,8 @@ function tabDrawHush() {
 // the link pill in words: LINKED · 2 S AGO, STALE · 48 S AGO, NO LINK · RETRYING (linkState's states)
 function tabLinkText(l, now = Date.now()) {
   const age = lastHeard ? Math.max(0, Math.round((now - lastHeard) / 1000)) : null;
-  return l.state === "none" ? "no link · retrying" : age == null ? "connecting…" : `${l.state === "linked" ? "linked" : "stale"} · ${age} s ago`;
+  // linked: no seconds ticking by (the author: distracting); the age only once it is stale, when it means something
+  return l.state === "none" ? "no link · retrying" : age == null ? "connecting…" : l.state === "linked" ? "linked" : `stale · ${age} s ago`;
 }
 function tabDrawLink(l) {
   const el = document.getElementById("tabLink"), text = tabLinkText(l);

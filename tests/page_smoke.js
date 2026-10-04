@@ -3383,7 +3383,7 @@ const settle = async maxMs => {
     // the link in words (linkState's states), and the pill drawn with them
     got.link = tw.eval(`[tabLinkText({state: "linked"}, lastHeard + 2400), tabLinkText({state: "stale"}, lastHeard + 48000), tabLinkText({state: "none"})]`);
     tw.eval("drawLinkPill()");
-    got.pill = [/^linked · \d+ s ago$/.test(td.getElementById("tabLink").textContent), td.getElementById("tabLink").className];
+    got.pill = [td.getElementById("tabLink").textContent === "linked", td.getElementById("tabLink").className];
     // an alert: a banner (danger marked), nothing queued to speak
     got.banner = JSON.parse(tw.eval(`(() => { alertOut("hull", "Hull at 40%", "take it easy");
       const b = document.getElementById("tabBanner"); return JSON.stringify([!b.hidden, b.classList.contains("danger"), b.textContent.includes("Hull at 40%"), speechItems.length]); })()`));
@@ -3570,7 +3570,7 @@ const settle = async maxMs => {
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],
       serverRail: ["none", true],
-      reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
+      reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], signOut: [true, false],

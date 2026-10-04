@@ -214,7 +214,9 @@ upstream project's choices, not rules of the game.
   small window), six, line, or none, which follows the shared `tilesCollapsed` that ▴/▾ sets; ▴/▾ also makes its
   choice this device's.
 - **The link pill's "stale" is the long poll's limit, not quiet** (review S41): the server answers within 25 s even
-  with nothing new, so "stale" starts at 30 s without an answer; "linked · N s" counts up to that in quiet play.
+  with nothing new, so "stale" starts at 30 s without an answer; the desktop's "linked · N s" counts up to that in
+  quiet play. The tablet's pill says just "linked" (the ticking seconds distracted the author; 2026-10-04) and shows
+  the age only once stale.
 - **The README stays short and user-facing;** implementation detail lives in code comments and these notes.
 
 ## Known limits

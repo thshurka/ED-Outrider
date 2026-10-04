@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · The tablet's link pill: just "linked"
+- The tablet's link pill reads "linked" instead of counting the seconds since the last update, which was distracting.
+  A stale link still shows how long ("stale · 48 s ago").
+
 ## 2026-10-04 · Play alerts here, on the tablet
 - The tablet's Settings has **Play alerts here**: the tablet speaks the alerts (in Piper, from Outrider) and plays their
   sounds itself, whether or not a PC browser does too. With a Docker server there is often no browser open at all.
