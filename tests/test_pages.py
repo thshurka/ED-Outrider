@@ -67,6 +67,8 @@ class Log(unittest.TestCase):
 
     def test_specific_summaries(self):
         self.assertEqual(outrider.log.summary(self.SAMPLES[0]), "→ Sys · 32.10 ly · 2.40 t · boosted")
+        self.assertEqual(outrider.log.summary({"event": "FSDTarget", "Name": "Sys", "StarClass": "M", "RemainingJumpsInRoute": 1}),
+                         "Targeted Sys (M) · 1 jump left")
         self.assertIn("🏁 undiscovered", outrider.log.summary(self.SAMPLES[10]))
         self.assertIn("landable 0.19 g", outrider.log.summary(self.SAMPLES[10]))
         self.assertEqual(outrider.log.summary(self.SAMPLES[21], {(1, 7): "B 7"}), "Log: Bacterium Cerbrus on B 7")

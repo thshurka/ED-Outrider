@@ -79,6 +79,11 @@ def ly(x):
     return f"{x:,.0f}" if x is not None and x >= 100 else f"{x:.1f}" if x is not None else "?"
 
 
+def jumps(n):
+    """'1 jump', '6 jumps'."""
+    return f"{n} jump{'' if n == 1 else 's'}"
+
+
 async def fixed_answer(command, get, rows=10):
     """The words for a fixed command (hush and unhush are the caller's: they change state, the tools cannot)."""
     if command == "fuel":
@@ -87,7 +92,7 @@ async def fixed_answer(command, get, rows=10):
             return s["error"]
         if s.get("fuel_pct") is None:
             return "I have no fuel reading yet."
-        return f"Fuel at {s['fuel_pct']} percent" + (f", about {s['fuel_jumps']} jumps at max range." if s.get("fuel_jumps") is not None else ".")
+        return f"Fuel at {s['fuel_pct']} percent" + (f", about {jumps(s['fuel_jumps'])} at max range." if s.get("fuel_jumps") is not None else ".")
     if command == "unsold":
         u = await tools.call("unsold_data", {}, get, rows)
         if u.get("error"):
@@ -108,7 +113,7 @@ async def fixed_answer(command, get, rows=10):
         if h.get("off_route"):
             out = f"You are off the route; the nearest route system is {h.get('nearest_route_system')}. " + out
         if h.get("jumps_left") is not None:
-            out += f" {h['jumps_left']} jumps left"
+            out += f" {jumps(h['jumps_left'])} left"
             out += f", refuel in {h['refuel_in_jumps']}." if h.get("refuel_in_jumps") else "."
         return out
     if command == "nearest_unvisited":
@@ -140,12 +145,12 @@ async def fixed_answer(command, get, rows=10):
             return s["error"]
         out = [f"{s.get('system') or 'Position unknown'}."]
         if s.get("fuel_pct") is not None:
-            out.append(f"Fuel {s['fuel_pct']} percent" + (f", {s['fuel_jumps']} jumps." if s.get("fuel_jumps") is not None else "."))
+            out.append(f"Fuel {s['fuel_pct']} percent" + (f", {jumps(s['fuel_jumps'])}." if s.get("fuel_jumps") is not None else "."))
         if s.get("unsold"):
             out.append(f"{words_cr(s['unsold'])} credits unsold.")
         h = await tools.call("highway_route", {}, get, rows)
         if h.get("next"):
-            out.append(f"Highway: next {h['next']['system']}, {h.get('jumps_left')} jumps left.")
+            out.append(f"Highway: next {h['next']['system']}, {jumps(h.get('jumps_left'))} left.")
         return " ".join(out)
     raise ValueError(command)
 

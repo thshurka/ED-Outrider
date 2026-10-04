@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · "1 jump", not "1 jumps"
+- A count of one jump reads "1 jump" everywhere: Now's fuel line, the History totals, the Highway's figures and plot
+  message, the fuel alerts, the Log's FSD target line, and the spoken fuel, status and next-jump answers.
+
 ## 2026-10-04 · Version 2026.10.10
 - The Narn emblem without an orange box.
 

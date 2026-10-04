@@ -747,7 +747,7 @@ function renderNow() {
   }
   if (f && f.live && f.pct != null)
     lines.push(`<div class="now-line ${f.pct < 15 ? "urgent" : f.pct < 30 ? "warn" : ""}">⛽ <b>${f.pct}%</b>` +
-      (f.jumps_max != null ? ` · ${f.jumps_max} jumps` : "") + (f.since_scoop != null ? ` · ${f.since_scoop} since scoop` : "") +
+      (f.jumps_max != null ? ` · ${f.jumps_max} ${jumpsWord(f.jumps_max)}` : "") + (f.since_scoop != null ? ` · ${f.since_scoop} since scoop` : "") +
       (data.boost ? ` · <span class="boosted">boosted ×${data.boost}</span>` : "") +
       (fuelLow(f) && hereScoopText(f) ? `<div class="now-small">${hereScoopText(f)}</div>` : "") + `</div>`);
   const risk = nowRiskLine();
@@ -2042,6 +2042,7 @@ const RIGS_OUT_HINT = "Picked one up without a tap? Mark it with the ✕ by its 
 const andList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "";
 const orList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}` : xs[0] || "";
 const nBodies = n => `${n} bod${n === 1 ? "y" : "ies"}`;
+const jumpsWord = n => Number(n) === 1 ? "jump" : "jumps";   // "1 jump", "2 jumps"
 // a planet class for the voice: "Earth-like world", "terraformable high metal content world"
 const spokenClass = (sub, tf) => `${tf ? "terraformable " : ""}${String(sub || "planet").replace(/^(?!Earth)\w/, c => tf ? c.toLowerCase() : c)}`;
 // the spoken reason a body with a species new to your codex here is on the list: said whenever it is, so a body
@@ -2236,7 +2237,7 @@ function destSpoken(b, {it, v, eta}) {
 function recapText(st) {
   if (!st || (st.jumps || 0) < 3) return "";
   const n = (k, one, many) => st[k] ? `${st[k].toLocaleString("en-US")} ${st[k] === 1 ? one : many}` : null;
-  return andList([`${st.jumps.toLocaleString("en-US")} jumps`, st.ly ? `${Math.round(st.ly).toLocaleString("en-US")} light-years` : null,
+  return andList([`${st.jumps.toLocaleString("en-US")} ${jumpsWord(st.jumps)}`, st.ly ? `${Math.round(st.ly).toLocaleString("en-US")} light-years` : null,
     n("firsts", "system nobody had seen", "systems nobody had seen"), n("mapped", "body mapped", "bodies mapped"),
     n("samples", "species sampled", "species sampled"), n("codex_new", "new codex entry", "new codex entries")].filter(Boolean));
 }
@@ -3823,7 +3824,7 @@ function renderHistory() {
   const h = histData, st = document.getElementById("hStatus");
   if (!h || h.error) { st.textContent = h ? h.error : ""; return; }
   const tot = k => h.sessions.reduce((n, s) => n + s[k], 0);
-  st.textContent = `${h.sessions.length} sessions · ${tot("jumps")} jumps · ${Math.round(tot("ly")).toLocaleString()} ly · ${tot("firsts")} systems first discovered · ${tot("samples")} samples`;
+  st.textContent = `${h.sessions.length} sessions · ${tot("jumps")} ${jumpsWord(tot("jumps"))} · ${Math.round(tot("ly")).toLocaleString()} ly · ${tot("firsts")} systems first discovered · ${tot("samples")} samples`;
   const fmt = ts => ts.slice(0, 10) + " " + ts.slice(11, 16);
   const a = h.all_time;
   document.getElementById("histAll").innerHTML = !a ? "" : `<tr class="alltime" title="every session in your journals${a.since ? ", since " + a.since.slice(0, 10) : ""}">
@@ -4359,8 +4360,8 @@ function hwyHeadHtml(hd) {
   const ship = sh ? ` · ${esc(shipLabel(sh.name, sh.type))}${sh.type && shipName(sh.type) !== shipLabel(sh.name, sh.type) ? ` (${esc(shipName(sh.type))})` : ""}` +
     (sh.ts ? ` <span title="the ship's figures come from this Loadout">as of ${esc(day(sh.ts))}</span>` : "") : "";
   return `<div class="hwyttl">To ${hwyName(r.to)} <span class="unk">from ${esc(r.from)}</span></div>` +
-    `<div class="hwystats"><b>${n(s && s.jumps_total)}</b> jumps · <b>${n(r.total_ly)}</b> ly` +
-    (s && !s.complete ? ` · left <b>${n(s.jumps_left)}</b> jumps · <b>${n(s.ly_left)}</b> ly` : "") + `</div>` +
+    `<div class="hwystats"><b>${n(s && s.jumps_total)}</b> ${jumpsWord(s && s.jumps_total)} · <b>${n(r.total_ly)}</b> ly` +
+    (s && !s.complete ? ` · left <b>${n(s.jumps_left)}</b> ${jumpsWord(s.jumps_left)} · <b>${n(s.ly_left)}</b> ly` : "") + `</div>` +
     `<div class="hwystate">${hwyLineHtml(s, {glyph: false})}</div>` +
     `<div class="unk hwyhow">${esc(how)}${ship}${r.created_ts ? ` · plotted ${esc(when(r.created_ts))}` : ""}</div>` + hwyClipHtml(hd.clipboard);
 }
@@ -4647,7 +4648,7 @@ function renderHwy() {
   // a new route (or none): the form folds away while one is followed, and opens when there is none
   const rid = r ? r.id : null;
   if (rid !== H.routeId) {
-    if (H.routeId !== undefined && rid && H.watch) setHwyStatus(`Plotted: ${((r.summary || {}).jumps_total ?? r.count - 1).toLocaleString()} jumps to ${r.to}.`, "ok");
+    if (H.routeId !== undefined && rid && H.watch) { const nj = (r.summary || {}).jumps_total ?? r.count - 1; setHwyStatus(`Plotted: ${nj.toLocaleString()} ${jumpsWord(nj)} to ${r.to}.`, "ok"); }
     H.watch = false;
     hEl("hwyPlot").open = !rid; H.routeId = rid; HM.auto = true;
   }
@@ -5751,7 +5752,7 @@ function onData() {
     if (lastPosId !== undefined && f0 && f0.live && f0.pct != null && (f0.pct < 30 || fuelUnderJumps(f0)) && hs && !/^[OBAFGKM](_|$)/.test(hs)) {
       // another star here that scoops, when one is known already (Spansh, the honk): shown, and said; its absence
       // is shown on the tile but never said (most of the time it only means nothing is scanned yet)
-      const jn = f0.pct >= 30 ? ` (${fuelJumps(f0)} jumps)` : "", other = hereScoopText(f0, true);
+      const jn = f0.pct >= 30 ? ` (${fuelJumps(f0)} ${jumpsWord(fuelJumps(f0))})` : "", other = hereScoopText(f0, true);
       alertOut("fuel", `Fuel ${f0.pct}%${jn} at a ${hs} star you cannot scoop`, other || scoopHint(),
                {tag: "fuel_star", say: () => line("fuel_star", {pct: f0.pct, star: spokenStar(hs)}, `Fuel ${f0.pct} percent, and this star cannot be scooped.`) + (other ? " " + other : "")});
     }
@@ -5933,7 +5934,7 @@ function onData() {
                    {tag: "high_g", say: () => [merge ? brief() : "", line("high_g", hg, `${hg.gravity} g. ${hg.value} credits aboard. Land gently.`)].filter(Boolean).join(" ")});
       }
       else if (m.kind === "scoop_end") {   // Status.json: the scoop has ended (a jump cutting it short says nothing)
-        if (m.full) alertOut("scoop", "Tank full", m.jumps != null ? `${m.jumps} jumps at max range` : "",
+        if (m.full) alertOut("scoop", "Tank full", m.jumps != null ? `${m.jumps} ${jumpsWord(m.jumps)} at max range` : "",
                              {tag: "scoop", say: () => line("tank_full", {jumps: m.jumps}, "Tank full.")});
         else if (m.pct < 90) alertOut("scoopstop", `Scooping stopped at ${m.pct}%`, "",
                                       {tag: "scoop", say: () => line("scoop_stopped", {pct: m.pct}, `Scooping stopped at ${m.pct} percent.`)});
@@ -6024,10 +6025,10 @@ function onData() {
         const jt = `about ${j} jump${j === 1 ? "" : "s"}`, rt = sr ? scoopRateText(sr) : "";
         const rate = unscoop ? `the target cannot be scooped${rt ? `, and ${rt}` : ""}` : rt;
         alertOut("fuel", `Top up here: ${jt} of fuel left`, [unscoop && `${t.name} is a ${t.star_class} star you cannot scoop`, rt,
-                 `${f.since_scoop} jumps since the last scoop`].filter(Boolean).join(" · "),
+                 `${f.since_scoop} ${jumpsWord(f.since_scoop)} since the last scoop`].filter(Boolean).join(" · "),
                  {delay: 800, tag: "fuel_target", say: () => line("fuel_topup", {rate, jumps: jt}, `Top up first: ${jt} left, and ${rate}.`)});
       } else if (low)
-        alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} jumps since the last scoop`,
+        alertOut("fuel", `Fuel ${f.pct}% and ${t.name} is not scoopable`, `${t.star_class} star · ${f.since_scoop} ${jumpsWord(f.since_scoop)} since the last scoop`,
                  {delay: 800, tag: "fuel_target", say: () => line("fuel_target", {pct: f.pct, system: t.name}, `Fuel ${f.pct} percent, and the target cannot be scooped.`)});
     }
     lastSeq = t.seq;

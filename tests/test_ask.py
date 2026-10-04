@@ -50,6 +50,14 @@ class Phrases(unittest.TestCase):
         self.assertEqual(go("whats_left"), "Still to do here: find 1 more body in the FSS; biology on A 1; map A 2.")
         self.assertEqual(go("status_report"), "Start. Fuel 41 percent, 6 jumps. 1.2 million credits unsold. Highway: next Neu, 42 jumps left.")
         self.assertEqual(asyncio.run(ask.fixed_answer("fuel", fake_get(down=True))), "Outrider isn't running (start it, then ask again)")
+        # one jump is "1 jump" (the tablet's Now header said "1 jumps", and so did these)
+        async def one(name, args, get, rows):
+            return {"current_status": {"system": "Sol", "fuel_pct": 9, "fuel_jumps": 1},
+                    "highway_route": {"route": True, "next": {"system": "Neu", "distance_ly": 40}, "jumps_left": 1}}[name]
+        with unittest.mock.patch.object(ask.tools, "call", one):
+            self.assertEqual(go("fuel"), "Fuel at 9 percent, about 1 jump at max range.")
+            self.assertEqual(go("status_report"), "Sol. Fuel 9 percent, 1 jump. Highway: next Neu, 1 jump left.")
+            self.assertEqual(go("next_jump"), "Next highway stop: Neu, 40.0 light years. 1 jump left.")
         self.assertEqual([ask.words_cr(x) for x in (0, 950, 12_400, 1_000_000, 2_350_000_000)],
                          ["0", "950", "12 thousand", "1 million", "2.4 billion"])
 

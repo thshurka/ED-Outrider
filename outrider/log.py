@@ -201,7 +201,8 @@ LOG_FORMAT = {
     "StartJump": lambda e: (f"Jumping to {e.get('StarSystem')} ({e.get('StarClass', '?')})"
                             if e.get("JumpType") == "Hyperspace" else "Entering supercruise"),
     "FSDTarget": lambda e: f"Targeted {e.get('Name')} ({e.get('StarClass', '?')})"
-                           + (f" · {e['RemainingJumpsInRoute']} jumps left" if e.get("RemainingJumpsInRoute") else ""),
+                           + (f" · {e['RemainingJumpsInRoute']} jump{'' if e['RemainingJumpsInRoute'] == 1 else 's'} left"
+                              if e.get("RemainingJumpsInRoute") else ""),
     "Location": _where,
     "CarrierJump": lambda e: f"Carrier jumped to {e.get('StarSystem')}" + (" · aboard" if e.get("Docked") else ""),
     "SupercruiseEntry": lambda e: f"Supercruise in {e.get('StarSystem')}",
