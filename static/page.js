@@ -7195,7 +7195,7 @@ async function tabOpenSettings() {
   let ver = "a browser (no app)";
   if (app) { try { ver = typeof app.appVersion === "function" ? `ED Outrider for Android ${app.appVersion()}` : "the app"; } catch { ver = "the app"; } }
   document.getElementById("tabAppVer").textContent = ver;
-  // the app's own screens (bridge calls added in app 1.1; each one feature-detected, an older app has none of them)
+  // the app's own screens (bridge calls added in app 1.2; each one feature-detected, an older app has none of them)
   let anyApp = false;
   for (const [id, fn] of TAB_APP_SCREENS) {
     const has = !!app && typeof app[fn] === "function";

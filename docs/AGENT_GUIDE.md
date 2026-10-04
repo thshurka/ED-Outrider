@@ -243,7 +243,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   incompatibly, `MIN_APP_VERSION` when an older app can no longer work (426 `app_too_old` for its
   `X-Outrider-App` header), and `outrider.__version__` with each release. The app's tests depend on these shapes.
   The other way, the page calls the app's JavaScript bridge `window.OutriderApp` (bridgeVersion 1): `listen()`,
-  `setTheme(name)`, `appVersion()`, and from app 1.1 `openServer()`, `openVoice()`, `openMenu()` (the tablet's
+  `setTheme(name)`, `appVersion()`, and from app 1.2 `openServer()`, `openVoice()`, `openMenu()` (the tablet's
   Settings → Tablet app). Feature-detect every call (`typeof OutriderApp.x === "function"`): an older app lacks them.
 - **Devices.** Never exercise auto honk (uinput key presses: they go to whatever window has focus, including
   a running game) or the co-pilot button (reads `/dev/input`) against a real game or device from tests or a
