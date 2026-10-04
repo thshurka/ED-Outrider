@@ -9,7 +9,11 @@ for d in /config /app/data; do
   if ! ( touch "$d/.write-test" && rm -f "$d/.write-test" ) 2>/dev/null; then
     echo "ED Outrider cannot write $d (it runs as uid $(id -u)). On the host, in the folder with docker-compose.yml:"
     echo "  sudo chown -R $(id -u):$(id -g) docker/   then: docker compose restart"
-    exec sleep infinity
+    # wait, but stop at once when Docker asks: this script is PID 1, and PID 1 ignores SIGTERM unless it traps it
+    # (an exec'd sleep never stopped, so docker stop waited out the whole stop_grace_period: found on the author's server)
+    trap 'exit 0' TERM INT
+    sleep infinity & wait $!
+    exit 0
   fi
 done
 if [ ! -f "$CONFIG" ]; then

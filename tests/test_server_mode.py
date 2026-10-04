@@ -128,6 +128,8 @@ class Packaging(unittest.TestCase):
         entry = self.read("docker/entrypoint.sh")
         self.assertLess(entry.index(".write-test"), entry.index("--write-config"))
         self.assertIn("sleep infinity", entry)   # waits, not a restart loop
+        self.assertNotIn("exec sleep", entry)    # ...as PID 1 it must still stop on SIGTERM: trapped, the sleep in the background
+        self.assertIn("trap 'exit 0' TERM", entry)
 
     def test_stop_grace_outlasts_the_backup_wait(self):
         """R14: Docker must not kill a backup that Outrider is still allowed to finish at shutdown."""

@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Docker: a container that cannot write its folders stops at once
+- When the container cannot write `docker/config` or `docker/data`, it says how to fix it and waits. That wait now
+  ends as soon as Docker asks it to stop. It used to ignore the request, so `docker compose down` hung for the whole
+  6-minute grace period.
+
 ## 2026-10-04 · Version 2026.10.5; Sign out only with a password
 - The tablet's Settings shows Sign out only when Outrider asks for a password. Without one there is nothing to sign
   out of, and the greyed-out button read as one that did nothing.
