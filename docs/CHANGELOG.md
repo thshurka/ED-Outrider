@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · A Docker bundle without a checkout
+- `scripts/docker_bundle.sh` makes `dist/ed-outrider-docker-<version>-<arch>.tgz`: the built image, saved, with a
+  compose file that runs it, an `.env` example and INSTALL.txt. A server then needs no clone and no build:
+  `docker load`, set the journal folder, `docker compose up -d`. Nothing is published.
+
 ## 2026-10-04 · What you ask for is said in Piper only
 - A status report, "say again", a replay, and an answer to a question from the tablet are said in Piper (on the PC
   or in the browser, as before) or not at all: never in the browser's own voice. Each is shown as a caption either

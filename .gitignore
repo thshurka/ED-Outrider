@@ -38,3 +38,5 @@ docker/config/*
 docker/journals/*
 !docker/journals/.gitkeep
 .env
+# release bundles (scripts/docker_bundle.sh)
+/dist/

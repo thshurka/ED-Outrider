@@ -136,6 +136,18 @@ class Packaging(unittest.TestCase):
         secs = int(m.group(1)) * (60 if m.group(2) == "m" else 1)
         self.assertGreaterEqual(secs, ed_outrider.BACKUP_SHUTDOWN_WAIT + 30)
 
+    def test_bundle_rewrites_the_compose_file(self):
+        """scripts/docker_bundle.sh runs the saved image instead of a build: the two lines it rewrites are there, and the
+        bundles (dist/) and your .env never go into an image."""
+        compose = self.read("docker-compose.yml").splitlines()
+        self.assertIn("    build: .", compose)
+        self.assertIn("    image: ed-outrider:local", compose)
+        ignored = self.read(".dockerignore").splitlines()
+        self.assertTrue({"dist", ".env", "data", "docker/data", "docker/config"} <= set(ignored))
+        script = self.read("scripts/docker_bundle.sh")
+        self.assertIn("pull_policy: never", script)
+        self.assertTrue(os.access(os.path.join(self.ROOT, "scripts", "docker_bundle.sh"), os.X_OK))
+
 
 class StartUp(unittest.TestCase):
     def test_import_keeps_each_file(self):

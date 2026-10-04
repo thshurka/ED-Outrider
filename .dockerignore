@@ -4,9 +4,13 @@
 data
 docker/data
 docker/config
+docker/journals
+dist
+.env
 node_modules
 project
 ed_outrider.toml
 ed_outrider.toml.bak
+ed_outrider.toml.new
 **/__pycache__
 **/*.pyc

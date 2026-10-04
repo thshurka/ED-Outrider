@@ -295,6 +295,12 @@ its own database; set `[spansh] watch_firsts = false` on one, or both check the 
 4. **Updating:** `git pull && docker compose up -d --build`. Your database, backups and Piper voices stay in
    `docker/data/`, the config in `docker/config/`.
 
+   Without a checkout on the server: `scripts/docker_bundle.sh` (on a computer with the checkout and Docker) makes
+   `dist/ed-outrider-docker-<version>-<arch>.tgz`, the built image with a compose file that runs it. Copy it over,
+   extract it, `docker load -i ed-outrider-image.tar`, set `JOURNALS` in `.env`, then `docker compose up -d`
+   (its INSTALL.txt has the steps). The image is built for the computer that makes it (`PLATFORM=linux/arm64` for
+   an ARM server, if your Docker can build for it).
+
 `[server] game_pc = "auto"` turns all this on inside the container by itself; `false` does the same on a server
 without Docker. To ask an AI client about a server elsewhere, give the MCP bridge `[mcp] url` and `password`.
 
@@ -735,6 +741,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
 | `Dockerfile`, `docker-compose.yml`, `docker/` | Running Outrider as a server in Docker (see Running as a server) |
 | `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server (and a clean stop) |
+| `scripts/docker_bundle.sh` | A Docker release bundle in `dist/`: the built image saved with a compose file that runs it (no checkout or build on the server) |
 | `scripts/dark_icons.py` | Writes the tablet's Dark theme icons (Lucide, ISC) into `static/themes/dark.css` |
 | `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/`, `fonts/` |
 | `docs/` | Notes for contributors and their coding agents (code map, rules, journal traps, design notes, changelog); `images/` holds the screenshots |
