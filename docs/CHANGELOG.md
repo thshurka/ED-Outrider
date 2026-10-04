@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.5; Sign out only with a password
+- The tablet's Settings shows Sign out only when Outrider asks for a password. Without one there is nothing to sign
+  out of, and the greyed-out button read as one that did nothing.
+- The version is now 2026.10.5 (since 2026.10.4: the Tablet app section, Docker's fixed project name).
+
 ## 2026-10-04 · The tablet's Settings opens the app's own screens
 - In the Android app, the tablet's Settings sheet has a **Tablet app** section: Server… (which Outrider it connects
   to), Voice… (the wake word, sensitivity, the headset button) and App menu…, so they no longer need the Back

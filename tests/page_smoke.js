@@ -3471,6 +3471,15 @@ const settle = async maxMs => {
     td.getElementById("tabSetBtn").click(); await settle(1500);
     got.settings = [td.getElementById("tabSettings").hasAttribute("open"), /CSS px/.test(td.getElementById("tabViewport").textContent),
                     td.getElementById("tabAppVer").textContent, /signed in|asks no password/.test(td.getElementById("tabSignState").textContent)];
+    // Sign out only with a password to sign out of (api/version stubbed both ways)
+    got.signOut = [];
+    for (const password of [false, true]) {
+      const real = tw.fetch;
+      tw.fetch = (u, o) => /api\/version/.test(String(u)) ? Promise.resolve({ok: true, json: async () => ({password, signed_in: true})}) : real(u, o);
+      td.getElementById("tabSetBtn").click(); await sleep(100);
+      got.signOut.push(td.getElementById("tabSignOut").hidden);
+      tw.fetch = real;
+    }
     td.getElementById("tabTheme").value = "lcars"; td.getElementById("tabTheme").dispatchEvent(new tw.Event("change"));
     td.getElementById("tabDim").checked = true; td.getElementById("tabDim").dispatchEvent(new tw.Event("change"));
     got.prefs = [td.documentElement.dataset.theme, td.documentElement.classList.contains("tb-dim"), tw.localStorage.getItem("tabletDim"),
@@ -3497,7 +3506,7 @@ const settle = async maxMs => {
       reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
-      settings: [true, true, "a browser (no app)", true],
+      settings: [true, true, "a browser (no app)", true], signOut: [true, false],
       appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false], prefs: ["lcars", true, "true", null, "here"]};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodT = !bad.length && !terr.length;

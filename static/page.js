@@ -7203,12 +7203,13 @@ async function tabOpenSettings() {
   }
   document.getElementById("tabAppBox").hidden = !anyApp;
   const st = document.getElementById("tabSignState"), out = document.getElementById("tabSignOut");
-  st.textContent = "…"; out.disabled = true;
+  // Sign out only when there is a password to sign out of (greyed out, it read as a button that did nothing: author)
+  st.textContent = "…"; out.hidden = true;
   tabShow(document.getElementById("tabSettings"));
   try {
     const v = await (await fetch("api/version")).json();
     st.textContent = !v.password ? "Outrider asks no password" : v.signed_in ? "signed in" : "not signed in";
-    out.disabled = !v.password;
+    out.hidden = !v.password;
   } catch { st.textContent = "Outrider not reachable"; }
 }
 async function tabSignOut() {
