@@ -65,7 +65,9 @@ somewhere undiscovered is announced by the voice (a sound only corrects a target
 wrong). Desktop notifications are optional (🔔 alerts). A link pill says whether the page is linked to Outrider
 (linked / stale / no link), and the last line said sits beside the header's icons with ▶ to hear it again.
 
-Alerts can be spoken (🗣): with Piper (outrider/tts.py) when it is installed, else the browser's voice, in
+Alerts can be spoken (🗣): with Piper (outrider/tts.py; Cori by default, any Piper voice from Settings > Voice > More
+voices) when it is installed, else the browser's voice (never alongside Piper: a line Piper cannot say is not said;
+while the browser holds audio back until a click, a red "Click Here To Allow Audio" pill asks for it), in
 the personalities of resources/speech.json (outrider/speech.py: business, sarcastic, sweet, with swearing versions at
 a chosen rate), calling you by the names you choose. Besides the alerts the voice can say signal
 counts as the FSS finds them, where the frame shift drive is taking you (said in the hyperspace tunnel, not
@@ -77,11 +79,20 @@ window for trying voices and lines. Optionally the server plays the speech and t
 (POST /api/say/play, /api/sound/play; static/sounds.json, or your own <name>.wav files from [speech] sound_dir,
 served to the page by GET /api/sound/file/{name}), so no click on the page is needed; the next line is
 synthesised while one plays (POST /api/say/prefetch), and Volume is set per device. When Outrider stops
-answering for 30 s, the page says "Lost contact with Outrider" in the browser's voice. Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
+answering for 30 s, the page says "Lost contact with Outrider" in the Piper voice (made in advance; else the alert
+sound). Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
 keyboard binding on arriving by hyperspace so the Discovery Scanner fires, and says how many bodies
 it found. The voice can be hushed for a while (the page, or POST /api/hush: the state is the server's, so
 every window and device sees it), and a co-pilot button (outrider/button.py, Linux, optional, read-only) asks the
 speaking window for a status report, the last line again, or a hush until the next jump.
+
+Other devices: /tablet is the same pages in a touch layout with seven themes (static/tablet.css, static/themes/), a
+control rail of game buttons (outrider/rail.py) and, ticked in its Settings, the voice and sounds on the tablet itself;
+ED Outrider for Android (a separate repository) wraps it with a wake word that asks POST /api/ask (outrider/ask.py:
+fixed phrases, then an optional OpenAI-compatible AI with the read-only tools of outrider/tools.py). [server] password
+signs devices in (outrider/auth.py). python3 -m outrider.mcp serves the same read-only tools to an AI client over MCP.
+In Docker ([server] game_pc auto: off in a container) everything that presses keys, reads devices or plays on this
+PC is off and left out of the pages; see the README and scripts/docker_bundle.sh.
 
 The database backs itself up (a dated zip, the newest kept) at start when a day old and after quitting
 the game (each copy checked with quick_check and the zip with testzip before older ones rotate out), and

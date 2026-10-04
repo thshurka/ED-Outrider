@@ -8,9 +8,12 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 
 - A local web app for Elite Dangerous explorers. It reads the player's own journal files as they are written,
   keeps what it learns in SQLite, asks Spansh (and EDSM as a fallback) about nearby systems, and serves one
-  page on `http://127.0.0.1:8025/` that updates live, with sounds and optional spoken alerts.
+  page on `http://127.0.0.1:8025/` that updates live, with sounds and optional spoken alerts. The same page in a
+  touch layout at `/tablet` (wrapped by the separate ED Outrider for Android app), questions by voice
+  (`/api/ask`), read-only tools for AI clients (MCP), and a server mode for Docker with the game-PC parts off.
 - Python 3.11+, aiohttp, no framework. The page is plain HTML/CSS/JS, no build step.
-- Optional parts: Piper voices (`piper-tts`), and on Linux auto honk and the co-pilot button (`evdev`).
+- Optional parts: Piper voices (`piper-tts`), and on Linux auto honk, auto-target, the control rail and the co-pilot
+  button (`evdev`).
 - Licence GPL-2.0-or-later. Bundled data keeps its own licence (see the README footer).
 
 ## Code map
@@ -218,7 +221,11 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
 - **Docker** (`Dockerfile`, `docker-compose.yml`, `docker/entrypoint.sh`, `.dockerignore`): the image sets
   `OUTRIDER_CONTAINER=1` (so `game_pc` auto is off), writes a first-run config into `/config`, and is checked by
   `test_server_mode.Packaging` without Docker; build and run it by hand (`docker build`, `docker run` with scratch
-  folders) after changing it. verify.sh never needs Docker.
+  folders) after changing it. verify.sh never needs Docker. The entrypoint is PID 1: anything it waits on must trap
+  SIGTERM, or `docker stop` hangs for the whole grace period. The compose project is named `ed-outrider` (one
+  project for a checkout and every bundle). A release is `scripts/docker_bundle.sh` after bumping
+  `outrider.__version__`; the README's Docker section and the bundle's INSTALL.txt (written by the script) must
+  agree on the install and update steps.
 - **Stopping.** SIGTERM (docker stop, systemd) sets `run()`'s stop event: the same cleanup as Ctrl-C (tasks
   cancelled, commit, the quit backup, "stopped cleanly", exit 0). `verify.sh` stops its scratch server that way and
   fails if it does not stop cleanly.

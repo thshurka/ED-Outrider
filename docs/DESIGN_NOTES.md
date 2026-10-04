@@ -49,8 +49,11 @@ upstream project's choices, not rules of the game.
   duplicating). Themes are only for the tablet (the author, 2026-10-03): the desktop page keeps its look and has no
   picker. LCARS is a theme, not the structure: the shell's parts are neutral and every look is custom properties, and
   Elite and Babylon 5 are stylesheets of their own (evoked, never a game's or the show's assets).
-- **The tablet never speaks or plays sounds.** The PC's voice is the cockpit's; a tablet that also spoke would double
-  every line, and on a plain-http LAN address there are no Web Locks to pick one speaker. Alerts are a banner there.
+- **The tablet is silent unless asked: Play alerts here.** The PC's voice is the cockpit's; a tablet that also spoke
+  would double every line, and on a plain-http LAN address there are no Web Locks to pick one speaker, so alerts are
+  a banner there. But a Docker server often has no browser open at all (the author, 2026-10-04), so the tablet's
+  Settings can make it speak and play sounds itself, deliberately outside the one-speaker lock: doubling is the
+  user's to avoid, by turning one off. It has its own alert choices (Choose alerts…).
 - **One automatic page switch on the tablet:** to Now when the surface map shows, back when it hides (only if you
   are still on Now and chose no page meanwhile). Anything more would take the page from under your finger.
 - **Fonts are OFL and shipped; fan fonts never are.** Antonio and Barlow Condensed (SIL OFL 1.1) live in

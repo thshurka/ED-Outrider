@@ -22,7 +22,9 @@ about to jump away from something you'll regret leaving.**
 
 It runs on your own machine. It asks [Spansh](https://spansh.co.uk) (and
 [EDSM](https://www.edsm.net) as a backup) what the community already knows about the systems
-around you, then layers your own scans on top — nothing is ever uploaded.
+around you, then layers your own scans on top — nothing is ever uploaded. A tablet can sit beside you as a cockpit
+display ([ED Outrider for Android](https://github.com/weslocke/ED-Outrider-Android), or any browser), and Outrider can
+also run 24/7 on a home server in Docker.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="The Overview: the neighbourhood on the left, the system you're in on the right" width="900">
@@ -40,13 +42,14 @@ around you, then layers your own scans on top — nothing is ever uploaded.
 | 🌿 **On the ground** | What is left to sample on the body, a countdown to the next colony, and a warning when a run elsewhere would be discarded. |
 | ⛽ **Fuel you can trust** | Jumps left at max range and at your pace, laden range, fuel per hop, how scoopable your recent stars have been, and a nudge to top up before a dry stretch. |
 | 🧭 **Decide where to go** | Unfinished systems nearby, the nearest buyers for your data, bookmarks and a next stop, stellar phenomena, and a search across Spansh. |
-| 🛣 **Neutron Highway** | Plot a neutron route with Spansh for any ship you have flown; Outrider follows it as you fly, says the next stop and puts its name on the clipboard for the galaxy map. |
+| 🛣 **Neutron Highway** | Plot a neutron route with Spansh for any ship you have flown; Outrider follows it as you fly and says the next stop. |
 | 📜 **Your logbook** | Every journal event in a searchable log, every exobiology sample and what became of it, and a schematic of the system. |
 | 📈 **The long view** | Each trip from sale to sale with what it actually paid, what each ship loss cost, your best finds, ranks and career statistics. |
 | 🗣 **A voice with personality** | A natural neural voice, down to business, sarcastic or sweet, briefing you on arrival and warning before you leave something unfinished. |
-| 🎯 **Auto honk** | On Linux, Outrider can fire the Discovery Scanner for you on arrival. |
-| 🕹️ **Co-pilot button** | On Linux, one HOTAS button asks for a status report, the last line again, or quiet until the next jump. |
-| ⛏️ **Rhino mining** | A heading-up surface map on Now with your rigs, sample points and ship; the co-pilot button marks rigs, and every collection is kept per body. |
+| ⛏️ **Rhino mining** | A heading-up surface map on Now with your rigs, sample points and ship, and every collection kept per body. |
+| 📱 **A tablet in the cockpit** | Every page in a touch layout with seven themes, alerts as banners, game buttons on a control rail, and the voice on the tablet if you like. |
+| 🎙️ **Ask out loud** | "Hey Vespa, status report": answered in the voice from what Outrider knows, with an optional AI for anything else. |
+| 🎯 **Automation (game PC, Linux)** | Auto honk fires the Discovery Scanner on arrival, auto-target targets the next Highway system, and one HOTAS button asks for a status report. |
 
 ## 🚀 Getting started
 
@@ -59,17 +62,21 @@ Open **<http://127.0.0.1:8025/>** and go fly.
 
 > [!TIP]
 > The first start reads all your journals (a few seconds); after that it only reads what's new.
-> Journal folders are found automatically on Windows and Steam/Proton. Click the page once so
-> the browser allows sound.
+> Journal folders are found automatically on Windows and Steam/Proton. A browser needs one click on the
+> page before it plays sound: the red **Click Here To Allow Audio** pill asks for it.
 
 `requirements.txt` also installs two optional parts; leave either line out if you don't want it:
 
 - **Piper** (`piper-tts`, about 100 MB) for a natural speaking voice.
-- **evdev** (Linux only) for auto honk and the co-pilot button. It is built from source, so it needs your
-  distribution's Python development headers.
+- **evdev** (Linux only) for auto honk, auto-target, the control rail and the co-pilot button. It is built from
+  source, so it needs your distribution's Python development headers.
 
 Start Outrider with the `.venv`'s Python (`.venv/bin/python ed_outrider.py`, as above): plain `python3 ed_outrider.py` finds Piper and evdev in a `.venv` in the Outrider folder, but aiohttp must then be installed for that `python3` too.
 Your own files (the database, backups, downloaded voices, banned lines) all go in `data/`.
+
+Run this way, on the PC the game runs on, everything works. Further down: [opening the page from a tablet or
+another device](#-other-devices-on-your-network), [running Outrider as a server in Docker](#-running-as-a-server-docker)
+(the automation is off there), and [asking an AI client about your game](#-ask-an-ai-about-your-game).
 
 ## 🖥️ The views
 
@@ -190,125 +197,6 @@ Under the Where tile, the **discovery streak** is a dot per arrival for your las
 amber: bodies nobody had reported, blue: known, grey: revisited), and the **unreported horizon**: "nearest
 known unvisited: Xyz 4.8 ly". Any unvisited star closer than that on the galaxy map is one nobody has reported.
 
-## 📱 On a tablet
-
-Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
-the same pages in a cockpit layout, in one of six themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
-corners), Babylon 5 (Earthforce navy and steel), Narn (rust and ochre, wedge-cut), Sith (black, crimson, thin hard
-lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
-cards, switches and line icons beside the words). Settings picks one per tablet.
-
-<p align="center">
-  <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
-</p>
-
-- **The strip on top** shows the system, fuel and unsold data, and the link to Outrider in words
-  ("LINKED · 2 S AGO", "STALE · 48 S AGO", "NO LINK · RETRYING").
-- **The pages** are on the left in three groups of four: Explore (Now, Nearby, Here, Samples), Navigate (Bookmarks,
-  Search, Map, Highway) and Records (History, Log, Materials, My firsts). There is no Overview.
-- **Tap a row** in a table for all of its facts, including the columns too narrow to show, with Show in Here and
-  Bookmark.
-- **The maps by touch:** on the galaxy map one finger rotates, two fingers move it and a pinch zooms; on the Highway
-  map two fingers move and pinch.
-- **On a planet** the tablet switches to Now when the surface map appears (the Now button says MAP) and back to your
-  page when it goes. Nothing else switches pages by itself.
-- **The voice stays on the PC,** unless you tick **Play alerts here** in the tablet's Settings. Then the tablet speaks
-  (in Piper, from Outrider) and plays the alert sounds itself, whether or not a PC browser does too: handy with a
-  Docker server and no browser open. **Choose alerts…** under it picks which alerts the tablet says (🗣) and plays
-  (🔊), apart from the PC's choices; it starts from what the PC saved as defaults for new browsers. Either way an
-  alert is a banner across the top (red for danger), and the footer has Hush, Status report and the last line said.
-- **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
-  honk, auto-target's switch and test, backups and the voice settings stay on the PC.
-- **Settings** (bottom right) has the theme, a dim switch, the screen size in CSS pixels and Sign out.
-- **The control rail** on the right: up to eight game buttons for where you are (ship, SRV, Nomad, fighter, on
-  foot), each pressing that control's keyboard binding on the PC once. The defaults are landing gear, cargo scoop,
-  night vision, ship lights, flight assist, silent running, hardpoints and analysis mode; the SRV, the Nomad and
-  fighters, and on foot have their own. A button shows the game's state (Status.json), SENT until the game confirms
-  a press, and "not confirmed" if it doesn't. A control with no keyboard binding says "bind a key" (give it a second,
-  keyboard binding in Elite's controls). Edit chooses, renames and orders each set (stored on the PC). The rail
-  presses keys only while the game runs, through auto honk's virtual keyboard (Linux), and never while auto honk or
-  auto-target is pressing; one tap per button, never a sequence.
-
-Outrider must listen on your network for this (`[server] host = "0.0.0.0"`). With `[server] password` set, the tablet
-signs in once: see "Opening the page from another device" under Settings. The fonts are Antonio and Barlow Condensed,
-both under the SIL Open Font License and shipped with Outrider, as are the other themes' (Michroma, Saira, Orbitron,
-Exo 2, Russo One, Share Tech Mono, Rajdhani, Oxanium, Inter); Dark's icons are Lucide's (ISC licence, in `static/icons/`). A heading font of your own goes in your git-ignored `data/` folder and is never shared:
-`data/fonts/<theme>-display.ttf`: `lcars-display.ttf`, `elite-display.ttf` (a Eurostile-style face), `babylon5-display.ttf`,
-`narn-display.ttf`, `sith-display.ttf` or `alliance-display.ttf`.
-
-## 🎙️ Ask Outrider by voice
-
-The tablet app can ask Outrider a question out loud (Ask in its footer). The answer is said on the PC in your Piper
-voice, by the window that speaks, and shown as a caption on every open page. Outrider knows these without any AI:
-**status report, fuel, unsold, next jump, what's left here, nearest unvisited, hush** and **unhush**. Their phrases
-are in `resources/ask.json`; edit them freely.
-
-Anything else goes to an optional AI layer, off by default (`[assistant] enabled = false`). It sends nothing anywhere
-until you set it up: an OpenAI-compatible endpoint (`base_url`: Ollama on your PC, Venice.ai, OpenAI...), a `model`
-that can call tools, and an `api_key` that never leaves the PC. The AI gets the same read-only tools as the MCP
-bridge, so it can look things up but never act. Privacy: with a cloud provider, your question and what the tools
-answer go to that provider; a local model keeps everything on your PC. Try your model with real questions: tool calling
-varies.
-
-## 🤖 Ask an AI about your game
-
-An AI client you already use (Claude Code, the Claude desktop app, or any other MCP client) can ask Outrider questions
-in plain language: "what's worth landing on here?", "how much am I carrying unsold?", "what's left within 50 ly?",
-"how far to the next refuel on the highway?". The client starts `python3 -m outrider.mcp`, which reads your running
-Outrider and answers through ten read-only tools. These are current status, this system, nearby systems, the nearest
-unvisited system, one body, unsold data, work left behind, the Highway route, travel history and materials.
-It can only read: it never presses keys, plots, bookmarks or hushes anything. Nothing extra to install.
-
-- **Claude Code**, from the Outrider folder: `claude mcp add --transport stdio outrider -- python3 -m outrider.mcp`
-  (add `--scope user` to have it in every project). Use the venv's python if Outrider runs in one.
-- **Claude desktop app:** add to `claude_desktop_config.json` under `mcpServers`:
-  `"outrider": {"command": "python3", "args": ["-m", "outrider.mcp"], "cwd": "/path/to/Outrider"}`.
-- If Outrider isn't running, the tools say so. `[mcp] url` points the bridge elsewhere (default: this PC at
-  `[server] port`); `[mcp] max_rows` caps how many rows a list answers with (25). An Outrider on another computer
-  (a server) asks for its password: set `[mcp] password` (or `--password`) and the bridge signs in.
-- **Privacy:** Outrider uploads nothing, but what the tools answer goes to your AI client's provider like anything
-  else you type into it. A client running a local model keeps everything on your PC.
-
-## 🐳 Running as a server (Docker)
-
-Outrider can also run 24/7 on another computer (x86-64 or ARM) in Docker, reading the game's journal folder from a
-network share. Away from the game PC it cannot touch the game, so these are off there and left out of the pages:
-**auto honk, auto-target (and Target next / Retry), the tablet's control rail, the co-pilot button, the Highway's
-clipboard copy, and sound played on the PC** (the voice plays in the browser or on the tablet instead). Everything
-else works: every page, alerts, captions, the voice, Status.json's live fuel and surface map, the Highway's routes,
-Search, backups, the MCP bridge, Ask. You can keep the game-PC install too: they don't affect each other (each keeps
-its own database; set `[spansh] watch_firsts = false` on one, or both check the same firsts on Spansh).
-
-1. **Share the journal folder from the game PC**, read-only. Under Proton it is
-   `…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`.
-   - **NFS:** export it on the game PC (`/etc/exports`: `"/path/to/Elite Dangerous" 192.168.1.0/24(ro,no_subtree_check)`),
-     and on the server mount it with `actimeo=1` (without it, NFS can show the journal's growth up to a minute late and
-     the alerts come late and all at once; Outrider warns at start), e.g. in `/etc/fstab`:
-     `gamepc:/path/to/Elite\040Dangerous /mnt/elite-journals nfs ro,actimeo=1 0 0`.
-   - **CIFS / Samba:** share the folder read-only on the game PC, and mount it on the server
-     (`//gamepc/elite-journals /mnt/elite-journals cifs ro,username=you,password=…,vers=3.0 0 0`).
-   - Or let Docker mount it: `docker-compose.yml` has NFS and CIFS volume examples.
-2. **On the server**, from a clone of this repository (as the user who will own the files): create `.env` beside
-   `docker-compose.yml` with `JOURNALS=/mnt/elite-journals` (and `UID=`/`GID=` if yours are not 1000), then
-   `docker compose up -d --build`. The `docker/data` and `docker/config` folders come with the clone; if the
-   container says it cannot write them, `sudo chown -R $(id -u):$(id -g) docker/` and `docker compose restart`.
-3. **First run:** it writes `docker/config/ed_outrider.toml` (every network address, the journals at `/journals`).
-   Open `http://<server>:8025/`, then ⚙ Settings → Server settings: set a **password** (nothing on a server counts as
-   "this PC", so every device signs in, your own browser too) and add the server's network name to
-   **allowed hosts** if you open it by name. Then `docker compose restart`.
-4. **Updating:** `git pull && docker compose up -d --build`. Your database, backups and Piper voices stay in
-   `docker/data/`, the config in `docker/config/`.
-
-   Without a checkout on the server: `scripts/docker_bundle.sh` (on a computer with the checkout and Docker) makes
-   `dist/ed-outrider-docker-<version>-<arch>.tgz`, the built image with a compose file that runs it. Copy it over,
-   extract it, `docker load -i ed-outrider-image.tar`, set `JOURNALS` in `.env`, then `docker compose up -d`
-   (its INSTALL.txt has the steps). A later bundle takes over from it: copy the old folder's `docker/` and `.env`
-   into the new one first (INSTALL.txt again). The image is built for the computer that makes it (`PLATFORM=linux/arm64` for
-   an ARM server, if your Docker can build for it).
-
-`[server] game_pc = "auto"` turns all this on inside the container by itself; `false` does the same on a server
-without Docker. To ask an AI client about a server elsewhere, give the MCP bridge `[mcp] url` and `password`.
-
 ## 🔔 Alerts
 
 Alerts fire only for something out of the ordinary. Each can play a sound (🔊), show a desktop
@@ -354,43 +242,23 @@ Now starts with your voice, names and alert choices. The view and layouts stay p
 Targeting a system plays its sound; arriving is announced by the voice. Walking about a station counts
 as docked. A carrier jump booked just before you quit shows as "not yet confirmed" until your next login.
 
-## 💾 Backups
-
-Outrider backs itself up at start when the last backup is over a day old, and a few seconds after you quit
-the game. **Back up now** in the Data tile does it on demand.
-
-- Each backup is a dated zip in `data/backups/` holding the database, `browser_defaults.json`, the speech files
-  and your config file. The newest 7 are kept (`backup_keep`).
-- Every journal is also copied into `data/backups/journals/` and never deleted. Under Steam/Proton an uninstall
-  deletes your journals, so this copy matters.
-- Every backup is checked before it counts; a bad one never rotates a good one out.
-- The Data tile reads "backed up 3 h ago · verified · 7 kept", amber when overdue, red when one failed.
-- `backup_every_days = 0` turns automatic backups off.
-
-**Restoring.** The journals alone can rebuild everything:
-`python3 ed_outrider.py --legacy data/backups/journals` reads them into a fresh database.
-
-To get the database back (bookmarks, the Spansh cache, your settings), stop Outrider and run
-`python3 ed_outrider.py --restore` for the newest zip, or name one
-(`--restore outrider-ed_outrider-20260930-181500Z.zip`). It refuses while Outrider is running, checks the zip
-first, and keeps the database it replaces as `ed_outrider.sqlite.pre-restore-<date-time>`. `--list-backups`
-lists the zips; add `--db` for a second database. `--restore` leaves `speech.json`, `speech_banned.json` and
-`ed_outrider.toml` alone: unzip those by hand if you need them (an old `speech.json` lacks newer lines).
-
 ## 🗣 The voice
 
 Alerts are spoken when 🗣 in the header is on. **Piper**, a neural voice running on your CPU, sounds far
-better than the browser's own voice, which is only used when Outrider has no Piper at all. With Piper, a line it can't
-say is not said (what you ask for is still shown as a caption).
+better than the browser's own voice. The voice is Cori (`en_GB-cori-medium`) unless you pick another, and it
+downloads into `data/piper-voices/` the first time. ⚙ Settings → Voice switches between installed voices, and its
+**More voices** lists every Piper voice by language: pick one and Outrider downloads it and switches to it (on a
+Docker server too).
 
-**"Click Here To Allow Audio".** A browser plays no sound on a page until you click on it, and Outrider reloads itself
-after an update. When the window that speaks is held back like this, a red pill on the menu bar (and 🔇 in the tab's
-title) asks for that click, the tablet's caption line says the PC's page needs it, and the lines wait: they play once
-you click, or are dropped if they are no longer news. "Play speech and sounds on this PC" needs no click. To never be
-asked, allow sound for the page in the browser (Chrome: Site settings → Sound: Allow; Firefox: Autoplay: Allow Audio
-and Video). The voice (`voice` in the config file; Cori, `en_GB-cori-medium`, unless you pick another) downloads
-into `data/piper-voices/` the first time. Settings → Voice switches between installed voices, and its **More voices**
-lists every Piper voice by language: pick one and Outrider downloads it and switches to it (on a Docker server too).
+Without Piper installed, the browser's own voice speaks. With Piper, the browser's voice is never used: a line Piper
+can't say is not said (what you asked for is still shown as a caption).
+
+**"Click Here To Allow Audio".** A browser plays no sound on a page until you click on it, and Outrider reloads the
+page itself after an update. When the window that speaks is held back like this, a red **🔇 Click Here To Allow
+Audio** pill appears on the menu bar (and 🔇 in the tab's title), the tablet's caption line says the PC's page needs a
+click, and the lines wait: they play once you click, or are dropped if they are no longer news. "Play speech and
+sounds on this PC" needs no click. To never be asked, allow sound for the page in the browser (Chrome: Site settings →
+Sound: Allow; Firefox: Autoplay: Allow Audio and Video).
 
 **Choosing how it sounds**
 
@@ -438,10 +306,11 @@ lists every Piper voice by language: pick one and Outrider downloads it and swit
   quiets the PC too.
 - **One window speaks.** With the page open in several windows, only one speaks and plays sounds, so nothing
   is said twice. **Speak from this window** takes over; **This screen speaks: auto / always / never** sets it
-  per browser.
+  per browser. A tablet with **Play alerts here** speaks as well, whatever the PC does (see On a tablet).
 - **Play speech and sounds on this PC.** Ticked in the dialog, the PC running Outrider plays the voice and
   sounds itself: no click to allow audio, and the voice comes from the PC even with the page on a tablet (a page
-  must still be open). Linux only: `pw-play`, `paplay`, `aplay` or `ffplay` (`[speech] server_player`).
+  must still be open). Linux only: `pw-play`, `paplay`, `aplay` or `ffplay` (`[speech] server_player`). Not in
+  Docker: a server has no speakers to play on.
 - **Volume** (in the dialog, per device) sets Outrider's own voice and sounds, in the browser or on the PC.
 - **Your own sounds:** `[speech] sound_dir` names a folder of `<name>.wav` files (fanfare, thud, chime, alert… the
   names in `static/sounds.json`), up to 3 seconds each; each replaces that sound in the browser and on the PC. The
@@ -451,7 +320,8 @@ lists every Piper voice by language: pick one and Outrider downloads it and swit
   are said after it.
 - **The last line said** shows beside the header's icons, with ▶ to hear it again.
 - **Lost contact.** If Outrider stops answering for 30 seconds, the speaking window says "Lost contact with
-  Outrider" in the browser's own voice, and again when it is back.
+  Outrider. No alerts until it is back." in your Piper voice (made in advance while the link was up; without Piper,
+  the alert sound), and "Back in contact" when it returns.
 
 **Spoken lines: what was said, and banning lines**
 
@@ -544,11 +414,11 @@ follows it as you fly. One route is kept (following it needs no network) until y
   included) is **Off Route: Detour** until you are back on it, with the closest route system marked. A line under
   the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly · 38 of 399 · refuel in 3 jumps").
 - **Clipboard.** On arrival the next system's name goes on the desktop clipboard for the galaxy map (Linux:
-  `wl-copy` or `xclip`).
+  `wl-copy` or `xclip`; on the game PC only).
 - **The voice:** "Next Neutron Highway Stop: Hwy Stop 38, with three jumps left to refuel. Boost your FSD to
   continue.", plus refuel stops, detours, "Back on the highway", "Highway complete" and the fuel warning.
 
-**Auto-target** (Linux, off by default; the tab's **Auto-target the next system** box). After an FSD supercharge
+**Auto-target** (Linux, on the game PC only, off by default; the tab's **Auto-target the next system** box). After an FSD supercharge
 in a route system it waits 5 s, then presses keys to make the next route system your target: it opens the galaxy
 map, searches for the system, plots the route, closes the map and checks the target took. It says "Successfully
 targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own alerts row.
@@ -576,7 +446,7 @@ targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own aler
 
 ## 🎯 Auto honk
 
-On Linux, Outrider can fire the Discovery Scanner for you. On arriving by hyperspace it waits a moment,
+On Linux, Outrider can fire the Discovery Scanner for you. It runs on the game PC only (never in Docker). On arriving by hyperspace it waits a moment,
 holds Primary Fire, and says how it went ("System Scan Completed, 12 Bodies discovered"). It is off until
 you tick it in ⚙ Settings.
 
@@ -600,7 +470,8 @@ Setting it up:
 
 ## 🕹️ The co-pilot button
 
-On Linux, one button on your HOTAS (or a spare key) talks to the voice:
+On Linux, one button on your HOTAS (or a spare key) talks to the voice. It needs Outrider on the game PC (never in
+Docker), where the HOTAS is plugged in:
 
 - **Tap:** a status report: fuel and jumps (and any core module under your level), on a Highway route the boost
   and the next route system, the next stop, what is aboard against your rebuy, and the nearest unvisited system
@@ -624,6 +495,98 @@ Settings shows whether it is listening.
   A keyboard or mouse needs your user in the `input` group, which lets every program read your typing, so a
   joystick button is the better choice.
 
+## 📱 On a tablet
+
+Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
+the same pages in a cockpit layout, in one of seven themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
+corners), Babylon 5 (Earthforce navy and steel), Narn (rust and ochre, wedge-cut), Sith (black, crimson, thin hard
+lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
+cards, switches and line icons beside the words). Settings picks one per tablet. Outrider must listen on your network
+for this: see [Other devices on your network](#-other-devices-on-your-network).
+
+<p align="center">
+  <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
+</p>
+
+- **The strip on top** shows the system, fuel and unsold data, and the link to Outrider in words ("LINKED",
+  "STALE · 48 S AGO", "NO LINK · RETRYING").
+- **The pages** are on the left in three groups of four: Explore (Now, Nearby, Here, Samples), Navigate (Bookmarks,
+  Search, Map, Highway) and Records (History, Log, Materials, My firsts). There is no Overview.
+- **Tap a row** in a table for all of its facts, including the columns too narrow to show, with Show in Here and
+  Bookmark.
+- **The maps by touch:** on the galaxy map one finger rotates, two fingers move it and a pinch zooms; on the Highway
+  map two fingers move and pinch.
+- **On a planet** the tablet switches to Now when the surface map appears (the Now button says MAP) and back to your
+  page when it goes. Nothing else switches pages by itself.
+- **Alerts** are a banner across the top (red for danger), and the footer has Hush, Status report and the last line
+  said.
+- **The voice stays on the PC,** unless you tick **Play alerts here** in the tablet's Settings. Then the tablet speaks
+  (in Piper, from Outrider) and plays the alert sounds itself, whether or not a PC browser does too: just the thing
+  with a Docker server and no browser open (turn one off if you hear both). **Choose alerts…** under it picks which
+  alerts the tablet says (🗣) and plays (🔊), apart from the PC's choices; it starts from what the PC saved as defaults
+  for new browsers.
+- **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
+  honk, auto-target's switch and test, backups and the voice settings stay on the PC.
+- **Settings** (bottom right): the theme, a dim switch, Play alerts here and Choose alerts…, the screen size in CSS
+  pixels, the app's version and, in the Android app, its own screens (Server…, Voice…, App menu…), and Sign out when
+  Outrider asks for a password.
+- **The control rail** on the right (on the game PC only; not in Docker): up to eight game buttons for where you are
+  (ship, SRV, Nomad, fighter, on foot), each pressing that control's keyboard binding on the PC once. The defaults are
+  landing gear, cargo scoop, night vision, ship lights, flight assist, silent running, hardpoints and analysis mode;
+  the SRV, the Nomad and fighters, and on foot have their own. A button shows the game's state (Status.json), SENT
+  until the game confirms a press, and "not confirmed" if it doesn't. A control with no keyboard binding says "bind a
+  key" (give it a second, keyboard binding in Elite's controls). Edit chooses, renames and orders each set (stored on
+  the PC). The rail presses keys only while the game runs, through auto honk's virtual keyboard (Linux), and never
+  while auto honk or auto-target is pressing; one tap per button, never a sequence.
+
+**The Android app.** [ED Outrider for Android](https://github.com/weslocke/ED-Outrider-Android) shows the tablet layout
+full screen with the screen kept on, signs in once, listens for a wake word ("Hey Vespa", "OK Vespa"; the word and
+its sensitivity are in the app's Voice screen) or a tap on Ask, and can read answers aloud when nothing else speaks.
+Any browser at `/tablet` works too, without the wake word and Ask.
+
+The fonts are Antonio and Barlow Condensed, both under the SIL Open Font License and shipped with Outrider, as are the
+other themes' (Michroma, Saira, Orbitron, Exo 2, Russo One, Share Tech Mono, Rajdhani, Oxanium, Inter); Dark's icons
+are Lucide's (ISC licence, in `static/icons/`). A heading font of your own goes in your git-ignored `data/` folder and
+is never shared: `data/fonts/<theme>-display.ttf`: `lcars-display.ttf`, `elite-display.ttf` (a Eurostile-style
+face), `babylon5-display.ttf`, `narn-display.ttf`, `sith-display.ttf` or `alliance-display.ttf`.
+
+## 🎙️ Ask Outrider by voice
+
+The Android app asks Outrider a question out loud, after its wake word or a tap on Ask. The answer is said in your
+Piper voice by the window that speaks (a PC browser, or the tablet with Play alerts here) and shown as a caption on
+every open page. Outrider knows these without any AI: **status report, fuel, unsold, next jump, what's left here,
+nearest unvisited, hush** and **unhush**. Their phrases are in `resources/ask.json`; edit them freely.
+
+Anything else goes to an optional AI layer, off by default (`[assistant] enabled = false`, also in ⚙ Settings →
+Server). It sends nothing anywhere until you set it up: an OpenAI-compatible endpoint (`base_url`: Ollama on your PC,
+Venice.ai, OpenAI, OpenRouter...), a `model` that can call tools, and an `api_key` that never leaves Outrider. The AI
+gets the same read-only tools as the MCP bridge, so it can look things up but never act. Privacy: with a cloud
+provider, your question and what the tools answer go to that provider; a local model keeps everything at home. Try
+your model with real questions: tool calling varies, and a slow model runs into `timeout`.
+
+## 💾 Backups
+
+Outrider backs itself up at start when the last backup is over a day old, and a few seconds after you quit
+the game. **Back up now** in the Data tile does it on demand.
+
+- Each backup is a dated zip in `data/backups/` holding the database, `browser_defaults.json`, the speech files
+  and your config file. The newest 7 are kept (`backup_keep`).
+- Every journal is also copied into `data/backups/journals/` and never deleted. Under Steam/Proton an uninstall
+  deletes your journals, so this copy matters.
+- Every backup is checked before it counts; a bad one never rotates a good one out.
+- The Data tile reads "backed up 3 h ago · verified · 7 kept", amber when overdue, red when one failed.
+- `backup_every_days = 0` turns automatic backups off.
+
+**Restoring.** The journals alone can rebuild everything:
+`python3 ed_outrider.py --legacy data/backups/journals` reads them into a fresh database.
+
+To get the database back (bookmarks, the Spansh cache, your settings), stop Outrider and run
+`python3 ed_outrider.py --restore` for the newest zip, or name one
+(`--restore outrider-ed_outrider-20260930-181500Z.zip`). It refuses while Outrider is running, checks the zip
+first, and keeps the database it replaces as `ed_outrider.sqlite.pre-restore-<date-time>`. `--list-backups`
+lists the zips; add `--db` for a second database. `--restore` leaves `speech.json`, `speech_banned.json` and
+`ed_outrider.toml` alone: unzip those by hand if you need them (an old `speech.json` lacks newer lines).
+
 ## 🧭 Good to know
 
 > [!NOTE]
@@ -643,10 +606,145 @@ Settings shows whether it is listening.
 - **Losing your ship loses your data.** Discoveries and samples that went down show as *lost* until you scan
   them again. Scanning a body you've already sold adds nothing; only mapping it still pays.
 - **Small things worth knowing:** the pill at the top right says whether the page is linked to Outrider ("stale"
-  after 30 s without an answer); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
+  after 30 s without an answer; on the tablet just "linked"); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
   its colony distance; Search's mining list includes minerals you have refined, with those bodies first; the
   Settings' chips jump to its sections; and Settings → Display chooses whether the header tiles fold to one line on a
   small window, on this device.
+
+## 🌐 Other devices on your network
+
+Outrider listens on 127.0.0.1 only unless `[server] host` says otherwise (`"0.0.0.0"` for your network; ⚙ Settings →
+Server, or the config file). It answers to any IP address, but by name only to `localhost`, the configured host and
+this machine's name; add others (a router's `mypc.lan`, say) to `[server] allowed_hosts`. This, and refusing changes
+sent by other web sites, stops a malicious page from reading your journals or pressing keys.
+
+It does not stop people on your network, so set **`[server] password`** as well: a tablet or phone then shows a
+sign-in page once (the Android app its own) and stays signed in, also across Outrider restarts, until you change the
+password. The PC Outrider runs on never asks. The page is plain http, so the password crosses your network
+unencrypted: pick one you use nowhere else. Without one, anything on your network can read the page and change
+bookmarks, and Outrider says so at start.
+
+An HTTPS reverse proxy on your own network (Caddy, nginx, a NAS's) works too: put its name in
+`[server] allowed_hosts` (say `outrider.lan`); Outrider answers it with or without a port and accepts its `https://`
+pages.
+
+> [!CAUTION]
+> **Do not expose Outrider to the internet** (no port forwarding, no public name, no tunnel). It serves your
+> journals, its password is there to stop accidents on your own network rather than to keep attackers out, and it
+> gets no security updates. Outrider warns at start when `allowed_hosts` holds a name that looks public. To reach it
+> away from home, use a VPN into your network (WireGuard, Tailscale) instead.
+
+## 🐳 Running as a server (Docker)
+
+Outrider can run 24/7 on another computer (a home server or NAS, x86-64 or ARM) in Docker, reading the game's journal
+folder from a network share, and serve the pages and the tablet from there.
+
+> [!WARNING]
+> **In Docker, the automatic functions are switched off.** A server is not the PC the game runs on: it cannot press
+> keys in the game, read your HOTAS or play sound at your desk. Outrider there turns these off and leaves them out of
+> the pages:
+>
+> - **Auto honk**
+> - **Auto-target** on the Neutron Highway, and its 🎯 Target next and ⟳ Retry
+> - **The tablet's control rail** (the game buttons)
+> - **The co-pilot button** (and marking Rhino rigs with it)
+> - **The Highway's clipboard copy** of the next system
+> - **Play speech and sounds on this PC**
+>
+> If you use any of these, run Outrider on the game PC (Getting started), or run both: each keeps its own database
+> and they don't interfere.
+
+Everything else works: every page and the tablet, alerts and captions, the voice, Status.json's live fuel and surface
+map, the Highway's routes, Search, backups, Ask and the MCP bridge. The voice plays in a browser with the page open
+(after a click: the red pill asks for it) or on the tablet with **Play alerts here**. `[server] game_pc = "auto"`
+turns the automation off inside a container by itself; `false` does the same on a server without Docker.
+
+**You need** Docker with Compose v2: `docker compose version` must work (on Ubuntu's `docker.io`, install
+`docker-compose-v2`; with Docker's own packages it is `docker-compose-plugin`).
+
+**1. Share the journal folder from the game PC, read-only.** Under Proton it is
+`…/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous`.
+
+- **NFS:** export it on the game PC (`/etc/exports`:
+  `"/path/to/Elite Dangerous" 192.168.1.0/24(ro,no_subtree_check)`) and mount it on the server **with `actimeo=1`**,
+  e.g. in `/etc/fstab`: `gamepc:/path/to/Elite\040Dangerous /mnt/elite-journals nfs ro,actimeo=1 0 0`. Without it,
+  NFS may show the journal's growth up to a minute late, and the alerts come late and all at once (Outrider warns at
+  start). After changing the options, unmount and mount it again; `findmnt -t nfs,nfs4 -o TARGET,OPTIONS` should
+  show `acregmin=1,acregmax=1`.
+- **CIFS / Samba:** share the folder read-only and mount it on the server
+  (`//gamepc/elite-journals /mnt/elite-journals cifs ro,username=you,password=…,vers=3.0 0 0`); CIFS caches for a
+  second by default.
+- Or let Docker mount it: `docker-compose.yml` has NFS and CIFS volume examples.
+
+**2. Install,** as the user who will own the files, either way:
+
+- **From a release bundle** (no checkout or build on the server). A bundle,
+  `ed-outrider-docker-<version>-<arch>.tgz`, holds the built image and a compose file that runs it:
+  ```bash
+  tar xzf ed-outrider-docker-<version>-<arch>.tgz && cd ed-outrider-docker-<version>-<arch>
+  docker load -i ed-outrider-image.tar
+  cp .env.example .env        # set JOURNALS to the mount, and UID/GID (id -u, id -g), PORT, TZ
+  docker compose up -d
+  ```
+  Its INSTALL.txt has the same steps. `scripts/docker_bundle.sh` makes one, on a computer with this repository and
+  Docker, into `dist/`; it is built for that computer's architecture (`PLATFORM=linux/arm64` for an ARM server, if
+  your Docker can build for it).
+- **From a checkout:**
+  ```bash
+  git clone https://github.com/weslocke/ED-Outrider.git && cd ED-Outrider
+  echo "JOURNALS=/mnt/elite-journals" > .env      # and UID=, GID= if yours are not 1000
+  docker compose up -d --build
+  ```
+
+**3. First run.** `docker compose logs -f` shows it reading every journal (a while for years of them) and then
+"serving on…". It writes its config to `docker/config/ed_outrider.toml` (every network address, the journals at
+`/journals`) and downloads the Cori voice. Open `http://<server>:8025/`, then ⚙ Settings → Server: set a
+**password** (nothing on a server counts as "this PC", so every device signs in, your own browser too), add the
+server's name to **allowed hosts** if you open it by name, save, and `docker compose restart`. If the log says it
+cannot write `/config` or `/app/data`, the folders belong to someone else: `sudo chown -R $(id -u):$(id -g) docker/`
+and `docker compose restart`.
+
+**Updating.**
+
+- **A newer bundle:** extract it beside the old one, then from the new folder:
+  ```bash
+  OLD=../ed-outrider-docker-<old version>-<arch>       # the old bundle's folder
+  (cd "$OLD" && docker compose down)                  # stop the old one, so its database is closed
+  rm -rf docker && cp -a "$OLD/docker" "$OLD/.env" .  # your database, backups, voices, config and settings
+  docker load -i ed-outrider-image.tar
+  docker compose up -d
+  ```
+  Without `docker/` it would start as a new install. Keep the old folder until the new one runs, then delete it and
+  its image (`docker rmi ed-outrider:<old version>`).
+- **A checkout:** `git pull && docker compose up -d --build`.
+
+**Good to know.** Your data lives in `docker/data/` (the database, backups, Piper voices) and `docker/config/` (the
+config); back those up. `docker compose down` waits for a backup that is running (up to 5 minutes). Every bundle and
+checkout uses the Compose project name `ed-outrider`, so a new one replaces the old container. If you also run
+Outrider on the game PC, set `[spansh] watch_firsts = false` on one of them, or both check the same firsts on Spansh.
+To ask an AI client about the server, give the MCP bridge `[mcp] url` and `password`.
+
+## 🤖 Ask an AI about your game
+
+An AI client you already use (Claude Code, the Claude desktop app, or any other MCP client) can ask Outrider questions
+in plain language: "what's worth landing on here?", "how much am I carrying unsold?", "what's left within 50 ly?",
+"how far to the next refuel on the highway?". Your client starts `python3 -m outrider.mcp` when it needs it (nothing
+to run or switch on in Outrider), which reads your running Outrider and answers through ten read-only tools: current
+status, this system, nearby systems, the nearest unvisited system, one body, unsold data, work left behind, the
+Highway route, travel history and materials. It can only read: it never presses keys, plots, bookmarks or hushes
+anything. Nothing extra to install.
+
+- **Claude Code**, from the Outrider folder: `claude mcp add --transport stdio outrider -- python3 -m outrider.mcp`
+  (add `--scope user` to have it in every project). Use the venv's python if Outrider runs in one.
+- **Claude desktop app:** add to `claude_desktop_config.json` under `mcpServers`:
+  `"outrider": {"command": "python3", "args": ["-m", "outrider.mcp"], "cwd": "/path/to/Outrider"}`.
+- **An Outrider elsewhere** (a Docker server): the bridge runs on the computer with your AI client, from a checkout
+  of this repository; set `[mcp] url` (`"http://server:8025"`) and `[mcp] password` (its `[server] password`; or
+  `--url` and `--password`), and it signs in.
+- If Outrider isn't running, the tools say so. `[mcp] max_rows` caps how many rows a list answers with (25).
+  `python3 -m outrider.mcp --list` shows the tools.
+- **Privacy:** Outrider uploads nothing, but what the tools answer goes to your AI client's provider like anything
+  else you type into it. A client running a local model keeps everything on your PC.
 
 ## ⚙️ Settings
 
@@ -655,8 +753,8 @@ Settings shows whether it is listening.
 <br>
 
 **⚙ Settings** (top right) holds everything, in folding sections: Alerts, Voice, What is said, Sounds, Values, Risk
-and warnings, Surface map, Auto honk, Display, Sharing, **Server settings** and Spoken lines. Most are this browser's
-own (Sharing exports them or makes them the defaults for new browsers). **Server settings** is the config file
+& warnings, Surface map, Auto honk, Display, Sharing, **Server** and Spoken lines. Most are this browser's
+own (Sharing exports them or makes them the defaults for new browsers). **Server** is the config file
 itself, every key of it: the network and the client password, the journal folders, paths, backups, Spansh, the
 Highway, the voice's AI layer and more. Saving there writes `ed_outrider.toml` (only the keys you changed; its
 comments stay, and the previous file is kept as `ed_outrider.toml.bak`), and Outrider uses them from its next start.
@@ -672,13 +770,13 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them (setting `live` turns off legacy auto-detection: list `legacy` too) |
 | `[server]` | `host`, `port`, `password`, `game_pc`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
-| `[defaults]` | What a new browser starts with: thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `codex_interesting`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
+| `[defaults]` | What a new browser starts with (`voice` defaults to `en_GB-cori-medium`): thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `codex_interesting`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC**; `sound_dir`, your own alert sounds |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
 | `[assistant]` | `enabled`, `base_url`, `api_key`, `model`, `timeout`, `max_rounds`: the voice's optional AI layer |
-| `[mcp]` | `url`, `max_rows`, `password`: for the MCP bridge (see Ask an AI) |
+| `[mcp]` | `url`, `max_rows`, `password`: for the MCP bridge (see Ask an AI about your game) |
 | `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
 Command-line flags override the file for a single run:
@@ -693,26 +791,6 @@ Command-line flags override the file for a single run:
 | `--rescan` | Rebuild from the journals, keeping the Spansh cache |
 | `--restore [ZIP]`, `--list-backups` | See Backups |
 | `--simulate` | For screenshots and demos: the panels show the last known values (fuel...) as if the game were running; auto honk, auto-target, the co-pilot button and the clipboard are off |
-
-**Opening the page from another device.** Outrider listens on 127.0.0.1 only unless `[server] host` says
-otherwise (`"0.0.0.0"` for your network). It answers to any IP address, but by name only to `localhost`,
-the configured host and this machine's name; add others (a router's `mypc.lan`, say) to
-`[server] allowed_hosts`. This, and refusing changes sent by other web sites, stops a malicious page
-from reading your journals or pressing keys. It does not stop people on your network, so set
-`[server] password` as well: a tablet or phone then shows a sign-in page once and stays signed in (also across
-Outrider restarts) until you change the password. This PC itself never asks. The page is plain http, so the password
-crosses your network unencrypted: pick one you use nowhere else. Without one, anything on your network can read
-the page and change bookmarks.
-
-An HTTPS reverse proxy on your own network (Caddy, nginx, a NAS's) works too: put its name in
-`[server] allowed_hosts` (say `outrider.lan`); Outrider answers it with or without a port and accepts its `https://`
-pages.
-
-> **Do not expose Outrider to the internet** (no port forwarding, no public name, no tunnel). It serves your
-> journals, its password is there to stop accidents on your own network rather than to keep attackers out, and it
-> gets no security updates. Outrider warns at start when `allowed_hosts` holds a name that looks public, or when it
-> listens on your network with no password. To reach it away from home, use a VPN into your network (WireGuard,
-> Tailscale) instead.
 
 </details>
 
@@ -751,9 +829,9 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `resources/mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page, against a scratch server only (it refuses 8025 and a missing port) |
 | `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
-| `Dockerfile`, `docker-compose.yml`, `docker/` | Running Outrider as a server in Docker (see Running as a server) |
+| `Dockerfile`, `docker-compose.yml`, `docker/` | Running Outrider as a server in Docker (see Running as a server); `docker/entrypoint.sh` writes the first config and checks the folders can be written |
 | `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server (and a clean stop) |
-| `scripts/docker_bundle.sh` | A Docker release bundle in `dist/`: the built image saved with a compose file that runs it (no checkout or build on the server) |
+| `scripts/docker_bundle.sh` | A Docker release bundle in `dist/` (git-ignored): the built image saved with a compose file that runs it (no checkout or build on the server) |
 | `scripts/dark_icons.py` | Writes the tablet's Dark theme icons (Lucide, ISC) into `static/themes/dark.css` |
 | `data/` | Your own files, git-ignored: the database, `browser_defaults.json`, `speech_banned.json`, `backups/`, `piper-voices/`, `fonts/` |
 | `docs/` | Notes for contributors and their coding agents (code map, rules, journal traps, design notes, changelog); `images/` holds the screenshots |

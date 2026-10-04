@@ -2,6 +2,17 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Docs: the README reorganised and brought up to date
+- The README runs features first (the views, alerts, the voice, the surface map, the Highway, auto honk, the co-pilot
+  button, the tablet and its Android app, Ask, backups), then the server-level parts (other devices on your network,
+  Docker, the MCP bridge, settings).
+- The Docker section has the real install and update steps (a release bundle or a checkout, Compose v2, NFS with
+  `actimeo=1`) and a plain warning that auto honk, auto-target, the control rail, the co-pilot button, the clipboard
+  copy and playing on the PC are off in Docker.
+- Corrected: seven tablet themes, the "linked" pill, Play alerts here and Choose alerts…, the Tablet app buttons, the
+  voice (Cori, More voices, the browser's voice only without Piper, the audio pill, "Lost contact" in Piper), and the
+  script's own description (`--help`).
+
 ## 2026-10-04 · Version 2026.10.7; the tablet chooses its own alerts
 - With Play alerts here ticked, the tablet's Settings has **Choose alerts…**: a large sheet with every alert's short
   name and what it is, and big 🗣 Voice and 🔊 Sound toggles. The choices are the tablet's own; the PC's browser keeps
