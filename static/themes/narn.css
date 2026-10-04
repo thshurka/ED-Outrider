@@ -52,4 +52,7 @@
 [data-theme="narn"] .tb-chip .tb-k { font-size: 12px; } [data-theme="narn"] .tb-link { font-size: 13px; }
 [data-theme="narn"] .tb-rbl b { font-size: 14px; } [data-theme="narn"] .tb-page { font-size: 15px; }
 /* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
-[data-theme="narn"] .tb-emblem { display: block; background-image: url("../emblems/narn.webp"); }
+[data-theme="narn"] .tb-emblem { display: block; background-image: url("../emblems/narn.webp"); opacity: .8; }
+/* the emblem on the page's own background, not on the column's rust fill (an orange box on the author's tablet); the fill
+   comes back with Show the theme's emblem off */
+:root[data-theme="narn"]:not(.tb-noemblem) .tb-navfill { background: transparent; }

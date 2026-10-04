@@ -187,6 +187,12 @@ class Tablet(unittest.TestCase):
             self.assertEqual(refs, {emblems[t]} if t in emblems else set(), t)
             if t in emblems:
                 self.assertTrue(os.path.isfile(os.path.join(folder, emblems[t])), t)
+                # never on a painted block: the column's free space is unfilled while the emblem shows (Narn's rust
+                # fill made an orange box of it, on the author's tablet)
+                with open(os.path.join(ed_outrider.STATIC_DIR, "themes", f"{t}.css"), encoding="utf-8") as f:
+                    css = f.read()
+                self.assertTrue("--tb-fill: transparent" in css or
+                                f':root[data-theme="{t}"]:not(.tb-noemblem) .tb-navfill {{ background: transparent;' in css, t)
                 self.assertIn(emblems[t], credits)
         with open(os.path.join(ed_outrider.STATIC_DIR, "page.js"), encoding="utf-8") as f:   # the page offers the setting for these
             listed = re.search(r"const TB_EMBLEMS = \[([^\]]*)\]", f.read()).group(1)

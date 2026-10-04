@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · The Narn emblem without an orange box
+- In the Narn theme the free space under the page list was painted rust, so its emblem sat on an orange block. While
+  the emblem shows, that space is left unpainted and the emblem is stronger (its own colours show); with Show the
+  theme's emblem off, the rust fill is back.
+
 ## 2026-10-04 · Version 2026.10.9: the emblems' file type on Python 3.12
 - The `.webp` emblems are served as `image/webp` in Docker too: aiohttp serves static files from a type table of its
   own, which now gets `.webp` as well (2026.10.8 sent them as `application/octet-stream`).
