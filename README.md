@@ -512,7 +512,7 @@ themes show their emblem in the free space under the page list (credits at the b
 for this: see [Other devices on your network](#-other-devices-on-your-network).
 
 <p align="center">
-  <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left" width="900">
+  <img src="docs/images/tablet.png" alt="The tablet layout on Now, with the surface map: the status strip on top, the pages on the left, the game controls on the right" width="900">
 </p>
 
 - **The strip on top** shows the system, fuel and unsold data, and the link to Outrider in words ("LINKED",
