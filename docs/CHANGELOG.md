@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.9: the emblems' file type on Python 3.12
+- The `.webp` emblems are served as `image/webp` in Docker too: aiohttp serves static files from a type table of its
+  own, which now gets `.webp` as well (2026.10.8 sent them as `application/octet-stream`).
+
 ## 2026-10-04 · Version 2026.10.8
 - The Minbari and Centauri themes, the relabelled Babylon 5 family, and the themes' emblems.
 
@@ -14,7 +18,6 @@ Newest first, one entry per commit.
 - Local copies in `static/emblems/` with `CREDITS.txt` (the Elite badge under Frontier's media usage rules; the
   Babylon 5 ones public-domain fan redrawings; Sith CC BY-SA 4.0; Alliance public domain). The README footer and the
   tablet's Settings carry the credits, and Frontier's attribution.
-- `.webp` is served as `image/webp` on Python 3.12 too (the Docker image), which doesn't know the type.
 
 ## 2026-10-04 · Two more Babylon 5 tablet themes: Minbari and Centauri
 - **Babylon 5 - Minbari:** deep indigo, lilac and pearl with a sea-glass accent, soft arches and thin double lines;

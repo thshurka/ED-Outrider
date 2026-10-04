@@ -202,8 +202,16 @@ class Tablet(unittest.TestCase):
                 r = await c.get(f"/static/emblems/{name}")
                 out.append((r.status, r.headers.get("Content-Type", "").split(";")[0]))
             return out
-        self.assertEqual(self.client(go), [(200, "image/webp"), (200, "image/svg+xml")])
-        self.assertEqual(ed_outrider.STATIC_TYPES[".webp"], "image/webp")   # Python 3.12 (the Docker image) has no .webp
+        # as on Python 3.12 (the Docker image): aiohttp's own table of static file types without .webp
+        import mimetypes
+        import aiohttp.web_fileresponse as fr
+        bare = mimetypes.MimeTypes()
+        for strict in (True, False):
+            bare.types_map[strict].pop(".webp", None)
+            bare.types_map_inv[strict].pop("image/webp", None)
+        with unittest.mock.patch.object(fr, "CONTENT_TYPES", bare):
+            ed_outrider.register_static_types()
+            self.assertEqual(self.client(go), [(200, "image/webp"), (200, "image/svg+xml")])
 
     def test_dark_theme_icons(self):
         """The dark theme's line icons are Lucide's (ISC: its licence ships beside them), inline as CSS masks written by

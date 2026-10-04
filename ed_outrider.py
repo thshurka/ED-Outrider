@@ -9980,10 +9980,20 @@ def sounds_json():
 # shell's stylesheet and every theme's (each scoped to its data-theme, so the per-device picker switches without a
 # reload). Fonts a theme lists first may come from data/fonts/ (fan fonts never committed: FONT_DIR, /userfonts/).
 # File types the static files need that an older Python's mimetypes lacks (3.12, the Docker image's, has no .webp:
-# the themes' emblems would be served as application/octet-stream)
+# the themes' emblems were served as application/octet-stream). aiohttp keeps a table of its own for static files.
 STATIC_TYPES = {".webp": "image/webp", ".woff2": "font/woff2"}
-for _ext, _type in STATIC_TYPES.items():
-    mimetypes.add_type(_type, _ext)
+
+
+def register_static_types():
+    import aiohttp.web_fileresponse
+    tables = [mimetypes, getattr(aiohttp.web_fileresponse, "CONTENT_TYPES", None)]
+    for ext, typ in STATIC_TYPES.items():
+        for table in tables:
+            if table is not None:
+                table.add_type(typ, ext)
+
+
+register_static_types()
 TABLET_STYLES = ("tablet.css", "themes/lcars.css", "themes/elite.css", "themes/babylon5.css", "themes/narn.css",
                  "themes/minbari.css", "themes/centauri.css", "themes/sith.css", "themes/alliance.css", "themes/dark.css")
 TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance", "dark")
