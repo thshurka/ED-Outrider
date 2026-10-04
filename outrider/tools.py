@@ -5,7 +5,8 @@ compact answer from Outrider's read-only GET routes through the `get(path, param
 the MCP bridge (outrider/mcp.py: `get` is an HTTP GET to the running server) and, later, the voice's AI layer inside
 Outrider (an in-process `get`). Neither copies a tool.
 
-Read-only is a safety rule: a handler can only reach READ_ROUTES (GETs that change nothing), never a POST route (no rail,
+Read-only is a safety rule: a handler can only reach READ_ROUTES (GETs that change no player data; a known system's
+lookup may fill Spansh's cache, as the page's own reads do), never a POST route (no rail,
 auto honk, auto-target, Highway plot, bookmark or hush): `guarded()` refuses anything else before it is asked.
 Answers are trimmed to what answers the question, lists capped at max_rows with how many were left out.
 """

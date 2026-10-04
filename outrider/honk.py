@@ -390,6 +390,8 @@ class Honker:
                 raise ValueError("the virtual keyboard is not open")
             why = (("switched off" if cancel is not None and cancel.is_set() else None) or (check() if check else None))
             if why:
+                if self.stop.is_set() and not self.owners:   # close() came during the check: it left the closing to us
+                    self._close_now()
                 raise NotNow(why)
             done = []
             try:
@@ -432,7 +434,7 @@ class Honker:
         try:
             ui = self.ui
             if ui is None or self.stop.is_set():
-                raise ValueError("the virtual keyboard is not open")
+                raise ValueError("the virtual keyboard is not open")   # (closed below if close() is waiting on us)
             why = check() if check else None
             if why:
                 raise NotNow(why)
@@ -448,9 +450,11 @@ class Honker:
                 for c in reversed(done):
                     ui.write(e.EV_KEY, c, 0)
                     ui.syn()
-                if self.stop.is_set():   # closed while the key was down: close now that it is let go
-                    self._close_now()
         finally:
+            # close() while we held the lock (the key down, the check, or just as we took it) left the closing to us:
+            # done now, however the tap ended (review R12)
+            if self.stop.is_set() and not self.owners and self.ui is not None:   # (not reopened meanwhile)
+                self._close_now()
             self.lock.release()
 
     def _hold(self, cancel=None):

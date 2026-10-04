@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch F: the rail's keyboard and the dialogs' buttons
+- A rail button pressed just as Outrider let go of the virtual keyboard (auto honk and auto-target off, the rail's
+  last use ending) no longer leaves the device open (R12); auto honk's press closes it in the same case too.
+- Enter in a rail button's label saves the rail instead of closing the editor and losing the typing (R11). The
+  dialogs' ✕ and Done are plain buttons now, so Enter in Settings' fields no longer closes Settings either.
+
 ## 2026-10-04 · Review fixes, batch E: the AI layer's odd answers
 - An AI provider answering in an unexpected shape now gives "the AI provider's answer was malformed" (502 ai_error)
   instead of a server error (R4). Providers that send a tool call's arguments as an object, or the answer as a list

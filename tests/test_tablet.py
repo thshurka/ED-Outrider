@@ -102,6 +102,16 @@ class Tablet(unittest.TestCase):
             self.assertTrue(self.state.payload()["restart_needed"])
         ed_outrider.restart_needed(now=3e12)
 
+    def test_dialog_buttons_typed(self):
+        """R11: a button in a <form method="dialog"> without a type is a submit button, so Enter in any field of the
+        form "presses" the first one (the rail editor's ✕: typed labels thrown away). Every one says what it is."""
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.html"), encoding="utf-8") as f:
+            html = f.read()
+        forms = re.findall(r'<form[^>]*method="dialog"[^>]*>(.*?)</form>', html, re.S)
+        self.assertGreaterEqual(len(forms), 5)
+        untyped = [b for f in forms for b in re.findall(r"<button[^>]*>", f) if "type=" not in b]
+        self.assertEqual(untyped, [])
+
     def reset_stamps(self):
         for name in ("_stamps", "_page_stamp", "_code_stamp"):   # the stamps' cache, forgotten (a test's clock is far ahead)
             if isinstance(getattr(ed_outrider, name, None), dict):

@@ -6964,6 +6964,8 @@ const tabGroupOf = v => Object.keys(TB.groups).find(g => TB.groups[g].includes(v
 // a sheet opened and closed (the open attribute where a browser has no modal dialogs: the smoke test's jsdom)
 const tabShow = d => { if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute("open", ""); } };
 const tabClose = d => { if (d.close) d.close(); else d.removeAttribute("open"); };
+// a dialog's ✕ or Done: a plain button (type="button": Enter in one of its fields must not "press" it), closing it here
+document.addEventListener("click", e => { const b = e.target.closest("dialog [data-close]"); if (b) tabClose(b.closest("dialog")); });
 function tabSetup() {
   for (const id of ["tabHead", "tabNav", "tabMain", "tabRail", "tabFoot"]) document.getElementById(id).hidden = false;
   document.getElementById("tabMain").append(document.querySelector("header"), document.getElementById("nowView"), document.querySelector("main"));
@@ -7000,6 +7002,8 @@ function tabSetup() {
   document.getElementById("tabRailRows").addEventListener("click", tabRailRowsClick);
   document.getElementById("tabRailAddBtn").onclick = tabRailAdd;
   document.getElementById("tabRailSave").onclick = () => tabRailSave(false);
+  // Enter in a label submits the form: that saves, as the Save button does (it used to close it, the edits lost)
+  document.querySelector("#tabRailEdit form").addEventListener("submit", e => { e.preventDefault(); tabRailSave(false); });
   document.getElementById("tabRailReset").onclick = () => tabRailSave(true);
   // before the page's own handlers (a name's click copies it, which means nothing on a tablet)
   document.addEventListener("click", tabRowTap, true);

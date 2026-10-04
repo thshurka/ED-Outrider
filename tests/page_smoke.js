@@ -3443,6 +3443,22 @@ const settle = async maxMs => {
       tw.fetch = (u, o) => { if (/api\/highway\/target/.test(String(u))) { sent = o && o.body; return Promise.resolve({ok: false, json: async () => ({error: "smoke"})}); } return real(u, o); };
       tw.eval('hwyAutoStart("next")'); await sleep(100); tw.fetch = real; return sent;
     })();
+    // R11: Enter in a rail label (the form's submit) saves the typed labels; the ✕ only closes
+    got.railEnter = await (async () => {
+      const real = tw.fetch; let sent = null;
+      tw.fetch = (u, o) => { if (/api\/rail\/sets/.test(String(u)) && o && o.method === "POST") { sent = JSON.parse(o.body); return Promise.resolve({ok: false, json: async () => ({error: "smoke"})}); } return real(u, o); };
+      const dlg = td.getElementById("tabRailEdit");
+      tw.eval(`TB.railEdit = {ctx: "ship", rows: [{id: "gear", label: "Gear"}], max: 8, edit: {ship: {catalogue: [{id: "gear", label: "Gear", action: "LandingGearToggle"}]}}};
+        tabRailEditDraw(); tabShow(document.getElementById("tabRailEdit"));`);
+      td.querySelector("#tabRailRows [data-label]").value = "Wheels";
+      dlg.querySelector("form").requestSubmit();
+      await sleep(100); tw.fetch = real;
+      const open = dlg.hasAttribute("open");
+      dlg.querySelector(".tb-sheethead button").click();
+      const r = [sent && sent.buttons[0].label, open, dlg.hasAttribute("open")];
+      tw.eval("TB.railEdit = null");
+      return r;
+    })();
     // two fingers on a map: the midpoint's move and the pinch
     got.pinch = tw.eval("JSON.stringify(pinchStep([{x: 0, y: 0}, {x: 10, y: 0}], [{x: 5, y: 5}, {x: 25, y: 5}]))");
     // the settings sheet: the screen in CSS px, the sign-in state (this PC: signed in, whatever the password)
@@ -3464,13 +3480,13 @@ const settle = async maxMs => {
       serverRail: ["none", true],
       reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
-      target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
+      target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodT = !bad.length && !terr.length;
     allOk = allOk && goodT;
     console.log(goodT ? "OK" : "FAIL", "| tablet layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
-      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, pinch, settings", terr);
+      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, Enter saves the rail, pinch, settings", terr);
     tw.close();
   }
   // Settings (was the alerts dialog): folding sections remembered per device, open/close all, and Server settings drawn

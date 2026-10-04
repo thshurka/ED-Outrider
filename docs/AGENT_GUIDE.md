@@ -171,6 +171,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   `static/icons/lucide/` (run it after changing its `ICONS`). A new theme: its stylesheet in `TABLET_STYLES`, its name in `TABLET_THEMES` and `TB.themes`,
   an `<option>` in `#tabTheme`. A font: OFL only, with its licence file (`test_tablet.py` checks); a fan font is the
   player's drop-in in `data/fonts/` (`/userfonts/`, `USER_FONT_RE`), listed first in the theme's `@font-face`.
+  Every `<button>` in a `<form method="dialog">` has a `type` (`test_tablet.py` checks): a ✕ or Done is
+  `type="button" data-close` (closed by one page-wide handler), since an untyped one is what Enter in a field presses.
 - **Page layout: scroll the pane, not the window.** On a window of at least 900 × 600 (`appWanted`; not Now) the
   body gets `app`: it is the window's height with no page scroll, the header stays, the view fills the rest (flex
   columns with `min-height: 0` down the chain) and each `.pane` (a bordered box, tabindex in app mode) scrolls on its
@@ -224,7 +226,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   (`Honker.tap`), only for a button in the CURRENT context's set, only while the game is live, never with --simulate,
   and refused (not queued) while auto honk or auto-target hold the keyboard. Never a sequence. Tests use
   `_fake_evdev()` and a recording UI (`tests/test_rail.py`), never `Honker.open()`. Its sets are live-only meta
-  (`rail_sets`), out of `RESET_JOURNAL_DATA`.
+  (`rail_sets`), out of `RESET_JOURNAL_DATA`. `close()` never waits for the lock: whoever holds it (`tap`, `press`,
+  auto-target) closes the device on its way out when `stop` is set, whichever way it leaves.
 - **The AI's tools are read-only, by rule** (`outrider/tools.py`). A handler reads only through the `get` it is given,
   and only `READ_ROUTES` (GET routes that change nothing; `/api/find` is out because it can store a system). Never add
   a POST route or a tool that acts (presses, plots, bookmarks, hushes): `test_mcp.py` walks every tool and checks.

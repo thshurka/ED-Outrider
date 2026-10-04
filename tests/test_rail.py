@@ -144,6 +144,51 @@ class Tap(unittest.TestCase):
         t.join(2)
         self.assertEqual((ui.events, ui.closed, h.ui), ([("KEY_K", 1), ("KEY_K", 0)], True, None))
 
+    # ---- R12: close() arriving while a tap or a press holds the lock (it leaves the closing to them) ----
+    class LockThen:
+        """The Honker's lock, running `then` once right after it is taken: close() lands at that moment."""
+
+        def __init__(self, real, then):
+            self.real, self.then = real, then
+
+        def acquire(self, blocking=True, timeout=-1):
+            ok = self.real.acquire(blocking, timeout)
+            if ok and self.then:
+                then, self.then = self.then, None
+                then()
+            return ok
+
+        def release(self):
+            self.real.release()
+
+        def __enter__(self):
+            self.acquire()
+
+        def __exit__(self, *exc):
+            self.release()
+
+    def test_close_as_the_tap_takes_the_lock(self):
+        h = self.honker()
+        ui, h.owners = h.ui, {"rail"}
+        h.lock = self.LockThen(h.lock, lambda: h.close("rail"))
+        with self.assertRaises(ValueError):
+            h.tap(["KEY_K"], hold=0)
+        self.assertEqual((ui.closed, h.ui, ui.events), (True, None, []))
+
+    def test_close_during_a_refused_tap(self):
+        h = self.honker()
+        ui, h.owners = h.ui, {"rail"}
+        with self.assertRaises(outrider.honk.NotNow):
+            h.tap(["KEY_K"], check=lambda: (h.close("rail"), "moved")[1], hold=0)
+        self.assertEqual((ui.closed, h.ui), (True, None))
+
+    def test_close_during_a_refused_press(self):
+        h = self.honker()
+        ui, h.owners, h.hold = h.ui, {"honk"}, 0
+        with self.assertRaises(outrider.honk.NotNow):
+            h.press(check=lambda: (h.close("honk"), "jumping")[1])
+        self.assertEqual((ui.closed, h.ui, ui.events), (True, None, []))
+
 
 class Server(unittest.TestCase):
     def setUp(self):
