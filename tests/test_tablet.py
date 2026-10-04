@@ -102,6 +102,49 @@ class Tablet(unittest.TestCase):
             self.assertTrue(self.state.payload()["restart_needed"])
         ed_outrider.restart_needed(now=3e12)
 
+    def reset_stamps(self):
+        for name in ("_stamps", "_page_stamp", "_code_stamp"):   # the stamps' cache, forgotten (a test's clock is far ahead)
+            if isinstance(getattr(ed_outrider, name, None), dict):
+                getattr(ed_outrider, name)["at"] = None
+
+    def test_stamps_change_together(self):
+        """R3: the page stamp and restart_needed come from one refresh, so a payload never pairs the new page files'
+        stamp with a stale "no restart needed" (the page would reload onto files the running server can't serve)."""
+        self.addCleanup(self.reset_stamps)
+        self.reset_stamps()
+        t = 1e13
+        with tempfile.TemporaryDirectory() as d:
+            for name in ed_outrider.PAGE_FILES:
+                os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("x")
+            with unittest.mock.patch.object(ed_outrider, "STATIC_DIR", d):
+                old = ed_outrider.page_stamp(now=t)
+                self.assertFalse(ed_outrider.restart_needed(now=t + 3))
+                # an update: new page files and new code on disk, the running server not restarted
+                with open(os.path.join(d, "page.js"), "w") as f:
+                    f.write("new")
+                with unittest.mock.patch.object(ed_outrider, "code_stamp", lambda root=None: "updated00000"):
+                    for now in (t + 4, t + 6, t + 8.5, t + 12):
+                        new_page, restart = ed_outrider.page_stamp(now=now), ed_outrider.restart_needed(now=now)
+                        self.assertFalse(new_page != old and not restart, now)
+
+    def test_index_stamp_fresh(self):
+        """R3: a page served right after an update carries the stamp of the files it got, not the cached one, and the
+        payload then agrees with it (no reload loop)."""
+        self.addCleanup(self.reset_stamps)
+        cached = ed_outrider.page_stamp()
+
+        async def go(c):
+            html = await (await c.get("/")).text()
+            return html, (await (await c.get("/api/nearby")).json())["page_stamp"]
+        with unittest.mock.patch.object(ed_outrider, "PAGE_FILES", ed_outrider.PAGE_FILES + ("added-by-an-update.css",)):
+            html, payload_stamp = self.client(go)
+            fresh = ed_outrider.page_stamp(ed_outrider.STATIC_DIR)
+        self.assertNotEqual(fresh, cached)
+        self.assertIn(f'window.__PAGE_STAMP__ = "{fresh}";', html)
+        self.assertEqual(payload_stamp, fresh)
+
     def test_fonts_are_ofl_and_shipped_with_their_licences(self):
         fonts = os.path.join(ed_outrider.STATIC_DIR, "fonts")
         files = os.listdir(fonts)

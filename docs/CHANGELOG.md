@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch C: the self-reloading page after an update
+- An open page no longer reloads onto updated page files a few seconds before Outrider notices its own code changed
+  too: both are checked in one go, so it waits for the restart instead (R3). A page loaded just after an update
+  carries the stamp of the files it got, so it doesn't reload once more for nothing.
+
 ## 2026-10-04 · Review fixes, batch B: writing the config file from Settings
 - Saving Server settings keeps the config file's permissions (a `chmod 600` file stays private; a new one is made
   private, since it may hold passwords) and writes through a symlinked config instead of replacing the link (R2).

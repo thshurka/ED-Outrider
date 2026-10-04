@@ -4812,9 +4812,9 @@ class State:
         changed.set()      # wakes every page request waiting in /api/nearby
 
     def payload(self):
-        pos, jr = self.journals.pos, self.journals.jump_range
+        pos, jr, stamp = self.journals.pos, self.journals.jump_range, stamps()
         return {
-            "version": self.version, "run_id": RUN_ID, "page_stamp": page_stamp(), "restart_needed": restart_needed(),
+            "version": self.version, "run_id": RUN_ID, "page_stamp": stamp["page"], "restart_needed": stamp["restart_needed"],
             "game_pc": self.game_pc,   # False: the page leaves out what needs the game PC
             "status": self.status, "radius": self.radius,
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
@@ -9969,28 +9969,25 @@ USER_FONT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}\.(ttf|otf|woff2?)")
 
 # The page's files: an open page compares their stamp (in every payload) with the one it was served with, and reloads
 # itself when Outrider has newer ones (a tablet runs for hours; a restart after an update must reach it). Statted at
-# most every PAGE_STAMP_S seconds (the payload is built often).
+# most every PAGE_STAMP_S seconds (the payload is built often), together with the server's code (restart_needed below):
+# one refresh for both, so a payload never pairs new page files with a stale "no restart needed" (review R3).
 PAGE_FILES = ("page.html", "page.js", "page.css", "sounds.json") + TABLET_STYLES
 PAGE_STAMP_S = 5.0
-_page_stamp = {"at": None, "value": None}
+_stamps = {"at": None, "page": None, "code": None}
 
 
 def page_stamp(static_dir=None, now=None):
     """A short stamp of the page's files (their sizes and modification times): changes when any of them does."""
-    now = time.monotonic() if now is None else now
-    if static_dir is None and _page_stamp["at"] is not None and now - _page_stamp["at"] < PAGE_STAMP_S:
-        return _page_stamp["value"]
+    if static_dir is None:
+        return stamps(now)["page"]
     parts = []
     for name in PAGE_FILES:
         try:
-            st = os.stat(os.path.join(static_dir or STATIC_DIR, name))
+            st = os.stat(os.path.join(static_dir, name))
             parts.append(f"{name}:{st.st_size}:{st.st_mtime_ns}")
         except OSError:
             parts.append(f"{name}:-")
-    value = hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
-    if static_dir is None:
-        _page_stamp.update(at=now, value=value)
-    return value
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
 
 
 # The server's own code (this file and outrider/*.py) as it was when it started: when the files on disk differ, Outrider
@@ -10010,15 +10007,20 @@ def code_stamp(root=None):
 
 
 CODE_STAMP_START = code_stamp()
-_code_stamp = {"at": None, "value": None}
+
+
+def stamps(now=None, fresh=False):
+    """{"page": the page files' stamp, "restart_needed": the code on disk differs from the code running}, both from
+    one refresh made at most every PAGE_STAMP_S (fresh: now; a page being served carries its files' own stamp)."""
+    now = time.monotonic() if now is None else now
+    if fresh or _stamps["at"] is None or not 0 <= now - _stamps["at"] < PAGE_STAMP_S:
+        _stamps.update(at=now, page=page_stamp(STATIC_DIR), code=code_stamp())
+    return {"page": _stamps["page"], "restart_needed": _stamps["code"] != CODE_STAMP_START}
 
 
 def restart_needed(now=None):
     """Whether the server's code on disk differs from the code running (checked at most every PAGE_STAMP_S)."""
-    now = time.monotonic() if now is None else now
-    if _code_stamp["at"] is None or now - _code_stamp["at"] >= PAGE_STAMP_S:
-        _code_stamp.update(at=now, value=code_stamp())
-    return _code_stamp["value"] != CODE_STAMP_START
+    return stamps(now)["restart_needed"]
 
 
 def load_page(tablet=False):
@@ -10302,7 +10304,7 @@ def make_app(state, hosts=None):
         return web.Response(text=load_page(tablet=request.path == "/tablet").replace("/*SEARCH_OPTIONS*/null", options)
                             .replace("/*SERVER_DEFAULTS*/null", json.dumps(saved).replace("<", "\\u003c"))
                             .replace("/*SOUNDS*/null", sounds_json())
-                            .replace("/*PAGE_STAMP*/null", json.dumps(page_stamp())),
+                            .replace("/*PAGE_STAMP*/null", json.dumps(stamps(fresh=True)["page"])),
                             content_type="text/html")
 
     async def defaults_get(_):

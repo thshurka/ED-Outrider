@@ -161,7 +161,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   modification times of `PAGE_FILES`) against the `__PAGE_STAMP__` it was served with; `pageStampTick` reloads once
   nothing was touched for `RELOAD_IDLE_MS` and nothing is said, open or typed in. A new file the page loads goes in
   `PAGE_FILES` (a theme in `TABLET_STYLES` is in it already). State worth keeping across that reload belongs in
-  per-device storage, as the view is.
+  per-device storage, as the view is. `page_stamp` and `restart_needed` come from one cached refresh (`stamps()`), so
+  they always agree; the served page takes a fresh one (`stamps(fresh=True)`).
 - **The tablet layout** (`body.tablet`, `TABLET` in page.js) is the same views in another shell, never a copy of them:
   a view change works on both. The tablet never speaks, plays sounds or joins the one-speaker lock (`speakMode()` is
   "never" there): keep any new sound or speech path behind `speakerHere()`. It has no Overview. The desktop page must
