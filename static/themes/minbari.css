@@ -2,7 +2,8 @@
    evoked, not copied. Deep indigo, lilac and pearl with a sea-glass accent; soft curves, panels topped like a pointed
    window, thin double lines. Fonts: Marcellus (headings) and Inter (text), both SIL OFL 1.1, in static/fonts/ with
    their licences. Your own heading font goes first if you drop it in as data/fonts/minbari-display.ttf (served at
-   /userfonts/; never committed). No show assets. */
+   /userfonts/; never committed). No show assets apart from the faction emblem under the
+   page list, a fan redrawing (static/emblems/CREDITS.txt). */
 @font-face { font-family: "Minbari Display"; font-display: swap;
   src: url("../../userfonts/minbari-display.ttf") format("truetype"), url("../fonts/Marcellus-Regular.ttf") format("truetype"); }
 @font-face { font-family: "Marcellus"; font-display: swap; src: url("../fonts/Marcellus-Regular.ttf") format("truetype"); }
@@ -53,3 +54,5 @@
 [data-theme="minbari"] body.tablet .pane { border-radius: 18px 18px 10px 10px; }
 [data-theme="minbari"] body.tablet #nowView .now-sys { color: var(--mb-lilac); font-family: var(--tb-font-display); letter-spacing: 1.5px; }
 [data-theme="minbari"] .tb-sheet h2 { color: var(--mb-lilac); font-family: var(--tb-font-display); letter-spacing: 1px; }
+/* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
+[data-theme="minbari"] .tb-emblem { display: block; background-image: url("../emblems/minbari.webp"); }

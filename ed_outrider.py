@@ -149,6 +149,7 @@ import hashlib
 import io
 import json
 import math
+import mimetypes
 import os
 import random
 import re
@@ -9978,6 +9979,11 @@ def sounds_json():
 # The tablet layout (GET /tablet): the same page in a tablet mode (body.tablet: page.js draws its shell), with the
 # shell's stylesheet and every theme's (each scoped to its data-theme, so the per-device picker switches without a
 # reload). Fonts a theme lists first may come from data/fonts/ (fan fonts never committed: FONT_DIR, /userfonts/).
+# File types the static files need that an older Python's mimetypes lacks (3.12, the Docker image's, has no .webp:
+# the themes' emblems would be served as application/octet-stream)
+STATIC_TYPES = {".webp": "image/webp", ".woff2": "font/woff2"}
+for _ext, _type in STATIC_TYPES.items():
+    mimetypes.add_type(_type, _ext)
 TABLET_STYLES = ("tablet.css", "themes/lcars.css", "themes/elite.css", "themes/babylon5.css", "themes/narn.css",
                  "themes/minbari.css", "themes/centauri.css", "themes/sith.css", "themes/alliance.css", "themes/dark.css")
 TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance", "dark")

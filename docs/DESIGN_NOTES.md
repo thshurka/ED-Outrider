@@ -48,7 +48,10 @@ upstream project's choices, not rules of the game.
   `body.tablet`, and page.js draws a shell round the views it already has (6,000 lines of rendering are not worth
   duplicating). Themes are only for the tablet (the author, 2026-10-03): the desktop page keeps its look and has no
   picker. LCARS is a theme, not the structure: the shell's parts are neutral and every look is custom properties, and
-  Elite and Babylon 5 are stylesheets of their own (evoked, never a game's or the show's assets).
+  Elite and Babylon 5 are stylesheets of their own (evoked, never a game's or the show's assets), with one exception
+  the author chose: an emblem under the page list in the Elite, Babylon 5 and Star Wars themes (static/emblems/,
+  each under the terms in its CREDITS.txt: Frontier's media usage rules for Elite, public-domain fan redrawings and
+  Wikimedia Commons files for the others). Local copies only: the Android app blocks anything but Outrider.
 - **The tablet is silent unless asked: Play alerts here.** The PC's voice is the cockpit's; a tablet that also spoke
   would double every line, and on a plain-http LAN address there are no Web Locks to pick one speaker, so alerts are
   a banner there. But a Docker server often has no browser open at all (the author, 2026-10-04), so the tablet's

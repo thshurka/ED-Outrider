@@ -3,7 +3,8 @@
    double borders with notched corners. Crimson is only ever a fill under cream (too dark to read as text).
    Fonts: Cinzel (headings) and Cormorant Garamond (text), both SIL OFL 1.1, in static/fonts/ with their licences.
    Your own heading font goes first if you drop it in as data/fonts/centauri-display.ttf (served at /userfonts/;
-   never committed). No show assets. */
+   never committed). No show assets apart from the faction emblem under the
+   page list, a fan redrawing (static/emblems/CREDITS.txt). */
 @font-face { font-family: "Centauri Display"; font-weight: 400 900; font-display: swap;
   src: url("../../userfonts/centauri-display.ttf") format("truetype"), url("../fonts/Cinzel-VF.ttf") format("truetype"); }
 @font-face { font-family: "Cinzel"; font-weight: 400 900; font-display: swap; src: url("../fonts/Cinzel-VF.ttf") format("truetype"); }
@@ -67,3 +68,5 @@
   .tb-sheethead h2, .tb-facts dt, body.tablet th, body.tablet #nowView .now-sys) { font-size-adjust: none; }
 [data-theme="centauri"] .tb-chip .tb-k { font-size: 12px; } [data-theme="centauri"] .tb-link { font-size: 13px; }
 [data-theme="centauri"] .tb-rbl b { font-size: 14px; } [data-theme="centauri"] .tb-group { font-size: 15px; }
+/* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
+[data-theme="centauri"] .tb-emblem { display: block; background-image: url("../emblems/centauri.webp"); }

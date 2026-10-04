@@ -56,7 +56,13 @@ html.tb-dim body.tablet { filter: brightness(.55); }
   display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 14px; cursor: pointer; }
 .tb-page.on { background: var(--tb-page-on-bg); color: var(--tb-page-on-fg); font-weight: 600; }
 .tb-maptag { padding: 1px 8px; border-radius: 10px; background: var(--tb-page-on-fg); color: var(--tb-page-on-bg); font-size: 13px; font-weight: 600; }
-.tb-navfill { flex: 1 1 auto; min-height: 12px; background: var(--tb-fill); }
+.tb-navfill { flex: 1 1 auto; min-height: 12px; background: var(--tb-fill); position: relative; container-type: size; }
+/* a theme's emblem (static/emblems/, credited there), centred in the free space under the page list; decoration, never
+   a control. Off unless the theme sets one; gone when the space is too short to show it well */
+.tb-emblem { display: none; position: absolute; inset: 18px 16px; background: center / contain no-repeat; opacity: .45;
+  pointer-events: none; }
+@container (max-height: 120px) { .tb-emblem { visibility: hidden; } }
+.tb-noemblem .tb-emblem { display: none !important; }   /* Settings: Show the theme's emblem, off */
 .tb-main { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 .tb-rail { grid-column: 3; grid-row: 2; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
 .tb-railhead { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: 40px; }
@@ -129,6 +135,7 @@ html.tb-dim body.tablet { filter: brightness(.55); }
 .tb-row select { min-height: 40px; font: inherit; }
 .tb-row input[type=checkbox] { width: 26px; height: 26px; }
 .tb-note { margin: 0; color: var(--muted); font-size: 15px; }
+.tb-credits { font-size: 12px; }
 .tb-sub { margin: 6px 0 8px; font-size: 17px; }
 /* ---- the views inside the shell ---- */
 /* the desktop's own head (the six tiles, the tab buttons, the icons) gives way to the shell; its strips stay */

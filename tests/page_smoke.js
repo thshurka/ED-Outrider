@@ -3525,6 +3525,16 @@ const settle = async maxMs => {
       got.signOut.push(td.getElementById("tabSignOut").hidden);
       tw.fetch = real;
     }
+    // the theme's emblem: the setting is offered only for a theme that has one; off hides it, remembered per tablet
+    got.emblem = [];
+    for (const t of ["elite", "lcars"]) { tw.eval(`tabTheme(${JSON.stringify(t)})`); got.emblem.push(td.getElementById("tabEmblemRow").hidden); }
+    tw.eval('tabTheme("centauri")');
+    const em = td.getElementById("tabEmblem");
+    got.emblem.push(em.checked);
+    em.checked = false; em.dispatchEvent(new tw.Event("change"));
+    got.emblem.push(td.documentElement.classList.contains("tb-noemblem"), tw.localStorage.getItem("tabletEmblem"));
+    em.checked = true; em.dispatchEvent(new tw.Event("change"));
+    got.emblem.push(td.documentElement.classList.contains("tb-noemblem"));
     td.getElementById("tabTheme").value = "lcars"; td.getElementById("tabTheme").dispatchEvent(new tw.Event("change"));
     td.getElementById("tabDim").checked = true; td.getElementById("tabDim").dispatchEvent(new tw.Event("change"));
     got.prefs = [td.documentElement.dataset.theme, td.documentElement.classList.contains("tb-dim"), tw.localStorage.getItem("tabletDim"),
@@ -3585,7 +3595,7 @@ const settle = async maxMs => {
       reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
-      settings: [true, true, "a browser (no app)", true], signOut: [true, false],
+      settings: [true, true, "a browser (no app)", true], signOut: [true, false], emblem: [false, true, true, true, "false", false],
       appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false],
       tabletAudio: ["[false,false]", false, '[true,true,"always","true"]', false, [true, true, true, true, true], "[false,false]", ["A line here."], "🔇 Tap anywhere to let Outrider speak here",
                     '[false,false,"false"]'], prefs: ["lcars", true, "true", null, "here"]};

@@ -1,7 +1,8 @@
 /* Sith, a tablet theme (data-theme="sith"): Imperial and Sith consoles from Star Wars, evoked, not copied. Pure black,
    crimson for what matters, cold steel-white text, thin hard-edged lines, sparse. Fonts: Share Tech Mono (headings and
    labels) and Rajdhani (text), both SIL OFL 1.1, in static/fonts/ with their licences. Your own heading font goes first if
-   you drop it in as data/fonts/sith-display.ttf (served at /userfonts/; never committed). No film assets. */
+   you drop it in as data/fonts/sith-display.ttf (served at /userfonts/; never committed). No film assets apart from the faction emblem under the
+   page list (static/emblems/CREDITS.txt). */
 @font-face { font-family: "Sith Display"; font-display: swap;
   src: url("../../userfonts/sith-display.ttf") format("truetype"), url("../fonts/ShareTechMono-Regular.ttf") format("truetype"); }
 @font-face { font-family: "Share Tech Mono"; font-display: swap; src: url("../fonts/ShareTechMono-Regular.ttf") format("truetype"); }
@@ -54,3 +55,6 @@
 [data-theme="sith"] .tb-chip .tb-k { font-size: 12px; } [data-theme="sith"] .tb-link { font-size: 13px; letter-spacing: 1px; }
 [data-theme="sith"] .tb-rbl b { font-size: 14px; letter-spacing: 1px; } [data-theme="sith"] .tb-page { font-size: 15px; }
 [data-theme="sith"] .tb-btn, [data-theme="sith"] .tb-voice { font-size: 13px; }
+/* the faction's emblem under the page list, one colour drawn in the theme's accent (static/emblems/CREDITS.txt) */
+[data-theme="sith"] .tb-emblem { display: block; background-color: var(--accent); opacity: .55;
+  -webkit-mask: url("../emblems/sith.svg") center / contain no-repeat; mask: url("../emblems/sith.svg") center / contain no-repeat; }

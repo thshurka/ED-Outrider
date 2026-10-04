@@ -172,6 +172,39 @@ class Tablet(unittest.TestCase):
                 for name in re.findall(r'url\("\.\./fonts/([^"]+)"\)', fh.read()):
                     self.assertIn(name, files, css)
 
+    def test_faction_emblems(self):
+        """The Babylon 5 and Star Wars themes show their faction's emblem in the free space under the page list (the
+        author's request): local copies (the Android app blocks anything that is not Outrider), credited with their
+        licences, one per theme and none for the others, served as images."""
+        emblems = {"elite": "elite.webp", "babylon5": "babylon5.webp", "narn": "narn.webp", "minbari": "minbari.webp", "centauri": "centauri.webp",
+                   "sith": "sith.svg", "alliance": "alliance.svg"}
+        folder = os.path.join(ed_outrider.STATIC_DIR, "emblems")
+        with open(os.path.join(folder, "CREDITS.txt"), encoding="utf-8") as f:
+            credits = f.read()
+        for t in ed_outrider.TABLET_THEMES:
+            with open(os.path.join(ed_outrider.STATIC_DIR, "themes", f"{t}.css"), encoding="utf-8") as f:
+                refs = set(re.findall(r'url\("\.\./emblems/([^"]+)"\)', f.read()))
+            self.assertEqual(refs, {emblems[t]} if t in emblems else set(), t)
+            if t in emblems:
+                self.assertTrue(os.path.isfile(os.path.join(folder, emblems[t])), t)
+                self.assertIn(emblems[t], credits)
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.js"), encoding="utf-8") as f:   # the page offers the setting for these
+            listed = re.search(r"const TB_EMBLEMS = \[([^\]]*)\]", f.read()).group(1)
+        self.assertEqual(set(re.findall(r'"(\w+)"', listed)), set(emblems))
+        for words in ("CC BY-SA 4.0", "Warner Bros", "Lucasfilm", "public domain", "with permission of Frontier Developments plc"):
+            self.assertIn(words, credits)
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.html"), encoding="utf-8") as f:
+            self.assertRegex(f.read(), r'<div class="tb-navfill" aria-hidden="true"><div class="tb-emblem"></div></div>')
+
+        async def go(c):
+            out = []
+            for name in ("babylon5.webp", "sith.svg"):
+                r = await c.get(f"/static/emblems/{name}")
+                out.append((r.status, r.headers.get("Content-Type", "").split(";")[0]))
+            return out
+        self.assertEqual(self.client(go), [(200, "image/webp"), (200, "image/svg+xml")])
+        self.assertEqual(ed_outrider.STATIC_TYPES[".webp"], "image/webp")   # Python 3.12 (the Docker image) has no .webp
+
     def test_dark_theme_icons(self):
         """The dark theme's line icons are Lucide's (ISC: its licence ships beside them), inline as CSS masks written by
         scripts/dark_icons.py (no request per icon), and only under data-theme="dark"."""

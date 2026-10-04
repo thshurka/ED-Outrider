@@ -2,7 +2,8 @@
    panels with thin borders and angled header tabs, light blue-white text, amber for warnings.
    Fonts: Orbitron (headings) and Exo 2 (text), both SIL OFL 1.1, in static/fonts/ with their licences. Your own
    heading font goes first if you drop it in as data/fonts/babylon5-display.ttf (served at /userfonts/; never
-   committed; best for titles only); without it, Orbitron. No show assets. */
+   committed; best for titles only); without it, Orbitron. No show assets apart from the faction emblem under the
+   page list, a fan redrawing (static/emblems/CREDITS.txt). */
 @font-face { font-family: "B5 Display"; font-weight: 400 900; font-display: swap;
   src: url("../../userfonts/babylon5-display.ttf") format("truetype"), url("../fonts/Orbitron-VF.ttf") format("truetype"); }
 @font-face { font-family: "B5 Heading"; font-weight: 400 900; font-display: swap; src: url("../fonts/Orbitron-VF.ttf") format("truetype"); }
@@ -65,3 +66,5 @@
 [data-theme="babylon5"] .tb-rbs { font-size: 11px; letter-spacing: .5px; }
 [data-theme="babylon5"] .tb-group { font-size: 15px; } [data-theme="babylon5"] .tb-page { font-size: 13px; }
 [data-theme="babylon5"] .tb-btn { font-size: 12px; } [data-theme="babylon5"] .tb-voice { font-size: 12px; }
+/* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
+[data-theme="babylon5"] .tb-emblem { display: block; background-image: url("../emblems/babylon5.webp"); }

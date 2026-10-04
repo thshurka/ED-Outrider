@@ -2,7 +2,8 @@
    panels with chamfered (cut) corners instead of LCARS elbows and pills, a little cyan for what is selected or active.
    Fonts: Michroma (headings) and Saira Semi Condensed (text), both SIL OFL 1.1, in static/fonts/ with their licences.
    Your own heading font goes first if you drop it in as data/fonts/elite-display.ttf (served at /userfonts/; never
-   committed; a Eurostile-style face suits it); without it, Michroma. No game assets. */
+   committed; a Eurostile-style face suits it); without it, Michroma. No game assets apart from the Explorer Elite badge under
+   the page list, used under Frontier's media usage rules (static/emblems/CREDITS.txt). */
 @font-face { font-family: "Elite Display"; font-display: swap;
   src: url("../../userfonts/elite-display.ttf") format("truetype"), url("../fonts/Michroma-Regular.ttf") format("truetype"); }
 @font-face { font-family: "Saira Semi Condensed"; font-weight: 400; font-display: swap; src: url("../fonts/SairaSemiCondensed-Regular.ttf") format("truetype"); }
@@ -72,3 +73,8 @@
 [data-theme="elite"] .tb-group { font-size: 15px; } [data-theme="elite"] .tb-page { font-size: 12px; letter-spacing: .5px; }
 [data-theme="elite"] .tb-btn { font-size: 12px; } [data-theme="elite"] .tb-voice { font-size: 12px; }
 [data-theme="elite"] .tb-rbl b { font-family: var(--tb-font); font-size: 15px; font-weight: 600; letter-spacing: 1px; }
+/* the Explorer "Elite" rank badge under the page list, recoloured to two dark oranges (the wings #A04C00, the ring
+   #6A3000: dark enough to read as decoration at full opacity), about 140 px wide (Frontier's media rules:
+   static/emblems/CREDITS.txt) */
+[data-theme="elite"] .tb-emblem { display: block; background-image: url("../emblems/elite.webp"); background-size: min(100%, 140px) auto;
+  opacity: 1; }

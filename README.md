@@ -502,7 +502,8 @@ the same pages in a cockpit layout, in one of nine themes: LCARS (below), Elite 
 corners), four from Babylon 5 (Earthforce: navy and steel; Narn: rust and ochre, wedge-cut; Minbari: indigo, lilac and
 pearl, soft arches and thin double lines; Centauri: gold on royal purple, ornate notched double borders), Sith (black,
 crimson, thin hard lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
-cards, switches and line icons beside the words). Settings picks one per tablet. Outrider must listen on your network
+cards, switches and line icons beside the words). Settings picks one per tablet. The Elite, Babylon 5 and Star Wars
+themes show their emblem in the free space under the page list (credits at the bottom of this page). Outrider must listen on your network
 for this: see [Other devices on your network](#-other-devices-on-your-network).
 
 <p align="center">
@@ -858,6 +859,13 @@ distances and colour variants are from <a href="https://github.com/Silarn/EDMC-E
 Planetary mining odds are CMDR Grumlop's survey from the
 <a href="https://edfieldmanual.com/index.php?title=Module:Data/SurfaceMiningProspecting">Elite Dangerous Field Manual</a>
 (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>), shipped unchanged in <code>resources/mining_odds.json</code>.<br>
+The tablet themes' emblems (in <code>static/emblems/</code>, each under the terms in its <code>CREDITS.txt</code>, not the GPL):
+the Explorer Elite badge is used under Frontier's media usage rules; the Babylon 5 emblems (© Warner Bros.) are public-domain
+redrawings from the Babylon 5 Wiki; the Sith emblem is Gameposo's, vectorised by Marnanel (Wikimedia Commons,
+CC BY-SA 4.0), and the Rebel Alliance emblem a public-domain Wikimedia Commons file (both Lucasfilm trademarks).
+Unofficial, non-commercial fan use.<br>
 ED Outrider is free software under the <a href="LICENSE">GNU GPL v2 or later</a>.<br>
-Elite Dangerous © Frontier Developments — this is a fan-made tool, not affiliated with Frontier.
+ED Outrider was created using assets and imagery from Elite Dangerous, with the permission of Frontier Developments
+plc, for non-commercial purposes. It is not endorsed by nor reflects the views or opinions of Frontier Developments and
+no employee of Frontier Developments was involved in the making of it.
 </p>

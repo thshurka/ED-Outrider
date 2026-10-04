@@ -1,0 +1,27 @@
+Emblems shown under the tablet's page list in the Elite, Babylon 5 and Star Wars themes (static/themes/*.css).
+Unofficial, non-commercial fan use: the emblems' designs belong to their owners, and ED Outrider is not affiliated with
+them. These files are not under the project's GPL: each keeps the terms given here.
+
+Elite Dangerous
+  elite.webp: the Explorer "Elite" rank badge (the Pilots' Federation's wings and phoenix), "Explorer Elite icon.png"
+    on the Elite Dangerous Wiki (elite-dangerous.fandom.com), recoloured from its teals to two dark oranges
+    (brightness mapped from #6A3000 to #A04C00, transparency kept) and saved as WebP. Used under Frontier's
+    Elite Dangerous media usage rules
+    (https://customersupport.frontier.co.uk/hc/en-us/articles/4404292442642-How-can-I-use-Elite-Dangerous-media):
+    Assets borrowed from Elite Dangerous, with permission of Frontier Developments plc.
+
+Babylon 5 (babylon5.webp: the Earth Alliance seal, narn.webp: the Narn Regime, minbari.webp: the Minbari Federation,
+centauri.webp: the Centauri Republic)
+  User-created redrawings released into the public domain by their authors on the Babylon 5 Wiki
+  (babylon5.fandom.com; Category:User-created public domain images):
+    EAS_wiki.png, Wiki_narnregime.png, Wiki_minbarifed.png, Wiki_centaurirep.png
+  The emblems themselves are Babylon 5's (c) Warner Bros.
+
+Star Wars
+  sith.svg: "Logo-sith-empire.svg" by Gameposo, vectorised by Marnanel, Wikimedia Commons
+    (https://commons.wikimedia.org/wiki/File:Logo-sith-empire.svg), licensed CC BY-SA 4.0
+    (https://creativecommons.org/licenses/by-sa/4.0/). This file stays under CC BY-SA 4.0; it is used unchanged
+    (drawn in the theme's colour as a CSS mask).
+  alliance.svg: "Rebel Alliance logo.svg" by User:Tkgd2007, Wikimedia Commons
+    (https://commons.wikimedia.org/wiki/File:Rebel_Alliance_logo.svg), public domain (too simple for copyright).
+  The Sith and Rebel Alliance emblems are Star Wars trademarks of Lucasfilm Ltd. (Disney).

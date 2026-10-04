@@ -7069,6 +7069,7 @@ function tabSetup() {
   document.getElementById("tabMain").append(document.querySelector("header"), document.getElementById("nowView"), document.querySelector("main"));
   tabTheme(store.get("tabletTheme", TB.themes[0]));
   tabDim(store.get("tabletDim", false) === true);
+  tabEmblem(store.get("tabletEmblem", true) !== false);
   const nav = document.getElementById("tabNav");
   nav.querySelectorAll("[data-group]").forEach(b => b.onclick = () => { TB.group = b.dataset.group; tabDrawNav(); });
   // a page you choose: no automatic way back from Now any more, and the nav shows that page's group again
@@ -7087,6 +7088,7 @@ function tabSetup() {
   document.getElementById("tabAsk").onclick = () => { const a = window.OutriderApp; if (a && typeof a.listen === "function") { try { a.listen(); } catch {} } };
   document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
   document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
+  document.getElementById("tabEmblem").onchange = e => { store.set("tabletEmblem", e.target.checked); tabEmblem(e.target.checked); };
   document.getElementById("tabAudio").onchange = e => tabSetAudio(e.target.checked);
   document.getElementById("tabAlertsBtn").onclick = tabOpenAlerts;
   document.getElementById("tabAlertList").addEventListener("change", tabAlertToggle);
@@ -7115,10 +7117,17 @@ function tabSetup() {
     "The grid is the galactic plane through your position; stalks drop each system onto it.";
   tabDrawNav(); tabDrawCaption(); tabDrawAsk();
 }
+// the themes with an emblem under the page list (their stylesheets set it; static/emblems/CREDITS.txt)
+const TB_EMBLEMS = ["elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance"];
+function tabEmblem(on) {   // Settings: Show the theme's emblem (per tablet, on by default)
+  document.documentElement.classList.toggle("tb-noemblem", !on);
+  document.getElementById("tabEmblem").checked = !!on;
+}
 function tabTheme(name) {
   const t = TB.themes.includes(name) ? name : TB.themes[0];
   document.documentElement.dataset.theme = t;
   document.getElementById("tabTheme").value = t;
+  document.getElementById("tabEmblemRow").hidden = !TB_EMBLEMS.includes(t);   // offered only where there is one
   const app = window.OutriderApp;   // the app's own screens (settings, sign-in) follow the theme
   if (app && typeof app.setTheme === "function") { try { app.setTheme(t); } catch {} }
 }

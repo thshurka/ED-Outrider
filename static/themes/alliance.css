@@ -2,7 +2,8 @@
    blue-black, cockpit orange and sand panels, blue for what is active or chosen, off-white text, slightly rounded
    console panels. Fonts: Oxanium (headings) and Rajdhani (text), both SIL OFL 1.1, in static/fonts/ with their licences.
    Your own heading font goes first if you drop it in as data/fonts/alliance-display.ttf (served at /userfonts/; never
-   committed). No film assets. */
+   committed). No film assets apart from the faction emblem under the
+   page list (static/emblems/CREDITS.txt). */
 @font-face { font-family: "Alliance Display"; font-weight: 200 800; font-display: swap;
   src: url("../../userfonts/alliance-display.ttf") format("truetype"), url("../fonts/Oxanium-VF.ttf") format("truetype"); }
 @font-face { font-family: "Rajdhani"; font-weight: 400; font-display: swap; src: url("../fonts/Rajdhani-Regular.ttf") format("truetype"); }
@@ -46,3 +47,6 @@
 [data-theme="alliance"] .tb-sheet h2 { color: var(--al-orange); }
 [data-theme="alliance"] .tb-chip .tb-k { font-size: 12px; } [data-theme="alliance"] .tb-link { font-size: 13px; }
 [data-theme="alliance"] .tb-rbl b { font-size: 15px; } [data-theme="alliance"] .tb-page { font-size: 15px; }
+/* the faction's emblem under the page list, one colour drawn in the theme's accent (static/emblems/CREDITS.txt) */
+[data-theme="alliance"] .tb-emblem { display: block; background-color: var(--accent); opacity: .55;
+  -webkit-mask: url("../emblems/alliance.svg") center / contain no-repeat; mask: url("../emblems/alliance.svg") center / contain no-repeat; }
