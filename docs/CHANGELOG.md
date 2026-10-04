@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch E: the AI layer's odd answers
+- An AI provider answering in an unexpected shape now gives "the AI provider's answer was malformed" (502 ai_error)
+  instead of a server error (R4). Providers that send a tool call's arguments as an object, or the answer as a list
+  of text parts, are understood. Anything else failing in the AI layer is an ai_error too, with its traceback in
+  Outrider's log.
+
 ## 2026-10-04 · Review fixes, batch D: sign-in and the network
 - After signing in, the sign-in page only goes on to a page of this Outrider: a link such as
   `/signin?next=/\evil.com` could send you to another site (R6). The server drops such a `next` too.

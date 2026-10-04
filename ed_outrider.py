@@ -5003,6 +5003,10 @@ class State:
                     words = await outrider.ask.ai_answer(text, self.assistant, get, session)
             except outrider.ask.AIError as e:
                 return {"error": e.why, "code": e.code}, {"ai_timeout": 504, "ai_off": 503}.get(e.code, 502)
+            except Exception as e:  # noqa: BLE001 -- a backstop (R4): the AI layer's own failure, never a 500
+                import traceback
+                traceback.print_exc()
+                return {"error": f"the AI layer failed ({type(e).__name__})", "code": "ai_error"}, 502
         else:
             matched = "none"
             words = ("I only know a few questions so far: a status report, fuel, unsold data, the next jump, what's left "

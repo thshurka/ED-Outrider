@@ -187,6 +187,32 @@ def assistant_settings(cfg):
     return out
 
 
+MALFORMED = "the AI provider's answer was malformed"
+
+
+def message_text(content):
+    """A message's words: a string, or a list of text parts ({"type": "text", "text": ...}) joined. AIError else."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and all(isinstance(p, dict) for p in content):
+        return "".join(p["text"] for p in content if isinstance(p.get("text"), str))
+    raise AIError("ai_error", MALFORMED)
+
+
+def call_arguments(fn):
+    """A tool call's arguments: a JSON object in a string (OpenAI), or already an object (some providers)."""
+    args = fn.get("arguments")
+    if isinstance(args, dict):
+        return args
+    try:
+        args = json.loads(args or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return args if isinstance(args, dict) else {}
+
+
 def openai_tools():
     """The registry as OpenAI-style function tools (the same tools the MCP bridge serves)."""
     return [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["inputSchema"]}}
@@ -223,20 +249,22 @@ async def ai_answer(text, cfg, get, session, rows=10):
                 msg = d["choices"][0]["message"]
             except (KeyError, IndexError, TypeError):
                 raise AIError("ai_error", "the AI provider's answer had no message") from None
+            # every step's shape checked (review R4): a provider's odd answer is ai_error, never a crash
+            if not isinstance(msg, dict):
+                raise AIError("ai_error", MALFORMED)
             calls = msg.get("tool_calls") or []
+            if not isinstance(calls, list) or not all(isinstance(c, dict) and isinstance(c.get("function") or {}, dict) for c in calls):
+                raise AIError("ai_error", MALFORMED)
+            content = message_text(msg.get("content"))
             if not calls:
-                words = (msg.get("content") or "").strip()
+                words = content.strip()
                 if not words:
                     raise AIError("ai_error", "the AI gave no answer")
                 return words
-            messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+            messages.append({"role": "assistant", "content": content, "tool_calls": calls})
             for c in calls:
-                fn = (c.get("function") or {}) if isinstance(c, dict) else {}
-                try:
-                    args = json.loads(fn.get("arguments") or "{}")
-                except ValueError:
-                    args = {}
-                out = await tools.call(str(fn.get("name")), args if isinstance(args, dict) else {}, get, rows)
+                fn = c.get("function") or {}
+                out = await tools.call(str(fn.get("name")), call_arguments(fn), get, rows)
                 messages.append({"role": "tool", "tool_call_id": c.get("id"), "name": fn.get("name"),
                                  "content": json.dumps(out, separators=(",", ":"))})
         raise AIError("ai_error", f"the AI was still calling tools after {cfg['max_rounds']} rounds")

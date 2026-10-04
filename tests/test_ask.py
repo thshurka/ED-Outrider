@@ -186,6 +186,34 @@ class Endpoint(unittest.TestCase):
         status, body, seen = self.ai_run([401], text="fuel")
         self.assertEqual((status, body["matched"], seen), (200, "fixed", []))
 
+    def test_ai_malformed_replies(self):
+        """R4: an AI provider's answer of an unexpected shape gives 502 ai_error (or, where the meaning is plain, an
+        answer), never a 500 with a traceback."""
+        msg = lambda m: {"choices": [{"message": m}]}   # noqa: E731
+        call = lambda args: msg({"tool_calls": [{"id": "c1", "function": {"name": "current_status", "arguments": args}}]})   # noqa: E731
+        done = msg({"content": "All quiet."})
+        for script in ([{"choices": ["not a dict"]}], [{"choices": [{"message": "text"}]}], [msg({"tool_calls": "x"})],
+                       [msg({"tool_calls": ["not a dict"]})], [msg({"content": 5})], [{"choices": {"0": 1}}], [["a list"]]):
+            with contextlib.redirect_stderr(io.StringIO()):
+                status, body, _ = self.ai_run(list(script), text="sing")
+            self.assertEqual((status, body.get("code")), (502, "ai_error"), script)
+        # plain meanings accepted: arguments already an object, content as a list of text parts
+        status, body, seen = self.ai_run([call({}), done], text="sing")
+        self.assertEqual((status, body["answer"]), (200, "All quiet."))
+        self.assertEqual(seen[1][0]["messages"][-1]["role"], "tool")
+        status, body, _ = self.ai_run([msg({"content": [{"type": "text", "text": "All"}, {"type": "text", "text": " quiet."}]})], text="sing")
+        self.assertEqual((status, body["answer"]), (200, "All quiet."))
+
+    def test_ai_backstop(self):
+        """R4: anything else going wrong in the AI layer is ai_error with the exception's name, not a 500."""
+        async def broken(*a, **k):
+            raise KeyError("surprise")
+        with unittest.mock.patch.object(ask, "ai_answer", broken), contextlib.redirect_stderr(io.StringIO()) as err:
+            status, body, _ = self.ai_run([{}], text="sing")
+        self.assertIn("surprise", err.getvalue())   # the traceback is in the log
+        self.assertEqual((status, body["code"]), (502, "ai_error"))
+        self.assertIn("KeyError", body["error"])
+
     async def _post(self, c, text):
         r = await c.post("/api/ask", json={"text": text})
         return r.status, (await r.json()).get("code")
