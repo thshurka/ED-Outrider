@@ -1453,7 +1453,11 @@ const alertSound = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true
 // not spoken until you tick them: they repeat what the game (or another alert) already told you
 const QUIET_KINDS = {scoopstop: false, supercharge: false, bodybrief: false, ...OFF_KINDS};
 const alertSpeak = Object.assign(Object.fromEntries(ALERTS.map(([k]) => [k, true])), QUIET_KINDS, store.get("alertSpeak", {}));
-let speechOn = !TABLET && store.get("speech", false);   // the tablet never speaks: the PC does
+// The tablet is silent (the PC speaks) unless "Play alerts here" is ticked in its Settings (the author, 2026-10-04: a
+// Docker server often has no browser open at all): then it speaks and plays the alert sounds itself, whatever any PC
+// window does (both may then speak: turn one off). Per tablet.
+const tabletSpeaks = () => TABLET && store.get("tabletAudio", false) === true;
+let speechOn = TABLET ? tabletSpeaks() : store.get("speech", false);
 function notify(kind, title, body) {
   if (!alertCfg.enabled || !alertCfg[kind] || typeof Notification === "undefined" || Notification.permission !== "granted") return false;
   try {
@@ -1501,7 +1505,7 @@ function claimSpeaker(steal = false) {
     isSpeaker = false; drawSpeaker(); claimSpeaker();   // another window took it: wait in line again
   });
 }
-const speakMode = () => { if (TABLET) return "never"; const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
+const speakMode = () => { if (TABLET) return tabletSpeaks() ? "always" : "never"; const m = store.get("speakMode", "auto"); return ["auto", "always", "never"].includes(m) ? m : "auto"; };
 const speakerHere = () => speakMode() === "always" || (speakMode() === "auto" && isSpeaker);
 // "Play speech and sounds on this PC" (per browser, off by default): the speaking window still picks and queues
 // the lines, but the PC running Outrider plays them and the alert sounds through its own player, so no click on
@@ -1567,7 +1571,7 @@ function uncool(it) {
 const SOUND_LEAD = {fanfare: 1700, chime: 1000};
 function alertOut(kind, title, body, {sound, say, delay = 0, tag = null, still = null, quiet = false} = {}) {
   lastAlert = {kind, title, body, at: Date.now()};
-  if (TABLET) tabBanner(kind, title, body);   // the tablet shows it; the PC says it
+  if (TABLET) tabBanner(kind, title, body);   // the tablet shows it; the PC says it (and the tablet too with Play alerts here)
   const entry = logSpeech({kind, tag, words: title});
   const snd = sound === undefined ? (ALERTS.find(a => a[0] === kind) || [])[2] : sound;
   const loud = speakerHere(), hush = hushed() && speechPrio(kind, tag) > 1;   // hushed: danger (and a rig press's answer) still speaks
@@ -5552,13 +5556,13 @@ function drawSoundBtn() {
 soundBtn.onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (soundOn) audio(); drawSoundBtn(); };
 document.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { play(b.dataset.try); drawSoundBtn(); });
 // Browsers only allow audio after a click; any click on the page unlocks it.
-document.addEventListener("pointerdown", () => { if ((soundOn || speechOn) && !TABLET) { audio(); setTimeout(audioStateChanged, 50); } });
+document.addEventListener("pointerdown", () => { if ((soundOn || speechOn) && (!TABLET || tabletSpeaks())) { audio(); setTimeout(audioStateChanged, 50); } });
 // ---- audio held back by the browser (2026-10-04): until a click on the page the browser keeps its audio engine
 // suspended, and Piper's voice and the sounds cannot play (on the PC itself, "Play on this PC" needs no click). The
 // speaking window shows a red pill on the menu bar and 🔇 in its title, tells Outrider (POST api/speaker/audio: the
 // tablet then asks for the click too), and holds its lines until the click (see sayNow). Never the browser's voice.
 function audioBlocked() {
-  if (TABLET || !speakerHere() || serverPlay()) return false;
+  if (!speakerHere() || serverPlay()) return false;   // (a tablet only with Play alerts here)
   const t = data && data.tts;
   if (!((speechOn && t && t.engine === "piper") || soundOn)) return false;
   const ctx = audio();   // made here if not yet: a browser holding audio back leaves it suspended
@@ -5571,6 +5575,7 @@ function audioStateChanged() {
 function drawAudioPill() {
   audioIsBlocked = audioBlocked();
   document.getElementById("audioPill").hidden = !audioIsBlocked;
+  if (TABLET) tabDrawCaption();   // the tablet has no menu bar: its caption line asks for the tap
   if (audioIsBlocked !== document.title.startsWith("🔇 ")) document.title = audioIsBlocked ? "🔇 " + document.title : document.title.slice(3);
   // the speaking window says so (and a window that said "blocked" takes it back when it no longer speaks)
   if (audioIsBlocked !== audioBlockedSent && (speakerHere() || audioBlockedSent)) {
@@ -6844,7 +6849,7 @@ const LOST_SAY_MS = 30000, LOST_PARTS = ["Lost contact with Outrider.", "No aler
 const LOST_TEXT = LOST_PARTS.join(" ");
 const lostLine = {key: null, buf: null};   // buf: [AudioBuffer, ...], one per sentence
 async function prepareLostLine() {
-  if (TABLET) return;   // never said here
+  if (TABLET && !tabletSpeaks()) return;   // never said here
   const t = data && data.tts;
   if (!t || t.engine !== "piper") return;
   const ctx = actx || audio();   // decoding needs no click: the context may stay paused until the line is played
@@ -6866,7 +6871,7 @@ async function prepareLostLine() {
 // Its fate goes in the dialog's Spoken lines like any line, so a silent one says why.
 async function sayLost() {
   const entry = logSpeech({kind: "connection", words: LOST_TEXT});
-  if (!(speechOn && isSpeaker)) { toast(LOST_TEXT); setFate(entry, !speechOn ? "silent: speech off" : "silent: another window speaks"); return ""; }
+  if (!(speechOn && speakerHere())) { toast(LOST_TEXT); setFate(entry, !speechOn ? "silent: speech off" : "silent: another window speaks"); return ""; }
   const ctx = await runningAudio();   // paused audio starts again if this page has had a click since it loaded
   if (!ctx) {
     toast(LOST_TEXT + " (click the page once so it may play sound)");
@@ -7082,6 +7087,7 @@ function tabSetup() {
   document.getElementById("tabAsk").onclick = () => { const a = window.OutriderApp; if (a && typeof a.listen === "function") { try { a.listen(); } catch {} } };
   document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
   document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
+  document.getElementById("tabAudio").onchange = e => tabSetAudio(e.target.checked);
   document.getElementById("tabSignOut").onclick = tabSignOut;
   document.getElementById("tabSheetActs").addEventListener("click", e => {
     const b = e.target.closest("[data-act]"); if (!b) return;
@@ -7178,6 +7184,7 @@ function tabDrawLink(l) {
 function tabDrawCaption() {
   const c = captions[captions.length - 1], el = document.getElementById("tabCaption");
   const text = disconnected ? "Reconnecting: old alerts will not replay"
+    : audioIsBlocked ? "🔇 Tap anywhere to let Outrider speak here"
     : data && data.speaker_audio_blocked ? "🔇 Outrider's voice is waiting: click the Outrider page on the PC to allow audio"
     : c ? c.words : "";
   if (el.textContent !== text) el.textContent = text;
@@ -7238,7 +7245,15 @@ function tabAppScreen(fn) {
   tabClose(document.getElementById("tabSettings"));
   try { if (app && typeof app[fn] === "function") app[fn](); } catch {}
 }
+// Play alerts here: this tablet speaks and plays the sounds itself (see tabletSpeaks)
+function tabSetAudio(on) {
+  store.set("tabletAudio", !!on);
+  speechOn = tabletSpeaks();
+  if (speechOn) { audio(); prepareLostLine(); } else hushSpeech(true);
+  drawAudioPill();
+}
 async function tabOpenSettings() {
+  document.getElementById("tabAudio").checked = tabletSpeaks();
   document.getElementById("tabViewport").textContent = `${innerWidth} × ${innerHeight} CSS px at ${+(window.devicePixelRatio || 1).toFixed(2)}×`;
   const app = window.OutriderApp;
   let ver = "a browser (no app)";

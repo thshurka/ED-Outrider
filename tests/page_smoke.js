@@ -3539,6 +3539,28 @@ const settle = async maxMs => {
     td.getElementById("tabAppVoice").click();
     got.appScreens.push(calls, td.getElementById("tabSettings").hasAttribute("open"));
     delete tw.OutriderApp;
+    // Play alerts here: off, the tablet is silent; on, it speaks (whatever a PC window does) and asks for a tap when its
+    // browser holds audio back; off again, silent
+    {
+      const said = [], realSay = tw.sayNow;
+      tw.sayNow = async item => { said.push(item.words); };
+      const ta = [tw.eval("JSON.stringify([speechOn, speakerHere()])")];
+      td.getElementById("tabSetBtn").click(); await settle(300);
+      const box = td.getElementById("tabAudio");
+      ta.push(box.checked);
+      box.checked = true; box.dispatchEvent(new tw.Event("change"));
+      ta.push(tw.eval("JSON.stringify([speechOn, speakerHere(), speakMode(), localStorage.getItem('tabletAudio')])"));
+      tw.eval('alertOut("game", "Game loaded", "", {say: "A line here."})');
+      await sleep(300);
+      ta.push(said.slice());
+      ta.push(tw.eval(`(() => { const a = actx; actx = {state: "suspended", resume() { return Promise.resolve(); }}; drawAudioPill();
+        const t = document.getElementById("tabCaption").textContent; actx = a; drawAudioPill(); return t; })()`));
+      box.checked = false; box.dispatchEvent(new tw.Event("change"));
+      ta.push(tw.eval("JSON.stringify([speechOn, speakerHere(), localStorage.getItem('tabletAudio')])"));
+      tw.sayNow = realSay;
+      tw.eval('tabClose(document.getElementById("tabSettings"))');
+      got.tabletAudio = ta;
+    }
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
@@ -3552,12 +3574,14 @@ const settle = async maxMs => {
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], signOut: [true, false],
-      appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false], prefs: ["lcars", true, "true", null, "here"]};
+      appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false],
+      tabletAudio: ["[false,false]", false, '[true,true,"always","true"]', ["A line here."], "🔇 Tap anywhere to let Outrider speak here",
+                    '[false,false,"false"]'], prefs: ["lcars", true, "true", null, "here"]};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodT = !bad.length && !terr.length;
     allOk = allOk && goodT;
     console.log(goodT ? "OK" : "FAIL", "| tablet layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
-      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, Enter saves the rail, pinch, settings, the app's screens", terr);
+      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, Enter saves the rail, pinch, settings, the app's screens, Play alerts here", terr);
     tw.close();
   }
   // Settings (was the alerts dialog): folding sections remembered per device, open/close all, and Server settings drawn

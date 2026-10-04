@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Play alerts here, on the tablet
+- The tablet's Settings has **Play alerts here**: the tablet speaks the alerts (in Piper, from Outrider) and plays their
+  sounds itself, whether or not a PC browser does too. With a Docker server there is often no browser open at all.
+  When its browser holds audio back, the tablet's caption line says "Tap anywhere to let Outrider speak here".
+- With it on, the tablet counts as a window that speaks, so the answers you ask for are said there in Piper.
+
 ## 2026-10-04 · "Click Here To Allow Audio"; never the browser's voice with Piper
 - When the browser holds audio back until a click (after a page load or Outrider's own reload), the window that
   speaks shows a red **Click Here To Allow Audio** pill on the menu bar and 🔇 in its title. The tablet's caption line

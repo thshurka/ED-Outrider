@@ -165,8 +165,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   per-device storage, as the view is. `page_stamp` and `restart_needed` come from one cached refresh (`stamps()`), so
   they always agree; the served page takes a fresh one (`stamps(fresh=True)`).
 - **The tablet layout** (`body.tablet`, `TABLET` in page.js) is the same views in another shell, never a copy of them:
-  a view change works on both. The tablet never speaks, plays sounds or joins the one-speaker lock (`speakMode()` is
-  "never" there): keep any new sound or speech path behind `speakerHere()`. The browser's own voice is used only when
+  a view change works on both. The tablet never joins the one-speaker lock, and it is silent (`speakMode()` "never")
+  unless its Settings' Play alerts here is ticked (`tabletSpeaks()`, per tablet: then "always", whatever a PC window
+  does); keep any new sound or speech path behind `speakerHere()`. The browser's own voice is used only when
   the server has no Piper (`data.tts.available` false); while the browser holds audio back (`audioBlocked()`), the
   speaking window shows `#audioPill`, posts `/api/speaker/audio` (the payload's `speaker_audio_blocked`, on the
   tablet's caption line) and `sayNow` holds its line until the click (`audioUnlocked`), dropping it if stale. It has no Overview. The desktop page must
