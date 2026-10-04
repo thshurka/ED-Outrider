@@ -10,7 +10,7 @@ services:
     image: ed-outrider:local
     container_name: ed-outrider
     restart: unless-stopped
-    stop_grace_period: 2m          # a backup running at shutdown gets to finish
+    stop_grace_period: 6m          # a backup running at shutdown gets to finish (longer than ed_outrider.py's BACKUP_SHUTDOWN_WAIT, 5 min)
     user: "${UID:-1000}:${GID:-1000}"   # the files in docker/ stay yours
     ports:
       - "${PORT:-8025}:8025"

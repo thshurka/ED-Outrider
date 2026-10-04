@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Review fixes, batch A: Docker's first run, stopping during start-up, leftovers
+- Docker's first run works on a fresh clone: `docker/data`, `docker/config` and `docker/journals` come with the
+  repository (Docker made missing ones owned by root, and the container restarted forever, unable to write its
+  config: review R1). If a folder still can't be written, the container says how to fix it and waits.
+- Docker gives Outrider 6 minutes to stop, longer than its 5-minute wait for a running backup (R14); leftovers of a
+  backup killed part way (`.zip.part`, `.db-*.sqlite`) are removed at the next start.
+- A stop during the start-up journal import (docker stop, systemd) ends cleanly and keeps the journal files already
+  read: each is saved as it is read (R13).
+
 ## 2026-10-04 · Running as a server in Docker (the Docker plan, D4)
 - `Dockerfile` and `docker-compose.yml`: Outrider 24/7 on another computer (x86-64 or ARM), built from this checkout
   (`docker compose up -d --build`), Piper included. The journals come from the game PC over NFS or CIFS, read-only;

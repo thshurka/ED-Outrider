@@ -113,6 +113,69 @@ class Packaging(unittest.TestCase):
         self.assertIn('exec python ed_outrider.py --config "$CONFIG"', entry)
         self.assertTrue(ed_outrider.in_container("/nonexistent/.dockerenv", env={"OUTRIDER_CONTAINER": "1"}))
 
+    def test_folders_ship_and_are_checked(self):
+        """R1: a fresh clone has docker/data, config and journals (Docker would make missing ones as root, and the
+        container could not write them); the entrypoint checks it can write before anything else."""
+        import subprocess
+        for d in ("data", "config", "journals"):
+            keep = os.path.join("docker", d, ".gitkeep")
+            self.assertTrue(os.path.exists(os.path.join(self.ROOT, keep)), keep)
+            ignored = subprocess.run(["git", "check-ignore", "-q", keep], cwd=self.ROOT).returncode == 0
+            self.assertFalse(ignored, f"{keep} must be tracked")
+            self.assertEqual(subprocess.run(["git", "check-ignore", "-q", os.path.join("docker", d, "x.sqlite")], cwd=self.ROOT).returncode, 0)
+        self.assertEqual(subprocess.run(["git", "check-ignore", "-q", "data/ed_outrider.sqlite"], cwd=self.ROOT).returncode, 0)
+        entry = self.read("docker/entrypoint.sh")
+        self.assertLess(entry.index(".write-test"), entry.index("--write-config"))
+        self.assertIn("sleep infinity", entry)   # waits, not a restart loop
+
+    def test_stop_grace_outlasts_the_backup_wait(self):
+        """R14: Docker must not kill a backup that Outrider is still allowed to finish at shutdown."""
+        import re
+        m = re.search(r"stop_grace_period:\s*(\d+)([sm])", self.read("docker-compose.yml"))
+        secs = int(m.group(1)) * (60 if m.group(2) == "m" else 1)
+        self.assertGreaterEqual(secs, ed_outrider.BACKUP_SHUTDOWN_WAIT + 30)
+
+
+class StartUp(unittest.TestCase):
+    def test_import_keeps_each_file(self):
+        """R13: a stop part way through the start-up import keeps the journal files already read (each is committed)."""
+        with tempfile.TemporaryDirectory() as d:
+            jdir = os.path.join(d, "j")
+            os.makedirs(jdir)
+            for day in (1, 2, 3):   # three small journals, read in order
+                with open(os.path.join(jdir, f"Journal.2026-10-0{day}T000000.01.log"), "w") as f:
+                    f.write(f'{{"timestamp":"2026-10-0{day}T00:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0","build":"x"}}\n')
+            for commit_each, kept in ((True, 2), (False, 0)):
+                path = os.path.join(d, f"db{commit_each}.sqlite")
+                db = ed_outrider.open_db(path)
+                j = ed_outrider.Journals(db)
+                real, n = j.read_file, [0]
+
+                def read(p):
+                    n[0] += 1
+                    if n[0] == 3:
+                        raise SystemExit(0)   # the stop, during the third file
+                    return real(p)
+                j.read_file = read
+                with self.assertRaises(SystemExit):
+                    j.scan_dir(jdir, commit_each=commit_each)
+                db.close()
+                db = ed_outrider.open_db(path)
+                got = db.execute("SELECT count(*) FROM journal_files").fetchone()[0]   # files read, with their offsets
+                db.close()
+                self.assertEqual(got, kept, commit_each)
+
+    def test_backup_leftovers_swept(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("ed_outrider-2026-10-01.zip", "ed_outrider-2026-10-04.zip.part", ".db-ed_outrider-2026-10-04.sqlite",
+                         "notes.txt"):
+                open(os.path.join(d, name), "w").close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                removed = ed_outrider.sweep_backup_leftovers(d)
+            self.assertEqual(sorted(removed), [".db-ed_outrider-2026-10-04.sqlite", "ed_outrider-2026-10-04.zip.part"])
+            self.assertEqual(sorted(os.listdir(d)), ["ed_outrider-2026-10-01.zip", "notes.txt"])
+        self.assertEqual(ed_outrider.sweep_backup_leftovers("/nonexistent/backups"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

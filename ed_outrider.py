@@ -2302,8 +2302,9 @@ class Journals:
             self.db.commit()
             print(f"imported {n} journal files from {d}")
 
-    def scan_dir(self, d):
-        """Read new data from every journal in d. Returns the number of files touched."""
+    def scan_dir(self, d, commit_each=False):
+        """Read new data from every journal in d. Returns the number of files touched. commit_each: commit after every
+        file (the start-up import: a stop part way keeps the files already read; review R13)."""
         touched = 0
         for path in sorted(glob(os.path.join(glob_escape(d), "Journal.*.log"))):
             try:
@@ -2320,6 +2321,8 @@ class Journals:
                     continue
                 self.bad_files.discard(path)
                 touched += 1
+                if commit_each:
+                    self.db.commit()
         return touched
 
     def start_offset(self, path):
@@ -11243,10 +11246,22 @@ async def run(args, st):
     db = open_db(args.db, rescan=args.rescan)
     journals = Journals(db)
 
+    # a stop (SIGTERM: docker stop, systemd) during the import, which is synchronous: end at once with what is read
+    # kept (each journal file is committed as it is read) instead of being killed with it all rolled back (review R13);
+    # once serving, the event loop's handler below takes over and stops through the usual cleanup
+    def stop_during_start(signum, frame):
+        db.commit()
+        print("stopped during start-up (the journals not read yet are read at the next start)")
+        raise SystemExit(0)
+    try:
+        signal.signal(signal.SIGTERM, stop_during_start)
+    except ValueError:   # not the main thread (a test): no handler
+        pass
+    sweep_backup_leftovers(BACKUP_DIR)
     t = time.time()
     journals.import_legacy()
     for d in LIVE_DIRS:
-        journals.scan_dir(d)
+        journals.scan_dir(d, commit_each=True)
         journals.read_navroute(d)
         journals.read_status(d)
     db.commit()
@@ -11412,6 +11427,27 @@ async def run(args, st):
 
 
 BACKUP_SHUTDOWN_WAIT = 300   # s a backup running at shutdown (the quit backup) gets to finish and be recorded
+# (docker-compose.yml's stop_grace_period must be longer than this, or Docker kills the backup part way: review R14)
+
+
+def sweep_backup_leftovers(folder):
+    """At start (no backup runs yet): remove what a backup killed part way left behind (a .zip.part and its .db-*.sqlite
+    copy), which rotation never touches (review R14). Returns the names removed."""
+    removed = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return removed
+    for name in names:
+        if name.endswith(".zip.part") or (name.startswith(".db-") and name.endswith(".sqlite")):
+            try:
+                os.remove(os.path.join(folder, name))
+                removed.append(name)
+            except OSError:
+                pass
+    if removed:
+        print(f"backup: removed what an interrupted backup left: {', '.join(sorted(removed))}")
+    return removed
 
 
 async def finish_backup(state, wait=None):

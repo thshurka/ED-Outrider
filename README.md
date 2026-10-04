@@ -284,8 +284,10 @@ its own database; set `[spansh] watch_firsts = false` on one, or both check the 
    - **CIFS / Samba:** share the folder read-only on the game PC, and mount it on the server
      (`//gamepc/elite-journals /mnt/elite-journals cifs ro,username=you,password=…,vers=3.0 0 0`).
    - Or let Docker mount it: `docker-compose.yml` has NFS and CIFS volume examples.
-2. **On the server**, from a clone of this repository: create `.env` beside `docker-compose.yml` with
-   `JOURNALS=/mnt/elite-journals` (and `UID=`/`GID=` if yours are not 1000), then `docker compose up -d --build`.
+2. **On the server**, from a clone of this repository (as the user who will own the files): create `.env` beside
+   `docker-compose.yml` with `JOURNALS=/mnt/elite-journals` (and `UID=`/`GID=` if yours are not 1000), then
+   `docker compose up -d --build`. The `docker/data` and `docker/config` folders come with the clone; if the
+   container says it cannot write them, `sudo chown -R $(id -u):$(id -g) docker/` and `docker compose restart`.
 3. **First run:** it writes `docker/config/ed_outrider.toml` (every network address, the journals at `/journals`).
    Open `http://<server>:8025/`, then ⚙ Settings → Server settings: set a **password** (nothing on a server counts as
    "this PC", so every device signs in, your own browser too) and add the server's network name to
