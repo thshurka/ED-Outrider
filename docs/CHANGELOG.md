@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · The tablet's Settings opens the app's own screens
+- In the Android app, the tablet's Settings sheet has a **Tablet app** section: Server… (which Outrider it connects
+  to), Voice… (the wake word, sensitivity, the headset button) and App menu…, so they no longer need the Back
+  gesture. Each button shows only when the app has that screen (app 1.1 or later); in a browser the section is hidden.
+- The sheet names the app with its version ("ED Outrider for Android 1.1.0").
+
 ## 2026-10-04 · Docker: one project name, and how to update a bundle
 - `docker-compose.yml` names its project `ed-outrider`, so a newer bundle's `docker compose up -d` replaces the
   running container instead of failing on its name (and a checkout and a bundle are the same project). A checkout

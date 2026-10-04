@@ -7029,6 +7029,7 @@ function tabSetup() {
   };
   document.getElementById("tabStatus").onclick = () => postCopilot({action: "status"}, "ask for a status report");
   document.getElementById("tabSetBtn").onclick = tabOpenSettings;
+  for (const [id, fn] of TAB_APP_SCREENS) document.getElementById(id).onclick = () => tabAppScreen(fn);
   // Ask (the app's voice): only where the app can listen; it shows its own "listening" and posts api/ask, and the
   // answer comes back as a caption like any other
   document.getElementById("tabAsk").onclick = () => { const a = window.OutriderApp; if (a && typeof a.listen === "function") { try { a.listen(); } catch {} } };
@@ -7180,13 +7181,27 @@ function tabOpenRow(table, tr) {
     (bm ? `<button type="button" class="tb-btn" data-act="bm" data-id="${esc(bm.dataset.bm)}" data-name="${esc(bm.dataset.name || name)}">Bookmark…</button>` : "");
   tabShow(document.getElementById("tabSheet"));
 }
-// ---- the settings sheet: the theme, dim, this screen's size (CSS px), the app's version, sign out ----
+// ---- the settings sheet: the theme, dim, this screen's size (CSS px), the app's version, sign out, and the app's own
+// screens (OutriderApp.openServer / openVoice / openMenu: the page stays loaded underneath while one is open) ----
+const TAB_APP_SCREENS = [["tabAppServer", "openServer"], ["tabAppVoice", "openVoice"], ["tabAppMenu", "openMenu"]];
+function tabAppScreen(fn) {
+  const app = window.OutriderApp;
+  tabClose(document.getElementById("tabSettings"));
+  try { if (app && typeof app[fn] === "function") app[fn](); } catch {}
+}
 async function tabOpenSettings() {
   document.getElementById("tabViewport").textContent = `${innerWidth} × ${innerHeight} CSS px at ${+(window.devicePixelRatio || 1).toFixed(2)}×`;
   const app = window.OutriderApp;
   let ver = "a browser (no app)";
-  if (app) { try { ver = typeof app.appVersion === "function" ? String(app.appVersion()) : "the app"; } catch { ver = "the app"; } }
+  if (app) { try { ver = typeof app.appVersion === "function" ? `ED Outrider for Android ${app.appVersion()}` : "the app"; } catch { ver = "the app"; } }
   document.getElementById("tabAppVer").textContent = ver;
+  // the app's own screens (bridge calls added in app 1.1; each one feature-detected, an older app has none of them)
+  let anyApp = false;
+  for (const [id, fn] of TAB_APP_SCREENS) {
+    const has = !!app && typeof app[fn] === "function";
+    document.getElementById(id).hidden = !has; anyApp = anyApp || has;
+  }
+  document.getElementById("tabAppBox").hidden = !anyApp;
   const st = document.getElementById("tabSignState"), out = document.getElementById("tabSignOut");
   st.textContent = "…"; out.disabled = true;
   tabShow(document.getElementById("tabSettings"));

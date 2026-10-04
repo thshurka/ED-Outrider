@@ -129,6 +129,7 @@ html.tb-dim body.tablet { filter: brightness(.55); }
 .tb-row select { min-height: 40px; font: inherit; }
 .tb-row input[type=checkbox] { width: 26px; height: 26px; }
 .tb-note { margin: 0; color: var(--muted); font-size: 15px; }
+.tb-sub { margin: 6px 0 8px; font-size: 17px; }
 /* ---- the views inside the shell ---- */
 /* the desktop's own head (the six tiles, the tab buttons, the icons) gives way to the shell; its strips stay */
 body.tablet header { padding: 0 4px 4px; border-bottom: 0; }

@@ -3475,6 +3475,16 @@ const settle = async maxMs => {
     td.getElementById("tabDim").checked = true; td.getElementById("tabDim").dispatchEvent(new tw.Event("change"));
     got.prefs = [td.documentElement.dataset.theme, td.documentElement.classList.contains("tb-dim"), tw.localStorage.getItem("tabletDim"),
                  tw.localStorage.getItem("view"), JSON.parse(tw.localStorage.getItem("tabletView"))];
+    // the app's own screens: hidden in a browser; in the app, a button per bridge call it has (feature-detected)
+    got.appScreens = [td.getElementById("tabAppBox").hidden];
+    tw.OutriderApp = {appVersion: () => "1.2.0", openServer() { calls.push("server"); }, openVoice() { calls.push("voice"); }};
+    const calls = [];
+    td.getElementById("tabSetBtn").click(); await settle(500);
+    got.appScreens.push(td.getElementById("tabAppBox").hidden, ["tabAppServer", "tabAppVoice", "tabAppMenu"].map(id => td.getElementById(id).hidden),
+                        td.getElementById("tabAppVer").textContent);
+    td.getElementById("tabAppVoice").click();
+    got.appScreens.push(calls, td.getElementById("tabSettings").hasAttribute("open"));
+    delete tw.OutriderApp;
     const want = {desk: [true, true, true, true], shell: [true, true, true, true, true], moved: [true, true, true], theme: "lcars", start: "now",
       quiet: [false, false, "never", false], status: [true, true], pages: [],
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
@@ -3487,12 +3497,13 @@ const settle = async maxMs => {
       reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
-      settings: [true, true, "a browser (no app)", true], prefs: ["lcars", true, "true", null, "here"]};
+      settings: [true, true, "a browser (no app)", true],
+      appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false], prefs: ["lcars", true, "true", null, "here"]};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodT = !bad.length && !terr.length;
     allOk = allOk && goodT;
     console.log(goodT ? "OK" : "FAIL", "| tablet layout |", bad.length ? `failed ${bad.join(", ")}: ${JSON.stringify(Object.fromEntries(bad.map(k => [k, got[k]])))}`
-      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, Enter saves the rail, pinch, settings", terr);
+      : "shell shown, every page from its nav, silent, map switch to Now and back, link in words, banner, row sheet, no countdown, Enter saves the rail, pinch, settings, the app's screens", terr);
     tw.close();
   }
   // Settings (was the alerts dialog): folding sections remembered per device, open/close all, and Server settings drawn
