@@ -1,0 +1,52 @@
+/* Narn, a tablet theme (data-theme="narn"): the Narn Regime's consoles from Babylon 5, evoked, not copied. Dark
+   red-brown, rust-red panels, ochre-gold accents, parchment text; heavy angular panels with wedge cuts. Fonts: Russo One
+   (headings) and Exo 2 (text), both SIL OFL 1.1, in static/fonts/ with their licences. Your own heading font goes first
+   if you drop it in as data/fonts/narn-display.ttf (served at /userfonts/; never committed). No show assets. */
+@font-face { font-family: "Narn Display"; font-display: swap;
+  src: url("../../userfonts/narn-display.ttf") format("truetype"), url("../fonts/RussoOne-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Exo 2"; font-weight: 100 900; font-display: swap; src: url("../fonts/Exo2-VF.ttf") format("truetype"); }
+
+:root[data-theme="narn"] {
+  --nn-bg: #120806; --nn-rust: #B83A1E; --nn-rust2: #7A2A18; --nn-ochre: #E0A040; --nn-text: #E8C9A0; --nn-amber: #FFC24B;
+  --nn-panel: #22100B; --nn-line: #4E2216; --nn-cut: 2px; --nn-wedge: 16px;
+  --bg: var(--nn-bg); --panel: var(--nn-panel); --line: var(--nn-line); --text: var(--nn-text); --muted: #B8957A;
+  --accent: var(--nn-ochre); --good: #C8D27A; --warn: var(--nn-amber); --bad: #FF7A5C; --info: var(--nn-ochre);
+  --hot: #C8D27A; --biohot: #E0A0C8;
+  --tb-font: "Exo 2", system-ui, sans-serif; --tb-font-display: "Narn Display", "Exo 2", sans-serif;
+  --tb-case: uppercase; --tb-track: 1px; --tb-size: 17px;
+  --tb-title: var(--nn-ochre);
+  --tb-chip-bg: var(--nn-panel); --tb-chip-k: var(--nn-ochre); --tb-chip-v: var(--nn-text); --tb-chip-radius: 0;
+  --tb-group-bg: var(--nn-rust2); --tb-group-fg: var(--nn-text); --tb-group-open-bg: var(--nn-rust); --tb-group-open-fg: var(--nn-bg);
+  --tb-group-radius: 0; --tb-page-radius: 0;
+  --tb-page-bg: var(--nn-panel); --tb-page-fg: var(--nn-text); --tb-page-on-bg: var(--nn-ochre); --tb-page-on-fg: var(--nn-bg);
+  --tb-fill: var(--nn-rust2);
+  --tb-btn-bg: var(--nn-rust); --tb-btn-fg: var(--nn-bg); --tb-btn-on-bg: var(--nn-ochre); --tb-btn-on-fg: var(--nn-bg); --tb-btn-radius: 0;
+  --tb-link-ok: var(--nn-ochre); --tb-link-stale: var(--nn-amber); --tb-link-none: #FF7A5C;
+  --tb-rail-border: var(--nn-line); --tb-sheet-bg: #180A07; --tb-sheet-border: var(--nn-rust); --tb-sheet-radius: 0;
+  --tb-banner-bg: #180A07; --tb-banner-fg: var(--nn-text); --tb-banner-border: var(--nn-rust); --tb-danger: var(--nn-amber);
+  --tb-rb-on-bg: var(--nn-ochre); --tb-rb-on-fg: var(--nn-bg); --tb-rb-off-bg: var(--nn-rust2); --tb-rb-off-fg: var(--nn-text);
+  --tb-rb-high-bg: #F2C878; --tb-rb-pend-bg: var(--nn-panel); --tb-rb-pend-fg: var(--nn-amber); --tb-rb-unk-border: #8A5A40;
+  --tb-rb-unk-fg: #B8957A; --tb-rb-dim: var(--nn-line); --tb-rb-dim-fg: #8A6A55; --tb-rb-amber: var(--nn-amber); --tb-rb-radius: 0;
+  color-scheme: dark;
+}
+:root[data-theme="narn"] body.tablet { background: var(--nn-bg); color: var(--text); }
+/* heavy and angular: a small chamfer everywhere, a wedge cut off the big blocks */
+[data-theme="narn"] .tb-chip, [data-theme="narn"] .tb-link, [data-theme="narn"] .tb-page, [data-theme="narn"] .tb-btn,
+[data-theme="narn"] .tb-sheet, [data-theme="narn"] .tb-banner, [data-theme="narn"] .tb-voice, [data-theme="narn"] body.tablet .pane {
+  clip-path: polygon(var(--nn-cut) 0, calc(100% - var(--nn-cut)) 0, 100% var(--nn-cut), 100% calc(100% - var(--nn-cut)),
+                     calc(100% - var(--nn-cut)) 100%, var(--nn-cut) 100%, 0 calc(100% - var(--nn-cut)), 0 var(--nn-cut)); }
+[data-theme="narn"] .tb-group, [data-theme="narn"] .tb-rb { clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--nn-wedge)), calc(100% - var(--nn-wedge)) 100%, 0 100%); }
+[data-theme="narn"] .tb-group { border-left: 6px solid var(--nn-ochre); }
+[data-theme="narn"] .tb-head .tb-corner { background: var(--nn-rust); clip-path: polygon(0 0, 100% 0, 100% 40%, 60% 100%, 0 100%); }
+[data-theme="narn"] .tb-head .tb-bar { border-bottom: 4px solid var(--nn-rust); }
+[data-theme="narn"] .tb-foot .tb-corner { background: var(--nn-rust2); clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); }
+[data-theme="narn"] .tb-foot .tb-bar { border-top: 2px solid var(--nn-rust2); }
+[data-theme="narn"] .tb-chip { border: 1px solid var(--nn-line); }
+[data-theme="narn"] .tb-page { border-left: 4px solid var(--nn-rust2); }
+[data-theme="narn"] .tb-page.on { border-left-color: var(--nn-rust); }
+[data-theme="narn"] body.tablet th { color: var(--nn-ochre); }
+[data-theme="narn"] body.tablet tr.target td { background: rgba(224, 160, 64, .14); }
+[data-theme="narn"] body.tablet #nowView .now-sys { color: var(--nn-ochre); font-family: var(--tb-font-display); text-transform: uppercase; letter-spacing: 1px; }
+[data-theme="narn"] .tb-sheet h2 { color: var(--nn-ochre); }
+[data-theme="narn"] .tb-chip .tb-k { font-size: 12px; } [data-theme="narn"] .tb-link { font-size: 13px; }
+[data-theme="narn"] .tb-rbl b { font-size: 14px; } [data-theme="narn"] .tb-page { font-size: 15px; }

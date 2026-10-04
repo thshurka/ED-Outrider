@@ -38,7 +38,7 @@ const TABLET = typeof document !== "undefined" && !!document.body && document.bo
 // (null: you were on Now already, or chose a page since); mapWas: whether the map showed at the last draw
 const TB = {group: null, beforeMap: null, mapWas: false, bannerTimer: null, bannerKey: null,
             groups: {explore: ["now", "near", "here", "bio"], navigate: ["bm", "search", "map", "hwy"], records: ["hist", "log", "mat", "firsts"]},
-            themes: ["lcars", "elite", "babylon5"], railPending: {}, railEdit: null};
+            themes: ["lcars", "elite", "babylon5", "narn", "sith", "alliance"], railPending: {}, railEdit: null};
 // Where you are, as the exact id64 string (position.id). The JSON number position.id64 loses the last digits above
 // 2^53, so string comparisons with the server's exact ids (arrival, Here, moments) must use this.
 const posId = () => data && data.position ? data.position.id ?? String(data.position.id64) : null;

@@ -1,0 +1,48 @@
+/* Alliance, a tablet theme (data-theme="alliance"): Rebel Alliance cockpits from Star Wars, evoked, not copied. Dark
+   blue-black, cockpit orange and sand panels, blue for what is active or chosen, off-white text, slightly rounded
+   console panels. Fonts: Oxanium (headings) and Rajdhani (text), both SIL OFL 1.1, in static/fonts/ with their licences.
+   Your own heading font goes first if you drop it in as data/fonts/alliance-display.ttf (served at /userfonts/; never
+   committed). No film assets. */
+@font-face { font-family: "Alliance Display"; font-weight: 200 800; font-display: swap;
+  src: url("../../userfonts/alliance-display.ttf") format("truetype"), url("../fonts/Oxanium-VF.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 400; font-display: swap; src: url("../fonts/Rajdhani-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 500; font-display: swap; src: url("../fonts/Rajdhani-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 600 700; font-display: swap; src: url("../fonts/Rajdhani-SemiBold.ttf") format("truetype"); }
+
+:root[data-theme="alliance"] {
+  --al-bg: #0B0F14; --al-orange: #F28C28; --al-sand: #C9B98F; --al-blue: #4FA3D9; --al-text: #F2EBDD; --al-red: #E8453C;
+  --al-panel: #141A22; --al-line: #2A3442;
+  --bg: var(--al-bg); --panel: var(--al-panel); --line: var(--al-line); --text: var(--al-text); --muted: #A9A08A;
+  --accent: var(--al-orange); --good: #8FD08A; --warn: #F2C94C; --bad: var(--al-red); --info: var(--al-blue);
+  --hot: #8FD08A; --biohot: #C8A8E8;
+  --tb-font: "Rajdhani", system-ui, sans-serif; --tb-font-display: "Alliance Display", "Rajdhani", sans-serif;
+  --tb-case: uppercase; --tb-track: 1px; --tb-size: 18px;
+  --tb-title: var(--al-orange);
+  --tb-chip-bg: var(--al-panel); --tb-chip-k: var(--al-sand); --tb-chip-v: var(--al-text); --tb-chip-radius: 6px;
+  --tb-group-bg: var(--al-sand); --tb-group-fg: var(--al-bg); --tb-group-open-bg: var(--al-orange); --tb-group-open-fg: var(--al-bg);
+  --tb-group-radius: 6px; --tb-page-radius: 6px;
+  --tb-page-bg: var(--al-panel); --tb-page-fg: var(--al-text); --tb-page-on-bg: var(--al-blue); --tb-page-on-fg: var(--al-bg);
+  --tb-fill: transparent;
+  --tb-btn-bg: var(--al-sand); --tb-btn-fg: var(--al-bg); --tb-btn-on-bg: var(--al-blue); --tb-btn-on-fg: var(--al-bg); --tb-btn-radius: 6px;
+  --tb-link-ok: var(--al-blue); --tb-link-stale: #F2C94C; --tb-link-none: var(--al-red);
+  --tb-rail-border: var(--al-line); --tb-sheet-bg: #0E141B; --tb-sheet-border: var(--al-orange); --tb-sheet-radius: 6px;
+  --tb-banner-bg: #0E141B; --tb-banner-fg: var(--al-text); --tb-banner-border: var(--al-orange); --tb-danger: var(--al-red);
+  --tb-rb-on-bg: var(--al-orange); --tb-rb-on-fg: var(--al-bg); --tb-rb-off-bg: var(--al-panel); --tb-rb-off-fg: var(--al-text);
+  --tb-rb-high-bg: #FFB45E; --tb-rb-pend-bg: var(--al-panel); --tb-rb-pend-fg: var(--al-blue); --tb-rb-unk-border: var(--al-sand);
+  --tb-rb-unk-fg: var(--al-sand); --tb-rb-dim: var(--al-line); --tb-rb-dim-fg: #7D8796; --tb-rb-amber: #F2C94C; --tb-rb-radius: 6px;
+  color-scheme: dark;
+}
+:root[data-theme="alliance"] body.tablet { background: var(--al-bg); color: var(--text); }
+/* console panels: a sand frame at the head, orange and sand blocks, blue for the page you are on */
+[data-theme="alliance"] .tb-head .tb-corner { background: var(--al-orange); border-radius: 6px; margin: 6px 6px 6px 0; }
+[data-theme="alliance"] .tb-head .tb-bar { border: 2px solid var(--al-sand); border-radius: 6px; margin: 6px 0; }
+[data-theme="alliance"] .tb-foot .tb-corner { background: var(--al-sand); border-radius: 6px; margin: 6px 6px 6px 0; }
+[data-theme="alliance"] .tb-foot .tb-bar { border: 1px solid var(--al-line); border-radius: 6px; margin: 4px 0; }
+[data-theme="alliance"] .tb-chip, [data-theme="alliance"] .tb-page, [data-theme="alliance"] .tb-rb { border: 1px solid var(--al-line); }
+[data-theme="alliance"] .tb-rb.on { border-color: var(--al-orange); }
+[data-theme="alliance"] body.tablet th { color: var(--al-sand); }
+[data-theme="alliance"] body.tablet tr.target td { background: rgba(79, 163, 217, .14); }
+[data-theme="alliance"] body.tablet #nowView .now-sys { color: var(--al-orange); font-family: var(--tb-font-display); text-transform: uppercase; letter-spacing: 1px; }
+[data-theme="alliance"] .tb-sheet h2 { color: var(--al-orange); }
+[data-theme="alliance"] .tb-chip .tb-k { font-size: 12px; } [data-theme="alliance"] .tb-link { font-size: 13px; }
+[data-theme="alliance"] .tb-rbl b { font-size: 15px; } [data-theme="alliance"] .tb-page { font-size: 15px; }

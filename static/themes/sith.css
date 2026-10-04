@@ -1,0 +1,56 @@
+/* Sith, a tablet theme (data-theme="sith"): Imperial and Sith consoles from Star Wars, evoked, not copied. Pure black,
+   crimson for what matters, cold steel-white text, thin hard-edged lines, sparse. Fonts: Share Tech Mono (headings and
+   labels) and Rajdhani (text), both SIL OFL 1.1, in static/fonts/ with their licences. Your own heading font goes first if
+   you drop it in as data/fonts/sith-display.ttf (served at /userfonts/; never committed). No film assets. */
+@font-face { font-family: "Sith Display"; font-display: swap;
+  src: url("../../userfonts/sith-display.ttf") format("truetype"), url("../fonts/ShareTechMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Share Tech Mono"; font-display: swap; src: url("../fonts/ShareTechMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 400; font-display: swap; src: url("../fonts/Rajdhani-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 500; font-display: swap; src: url("../fonts/Rajdhani-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Rajdhani"; font-weight: 600 700; font-display: swap; src: url("../fonts/Rajdhani-SemiBold.ttf") format("truetype"); }
+
+:root[data-theme="sith"] {
+  --sh-red: #D0021B; --sh-red2: #5A0A12; --sh-steel: #E8E8E8; --sh-text: #C9CED6; --sh-amber: #FFB000;
+  --sh-panel: #0A0A0B; --sh-line: #2A2D33; --sh-cut: 8px;
+  --bg: #000000; --panel: var(--sh-panel); --line: var(--sh-line); --text: var(--sh-text); --muted: #8B919B;
+  --accent: var(--sh-red); --good: #9FD4C0; --warn: var(--sh-amber); --bad: #FF5A6A; --info: var(--sh-steel);
+  --hot: #9FD4C0; --biohot: #C8A8E8;
+  --tb-font: "Rajdhani", system-ui, sans-serif; --tb-font-display: "Sith Display", "Share Tech Mono", monospace;
+  --tb-case: uppercase; --tb-track: 1.5px; --tb-size: 18px;
+  --tb-title: var(--sh-steel);
+  --tb-chip-bg: transparent; --tb-chip-k: #8B919B; --tb-chip-v: var(--sh-steel); --tb-chip-radius: 0;
+  --tb-group-bg: transparent; --tb-group-fg: var(--sh-text); --tb-group-open-bg: var(--sh-red); --tb-group-open-fg: #000;
+  --tb-group-radius: 0; --tb-page-radius: 0;
+  --tb-page-bg: transparent; --tb-page-fg: var(--sh-text); --tb-page-on-bg: rgba(208, 2, 27, .18); --tb-page-on-fg: var(--sh-steel);
+  --tb-fill: transparent;
+  --tb-btn-bg: transparent; --tb-btn-fg: var(--sh-text); --tb-btn-on-bg: var(--sh-red); --tb-btn-on-fg: #000; --tb-btn-radius: 0;
+  --tb-link-ok: var(--sh-steel); --tb-link-stale: var(--sh-amber); --tb-link-none: #FF5A6A;
+  --tb-rail-border: var(--sh-line); --tb-sheet-bg: #050506; --tb-sheet-border: var(--sh-red); --tb-sheet-radius: 0;
+  --tb-banner-bg: #050506; --tb-banner-fg: var(--sh-steel); --tb-banner-border: var(--sh-red); --tb-danger: var(--sh-amber);
+  --tb-rb-on-bg: var(--sh-red); --tb-rb-on-fg: #000; --tb-rb-off-bg: transparent; --tb-rb-off-fg: var(--sh-text);
+  --tb-rb-high-bg: #FF4A5E; --tb-rb-pend-bg: transparent; --tb-rb-pend-fg: var(--sh-steel); --tb-rb-unk-border: var(--sh-line);
+  --tb-rb-unk-fg: #8B919B; --tb-rb-dim: #1E2025; --tb-rb-dim-fg: #6A7079; --tb-rb-amber: var(--sh-amber); --tb-rb-radius: 0;
+  color-scheme: dark;
+}
+:root[data-theme="sith"] body.tablet { background: #000; color: var(--text); }
+/* thin hard lines with cut corners; crimson only on what is on or chosen */
+[data-theme="sith"] .tb-chip, [data-theme="sith"] .tb-link, [data-theme="sith"] .tb-group, [data-theme="sith"] .tb-page,
+[data-theme="sith"] .tb-btn, [data-theme="sith"] .tb-rb, [data-theme="sith"] .tb-sheet, [data-theme="sith"] .tb-banner, [data-theme="sith"] .tb-voice {
+  clip-path: polygon(var(--sh-cut) 0, 100% 0, 100% calc(100% - var(--sh-cut)), calc(100% - var(--sh-cut)) 100%, 0 100%, 0 var(--sh-cut)); }
+[data-theme="sith"] .tb-chip, [data-theme="sith"] .tb-group, [data-theme="sith"] .tb-btn, [data-theme="sith"] .tb-rb { border: 1px solid var(--sh-line); }
+[data-theme="sith"] .tb-group.open, [data-theme="sith"] .tb-rb.on { border-color: var(--sh-red); }
+[data-theme="sith"] .tb-page { border-left: 2px solid var(--sh-line); }
+[data-theme="sith"] .tb-page.on { border-left-color: var(--sh-red); }
+[data-theme="sith"] .tb-pages { padding-left: 12px; }
+[data-theme="sith"] .tb-head .tb-corner { border-top: 2px solid var(--sh-red); border-left: 2px solid var(--sh-red); margin: 6px 0 0; }
+[data-theme="sith"] .tb-head .tb-bar { border-bottom: 1px solid var(--sh-line); }
+[data-theme="sith"] .tb-foot .tb-corner { border-bottom: 2px solid var(--sh-red); border-left: 2px solid var(--sh-red); margin: 0 0 6px; }
+[data-theme="sith"] .tb-foot .tb-bar { border-top: 1px solid var(--sh-line); }
+[data-theme="sith"] .tb-title { letter-spacing: 4px; font-size: 20px; }
+[data-theme="sith"] body.tablet th { color: #8B919B; font-family: var(--tb-font-display); }
+[data-theme="sith"] body.tablet tr.target td { background: rgba(208, 2, 27, .14); }
+[data-theme="sith"] body.tablet #nowView .now-sys { color: var(--sh-steel); font-family: var(--tb-font-display); text-transform: uppercase; letter-spacing: 3px; }
+[data-theme="sith"] .tb-sheet h2 { color: var(--sh-steel); }
+[data-theme="sith"] .tb-chip .tb-k { font-size: 12px; } [data-theme="sith"] .tb-link { font-size: 13px; letter-spacing: 1px; }
+[data-theme="sith"] .tb-rbl b { font-size: 14px; letter-spacing: 1px; } [data-theme="sith"] .tb-page { font-size: 15px; }
+[data-theme="sith"] .tb-btn, [data-theme="sith"] .tb-voice { font-size: 13px; }

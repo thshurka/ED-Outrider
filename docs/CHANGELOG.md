@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-03 · Three more tablet themes: Narn, Sith and Rebel Alliance
+- Narn (Babylon 5's Narn Regime): dark red-brown, rust panels with wedge cuts, ochre accents, parchment text.
+- Sith (Star Wars' Empire): black, crimson for what is on, steel-white text, thin hard lines with cut corners.
+- Rebel Alliance (Star Wars): blue-black, cockpit orange and sand panels, blue for what is chosen, rounded consoles.
+- Fonts (SIL OFL, shipped): Russo One, Share Tech Mono, Rajdhani, Oxanium; a heading font of your own as
+  data/fonts/narn-display.ttf, sith-display.ttf or alliance-display.ttf.
+
 ## 2026-10-03 · Rail: where an unbound control is bound; captions as written; "restart to finish updating"
 - A rail button bound only on your HOTAS says so ("On Joy 5 only: add a keyboard key"): the rail presses keys through
   a virtual keyboard, and the game takes a joystick button only from that joystick (found with Night Vision, Ship
