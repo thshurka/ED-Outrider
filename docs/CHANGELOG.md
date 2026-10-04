@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Stopping cleanly on SIGTERM; the MCP bridge signs in (the Docker plan, D3)
+- SIGTERM (docker stop, a systemd service) now stops Outrider as Ctrl-C does: its work saved, the quit backup
+  finished, exit code 0. It used to end at once.
+- The MCP bridge can reach an Outrider on another computer, which asks for its password: `[mcp] password` (or
+  `--password`); it signs in and says so when the password is missing or wrong.
+- The start-up note no longer says "no authentication" when a password is set.
+
 ## 2026-10-04 · Server mode leaves the game PC's controls out (the Docker plan, D2)
 - With `game_pc` off, the pages show nothing that needs the game PC: Settings' Auto honk section, "Play speech and
   sounds on this PC", the Highway's auto-target box, its 🎯 / Retry buttons and clipboard line, and on the tablet (and

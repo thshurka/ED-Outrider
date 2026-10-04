@@ -17,7 +17,7 @@ SECTION_TITLES = {"journals": "Journal folders", "server": "Server: network, pas
                   "defaults": "Defaults for new browsers", "spansh": "Spansh", "speech": "Speech on this PC",
                   "autohonk": "Auto honk", "copilot": "Co-pilot button", "highway": "Neutron Highway and auto-target",
                   "assistant": "Voice: the AI layer", "mcp": "MCP bridge (AI clients)"}
-SECRETS = {("server", "password"), ("assistant", "api_key")}   # never sent to the page, only "set" or not
+SECRETS = {("server", "password"), ("assistant", "api_key"), ("mcp", "password")}   # never sent to the page, only "set" or not
 HEADER = re.compile(r"^\s*\[\s*([A-Za-z0-9_.-]+)\s*\]")
 KEYLINE = re.compile(r"^(\s*)(#\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 

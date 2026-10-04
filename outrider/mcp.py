@@ -38,12 +38,16 @@ def mcp_settings(cfg):
         print(f"config: [mcp] url = {url!r} must be an http:// address, e.g. \"http://127.0.0.1:8025\"; using this PC",
               file=sys.stderr)
         url = ""
+    password = m.get("password", "")
+    if not isinstance(password, str):
+        print("config: [mcp] password must be text in quotes; ignored", file=sys.stderr)
+        password = ""
     rows = m.get("max_rows", tools.DEFAULT_ROWS)
     if isinstance(rows, bool) or not isinstance(rows, int) or not 1 <= rows <= MAX_ROWS:
         print(f"config: [mcp] max_rows = {rows!r} must be a whole number from 1 to {MAX_ROWS}; using {tools.DEFAULT_ROWS}",
               file=sys.stderr)
         rows = tools.DEFAULT_ROWS
-    return {"mcp_url": url.rstrip("/"), "mcp_rows": rows}
+    return {"mcp_url": url.rstrip("/"), "mcp_rows": rows, "mcp_password": password}
 
 
 def default_url(cfg):
@@ -53,18 +57,34 @@ def default_url(cfg):
     return f"http://127.0.0.1:{port if isinstance(port, int) and not isinstance(port, bool) else 8025}"
 
 
-def http_get(base, timeout=HTTP_TIMEOUT):
+def http_get(base, timeout=HTTP_TIMEOUT, password=""):
     """An async `get(path, params)` for the tools: a GET to the running Outrider, its JSON (a 4xx's {"error"} too);
-    Unavailable when it cannot be reached or answers something else."""
+    Unavailable when it cannot be reached or answers something else. On this PC no password is needed; a server
+    elsewhere (Docker) asks for its [server] password: given here ([mcp] password), the bridge signs in once and sends
+    the session as a Bearer token, signing in again if the session ends."""
     import aiohttp
+    session = {"token": None}
+
+    async def signin(s):
+        async with s.post(base + "/api/auth/signin", json={"password": password},
+                          headers={"User-Agent": "outrider-mcp"}) as r:
+            d = await r.json(content_type=None)
+            session["token"] = d.get("token") if r.status == 200 and isinstance(d, dict) else None
 
     async def get(path, params):
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as s:
-                async with s.get(base + tools.query(path, params)) as r:
-                    if r.status >= 500:
-                        raise tools.Unavailable(f"HTTP {r.status}")
-                    return await r.json(content_type=None)
+                for attempt in (1, 2):
+                    headers = {"Authorization": f"Bearer {session['token']}"} if session["token"] else {}
+                    async with s.get(base + tools.query(path, params), headers=headers) as r:
+                        if r.status == 401 and password and attempt == 1:
+                            await signin(s)   # the server wants a session: sign in and ask again
+                            continue
+                        if r.status >= 500:
+                            raise tools.Unavailable(f"HTTP {r.status}")
+                        if r.status == 401:
+                            raise tools.Refused("this Outrider asks for a password: set [mcp] password (its [server] password)")
+                        return await r.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
             raise tools.Unavailable(str(e)) from e
     return get
@@ -140,6 +160,7 @@ def main(argv=None):
                                  "client over MCP (stdio). Started by the client, not by hand.")
     ap.add_argument("--config", default=os.path.join(outrider.ROOT, "ed_outrider.toml"), help="the config file")
     ap.add_argument("--url", help="the running Outrider (default: [mcp] url, else this PC at [server] port)")
+    ap.add_argument("--password", help="the server's [server] password (default: [mcp] password); only for an Outrider elsewhere")
     ap.add_argument("--list", action="store_true", help="print the tools and exit")
     args = ap.parse_args(argv)
     cfg = {}
@@ -156,7 +177,7 @@ def main(argv=None):
             print(f"{t['name']}: {t['description']}")
         return 0
     print(f"outrider.mcp: serving {len(tools.TOOLS)} read-only tools from {url}", file=sys.stderr)
-    serve(sys.stdin, sys.stdout, runner(http_get(url), st["mcp_rows"]))
+    serve(sys.stdin, sys.stdout, runner(http_get(url, password=args.password or st["mcp_password"]), st["mcp_rows"]))
     return 0
 
 

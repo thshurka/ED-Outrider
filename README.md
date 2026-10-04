@@ -261,7 +261,8 @@ It can only read: it never presses keys, plots, bookmarks or hushes anything. No
 - **Claude desktop app:** add to `claude_desktop_config.json` under `mcpServers`:
   `"outrider": {"command": "python3", "args": ["-m", "outrider.mcp"], "cwd": "/path/to/Outrider"}`.
 - If Outrider isn't running, the tools say so. `[mcp] url` points the bridge elsewhere (default: this PC at
-  `[server] port`); `[mcp] max_rows` caps how many rows a list answers with (25).
+  `[server] port`); `[mcp] max_rows` caps how many rows a list answers with (25). An Outrider on another computer
+  (a server) asks for its password: set `[mcp] password` (or `--password`) and the bridge signs in.
 - **Privacy:** Outrider uploads nothing, but what the tools answer goes to your AI client's provider like anything
   else you type into it. A client running a local model keeps everything on your PC.
 
@@ -625,7 +626,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | `[speech]` | `server_player`, for **Play speech and sounds on this PC**; `sound_dir`, your own alert sounds |
 | `[copilot]` | `enabled`, `device`, `button`, `hold_ms`, `double_ms` |
 | `[assistant]` | `enabled`, `base_url`, `api_key`, `model`, `timeout`, `max_rounds`: the voice's optional AI layer |
-| `[mcp]` | `url`, `max_rows`: for the MCP bridge (see Ask an AI) |
+| `[mcp]` | `url`, `max_rows`, `password`: for the MCP bridge (see Ask an AI) |
 | `[highway]` | `clipboard`, `efficiency`, `conservative`, `conservative_ly`, `background_image`, `background_extent`, `background_opacity`; auto-target: `autotarget`, `autotarget_delay`, `autotarget_entry`, `autotarget_map_wait`, `autotarget_search_wait`, `autotarget_key_delay`, `autotarget_keys`, `autotarget_search`, `autotarget_submit`, `autotarget_plot`, `autotarget_dry_run` |
 
 Command-line flags override the file for a single run:

@@ -205,6 +205,9 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   one, 401 `signin_required` for `/api/`, `/static/` and the app's User-Agent (`OutriderApp/`), else a redirect to
   `/signin`. Don't add to `AUTH_OPEN`. Tests reach "another device" by patching `outrider.auth.is_loopback`
   (`tests/test_auth.py`).
+- **Stopping.** SIGTERM (docker stop, systemd) sets `run()`'s stop event: the same cleanup as Ctrl-C (tasks
+  cancelled, commit, the quit backup, "stopped cleanly", exit 0). `verify.sh` stops its scratch server that way and
+  fails if it does not stop cleanly.
 - **Server mode** (`[server] game_pc`, `State.game_pc`; `resolve_game_pc`: auto is off inside a container). Off: no
   virtual keyboard (`simulate_keyboard_off`), no co-pilot button or clipboard (`simulate_settings`), the PC player off;
   every route that presses keys or plays on this PC is registered through `pc_only()` and answers 409 `not_game_pc`.

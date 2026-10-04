@@ -138,6 +138,11 @@ EOF
     echo "smoke: $ok OK, $bad FAIL"
     if [ "$bad" != 0 ] || [ "$ok" = 0 ] || [ "$smoke_rc" != 0 ]; then FAIL=1; fi
     if [ -n "${VERBOSE:-}" ]; then echo "--- server log"; cat "$TMP/server.log"; fi
+    # SIGTERM (docker stop, systemd) stops it as Ctrl-C does: its cleanup runs and it exits 0
+    kill -TERM "$PID" 2>/dev/null; wait "$PID"; rc=$?; PID=""
+    if [ "$rc" != 0 ] || ! grep -q "stopped cleanly" "$TMP/server.log"; then
+      echo "the scratch server did not stop cleanly on SIGTERM (exit $rc):"; tail -15 "$TMP/server.log"; FAIL=1
+    fi
     if grep -q "Traceback" "$TMP/server.log"; then
       echo "server log has a traceback:"; grep -n -A12 "Traceback" "$TMP/server.log" | head -40; FAIL=1
     fi

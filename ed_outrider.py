@@ -142,6 +142,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import sqlite3
 import sys
 import threading
@@ -1000,6 +1001,7 @@ max_rounds = {st["assistant"]["max_rounds"]}   # tool rounds before it must answ
 [mcp]
 {"url = " + q(st["mcp_url"]) if st["mcp_url"] else "# url = " + q("http://127.0.0.1:8025")}   # the running Outrider for the MCP bridge (python3 -m outrider.mcp); default: this PC at [server] port
 max_rows = {st["mcp_rows"]}   # how many rows a list in a tool's answer holds (the rest are counted)
+password = {q(st["mcp_password"])}   # an Outrider on another computer (a server) asks for its [server] password: the bridge signs in with this ("" on this PC)
 """
 
 POSITION_EVENTS = ("FSDJump", "CarrierJump", "Location")
@@ -11375,12 +11377,19 @@ async def run(args, st):
               f"backing up to {BACKUP_DIR}")
         state.start_backup(auto=True)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("note: the page is reachable from other machines on your network (no authentication; "
-              "it can read your journals' contents and edit bookmarks)")
+        print("note: the page is reachable from other machines on your network" + (
+            " (they sign in with [server] password)" if state.password else
+            " (no password set: anyone on it can read your journals' contents and edit bookmarks; see [server] password)"))
         print("  it answers to any IP address, and by name only to these (add others to [server] allowed_hosts): "
               + ", ".join(sorted(h for h in hosts if h.endswith(f":{args.port}"))))
+    # stop as on Ctrl-C when asked to (SIGTERM: docker stop, systemd, verify.sh): the same cleanup below, exit code 0
+    stop = asyncio.Event()
     try:
-        await asyncio.Event().wait()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    except (NotImplementedError, RuntimeError, ValueError):   # Windows has no such handler: Ctrl-C only
+        pass
+    try:
+        await stop.wait()
     finally:
         if state.targeter:
             state.targeter.cancel.set()   # a sequence pressing keys lets go and stops now
@@ -11399,6 +11408,7 @@ async def run(args, st):
         await spansh.close()
         db.commit()
         db.close()
+        print("stopped cleanly")
 
 
 BACKUP_SHUTDOWN_WAIT = 300   # s a backup running at shutdown (the quit backup) gets to finish and be recorded

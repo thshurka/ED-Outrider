@@ -23,6 +23,10 @@ class Unavailable(Exception):
     """The running Outrider could not be reached (the tool answers NOT_RUNNING)."""
 
 
+class Refused(Exception):
+    """The running Outrider refused the read (a password it asks for): the tool answers with the reason."""
+
+
 class NotAllowed(Exception):
     """A tool asked for a route outside READ_ROUTES (a bug: never sent)."""
 
@@ -283,6 +287,8 @@ async def call(name, args, get, rows=DEFAULT_ROWS):
         return await t["handler"](guarded(get), args, max(1, int(rows)))
     except Unavailable:
         return {"error": NOT_RUNNING}
+    except Refused as e:
+        return {"error": str(e)}
 
 
 def query(path, params):

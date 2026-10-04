@@ -194,18 +194,19 @@ class Bridge(unittest.TestCase):
 
     def test_settings(self):
         with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(mcp.mcp_settings({}), {"mcp_url": "", "mcp_rows": 25})
-            self.assertEqual(mcp.mcp_settings({"mcp": {"url": "http://pc:9000/", "max_rows": 7}}), {"mcp_url": "http://pc:9000", "mcp_rows": 7})
-            self.assertEqual(mcp.mcp_settings({"mcp": {"url": "ftp://x", "max_rows": 0}}), {"mcp_url": "", "mcp_rows": 25})
+            self.assertEqual(mcp.mcp_settings({}), {"mcp_url": "", "mcp_rows": 25, "mcp_password": ""})
+            self.assertEqual(mcp.mcp_settings({"mcp": {"url": "http://pc:9000/", "max_rows": 7, "password": "pw"}}),
+                             {"mcp_url": "http://pc:9000", "mcp_rows": 7, "mcp_password": "pw"})
+            self.assertEqual(mcp.mcp_settings({"mcp": {"url": "ftp://x", "max_rows": 0}}), {"mcp_url": "", "mcp_rows": 25, "mcp_password": ""})
         self.assertIn("[mcp] url", err.getvalue())
         self.assertIn("[mcp] max_rows", err.getvalue())
         self.assertEqual((mcp.default_url({}), mcp.default_url({"server": {"port": 8931}})), ("http://127.0.0.1:8025", "http://127.0.0.1:8931"))
         import argparse
         a = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
         st = ed_outrider.settings_from({"mcp": {"url": "http://127.0.0.1:8931", "max_rows": 12}}, a, None, ([], []))
-        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["mcp"], {"url": "http://127.0.0.1:8931", "max_rows": 12})
+        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["mcp"], {"url": "http://127.0.0.1:8931", "max_rows": 12, "password": ""})
         st = ed_outrider.settings_from({}, a, None, ([], []))
-        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["mcp"], {"max_rows": 25})
+        self.assertEqual(tomllib.loads(ed_outrider.config_text(st))["mcp"], {"max_rows": 25, "password": ""})
 
     def test_against_a_server_with_a_password(self):
         """The bridge talks to 127.0.0.1: it passes request_guard like curl, and [server] password never applies."""
@@ -220,12 +221,39 @@ class Bridge(unittest.TestCase):
                 get = mcp.http_get(str(srv.make_url("")).rstrip("/"))
                 ok = await tools.call("nearest_unvisited", {}, get)
                 with unittest.mock.patch.object(outrider.auth, "is_loopback", lambda remote: False):
-                    away = await get("/api/nearby", {})   # the same from another device needs the password (status is open)
+                    try:   # the same from another device needs the password (status is open)
+                        away = await get("/api/nearby", {})
+                    except tools.Refused as e:
+                        away = {"code": "signin_required", "why": str(e)}
                 return ok, away
         ok, away = asyncio.run(go())
         self.assertNotIn("error", ok)
         self.assertIn("nearest", ok)
         self.assertEqual(away.get("code"), "signin_required")
+
+    def test_a_server_elsewhere_with_a_password(self):
+        """An Outrider on another computer (Docker): nothing is loopback, so the bridge signs in with [mcp] password
+        and sends the session as a Bearer token; without one it says what to set."""
+        from aiohttp.test_utils import TestServer
+        db = ed_outrider.open_db(":memory:")
+        self.addCleanup(db.close)
+        state = ed_outrider.State(db, ed_outrider.Journals(db), None, 25)
+        state.password = "hunter2"
+
+        async def go():
+            with unittest.mock.patch.object(outrider.auth, "is_loopback", lambda remote: False):
+                async with TestServer(ed_outrider.make_app(state)) as srv:
+                    url = str(srv.make_url("")).rstrip("/")
+                    good = await tools.call("nearest_unvisited", {}, mcp.http_get(url, password="hunter2"))
+                    again = await tools.call("nearest_unvisited", {}, mcp.http_get(url, password="hunter2"))
+                    none = await tools.call("nearest_unvisited", {}, mcp.http_get(url))
+                    wrong = await tools.call("nearest_unvisited", {}, mcp.http_get(url, password="nope"))
+                    return good, again, none, wrong
+        good, again, none, wrong = asyncio.run(go())
+        self.assertIn("nearest", good)
+        self.assertIn("nearest", again)
+        self.assertIn("[mcp] password", none["error"])
+        self.assertIn("[mcp] password", wrong["error"])
 
 
 if __name__ == "__main__":
