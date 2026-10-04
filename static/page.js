@@ -7088,6 +7088,9 @@ function tabSetup() {
   document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
   document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
   document.getElementById("tabAudio").onchange = e => tabSetAudio(e.target.checked);
+  document.getElementById("tabAlertsBtn").onclick = tabOpenAlerts;
+  document.getElementById("tabAlertList").addEventListener("change", tabAlertToggle);
+  document.getElementById("tabAlertsCopy").onclick = tabCopyPcAlerts;
   document.getElementById("tabSignOut").onclick = tabSignOut;
   document.getElementById("tabSheetActs").addEventListener("click", e => {
     const b = e.target.closest("[data-act]"); if (!b) return;
@@ -7251,10 +7254,49 @@ function tabSetAudio(on) {
   store.set("tabletAudio", !!on);
   speechOn = tabletSpeaks();
   if (speechOn) { audio(); prepareLostLine(); } else hushSpeech(true);
+  document.getElementById("tabAlertsRow").hidden = !speechOn;
   drawAudioPill();
+}
+// ---- which alerts this tablet says and plays (the author, 2026-10-04): the same per-device choices as the PC's
+// Settings table (alertSpeak / alertSound, in this tablet's own storage; until changed here they come from the PC's
+// saved defaults, then Outrider's), as big toggles with a short name per alert
+const TAB_ALERT_NAMES = {discovery: "Targeting a system", arrival: "Arriving somewhere new", game: "Game start and quit",
+  jump: "FSD charging", honk: "Auto honk", brief: "Arrival briefing", fss: "FSS finished", mapped: "Planet mapped",
+  leaving: "Leaving work behind", fuel: "Fuel", scoop: "Tank full", scoopstop: "Scooping stopped early",
+  supercharge: "Supercharged", highway: "Highway next stop", autotarget: "Auto-target", find: "Valuable body",
+  jumponium: "Jumponium materials", sampling: "Exobiology unfinished", approach: "High gravity", bodybrief: "Bio signals on approach",
+  sell: "Selling", saleleft: "Data left after a sale", unsold: "Unsold data", hull: "Hull, heat, interdiction",
+  carrier: "Carrier arrived", codex: "New codex entry", loss: "Ship lost", rigs: "Mining rigs", rigleash: "Rig too far",
+  rigsout: "Rigs still out"};
+function tabDrawAlerts() {
+  const tog = (attr, k, on, what) => `<label class="tb-tog"><input type="checkbox" data-${attr}="${esc(k)}"${on ? " checked" : ""}> ${what}</label>`;
+  document.getElementById("tabAlertList").innerHTML = ALERTS.map(([k, label, snd]) =>
+    `<div class="tb-alertrow"><div class="tb-alertname"><b>${esc(TAB_ALERT_NAMES[k] || k)}</b><span class="tb-note">${esc(label)}</span></div>` +
+    `<div class="tb-alerttogs">${UNSPOKEN.has(k) ? "" : tog("tspeak", k, alertSpeak[k], "🗣 Voice")}` +
+    `${snd || k === "arrival" ? tog("tsound", k, alertSound[k], "🔊 Sound") : ""}</div></div>`).join("");
+  const sd = serverSettings();
+  document.getElementById("tabAlertsCopy").hidden = !(isObj(sd.alertSpeak) || isObj(sd.alertSound));
+}
+function tabOpenAlerts() {
+  tabClose(document.getElementById("tabSettings"));
+  tabDrawAlerts();
+  tabShow(document.getElementById("tabAlerts"));
+}
+function tabAlertToggle(e) {
+  const el = e.target, k = el.dataset.tspeak || el.dataset.tsound;
+  if (!k) return;
+  const [cfg, key] = el.dataset.tspeak ? [alertSpeak, "alertSpeak"] : [alertSound, "alertSound"];
+  cfg[k] = el.checked; store.set(key, cfg);
+}
+function tabCopyPcAlerts() {   // the choices the PC saved as defaults for new browsers (Settings there)
+  const sd = serverSettings();
+  if (isObj(sd.alertSpeak)) { Object.assign(alertSpeak, sd.alertSpeak); store.set("alertSpeak", alertSpeak); }
+  if (isObj(sd.alertSound)) { Object.assign(alertSound, sd.alertSound); store.set("alertSound", alertSound); }
+  tabDrawAlerts(); toast("Copied the PC's saved alert choices");
 }
 async function tabOpenSettings() {
   document.getElementById("tabAudio").checked = tabletSpeaks();
+  document.getElementById("tabAlertsRow").hidden = !tabletSpeaks();
   document.getElementById("tabViewport").textContent = `${innerWidth} × ${innerHeight} CSS px at ${+(window.devicePixelRatio || 1).toFixed(2)}×`;
   const app = window.OutriderApp;
   let ver = "a browser (no app)";

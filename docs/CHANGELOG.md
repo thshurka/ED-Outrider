@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.7; the tablet chooses its own alerts
+- With Play alerts here ticked, the tablet's Settings has **Choose alerts…**: a large sheet with every alert's short
+  name and what it is, and big 🗣 Voice and 🔊 Sound toggles. The choices are the tablet's own; the PC's browser keeps
+  its. A tablet starts from the choices the PC saved as defaults for new browsers, and "Copy the PC's saved choices"
+  takes them again later.
+
 ## 2026-10-04 · The tablet's link pill: just "linked"
 - The tablet's link pill reads "linked" instead of counting the seconds since the last update, which was distracting.
   A stale link still shows how long ("stale · 48 s ago").

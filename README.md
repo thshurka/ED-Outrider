@@ -214,8 +214,9 @@ cards, switches and line icons beside the words). Settings picks one per tablet.
   page when it goes. Nothing else switches pages by itself.
 - **The voice stays on the PC,** unless you tick **Play alerts here** in the tablet's Settings. Then the tablet speaks
   (in Piper, from Outrider) and plays the alert sounds itself, whether or not a PC browser does too: handy with a
-  Docker server and no browser open. Either way an alert is a banner across the top (red for danger), and the footer
-  has Hush, Status report and the last line said.
+  Docker server and no browser open. **Choose alerts…** under it picks which alerts the tablet says (🗣) and plays
+  (🔊), apart from the PC's choices; it starts from what the PC saved as defaults for new browsers. Either way an
+  alert is a banner across the top (red for danger), and the footer has Hush, Status report and the last line said.
 - **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
   honk, auto-target's switch and test, backups and the voice settings stay on the PC.
 - **Settings** (bottom right) has the theme, a dim switch, the screen size in CSS pixels and Sign out.

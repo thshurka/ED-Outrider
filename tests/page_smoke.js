@@ -3550,6 +3550,18 @@ const settle = async maxMs => {
       ta.push(box.checked);
       box.checked = true; box.dispatchEvent(new tw.Event("change"));
       ta.push(tw.eval("JSON.stringify([speechOn, speakerHere(), speakMode(), localStorage.getItem('tabletAudio')])"));
+      // its own alert choices: Choose alerts… (only with Play alerts here) opens a sheet of toggles, stored on the tablet
+      ta.push(td.getElementById("tabAlertsRow").hidden);
+      td.getElementById("tabAlertsBtn").click(); await sleep(100);
+      const rows = td.querySelectorAll("#tabAlertList .tb-alertrow");
+      const fuelVoice = td.querySelector('#tabAlertList [data-tspeak="fuel"]');
+      ta.push([td.getElementById("tabAlerts").hasAttribute("open"), rows.length === tw.eval("ALERTS.length"),
+               !td.querySelector('#tabAlertList [data-tspeak="discovery"]'), !!td.querySelector('#tabAlertList [data-tsound="discovery"]'),
+               fuelVoice.checked]);
+      fuelVoice.checked = false; fuelVoice.dispatchEvent(new tw.Event("change", {bubbles: true}));
+      ta.push(tw.eval("JSON.stringify([alertSpeak.fuel, JSON.parse(localStorage.getItem('alertSpeak')).fuel])"));
+      fuelVoice.checked = true; fuelVoice.dispatchEvent(new tw.Event("change", {bubbles: true}));
+      tw.eval('tabClose(document.getElementById("tabAlerts"))');
       tw.eval('alertOut("game", "Game loaded", "", {say: "A line here."})');
       await sleep(300);
       ta.push(said.slice());
@@ -3575,7 +3587,7 @@ const settle = async maxMs => {
       target: '{"countdown":0}', railEnter: ["Wheels", true, false], pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
       settings: [true, true, "a browser (no app)", true], signOut: [true, false],
       appScreens: [true, false, [false, false, true], "ED Outrider for Android 1.2.0", ["voice"], false],
-      tabletAudio: ["[false,false]", false, '[true,true,"always","true"]', ["A line here."], "🔇 Tap anywhere to let Outrider speak here",
+      tabletAudio: ["[false,false]", false, '[true,true,"always","true"]', false, [true, true, true, true, true], "[false,false]", ["A line here."], "🔇 Tap anywhere to let Outrider speak here",
                     '[false,false,"false"]'], prefs: ["lcars", true, "true", null, "here"]};
     const bad = Object.keys(want).filter(k => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
     const goodT = !bad.length && !terr.length;

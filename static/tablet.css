@@ -225,3 +225,13 @@ body.tablet.app main.nearPinned > #hereView.detail > #bodyPanel, body.tablet.app
 /* a server: no rail column, the main column takes its width */
 body.tablet.notgamepc, body.tablet.app.notgamepc { grid-template-columns: var(--tb-nav-w) minmax(0, 1fr); }
 body.tablet.notgamepc .tb-banner { right: calc(var(--tb-pad) + 12px); }
+/* the tablet's alert choices (Settings > Play alerts here > Choose alerts…): a big sheet, big toggles */
+.tb-sheet.tb-alerts { width: min(900px, 96vw); }
+.tb-alertlist { display: flex; flex-direction: column; overflow-y: auto; max-height: 64vh; }
+.tb-alertrow { display: flex; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.tb-alertname { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tb-alertname .tb-note { font-size: 13px; }
+.tb-alerttogs { display: flex; gap: 10px; flex-shrink: 0; }
+.tb-tog { min-height: var(--tb-touch); min-width: 128px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 999px; font-size: 17px; cursor: pointer; }
+.tb-tog input { width: 26px; height: 26px; }
