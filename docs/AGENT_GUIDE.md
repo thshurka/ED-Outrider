@@ -227,7 +227,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   a POST route or a tool that acts (presses, plots, bookmarks, hushes): `test_mcp.py` walks every tool and checks.
   A new tool goes in the registry once; the MCP bridge and the voice's AI layer both serve it. Keep answers compact
   (`capped`, the fields that answer the question).
-- **The Android app's contract** (`project/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
+- **The Android app's contract** (`project/done/plans/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
   `{outrider, api, min_app, password, signed_in}`; `POST /api/auth/signin` {password} gives `{ok, token}` and the
   cookie; `POST /api/auth/signout`; `POST /api/ask` {text, source?} gives exactly `{answer, spoken, matched, command}`; `/api/version` also has `game_pc`
   (added 2026-10-04);
