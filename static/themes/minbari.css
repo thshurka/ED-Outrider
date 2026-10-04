@@ -1,0 +1,55 @@
+/* Babylon 5 - Minbari, a tablet theme (data-theme="minbari"): the Minbari's serene, crystalline consoles from Babylon 5,
+   evoked, not copied. Deep indigo, lilac and pearl with a sea-glass accent; soft curves, panels topped like a pointed
+   window, thin double lines. Fonts: Marcellus (headings) and Inter (text), both SIL OFL 1.1, in static/fonts/ with
+   their licences. Your own heading font goes first if you drop it in as data/fonts/minbari-display.ttf (served at
+   /userfonts/; never committed). No show assets. */
+@font-face { font-family: "Minbari Display"; font-display: swap;
+  src: url("../../userfonts/minbari-display.ttf") format("truetype"), url("../fonts/Marcellus-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Marcellus"; font-display: swap; src: url("../fonts/Marcellus-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Inter"; font-weight: 100 900; font-display: swap; src: url("../fonts/Inter-VF.ttf") format("truetype"); }
+
+:root[data-theme="minbari"] {
+  --mb-bg: #0F0C1C; --mb-panel: #1A1630; --mb-lilac: #B7A3E6; --mb-pearl: #ECE7F6; --mb-glass: #7FD1C4; --mb-violet: #5B4F86;
+  --mb-line: #3A3260; --mb-muted: #A79FC4; --mb-gold: #F2C46D; --mb-rose: #FF8FA3; --mb-arch: 22px;
+  /* page.css's colours, so the views take the theme too */
+  --bg: var(--mb-bg); --panel: var(--mb-panel); --line: var(--mb-line); --text: var(--mb-pearl); --muted: var(--mb-muted);
+  --accent: var(--mb-lilac); --good: var(--mb-glass); --warn: var(--mb-gold); --bad: var(--mb-rose); --info: var(--mb-glass);
+  --hot: var(--mb-glass); --biohot: #E3A8F0;
+  --tb-font: "Inter", system-ui, sans-serif; --tb-font-display: "Minbari Display", "Marcellus", serif;
+  --tb-case: none; --tb-track: .5px; --tb-size: 17px;
+  --tb-title: var(--mb-lilac);
+  --tb-chip-bg: var(--mb-panel); --tb-chip-k: var(--mb-muted); --tb-chip-v: var(--mb-pearl); --tb-chip-radius: 14px;
+  --tb-group-bg: var(--mb-panel); --tb-group-fg: var(--mb-lilac); --tb-group-open-bg: var(--mb-violet); --tb-group-open-fg: var(--mb-pearl);
+  --tb-group-radius: var(--mb-arch) var(--mb-arch) 8px 8px; --tb-page-radius: 14px;
+  --tb-page-bg: transparent; --tb-page-fg: var(--mb-pearl); --tb-page-on-bg: var(--mb-lilac); --tb-page-on-fg: var(--mb-bg);
+  --tb-fill: transparent;
+  --tb-btn-bg: var(--mb-violet); --tb-btn-fg: var(--mb-pearl); --tb-btn-on-bg: var(--mb-lilac); --tb-btn-on-fg: var(--mb-bg); --tb-btn-radius: 14px;
+  --tb-link-ok: var(--mb-glass); --tb-link-stale: var(--mb-gold); --tb-link-none: var(--mb-rose);
+  --tb-rail-border: var(--mb-line); --tb-sheet-bg: #141029; --tb-sheet-border: var(--mb-lilac); --tb-sheet-radius: 28px 28px 14px 14px;
+  --tb-banner-bg: #141029; --tb-banner-fg: var(--mb-pearl); --tb-banner-border: var(--mb-lilac); --tb-danger: var(--mb-rose);
+  --tb-rb-on-bg: var(--mb-glass); --tb-rb-on-fg: var(--mb-bg); --tb-rb-off-bg: var(--mb-panel); --tb-rb-off-fg: var(--mb-pearl);
+  --tb-rb-high-bg: #C9F0E9; --tb-rb-pend-bg: var(--mb-panel); --tb-rb-pend-fg: var(--mb-gold); --tb-rb-unk-border: var(--mb-muted);
+  --tb-rb-unk-fg: var(--mb-muted); --tb-rb-dim: var(--mb-line); --tb-rb-dim-fg: #7F78A0; --tb-rb-amber: var(--mb-gold); --tb-rb-radius: 14px;
+  color-scheme: dark;
+}
+:root[data-theme="minbari"] body.tablet { background: radial-gradient(ellipse at 50% -20%, #231C42, var(--mb-bg) 60%); color: var(--text); }
+/* thin double lines and soft curves; the big blocks topped like a pointed window */
+[data-theme="minbari"] .tb-sheet, [data-theme="minbari"] .tb-banner { border: 3px double var(--mb-lilac); }
+[data-theme="minbari"] .tb-group { border: 3px double var(--mb-violet); border-bottom-width: 1px; }
+[data-theme="minbari"] .tb-group.open { border-color: var(--mb-lilac); }
+[data-theme="minbari"] .tb-chip, [data-theme="minbari"] .tb-link { border: 1px solid var(--mb-line); }
+[data-theme="minbari"] .tb-page { border: 1px solid transparent; }
+[data-theme="minbari"] .tb-page:not(.on) { border-color: var(--mb-line); }
+[data-theme="minbari"] .tb-rb { border: 1px solid var(--mb-line); border-radius: 18px 18px 8px 8px; }
+[data-theme="minbari"] .tb-head .tb-corner { background: linear-gradient(160deg, var(--mb-lilac), var(--mb-violet));
+  border-radius: 0 0 48px 0; }
+[data-theme="minbari"] .tb-head .tb-bar { border-bottom: 3px double var(--mb-violet); }
+[data-theme="minbari"] .tb-foot .tb-corner { background: var(--mb-violet); border-radius: 0 40px 0 0; }
+[data-theme="minbari"] .tb-foot .tb-bar { border-top: 1px solid var(--mb-line); }
+[data-theme="minbari"] .tb-title { font-family: var(--tb-font-display); letter-spacing: 2px; }
+/* the views */
+[data-theme="minbari"] body.tablet th { color: var(--mb-lilac); }
+[data-theme="minbari"] body.tablet tr.target td { background: rgba(127, 209, 196, .12); }
+[data-theme="minbari"] body.tablet .pane { border-radius: 18px 18px 10px 10px; }
+[data-theme="minbari"] body.tablet #nowView .now-sys { color: var(--mb-lilac); font-family: var(--tb-font-display); letter-spacing: 1.5px; }
+[data-theme="minbari"] .tb-sheet h2 { color: var(--mb-lilac); font-family: var(--tb-font-display); letter-spacing: 1px; }

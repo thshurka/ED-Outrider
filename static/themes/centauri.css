@@ -1,0 +1,69 @@
+/* Babylon 5 - Centauri, a tablet theme (data-theme="centauri"): the Centauri Republic's imperial baroque from Babylon 5,
+   evoked, not copied. Gold on royal purple and near-black, cream text, crimson for what is chosen or urgent; ornate
+   double borders with notched corners. Crimson is only ever a fill under cream (too dark to read as text).
+   Fonts: Cinzel (headings) and Cormorant Garamond (text), both SIL OFL 1.1, in static/fonts/ with their licences.
+   Your own heading font goes first if you drop it in as data/fonts/centauri-display.ttf (served at /userfonts/;
+   never committed). No show assets. */
+@font-face { font-family: "Centauri Display"; font-weight: 400 900; font-display: swap;
+  src: url("../../userfonts/centauri-display.ttf") format("truetype"), url("../fonts/Cinzel-VF.ttf") format("truetype"); }
+@font-face { font-family: "Cinzel"; font-weight: 400 900; font-display: swap; src: url("../fonts/Cinzel-VF.ttf") format("truetype"); }
+@font-face { font-family: "Cormorant Garamond"; font-weight: 300 700; font-display: swap;
+  src: url("../fonts/CormorantGaramond-VF.ttf") format("truetype"); }
+
+:root[data-theme="centauri"] {
+  --ct-bg: #12080F; --ct-panel: #22101C; --ct-gold: #D4AF37; --ct-purple: #5E2A5A; --ct-crimson: #A3203A; --ct-cream: #F3E6C8;
+  --ct-line: #4A2440; --ct-muted: #C2A98A; --ct-amber: #F0C14B; --ct-alert: #FF6F7F; --ct-notch: 7px;
+  /* page.css's colours, so the views take the theme too */
+  --bg: var(--ct-bg); --panel: var(--ct-panel); --line: var(--ct-line); --text: var(--ct-cream); --muted: var(--ct-muted);
+  --accent: var(--ct-gold); --good: #B8D88A; --warn: var(--ct-amber); --bad: var(--ct-alert); --info: var(--ct-gold);
+  --hot: #B8D88A; --biohot: #E7A3E0;
+  --tb-font: "Cormorant Garamond", Georgia, serif; --tb-font-display: "Centauri Display", "Cinzel", serif;
+  --tb-case: none; --tb-track: .3px; --tb-size: 19px;
+  --tb-title: var(--ct-gold);
+  --tb-chip-bg: var(--ct-panel); --tb-chip-k: var(--ct-muted); --tb-chip-v: var(--ct-cream); --tb-chip-radius: 0;
+  --tb-group-bg: var(--ct-purple); --tb-group-fg: var(--ct-cream); --tb-group-open-bg: var(--ct-gold); --tb-group-open-fg: var(--ct-bg);
+  --tb-group-radius: 0; --tb-page-radius: 0;
+  --tb-page-bg: transparent; --tb-page-fg: var(--ct-cream); --tb-page-on-bg: var(--ct-crimson); --tb-page-on-fg: var(--ct-cream);
+  --tb-fill: transparent;
+  --tb-btn-bg: var(--ct-purple); --tb-btn-fg: var(--ct-cream); --tb-btn-on-bg: var(--ct-gold); --tb-btn-on-fg: var(--ct-bg); --tb-btn-radius: 0;
+  --tb-link-ok: var(--ct-gold); --tb-link-stale: var(--ct-amber); --tb-link-none: var(--ct-alert);
+  --tb-rail-border: var(--ct-line); --tb-sheet-bg: #1A0B15; --tb-sheet-border: var(--ct-gold); --tb-sheet-radius: 0;
+  --tb-banner-bg: #1A0B15; --tb-banner-fg: var(--ct-cream); --tb-banner-border: var(--ct-gold); --tb-danger: var(--ct-alert);
+  --tb-rb-on-bg: var(--ct-gold); --tb-rb-on-fg: var(--ct-bg); --tb-rb-off-bg: var(--ct-panel); --tb-rb-off-fg: var(--ct-cream);
+  --tb-rb-high-bg: #F0D77A; --tb-rb-pend-bg: var(--ct-panel); --tb-rb-pend-fg: var(--ct-amber); --tb-rb-unk-border: var(--ct-muted);
+  --tb-rb-unk-fg: var(--ct-muted); --tb-rb-dim: var(--ct-line); --tb-rb-dim-fg: #8E7266; --tb-rb-amber: var(--ct-amber); --tb-rb-radius: 0;
+  color-scheme: dark;
+}
+:root[data-theme="centauri"] body.tablet { background: var(--ct-bg); color: var(--text); }
+/* ornate: a gold double border, the corners notched */
+[data-theme="centauri"] .tb-sheet, [data-theme="centauri"] .tb-banner, [data-theme="centauri"] .tb-group, [data-theme="centauri"] .tb-rb,
+[data-theme="centauri"] .tb-btn, [data-theme="centauri"] .tb-chip, [data-theme="centauri"] .tb-link {
+  clip-path: polygon(var(--ct-notch) 0, calc(100% - var(--ct-notch)) 0, calc(100% - var(--ct-notch)) var(--ct-notch), 100% var(--ct-notch),
+    100% calc(100% - var(--ct-notch)), calc(100% - var(--ct-notch)) calc(100% - var(--ct-notch)), calc(100% - var(--ct-notch)) 100%,
+    var(--ct-notch) 100%, var(--ct-notch) calc(100% - var(--ct-notch)), 0 calc(100% - var(--ct-notch)), 0 var(--ct-notch),
+    var(--ct-notch) var(--ct-notch)); }
+[data-theme="centauri"] .tb-sheet, [data-theme="centauri"] .tb-banner { border: 5px double var(--ct-gold); }
+[data-theme="centauri"] .tb-group { border: 3px double var(--ct-gold); }
+[data-theme="centauri"] .tb-rb { border: 1px solid var(--ct-gold); }
+[data-theme="centauri"] .tb-chip, [data-theme="centauri"] .tb-link { border: 1px solid var(--ct-line); }
+[data-theme="centauri"] .tb-page { border-bottom: 1px solid var(--ct-line); }
+[data-theme="centauri"] .tb-page.on { border-left: 4px solid var(--ct-gold); }
+[data-theme="centauri"] .tb-head .tb-corner { background: var(--ct-purple); border-right: 4px double var(--ct-gold); border-bottom: 4px double var(--ct-gold); }
+[data-theme="centauri"] .tb-head .tb-bar { border-bottom: 4px double var(--ct-gold); }
+[data-theme="centauri"] .tb-foot .tb-corner { background: var(--ct-purple); border-right: 4px double var(--ct-gold); }
+[data-theme="centauri"] .tb-foot .tb-bar { border-top: 1px solid var(--ct-gold); }
+[data-theme="centauri"] .tb-title { font-family: var(--tb-font-display); font-weight: 700; letter-spacing: 3px; text-transform: uppercase; }
+/* the views */
+[data-theme="centauri"] body.tablet th { color: var(--ct-gold); font-family: var(--tb-font-display); font-weight: 600; }
+[data-theme="centauri"] body.tablet tr.target td { background: rgba(163, 32, 58, .28); }
+[data-theme="centauri"] body.tablet #nowView .now-sys { color: var(--ct-gold); font-family: var(--tb-font-display); font-weight: 700; letter-spacing: 2px; }
+[data-theme="centauri"] .tb-sheet h2 { color: var(--ct-gold); font-family: var(--tb-font-display); font-weight: 700; letter-spacing: 2px; }
+/* Cormorant reads small for its size, and Cinzel is wide: the text a touch heavier, the capitals a touch smaller */
+[data-theme="centauri"] body.tablet { font-weight: 500; }
+/* Cormorant's lowercase is short for its size: scaled by its x-height, so the views' fixed sizes read like the other
+   themes'; Cinzel (all capitals: the display font) is left as it is */
+[data-theme="centauri"] body.tablet { font-size-adjust: 0.47; }
+[data-theme="centauri"] :is(.tb-title, .tb-chip .tb-k, .tb-link, .tb-group, .tb-page, .tb-railtitle, .tb-rb, .tb-voice, .tb-btn,
+  .tb-sheethead h2, .tb-facts dt, body.tablet th, body.tablet #nowView .now-sys) { font-size-adjust: none; }
+[data-theme="centauri"] .tb-chip .tb-k { font-size: 12px; } [data-theme="centauri"] .tb-link { font-size: 13px; }
+[data-theme="centauri"] .tb-rbl b { font-size: 14px; } [data-theme="centauri"] .tb-group { font-size: 15px; }

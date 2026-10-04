@@ -167,7 +167,7 @@ class Tablet(unittest.TestCase):
             with open(lic, encoding="utf-8") as fh:
                 self.assertIn("SIL Open Font License, Version 1.1", fh.read())
         # every font a stylesheet asks for from static/fonts/ is there (a typo would silently fall back)
-        for css in ("tablet.css", os.path.join("themes", "lcars.css")):
+        for css in ["tablet.css"] + [os.path.join("themes", f"{t}.css") for t in ed_outrider.TABLET_THEMES]:
             with open(os.path.join(ed_outrider.STATIC_DIR, css), encoding="utf-8") as fh:
                 for name in re.findall(r'url\("\.\./fonts/([^"]+)"\)', fh.read()):
                     self.assertIn(name, files, css)

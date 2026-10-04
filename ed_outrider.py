@@ -86,7 +86,7 @@ it found. The voice can be hushed for a while (the page, or POST /api/hush: the 
 every window and device sees it), and a co-pilot button (outrider/button.py, Linux, optional, read-only) asks the
 speaking window for a status report, the last line again, or a hush until the next jump.
 
-Other devices: /tablet is the same pages in a touch layout with seven themes (static/tablet.css, static/themes/), a
+Other devices: /tablet is the same pages in a touch layout with nine themes (static/tablet.css, static/themes/), a
 control rail of game buttons (outrider/rail.py) and, ticked in its Settings, the voice and sounds on the tablet itself;
 ED Outrider for Android (a separate repository) wraps it with a wake word that asks POST /api/ask (outrider/ask.py:
 fixed phrases, then an optional OpenAI-compatible AI with the read-only tools of outrider/tools.py). [server] password
@@ -9978,9 +9978,9 @@ def sounds_json():
 # The tablet layout (GET /tablet): the same page in a tablet mode (body.tablet: page.js draws its shell), with the
 # shell's stylesheet and every theme's (each scoped to its data-theme, so the per-device picker switches without a
 # reload). Fonts a theme lists first may come from data/fonts/ (fan fonts never committed: FONT_DIR, /userfonts/).
-TABLET_STYLES = ("tablet.css", "themes/lcars.css", "themes/elite.css", "themes/babylon5.css", "themes/narn.css", "themes/sith.css",
-                 "themes/alliance.css", "themes/dark.css")
-TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "sith", "alliance", "dark")
+TABLET_STYLES = ("tablet.css", "themes/lcars.css", "themes/elite.css", "themes/babylon5.css", "themes/narn.css",
+                 "themes/minbari.css", "themes/centauri.css", "themes/sith.css", "themes/alliance.css", "themes/dark.css")
+TABLET_THEMES = ("lcars", "elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance", "dark")
 FONT_DIR = os.path.join(outrider.DATA_DIR, "fonts")
 USER_FONT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}\.(ttf|otf|woff2?)")
 

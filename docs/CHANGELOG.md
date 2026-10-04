@@ -2,6 +2,16 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Two more Babylon 5 tablet themes: Minbari and Centauri
+- **Babylon 5 - Minbari:** deep indigo, lilac and pearl with a sea-glass accent, soft arches and thin double lines;
+  Marcellus headings, Inter text.
+- **Babylon 5 - Centauri:** gold on royal purple and near-black, cream text, crimson for what is chosen, ornate double
+  borders with notched corners; Cinzel headings, Cormorant Garamond text (scaled by its x-height so it reads like the
+  others).
+- The Babylon 5 family is labelled "Babylon 5 - Earthforce", "- Narn", "- Minbari" and "- Centauri" in the picker; the
+  ids are unchanged (`babylon5` is Earthforce), so a saved choice keeps working.
+- The fonts are SIL OFL 1.1, shipped with their licences; every theme's fonts are now checked to be there.
+
 ## 2026-10-04 · Docs: the README reorganised and brought up to date
 - The README runs features first (the views, alerts, the voice, the surface map, the Highway, auto honk, the co-pilot
   button, the tablet and its Android app, Ask, backups), then the server-level parts (other devices on your network,

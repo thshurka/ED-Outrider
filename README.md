@@ -47,7 +47,7 @@ also run 24/7 on a home server in Docker.
 | 📈 **The long view** | Each trip from sale to sale with what it actually paid, what each ship loss cost, your best finds, ranks and career statistics. |
 | 🗣 **A voice with personality** | A natural neural voice, down to business, sarcastic or sweet, briefing you on arrival and warning before you leave something unfinished. |
 | ⛏️ **Rhino mining** | A heading-up surface map on Now with your rigs, sample points and ship, and every collection kept per body. |
-| 📱 **A tablet in the cockpit** | Every page in a touch layout with seven themes, alerts as banners, game buttons on a control rail, and the voice on the tablet if you like. |
+| 📱 **A tablet in the cockpit** | Every page in a touch layout with nine themes, alerts as banners, game buttons on a control rail, and the voice on the tablet if you like. |
 | 🎙️ **Ask out loud** | "Hey Vespa, status report": answered in the voice from what Outrider knows, with an optional AI for anything else. |
 | 🎯 **Automation (game PC, Linux)** | Auto honk fires the Discovery Scanner on arrival, auto-target targets the next Highway system, and one HOTAS button asks for a status report. |
 
@@ -498,9 +498,10 @@ Settings shows whether it is listening.
 ## 📱 On a tablet
 
 Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
-the same pages in a cockpit layout, in one of seven themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
-corners), Babylon 5 (Earthforce navy and steel), Narn (rust and ochre, wedge-cut), Sith (black, crimson, thin hard
-lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
+the same pages in a cockpit layout, in one of nine themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
+corners), four from Babylon 5 (Earthforce: navy and steel; Narn: rust and ochre, wedge-cut; Minbari: indigo, lilac and
+pearl, soft arches and thin double lines; Centauri: gold on royal purple, ornate notched double borders), Sith (black,
+crimson, thin hard lines), Rebel Alliance (cockpit orange and sand, blue for what is chosen) or Dark (a modern app's dark mode: slate
 cards, switches and line icons beside the words). Settings picks one per tablet. Outrider must listen on your network
 for this: see [Other devices on your network](#-other-devices-on-your-network).
 
@@ -545,10 +546,12 @@ its sensitivity are in the app's Voice screen) or a tap on Ask, and can read ans
 Any browser at `/tablet` works too, without the wake word and Ask.
 
 The fonts are Antonio and Barlow Condensed, both under the SIL Open Font License and shipped with Outrider, as are the
-other themes' (Michroma, Saira, Orbitron, Exo 2, Russo One, Share Tech Mono, Rajdhani, Oxanium, Inter); Dark's icons
+other themes' (Michroma, Saira, Orbitron, Exo 2, Russo One, Marcellus, Cinzel, Cormorant Garamond, Share Tech Mono, Rajdhani,
+Oxanium, Inter); Dark's icons
 are Lucide's (ISC licence, in `static/icons/`). A heading font of your own goes in your git-ignored `data/` folder and
 is never shared: `data/fonts/<theme>-display.ttf`: `lcars-display.ttf`, `elite-display.ttf` (a Eurostile-style
-face), `babylon5-display.ttf`, `narn-display.ttf`, `sith-display.ttf` or `alliance-display.ttf`.
+face), `babylon5-display.ttf`, `narn-display.ttf`, `minbari-display.ttf`, `centauri-display.ttf`, `sith-display.ttf` or
+`alliance-display.ttf`.
 
 ## 🎙️ Ask Outrider by voice
 
