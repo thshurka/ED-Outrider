@@ -2,6 +2,9 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.8
+- The Minbari and Centauri themes, the relabelled Babylon 5 family, and the themes' emblems.
+
 ## 2026-10-04 · Emblems on the tablet themes
 - The Elite (the Explorer "Elite" rank badge), Babylon 5 (Earthforce, Narn, Minbari, Centauri) and Star Wars (Sith,
   Rebel Alliance) themes show their emblem in the free space under the page list: faint, centred, and hidden when the
