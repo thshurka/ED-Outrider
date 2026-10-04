@@ -3,8 +3,9 @@
 Newest first, one entry per commit.
 
 ## 2026-10-04 · Version 2026.10.11; new screenshots
-- Every README screenshot retaken at 2560 × 1440 (the page at 160%): the orange view buttons, the split Here, the
-  drawn schematic (Lysood HP-I b9-2: water worlds and ringed gas giants), and the tablet with its control rail.
+- Every README screenshot retaken at a true 2560 × 1440 (a 1440p screen at 100%): the orange view buttons, the split
+  Here, the drawn schematic (Lysood HP-I b9-2: water worlds and ringed gas giants). The tablet's is at its own screen,
+  1920 × 1200 (a Galaxy Tab A11+), with its control rail.
 - Version 2026.10.11: the drawn schematic, "1 jump", `launch_outrider.sh`.
 
 ## 2026-10-04 · launch_outrider.sh
