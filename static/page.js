@@ -402,7 +402,7 @@ function renderStrip() {
     el.innerHTML = val(`${f.main.toFixed(1)}${f.capacity ? " / " + f.capacity + " t" : " t"}${f.pct != null ? ` · ${f.pct}%` : ""}`) +
       (f.vehicle ? ln(`Current vehicle: <b>${esc(f.vehicle.label)}</b>${f.vehicle.fuel != null ? ` · ${f.vehicle.fuel.toFixed(2)} t fuel` : ""}` +
                       ` <span class="unk" title="the figures above are your ship's, as last read before you left it">(ship's tank above)</span>`) : "") + hullLine() + moduleLine() +
-      ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> jumps at max range` : "") + (md && md.ly_max ? ` (${Math.round(md.ly_max).toLocaleString("en-US")} ly)` : "") +
+      ln((f.jumps_max != null ? `≈<b>${f.jumps_max}</b> ${jumpsWord(f.jumps_max)} at max range` : "") + (md && md.ly_max ? ` (${Math.round(md.ly_max).toLocaleString("en-US")} ly)` : "") +
          (f.jumps_recent != null ? (f.jumps_max != null ? ", " : "") + `<b>${f.jumps_recent}</b> at your pace` : "")) +
       ln([f.since_scoop != null ? `${f.since_scoop} jump${f.since_scoop === 1 ? "" : "s"} since the last scoop` : "",
           sr ? `<span class="${srWarn ? "warnc" : ""}" title="arrival stars of your last ${sr.of} jumps with a known star${srWarn ? `: fewer jumps of fuel aboard than two of your usual gaps between scoopable stars (1 in ${expectedGap(sr).toFixed(1)})` : ""}">scoopable: ${sr.scoopable} of last ${sr.of}${sr.dry_run ? ` · ${sr.dry_run} dry in a row` : ""}</span>` : ""].filter(Boolean).join(" · ")) +
@@ -2947,11 +2947,38 @@ function discSize(b, depth) {
   const px = r == null ? 20 : r < 1500 ? 12 : r < 4000 ? 18 : r < 10000 ? 26 : r < 30000 ? 34 : 44;
   return depth > 1 ? Math.max(10, Math.round(px * .8)) : px;
 }
+// Here's schematic draws each scanned body with the body panel's painter (bodyLook, paintBody), at its disc's size: the
+// class colours, bands, oceans, clouds, atmosphere rim, rings and a star's glow, lit from the left. Each picture is
+// made once and kept (a re-render costs nothing); without a canvas (the smoke test) the plain disc stays.
+const bodyArtCache = new Map();
+let bodyArtCanvas = null;   // null: not tried yet; false: no canvas here
+let schemSystem = "";       // the system Here's schematic draws (seeds the pictures as the body panel does)
+function bodyArtUrl(b, size) {
+  const dpr = Math.min(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1);
+  const rings = (b.ring_details || []).length || (b.rings ? 1 : 0);
+  const key = [schemSystem, b.name, b.subtype, b.atmosphere, b.radius_km, rings, size, dpr].join("|");
+  if (bodyArtCache.has(key)) return bodyArtCache.get(key);
+  if (bodyArtCanvas === null) {
+    try { const c = document.createElement("canvas"); bodyArtCanvas = c.getContext && c.getContext("2d") && typeof c.toDataURL === "function" ? c : false; }
+    catch { bodyArtCanvas = false; }
+  }
+  if (!bodyArtCanvas) return null;
+  const L = bodyLook(b, {}, [schemSystem]);
+  const box = size * (rings ? 2.3 : L.glow || L.tint ? 1.5 : 1.1), W = Math.round(box * dpr);
+  bodyArtCanvas.width = bodyArtCanvas.height = W;
+  paintBody(bodyArtCanvas.getContext("2d"), W, L, size / 2 * dpr, 0.3);
+  const art = {url: bodyArtCanvas.toDataURL("image/png"), box: Math.round(box)};
+  if (bodyArtCache.size > 600) bodyArtCache.clear();
+  bodyArtCache.set(key, art);
+  return art;
+}
 function discHtml(b, depth) {
   const size = discSize(b, depth);
   const col = b.type === "Star" ? (STAR_COLOURS[starGroup(starCode(b.subtype))] || "#ccc") : planetColour(b.subtype);
-  const cls = ["disc", b.scanned ? "" : "hollow", b.landable ? "landable" : "", selectedBody === b.name ? "sel" : ""].filter(Boolean).join(" ");
-  const ring = b.rings ? `<svg class="ringmark" viewBox="0 0 16 16" style="width:${size + 14}px;height:${size + 14}px"><ellipse cx="8" cy="8" rx="7.6" ry="2.3" transform="rotate(-18 8 8)"/></svg>` : "";
+  const art = b.scanned ? bodyArtUrl(b, size) : null;   // not scanned: a hollow outline, nothing to draw from
+  const cls = ["disc", b.scanned ? "" : "hollow", art ? "art" : "", b.landable ? "landable" : "", selectedBody === b.name ? "sel" : ""].filter(Boolean).join(" ");
+  const ring = art ? `<img class="bodyimg" src="${art.url}" alt="" style="width:${art.box}px;height:${art.box}px">`
+    : b.rings ? `<svg class="ringmark" viewBox="0 0 16 16" style="width:${size + 14}px;height:${size + 14}px"><ellipse cx="8" cy="8" rx="7.6" ry="2.3" transform="rotate(-18 8 8)"/></svg>` : "";
   const badges = [b.first_discovered && "🏁", b.first_mapped ? "🗺" : b.mapped ? `<span class="unk">🗺</span>` : "",
     (b.bio || b.genera.length) && `🧬${b.bio || b.genera.length}`, b.geo && `🪨${b.geo}`, b.mining && `⛏${b.mining}`, hasVolcanism(b) && `<span title="${esc(b.volcanism)}">🌋</span>`, b.first_footfall && "👣",
     b.terraformable && `<span class="nb T">T</span>`, b.notable && `<span class="nb ${b.notable}">${b.notable}</span>`,
@@ -2964,6 +2991,7 @@ function discHtml(b, depth) {
     (b.type === "Planet" && b.dist_ls != null ? `<div class="sdist">${Math.round(b.dist_ls).toLocaleString()} ls</div>` : "") + `</div>`;
 }
 function schematicHtml(h) {
+  schemSystem = String(h.id64 || "");
   const by = Object.fromEntries(h.bodies.map(b => [b.name, b]));
   const isStar = n => n.kind === "body" && by[n.name] && by[n.name].type === "Star";
   // a barycentre with a star anywhere under it, (A+B)+(C+D) too: it gets star rows, not one flat column (review F40)
@@ -3252,7 +3280,13 @@ function drawBodyArt(panel, d) {
   const S = 120, dpr = Math.min(2, window.devicePixelRatio || 1);
   c.width = Math.round(S * dpr); c.height = Math.round(S * dpr); c.style.width = c.style.height = S + "px";
   const g = c.getContext && c.getContext("2d"); if (!g) return;   // no canvas (the smoke test): the caption only
-  const L = bodyLook(d.row || {}, d.own || {}, [d.id64 || ""]), W = c.width, cx = W / 2, cy = W / 2, R = L.r * W;
+  const L = bodyLook(d.row || {}, d.own || {}, [d.id64 || ""]);
+  paintBody(g, c.width, L, L.r * c.width);
+}
+// paint a body's look centred on a W x W canvas with radius R (px): the body panel's picture, and Here's schematic
+// (ambient: the light on the night side; more for the schematic's small discs, which would otherwise read as dark blots)
+function paintBody(g, W, L, R, ambient = 0.1) {
+  const cx = W / 2, cy = W / 2;
   const fbm = noiseField(seededRng(L.seed));
   g.clearRect(0, 0, W, W);
   const ringBand = front => {   // the rings: behind the body, then their front half over it
@@ -3298,7 +3332,7 @@ function drawBodyArt(panel, d) {
         if (cl > 0.55) col = mixRgb(col, [245, 248, 255], Math.min(0.85, (cl - 0.55) * 5));
       } else col = mixRgb(L.base, L.base2, Math.max(0, Math.min(1, (n - 0.35) * (L.kind === "ice" ? 1.2 : 2))));
     }
-    const lit = L.kind === "star" ? 0.72 + 0.28 * nz : 0.1 + 0.9 * Math.max(0, dx * light[0] + dy * light[1] + nz * light[2]);
+    const lit = L.kind === "star" ? 0.72 + 0.28 * nz : ambient + (1 - ambient) * Math.max(0, dx * light[0] + dy * light[1] + nz * light[2]);
     if (L.tint) col = mixRgb(col, L.tint, 0.55 * Math.pow(1 - nz, 3));
     const i = (y * W + x) * 4, a = Math.min(1, (1 - Math.sqrt(d2)) * R);   // a soft edge
     px[i] = px[i] * (1 - a) + col[0] * lit * a; px[i + 1] = px[i + 1] * (1 - a) + col[1] * lit * a; px[i + 2] = px[i + 2] * (1 - a) + col[2] * lit * a;

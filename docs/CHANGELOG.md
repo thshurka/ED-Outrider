@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · The schematic draws each body
+- Here's schematic shows each scanned body as a small picture made from its scan data, the same painter as the body
+  panel's: class colours, gas-giant bands, oceans and clouds, an atmosphere's rim, rings, a star's glow. Each picture
+  is made once and kept. Unscanned bodies stay hollow outlines; landable and selected bodies keep their rings.
+- The fuel tile's "1 jumps at max range" reads "1 jump".
+
 ## 2026-10-04 · "1 jump", not "1 jumps"
 - A count of one jump reads "1 jump" everywhere: Now's fuel line, the History totals, the Highway's figures and plot
   message, the fuel alerts, the Log's FSD target line, and the spoken fuel, status and next-jump answers.

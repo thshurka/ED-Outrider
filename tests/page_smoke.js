@@ -3480,6 +3480,24 @@ const settle = async maxMs => {
         k("Class I gas giant", {atmosphere: "Hydrogen"}).tint, star.kind, star.glow, ns.dark, ns.r < star.r, ringed.rings.length, ringed.r <= 0.21,
         k("Icy body", {radius_km: 500}).r < k("Icy body", {radius_km: 6000}).r, /impression from scan data/.test(html) && /landable · terraformable · 🧬 3/.test(html)]);
     })()`));
+    // Here's schematic draws each scanned body with the same painter (a stand-in canvas here: jsdom has none), at its
+    // disc's size (more room with rings), once (cached); an unscanned body stays a hollow outline
+    got.schemArt = JSON.parse(tw.eval(`(() => {
+      const ctx = {clearRect() {}, createRadialGradient: () => ({addColorStop() {}}), beginPath() {}, arc() {}, fill() {}, ellipse() {},
+        stroke() {}, save() {}, restore() {}, translate() {}, rotate() {}, rect() {}, clip() {},
+        getImageData: (x, y, w, h) => ({data: new Uint8ClampedArray(w * h * 4)}), putImageData() {}};
+      let made = 0; const was = bodyArtCanvas;
+      bodyArtCanvas = {width: 0, height: 0, getContext: () => ctx, toDataURL: () => "data:image/png;base64,QQ" + (++made)};
+      bodyArtCache.clear();
+      const b = {name: "A 1", type: "Planet", subtype: "Water world", scanned: true, genera: [], radius_km: 6000};
+      const html = discHtml(b, 1), again = discHtml(b, 1);
+      const hollow = discHtml(Object.assign({}, b, {name: "A 2", scanned: false}), 1);
+      const ringed = discHtml(Object.assign({}, b, {name: "A 3", rings: true}), 1);
+      bodyArtCanvas = was; bodyArtCache.clear();
+      const box = h => +((/class="bodyimg"[^>]*width:(\\d+)px/.exec(h) || [])[1] || 0);
+      return JSON.stringify([/class="disc art/.test(html), /class="bodyimg" src="data:image\\/png;base64,QQ1"/.test(html), made, html === again,
+        /bodyimg/.test(hollow), /disc hollow/.test(hollow), box(ringed) > box(html), /ringmark/.test(ringed)]);
+    })()`));
     // the themes: each one picked sets data-theme and tells the app (its own screens follow); an unknown one is LCARS
     got.themes = JSON.parse(tw.eval(`(() => { const told = []; window.OutriderApp = {setTheme(n) { told.push(n); }};
       const seen = ["elite", "babylon5", "nope", "lcars"].map(t => { tabTheme(t); return document.documentElement.dataset.theme; });
@@ -3588,6 +3606,7 @@ const settle = async maxMs => {
       mapSwitch: [["now", true], ["hwy", false], ["bm", false]],
       themes: [["elite", "babylon5", "lcars", "lcars"], ["elite", "babylon5", "lcars", "lcars"], ["lcars", "elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance", "dark"]],
       bodies: [true, true, ["gas", "elw", "water", "ammonia", "ice", "ice", "metal", "metal", "rock", "gas"], true, null, null, "star", true, true, true, 2, true, true, true],
+      schemArt: [true, true, 2, true, false, true, true, false],
       ask: [true, "Fuel at 41 percent.", 0, "Nearest unvisited: Smojooe ZC-D c12-2, 10.8 light years.", false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],

@@ -138,7 +138,8 @@ and tons, saved spots, the last date and the distance.
 </td>
 <td width="50%" valign="top">
 <b>Schematic</b> — Here switches between <i>list</i>, <i>tree</i> (orbital order) and <i>schematic</i>: stars
-with their planets left to right, moons underneath, barycentres boxed. <i>Split</i> (on by default)
+with their planets left to right, moons underneath, barycentres boxed, each scanned body drawn from its scan data (as
+in the body panel: class colours, bands, oceans, clouds, atmosphere, rings). <i>Split</i> (on by default)
 keeps the schematic under the list or tree.
 <br><br><img src="docs/images/schematic.png" alt="The system schematic">
 </td>

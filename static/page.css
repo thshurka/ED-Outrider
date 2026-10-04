@@ -461,6 +461,10 @@ h3.subhead { font-size: 13px; font-weight: 600; color: var(--muted); text-transf
 .disc.landable { outline: 1.5px dashed var(--muted); outline-offset: 2px; }
 .disc.sel { outline: 2px solid var(--accent); outline-offset: 3px; }
 .ringmark { position: absolute; inset: 0; fill: none; stroke: var(--muted); stroke-width: 1; pointer-events: none; }
+/* a scanned body drawn from its scan data (bodyArtUrl): the picture centred on the disc, which keeps only its outlines
+   (landable, selected) */
+.disc.art { background: transparent; position: relative; z-index: 1; }
+.bodyimg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 .ringmark use { fill: none; }
 .sname { font-size: 12px; font-weight: 500; margin-top: 2px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .sname .belt { color: var(--muted); margin-left: 3px; }
