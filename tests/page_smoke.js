@@ -3530,6 +3530,35 @@ const settle = async maxMs => {
     allOk = allOk && goodS;
     console.log(goodS ? "OK" : "FAIL", "| settings |", goodS ? "12 folding sections, remembered; server settings from the config file (choices as a list); only changes sent" : JSON.stringify(got), errors.slice(before));
   }
+  // Settings > Voice > More voices: Piper's catalogue from the server (stubbed here: no network), one language at a time;
+  // "Download and use" asks the server for that voice (POST api/voice, stubbed: nothing downloads)
+  {
+    const w = dom.window, before = errors.length, real = w.fetch, posted = [];
+    const cat = {current: "en_GB-cori-medium", voices: [
+      {name: "de_DE-thorsten-high", language: "de_DE", language_name: "German (Germany)", quality: "high", speakers: 1, size_mb: 114, installed: false},
+      {name: "en_GB-alan-low", language: "en_GB", language_name: "English (Great Britain)", quality: "low", speakers: 1, size_mb: 63, installed: false},
+      {name: "en_GB-cori-medium", language: "en_GB", language_name: "English (Great Britain)", quality: "medium", speakers: 1, size_mb: 63, installed: true}]};
+    const json = body => Promise.resolve({ok: true, status: 200, headers: {get: () => "application/json"}, json: async () => body});
+    w.fetch = (u, o) => /api\/voices\/catalogue/.test(String(u)) ? json(cat)
+      : /api\/voice$/.test(String(u)) && o && o.method === "POST" ? (posted.push(JSON.parse(o.body).voice), json({ok: true})) : real(u, o);
+    w.eval("mvVoices = null; data.tts = Object.assign({}, data.tts, {voice: 'en_GB-cori-medium'})");
+    const d = w.document, mv = d.getElementById("moreVoices");
+    mv.open = true; mv.dispatchEvent(new w.Event("toggle"));
+    await sleep(150);
+    const rows = () => [...d.querySelectorAll("#mvList .mvrow")].map(r => r.textContent.replace(/\s+/g, " ").trim());
+    const got = {langs: [...d.querySelectorAll("#mvLang option")].map(o => o.value), lang: d.getElementById("mvLang").value, rows: rows()};
+    d.querySelector('#mvList [data-mv="en_GB-alan-low"]').click();
+    await sleep(100);
+    got.posted = posted;
+    d.getElementById("mvLang").value = "de_DE"; d.getElementById("mvLang").dispatchEvent(new w.Event("change"));
+    got.de = rows();
+    w.fetch = real; mv.open = false; w.eval("mvVoices = null");
+    const want = {langs: ["en_GB", "de_DE"], lang: "en_GB", rows: ["alanlow · 63 MBDownload and use", "corimedium · 63 MBin use"],   // (the spans' text run together)
+                  posted: ["en_GB-alan-low"], de: ["thorstenhigh · 114 MBDownload and use"]};
+    const goodV = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
+    allOk = allOk && goodV;
+    console.log(goodV ? "OK" : "FAIL", "| more voices |", goodV ? "Piper's catalogue by language; Download and use asks the server for it" : JSON.stringify(got), errors.slice(before));
+  }
   // server mode (payload game_pc false): what needs the game PC is left out of the desktop page; back with game_pc true
   {
     const w = dom.window, before = errors.length;

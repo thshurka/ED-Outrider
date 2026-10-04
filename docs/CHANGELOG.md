@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Cori by default; more voices from Settings
+- The default voice is now Cori (`en_GB-cori-medium`). A voice you picked, or one named in your config, stays.
+- Settings → Voice → **More voices** lists every Piper voice by language, with its quality and size. Pick one and
+  Outrider downloads it where it runs and switches to it, so a Docker server (which has no voice lab) gets any voice.
+- The voice lab and the server share one cached copy of Piper's voice list.
+
 ## 2026-10-04 · A Docker bundle without a checkout
 - `scripts/docker_bundle.sh` makes `dist/ed-outrider-docker-<version>-<arch>.tgz`: the built image, saved, with a
   compose file that runs it, an `.env` example and INSTALL.txt. A server then needs no clone and no build:

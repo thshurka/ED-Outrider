@@ -500,6 +500,11 @@
     <details class="setsec" data-sec-key="voice" data-chip="Voice"><summary>Voice <span id="ttsEngine" class="unk"></span> <span class="sum-note">the voice, its personality, pace and volume, which screen speaks</span></summary>
       <label class="mod">Voice <select id="ttsVoice"></select> <span id="ttsStatus" class="hint"></span></label>
       <div class="hint" id="ttsHint"></div>
+      <details id="moreVoices" class="morevoices"><summary>More voices <span class="sum-note">any of Piper's, downloaded where Outrider runs when you pick one</span></summary>
+        <div class="mod inlineopts">Language <select id="mvLang" aria-label="language"></select>
+          <button type="button" id="mvRefresh" title="fetch Piper's voice list again (it is kept for a week)">refresh list</button> <span id="mvMsg" class="hint"></span></div>
+        <div id="mvList" class="mvlist"></div>
+      </details>
       <div class="mod inlineopts">Personality: <span id="speechStyles" class="sstyles"></span>
         <span class="profrow"><label><input type="checkbox" id="speechProfanity"> with profanity <span id="speechProfanityWho" class="unk"></span></label>
         <label title="how often a line comes from the swearing versions instead of the clean ones"><input type="number" id="speechProfanityPct" min="0" max="100" step="5" style="width:4.5em">% of the time</label></span></div>

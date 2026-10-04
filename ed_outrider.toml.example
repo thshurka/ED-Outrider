@@ -87,10 +87,11 @@
 # surface_map_strip = false      # also a small copy of the surface map in the on-body strip
 # rig_warn = 3500                # m: say so when a mining rig is this far from your Rhino (again at 4,500 m); the
 #                                    # game destroys a rig 5,000 m from its Rhino
-# voice = "en_GB-southern_english_female-low"   # spoken alerts (🗣 in the page): the Piper voice, downloaded
-#                                               # into data/piper-voices/ on first use; needs `pip install piper-tts`
-#                                               # (see outrider/tts.py), otherwise the browser's own speech is used;
-#                                               # a voice picked in the page's alerts dialog wins over this
+# voice = "en_GB-cori-medium"   # spoken alerts (🗣 in the page): the Piper voice, downloaded
+#                               # into data/piper-voices/ on first use; needs `pip install piper-tts`
+#                               # (see outrider/tts.py), otherwise the browser's own speech is used;
+#                               # a voice picked in Settings > Voice wins over this (More voices there
+#                               # downloads any of Piper's)
 # voice_fallback = "en_GB-jenny_dioco-medium"   # used while the voice above is missing
 # speech_styles = ["business"]   # spoken alerts' personalities, picked from at random: any of the styles in
 #                                # speech.json ("business", "sarcastic", "sweet", or one you add); a single

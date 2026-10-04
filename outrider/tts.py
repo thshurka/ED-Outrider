@@ -28,6 +28,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 import wave
 from collections import OrderedDict
@@ -35,7 +36,7 @@ from collections import OrderedDict
 from . import DATA_DIR, ROOT
 
 VOICES_DIR = os.path.join(DATA_DIR, "piper-voices")
-DEFAULT_VOICE = "en_GB-southern_english_female-low"
+DEFAULT_VOICE = "en_GB-cori-medium"   # the author's pick (2026-10-04); Southern English Female before
 DEFAULT_FALLBACK = "en_GB-jenny_dioco-medium"
 CACHE_PHRASES = 50
 # Personalities in speech.json may name a voice of their own ("sarcastic": {"label": ..., "voice": ...}). Up to
@@ -49,6 +50,10 @@ EXTRA_VOICES_MAX = 4
 # which would write the download outside piper-voices/.
 VOICE_NAME = re.compile(r"^[a-z]{2,3}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)$")
 FILE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/{path}?download=true"
+# Piper's list of every voice (Settings > Voice > More voices, and the voice lab), kept beside the voices for a week
+CATALOGUE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json?download=true"
+CATALOGUE_CACHE = os.path.join(VOICES_DIR, "voices.json")
+CATALOGUE_MAX_AGE = 7 * 86400
 # The longest line spoken (about a minute of speech): a cap on the synthesis work one request can ask for.
 # A longer line is cut at a sentence or clause boundary, never mid-word (see clip_text).
 SAY_MAX = 1000
@@ -95,6 +100,56 @@ def installed_voices(voices_dir):
     """Voices in voices_dir that have both files (the model and its .onnx.json config): Piper needs both."""
     return sorted(os.path.basename(p)[:-5] for p in glob.glob(os.path.join(glob.escape(voices_dir), "*.onnx"))
                   if os.path.exists(p + ".json"))
+
+
+def fetch_catalogue(force=False, cache=None):
+    """Piper's voices.json: {voice: {language, quality, num_speakers, files: {path: {size_bytes, md5_digest}}}}.
+    Kept in `cache` (data/piper-voices/voices.json) for a week; force: fetched again now."""
+    cache = cache or CATALOGUE_CACHE
+    if not force and os.path.exists(cache) and time.time() - os.path.getmtime(cache) < CATALOGUE_MAX_AGE:
+        try:
+            with open(cache, encoding="utf-8") as f:
+                doc = json.load(f)
+            if isinstance(doc, dict):
+                return doc
+        except (OSError, ValueError):   # a cut-short copy: fetch it again rather than trust it for a week
+            pass
+    with urllib.request.urlopen(CATALOGUE_URL, timeout=30) as r:
+        data = r.read()
+    doc = json.loads(data)
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    # a temp file moved into place: an interrupted write never leaves a truncated catalogue behind
+    fd, part = tempfile.mkstemp(dir=os.path.dirname(cache), prefix="voices.json.", suffix=".part")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(part, 0o644)
+        os.replace(part, cache)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
+    return doc
+
+
+def catalogue_summary(doc, installed=()):
+    """The catalogue for the page: [{name, language (en_GB), language_name ("English (Great Britain)"), quality,
+    speakers, size_mb (the model), installed}], by name; entries that are not well-formed voices are left out."""
+    out, have = [], set(installed)
+    for name, v in (doc or {}).items():
+        if not isinstance(v, dict) or not VOICE_NAME.fullmatch(name):
+            continue
+        lang = v.get("language") if isinstance(v.get("language"), dict) else {}
+        files = v.get("files") if isinstance(v.get("files"), dict) else {}
+        size = sum((m or {}).get("size_bytes") or 0 for p, m in files.items() if p.endswith(".onnx") and isinstance(m, dict))
+        out.append({"name": name, "language": lang.get("code") or name.split("-")[0],
+                    "language_name": f"{lang.get('name_english') or ''} ({lang.get('country_english') or ''})".replace(" ()", "").strip(),
+                    "quality": v.get("quality") or name.rsplit("-", 1)[1],
+                    "speakers": v.get("num_speakers") if isinstance(v.get("num_speakers"), int) else 1,
+                    "size_mb": round(size / 1e6) if size else None, "installed": name in have})
+    return sorted(out, key=lambda x: x["name"])
 
 
 def voice_paths(name):

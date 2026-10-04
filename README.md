@@ -377,8 +377,9 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
 Alerts are spoken when 🗣 in the header is on. **Piper**, a neural voice running on your CPU, sounds far
 better than the browser's own voice, which is used for alerts when Piper isn't installed. What you ask for (a status
 report, the last line again, a question from the tablet) is only ever said in Piper: without it, it is shown as a
-caption instead. The voice (`voice` in the
-config file) downloads into `data/piper-voices/` the first time; the dialog switches between installed voices.
+caption instead. The voice (`voice` in the config file; Cori, `en_GB-cori-medium`, unless you pick another) downloads
+into `data/piper-voices/` the first time. Settings → Voice switches between installed voices, and its **More voices**
+lists every Piper voice by language: pick one and Outrider downloads it and switches to it (on a Docker server too).
 
 **Choosing how it sounds**
 

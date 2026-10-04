@@ -1088,7 +1088,7 @@ class Batch4Review(unittest.TestCase):
                 f.write('{"en_GB-a-low": {"lang')
             with unittest.mock.patch.object(voice_lab, "VOICES_DIR", d), \
                     unittest.mock.patch.object(voice_lab, "CATALOGUE_CACHE", cache), \
-                    unittest.mock.patch.object(voice_lab.urllib.request, "urlopen",
+                    unittest.mock.patch.object(voice_lab.outrider.tts.urllib.request, "urlopen",
                                                lambda url, timeout: io.BytesIO(b'{"en_GB-a-low": {}}')):
                 self.assertEqual(voice_lab.fetch_catalogue(), {"en_GB-a-low": {}})
             with open(cache) as f:

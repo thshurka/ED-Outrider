@@ -6312,13 +6312,14 @@ function drawServerPlay() {
     : p.choice !== "auto" ? `(${p.choice} is not installed on the PC: this browser plays them)`
     : "(no player found on the PC: pw-play, paplay, aplay or ffplay; this browser plays them)";
 }
+let mvVoices = null;   // More voices: Piper's catalogue once fetched (see loadMoreVoices)
 function drawTts() {
   const t = data && data.tts, sel = document.getElementById("ttsVoice");
   document.getElementById("ttsEngine").textContent = t && t.engine === "piper" ? "· Piper" : "· browser speech";
   document.getElementById("ttsStatus").textContent = t && t.available ? t.status : "";
   document.getElementById("ttsHint").textContent = !t || !t.available
     ? "Piper is not installed, so the browser's own voice is used (robotic on Linux). For a natural voice: python3 -m venv --system-site-packages .venv && .venv/bin/pip install piper-tts, then restart Outrider."
-    : "Voices live in data/piper-voices/; a configured voice that is missing is downloaded there on first use.";
+    : "Voices live in data/piper-voices/ where Outrider runs; More voices below downloads any of Piper's there.";
   const opts = (t && t.voices) || [];
   if (sel.dataset.opts !== opts.join(",")) {
     sel.innerHTML = opts.map(v => `<option>${esc(v)}</option>`).join("") || `<option value="">(none installed yet)</option>`;
@@ -6326,6 +6327,7 @@ function drawTts() {
   }
   if (t && t.voice && document.activeElement !== sel) sel.value = t.voice;
   sel.disabled = !opts.length;
+  if (mvVoices) { for (const v of mvVoices) v.installed = opts.includes(v.name); if (document.getElementById("moreVoices").open) drawMoreVoices(); }
   const sf = data && data.sound_files, own = sf ? Object.keys(sf.own || {}) : [];   // [speech] sound_dir (S16)
   document.getElementById("soundFiles").textContent = !sf ? "" : (own.length ? `Your own sounds: ${own.join(", ")}.` : "No sound files of your own found.")
     + ((sf.problems || []).length ? ` Not used: ${sf.problems.join("; ")}.` : "");
@@ -6335,6 +6337,44 @@ function drawTts() {
 }
 drawSpeechBtn();
 document.getElementById("ttsVoice").onchange = e => apiJson("api/voice", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({voice: e.target.value})});
+// ---- More voices (Settings > Voice): Piper's catalogue, from the server (GET api/voices/catalogue). Picking one
+// downloads it where Outrider runs and switches to it (POST api/voice, as the voice list above does): no voice lab
+// needed, so a Docker install has every voice too. The download's progress shows in the status beside Voice.
+async function loadMoreVoices(refresh = false) {
+  const msg = document.getElementById("mvMsg");
+  msg.textContent = "reading Piper's voice list…";
+  let r;
+  try { r = await apiJson(`api/voices/catalogue${refresh ? "?refresh=1" : ""}`); } catch { r = {error: "Outrider not reachable"}; }
+  if (!r || r.error) { msg.textContent = (r && r.error) || "?"; return; }
+  mvVoices = r.voices || [];
+  msg.textContent = `${mvVoices.length} voices`;
+  const sel = document.getElementById("mvLang"), names = new Map(mvVoices.map(v => [v.language, v.language_name || v.language]));
+  const langs = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1])), want = sel.value || String(r.current || "en_GB").split("-")[0];
+  sel.innerHTML = langs.map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join("");
+  sel.value = names.has(want) ? want : langs.length ? langs[0][0] : "";
+  drawMoreVoices();
+}
+function drawMoreVoices() {
+  const lang = document.getElementById("mvLang").value, cur = data && data.tts && data.tts.voice;
+  document.getElementById("mvList").innerHTML = (mvVoices || []).filter(v => v.language === lang).map(v =>
+    `<div class="mvrow"><span class="mvname">${esc(v.name.split("-")[1].replace(/_/g, " "))}</span>` +
+    `<span class="unk">${esc(v.quality)}${v.speakers > 1 ? ` · ${v.speakers} speakers` : ""}${v.size_mb ? ` · ${v.size_mb} MB` : ""}</span>` +
+    (v.name === cur ? `<span class="ok">in use</span>` : `<button type="button" data-mv="${esc(v.name)}">${v.installed ? "Use" : "Download and use"}</button>`) +
+    `</div>`).join("") || `<div class="hint">no voices in this language</div>`;
+}
+document.getElementById("moreVoices").addEventListener("toggle", e => { if (e.target.open && !mvVoices) loadMoreVoices(); });
+document.getElementById("mvLang").onchange = drawMoreVoices;
+document.getElementById("mvRefresh").onclick = () => loadMoreVoices(true);
+document.getElementById("mvList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-mv]"); if (!b) return;
+  const v = (mvVoices || []).find(x => x.name === b.dataset.mv);
+  let r;
+  try { r = await apiJson("api/voice", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({voice: b.dataset.mv})}); }
+  catch { r = {error: "Outrider not reachable"}; }
+  if (r.error) { toast(`Not switched: ${r.error}`); return; }
+  b.disabled = true;
+  toast(v && v.installed ? `Switching to ${b.dataset.mv}` : `Downloading ${b.dataset.mv}${v && v.size_mb ? ` (${v.size_mb} MB)` : ""}, then switching to it`);
+});
 alertDialog.querySelectorAll("[data-alert]").forEach(cb => {
   cb.checked = !!alertCfg[cb.dataset.alert];
   cb.onchange = async () => {

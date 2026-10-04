@@ -1278,3 +1278,90 @@ class PlausibleFixes(unittest.TestCase):
             self.assertEqual(list(quiet.iterdump()), list(live.iterdump()))
             for c in (writer, dst, quiet, live):
                 c.close()
+
+
+class VoiceCatalogue(unittest.TestCase):
+    """More voices (2026-10-04): Piper's catalogue from the server, for Settings > Voice (a Docker install has no voice
+    lab); a voice is fetched and used through POST /api/voice as before. Cori Medium is the default voice."""
+    DOC = {"en_GB-cori-medium": {"language": {"code": "en_GB", "name_english": "English", "country_english": "Great Britain"},
+                                 "quality": "medium", "num_speakers": 1,
+                                 "files": {"en/en_GB/cori/medium/en_GB-cori-medium.onnx": {"size_bytes": 63_000_000},
+                                           "en/en_GB/cori/medium/en_GB-cori-medium.onnx.json": {"size_bytes": 5_000},
+                                           "en/en_GB/cori/medium/MODEL_CARD": {"size_bytes": 300}}},
+           "de_DE-thorsten-high": {"language": {"code": "de_DE", "name_english": "German", "country_english": "Germany"},
+                                   "quality": "high", "num_speakers": 1,
+                                   "files": {"de/de_DE/thorsten/high/de_DE-thorsten-high.onnx": {"size_bytes": 114_000_000}}},
+           "en_US-libritts-high": {"language": {"code": "en_US", "name_english": "English", "country_english": "United States"},
+                                   "quality": "high", "num_speakers": 904, "files": {}},
+           "../evil-x-low": {"language": {"code": "en_GB"}, "quality": "low", "files": {}},
+           "not a dict": 5}
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.state = ed_outrider.State(self.db, ed_outrider.Journals(self.db), types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def test_default_voice(self):
+        import outrider.tts
+        self.assertEqual(outrider.tts.DEFAULT_VOICE, "en_GB-cori-medium")
+        st = ed_outrider.settings_from({}, argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None),
+                                       None, ([], []))
+        self.assertIn('voice = "en_GB-cori-medium"', ed_outrider.config_text(st))
+        with open(os.path.join(os.path.dirname(ed_outrider.STATIC_DIR), "ed_outrider.toml.example"), encoding="utf-8") as f:
+            self.assertIn('voice = "en_GB-cori-medium"', f.read())
+
+    def test_summary(self):
+        import outrider.tts
+        got = outrider.tts.catalogue_summary(self.DOC, installed=["en_GB-cori-medium"])
+        self.assertEqual([v["name"] for v in got], ["de_DE-thorsten-high", "en_GB-cori-medium", "en_US-libritts-high"])   # bad names out
+        cori = got[1]
+        self.assertEqual((cori["language"], cori["language_name"], cori["quality"], cori["size_mb"], cori["installed"], cori["speakers"]),
+                         ("en_GB", "English (Great Britain)", "medium", 63, True, 1))
+        self.assertEqual((got[0]["installed"], got[2]["speakers"]), (False, 904))
+
+    def test_endpoint(self):
+        import asyncio
+        import types
+        import outrider.tts
+        from aiohttp.test_utils import TestClient, TestServer
+        self.state.speaker = speaker = types.SimpleNamespace(available=True, installed=lambda: ["en_GB-cori-medium"], voice_name="en_GB-cori-medium")
+        calls = []
+
+        def fetch(force=False):
+            calls.append(force)
+            if len(calls) == 3:
+                raise OSError("no network")
+            return self.DOC
+
+        async def go():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                out = []
+                for q in ("", "?refresh=1", ""):
+                    r = await c.get("/api/voices/catalogue" + q)
+                    out.append((r.status, await r.json()))
+                speaker.available = False
+                r = await c.get("/api/voices/catalogue")
+                out.append((r.status, await r.json()))
+                return out
+        with unittest.mock.patch.object(outrider.tts, "fetch_catalogue", fetch):
+            out = asyncio.run(go())
+        self.assertEqual(calls, [False, True, False])
+        status, d = out[0]
+        self.assertEqual((status, d["current"], [v["name"] for v in d["voices"] if v["installed"]]), (200, "en_GB-cori-medium", ["en_GB-cori-medium"]))
+        self.assertEqual((out[2][0], out[2][1]["code"]), (502, "catalogue_unavailable"))
+        self.assertEqual(out[3][0], 503)   # no Piper: nothing to download for
+
+    def test_fetch_catalogue_shared(self):
+        """The voice lab and the server read the same cached catalogue (tts.fetch_catalogue), refetched after a week."""
+        import io
+        import tempfile
+        import outrider.tts
+        with tempfile.TemporaryDirectory() as d:
+            cache = os.path.join(d, "voices.json")
+            with unittest.mock.patch.object(outrider.tts.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b'{"en_GB-a-low": {}}')):
+                self.assertEqual(outrider.tts.fetch_catalogue(cache=cache), {"en_GB-a-low": {}})
+            with unittest.mock.patch.object(outrider.tts.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b'{"x": 1}')):
+                self.assertEqual(outrider.tts.fetch_catalogue(cache=cache), {"en_GB-a-low": {}})          # cached
+                os.utime(cache, (1, time.time() - outrider.tts.CATALOGUE_MAX_AGE - 5))
+                self.assertEqual(outrider.tts.fetch_catalogue(cache=cache), {"x": 1})                     # a week old

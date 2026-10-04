@@ -10963,6 +10963,20 @@ def make_app(state, hosts=None):
         # remembered (over restarts, like the radius and auto honk) once it loads: see remember_voice
         return web.json_response({"ok": True})
 
+    async def voice_catalogue_view(request):
+        """GET /api/voices/catalogue[?refresh=1]: Piper's voices for Settings > Voice > More voices, {voices: [{name,
+        language, language_name, quality, speakers, size_mb, installed}], current}. One is fetched and used with POST
+        /api/voice (the server downloads it): a Docker install has no voice lab. 503 without Piper, 502 offline."""
+        if not state.speaker or not state.speaker.available:
+            return web.json_response({"error": "Piper is not installed", "code": "no_piper"}, status=503)
+        try:
+            doc = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: outrider.tts.fetch_catalogue(force=request.query.get("refresh") == "1"))
+        except (OSError, ValueError) as e:
+            return web.json_response({"error": f"Piper's voice list cannot be fetched ({e})", "code": "catalogue_unavailable"}, status=502)
+        return web.json_response({"voices": outrider.tts.catalogue_summary(doc, state.speaker.installed()),
+                                  "current": state.speaker.voice_name})
+
     async def radius_view(request):
         try:
             r = float((await request.json())["radius"])
@@ -11061,6 +11075,7 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/status", status_view)
     app.router.add_get("/api/status.txt", status_txt_view)
     app.router.add_post("/api/voice", voice_view)
+    app.router.add_get("/api/voices/catalogue", voice_catalogue_view)
     app.router.add_post("/api/autohonk", pc_only(autohonk_view))
     app.router.add_post("/api/autohonk/test", pc_only(autohonk_test_view))
     app.router.add_post("/api/autohonk/forget", pc_only(autohonk_forget_view))

@@ -32,7 +32,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.request
 import wave
 from collections import OrderedDict
 
@@ -47,9 +46,7 @@ import outrider.tts
 
 VOICES_DIR = outrider.tts.VOICES_DIR
 SPEECH_FILE = os.path.join(outrider.RESOURCES_DIR, "speech.json")
-CATALOGUE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json?download=true"
 CATALOGUE_CACHE = os.path.join(VOICES_DIR, "voices.json")
-CATALOGUE_MAX_AGE = 7 * 86400
 # {cmdr}, {ship} and {here} for trying lines out (the lines themselves use {name}, from "Call me")
 ALWAYS = {"cmdr": "Jameson", "ship": "Out There", "here": "Drojau LL-O b26-3"}
 ANY_ALERT, ANY_STYLE = "any alert", "any personality"
@@ -192,34 +189,9 @@ class Voices:
 
 
 def fetch_catalogue(force=False):
-    """Piper's voices.json: {voice: {language, quality, num_speakers, files: {path: {size_bytes, md5_digest}}}}.
-    Kept in data/piper-voices/ for a week."""
-    if not force and os.path.exists(CATALOGUE_CACHE) and time.time() - os.path.getmtime(CATALOGUE_CACHE) < CATALOGUE_MAX_AGE:
-        try:
-            with open(CATALOGUE_CACHE, encoding="utf-8") as f:
-                doc = json.load(f)
-            if isinstance(doc, dict):
-                return doc
-        except (OSError, ValueError):   # a cut-short copy: fetch it again rather than trust it for a week
-            pass
-    with urllib.request.urlopen(CATALOGUE_URL, timeout=30) as r:
-        data = r.read()
-    doc = json.loads(data)
-    os.makedirs(VOICES_DIR, exist_ok=True)
-    # a temp file moved into place: an interrupted write never leaves a truncated catalogue behind
-    fd, part = tempfile.mkstemp(dir=VOICES_DIR, prefix="voices.json.", suffix=".part")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.chmod(part, 0o644)
-        os.replace(part, CATALOGUE_CACHE)
-    except BaseException:
-        try:
-            os.remove(part)
-        except OSError:
-            pass
-        raise
-    return doc
+    """Piper's voices.json, kept in data/piper-voices/ for a week (outrider.tts.fetch_catalogue: the server's
+    Settings > Voice > More voices reads the same copy)."""
+    return outrider.tts.fetch_catalogue(force, cache=CATALOGUE_CACHE)
 
 
 def download(entry, progress):
