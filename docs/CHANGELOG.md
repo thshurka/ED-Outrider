@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Server mode leaves the game PC's controls out (the Docker plan, D2)
+- With `game_pc` off, the pages show nothing that needs the game PC: Settings' Auto honk section, "Play speech and
+  sounds on this PC", the Highway's auto-target box, its 🎯 / Retry buttons and clipboard line, and on the tablet (and
+  so the Android app) the rail column, whose width goes to the page. Settings → Server settings says why.
+
 ## 2026-10-04 · Server mode: [server] game_pc (the Docker plan, D1)
 - `[server] game_pc` (auto, true or false): whether this Outrider runs on the PC the game runs on. Auto turns it off
   inside a container (Docker). Off, nothing touches a game PC: no auto honk, auto-target, tablet rail, co-pilot button,

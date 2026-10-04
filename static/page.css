@@ -930,3 +930,5 @@ body.app #hwyPanes.noroute #hwyAuto { grid-row: 3; align-self: start; }
 /* Outrider updated on disk but still running the old code */
 .updline { margin-top: 4px; font-size: 13px; color: var(--warn); font-weight: 600; }
 .updline::before { content: "⟳ "; }
+/* a server away from the game PC (payload game_pc false): what needs that PC is left out, not shown broken */
+body.notgamepc .pcOnly, body.notgamepc [data-aim] { display: none !important; }

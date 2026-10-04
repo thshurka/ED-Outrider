@@ -315,7 +315,7 @@
         </div>
       </form>
     </details>
-    <details id="hwyAuto">
+    <details id="hwyAuto" class="pcOnly">
       <summary>Auto-target the next system <span id="hwyAutoState" class="unk"></span></summary>
       <div class="srow">
         <label title="after an FSD supercharge on the route, press keys in the galaxy map to make the next route system the target (Linux; the same virtual keyboard as auto honk)"><input type="checkbox" id="hwyAutoOn"> Auto-target after a supercharge</label>
@@ -438,7 +438,7 @@
   <div class="tb-navfill" aria-hidden="true"></div>
 </nav>
 <div id="tabMain" class="tb-main" hidden></div>
-<aside id="tabRail" class="tb-rail" aria-label="Game controls" hidden>
+<aside id="tabRail" class="tb-rail pcOnly" aria-label="Game controls" hidden>
   <div class="tb-railhead"><div><div id="tabRailTitle" class="tb-railtitle">Game controls</div><div id="tabRailSub" class="tb-railsub"></div></div>
     <button type="button" id="tabRailEditBtn" class="tb-btn" title="choose this rail's buttons">Edit</button></div>
   <div id="tabRailList" class="tb-raillist"></div>
@@ -511,7 +511,7 @@
           <option value="auto">auto: one window at a time</option><option value="always">always</option><option value="never">never</option></select>
         <span id="speakerStatus" class="hint"></span> <button type="button" class="try" id="speakerClaim" hidden>speak from this window</button>
         <div class="hint">With the page open in several windows (a second screen at ?mode=now), auto lets only one of them speak and play the alert sounds; every window still shows the alerts. Remembered per browser: always makes every window of it speak, never keeps this browser quiet. The ▶ try buttons always work.</div></div>
-      <label class="mod"><input type="checkbox" id="serverPlay"> Play speech and sounds on this PC <span id="serverPlayStatus" class="unk"></span>
+      <label class="mod pcOnly"><input type="checkbox" id="serverPlay"> Play speech and sounds on this PC <span id="serverPlayStatus" class="unk"></span>
         <span class="hint">the PC running Outrider plays the spoken lines (Piper) and the alert sounds through its own player, so the page needs no click to allow audio; a page must still be open, since it chooses what to say. Whatever the PC cannot play, this browser plays instead. Per browser; Linux only</span></label>
       <label class="mod">Speed <input type="range" id="speechSpeed" min="0.5" max="2" step="0.05" style="width:12em;vertical-align:middle">
         <span id="speechSpeedOut"></span><span class="reset" data-reset="speechSpeed">reset</span>
@@ -605,7 +605,7 @@
           warning for it uses the config file's <code>rig_warn</code>, since the server says it for every window. Blank = the config file's value.</span></label>
       <label class="mod"><input type="checkbox" id="surfStrip"> Also a small copy of the surface map in the on-body strip (under the header), with a one-line legend</label>
     </details>
-    <details class="setsec" data-sec-key="honk" data-chip="Auto honk"><summary>Auto honk and the co-pilot button</summary>
+    <details class="setsec pcOnly" data-sec-key="honk" data-chip="Auto honk"><summary>Auto honk and the co-pilot button</summary>
       <label class="mod"><input type="checkbox" id="autoHonk"> Honk automatically on arriving in a system by hyperspace
         <span id="autoHonkStatus" class="hint"></span></label>
       <label class="mod"><input type="checkbox" id="autoHonkSay"> When it completes, say how many bodies it found

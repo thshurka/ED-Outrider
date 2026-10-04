@@ -221,3 +221,6 @@ body.tablet.app main.nearPinned > #hereView.detail > #bodyPanel, body.tablet.app
 #tabFuel, #tabUnsold, .tb-link { flex-shrink: 0; }
 .tb-railhead > div { min-width: 0; }
 .tb-rbl { overflow: hidden; } .tb-rbl b { overflow: hidden; text-overflow: ellipsis; }   /* a long label never runs under its state */
+/* a server: no rail column, the main column takes its width */
+body.tablet.notgamepc, body.tablet.app.notgamepc { grid-template-columns: var(--tb-nav-w) minmax(0, 1fr); }
+body.tablet.notgamepc .tb-banner { right: calc(var(--tb-pad) + 12px); }

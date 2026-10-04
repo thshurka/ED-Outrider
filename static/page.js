@@ -2554,6 +2554,9 @@ function render() {
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
   document.getElementById("updateLine").hidden = !data.restart_needed;
+  // a server away from the game PC ([server] game_pc false): what needs that PC is left out (body.notgamepc hides every
+  // .pcOnly: Settings' Auto honk, "play on this PC", the Highway's auto-target box and 🎯 / Retry, the tablet's rail)
+  document.body.classList.toggle("notgamepc", data.game_pc === false);
   if (TABLET) tabRender();
   // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
   if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
@@ -4316,7 +4319,7 @@ function hwyRowHtml(r, cls, retry = false) {
 }
 const HWY_COLS = 9;
 function hwyClipHtml(cb) {
-  if (!cb) return "";
+  if (!cb || (data && data.game_pc === false)) return "";   // a server has no desktop clipboard to copy to
   if (!cb.enabled) return `<div class="hwyclip unk">Copying the next system to the clipboard is off ([highway] clipboard in the config).</div>`;
   if (!cb.available) return `<div class="hwyclip warnc" title="${esc(cb.why || "")}">No wl-copy/xclip found: install one to auto-copy the next system.</div>`;
   return `<div class="hwyclip unk" title="with ${esc(cb.tool || "")}; paste it into the galaxy map's search">Next system copied to the clipboard on arrival${cb.last && cb.last.text ? ` · last: ${esc(cb.last.text)}` : ""}.</div>`;
@@ -6635,7 +6638,7 @@ setSecs.forEach(d => d.addEventListener("toggle", () => {
 document.getElementById("setOpenAll").onclick = () => setSecs.forEach(d => { d.open = true; });
 document.getElementById("setCloseAll").onclick = () => setSecs.forEach(d => { d.open = false; });
 const alertSections = [...alertDialog.querySelectorAll("[data-chip]")];
-alertChips.innerHTML = alertSections.map((s, i) => `<button type="button" data-sec="${i}">${esc(s.dataset.chip)}</button>`).join("");
+alertChips.innerHTML = alertSections.map((s, i) => `<button type="button" data-sec="${i}"${s.classList.contains("pcOnly") ? ` class="pcOnly"` : ""}>${esc(s.dataset.chip)}</button>`).join("");
 function showAlertSection(i, remember = true) {
   const s = alertSections[i]; if (!s) return;
   if (s.tagName === "DETAILS") s.open = true;
@@ -6673,7 +6676,9 @@ async function loadServerSettings() {
     if (k.kind === "table") return `<textarea rows="2" ${data} placeholder='{"Name": "KEY_..."}'>${esc(Object.keys(v).length ? JSON.stringify(v) : "")}</textarea>`;
     return `<input type="text" ${data} value="${esc(v)}">`;
   };
-  box.innerHTML = `<div class="hint">Saved in <code>${esc(c.path)}</code>${c.exists ? "" : " (made when you first save)"}. Outrider uses them from its next start;
+  box.innerHTML = (data && data.game_pc === false ? `<div class="hint warnc">This Outrider is a server, not the PC the game runs on ([server] game_pc): auto honk,
+    auto-target, the tablet's rail, the co-pilot button, the clipboard and playing on this PC are off and left out of the pages.</div>` : "") +
+    `<div class="hint">Saved in <code>${esc(c.path)}</code>${c.exists ? "" : " (made when you first save)"}. Outrider uses them from its next start;
     the previous file is kept beside it as <code>.bak</code>. Paths may be relative to the Outrider folder.</div>` +
     (c.problems && c.problems.length ? `<div class="hint warnc">The file has problems (defaults used): ${c.problems.map(esc).join("; ")}</div>` : "") +
     c.sections.map(sec => `<details class="srvsec" data-srvsec="${esc(sec.section)}"${SRV_SET_OPEN[sec.section] ? " open" : ""}><summary>${esc(sec.title)} <code>[${esc(sec.section)}]</code></summary>` +

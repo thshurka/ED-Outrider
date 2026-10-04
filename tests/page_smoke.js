@@ -3433,6 +3433,10 @@ const settle = async maxMs => {
     got.themes = JSON.parse(tw.eval(`(() => { const told = []; window.OutriderApp = {setTheme(n) { told.push(n); }};
       const seen = ["elite", "babylon5", "nope", "lcars"].map(t => { tabTheme(t); return document.documentElement.dataset.theme; });
       delete window.OutriderApp; return JSON.stringify([seen, told, [...document.querySelectorAll("#tabTheme option")].map(o => o.value)]); })()`));
+    // server mode on the tablet: no rail column (the main column takes its width), back with game_pc true
+    got.serverRail = JSON.parse(tw.eval(`(() => { const r = document.getElementById("tabRail"), o = [];
+      data.game_pc = false; render(); o.push(getComputedStyle(r).display);
+      data.game_pc = true; render(); o.push(getComputedStyle(r).display !== "none"); return JSON.stringify(o); })()`));
     // Target next from the tablet asks for no countdown (the game keeps the keyboard focus); not sent to the server
     got.target = await (async () => {
       const real = tw.fetch; let sent = null;
@@ -3457,6 +3461,7 @@ const settle = async maxMs => {
       ask: [true, "Fuel at 41 percent.", 0, "Nearest unvisited: Smojooe ZC-D c12-2, 10.8 light years.", false, 1, true],
       rail: [3, "tb-rb off", true, true, "Ship controls", "tb-rb pending", '[{"context":"ship","id":"gear"}]', "tb-rb on", "tb-rb notconf",
              "tb-rb nolink|no rail: docked|0"],
+      serverRail: ["none", true],
       reload: [true, true, false, false, 0, false, 0, true, true, 1], hint: [true, false], searchSheet: "123456", popKeeps: true, link: ["linked · 2 s ago", "stale · 48 s ago", "no link · retrying"], pill: [true, "tb-link linked"],
       banner: [true, true, true, 0], sheet: [true, true, true, true, true, true, true], sheetHere: [false, "here"],
       target: '{"countdown":0}', pinch: '{"dx":10,"dy":5,"scale":2,"x":15,"y":5}',
@@ -3500,6 +3505,19 @@ const settle = async maxMs => {
     const goodS = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
     allOk = allOk && goodS;
     console.log(goodS ? "OK" : "FAIL", "| settings |", goodS ? "12 folding sections, remembered; server settings from the config file; only changes sent" : JSON.stringify(got), errors.slice(before));
+  }
+  // server mode (payload game_pc false): what needs the game PC is left out of the desktop page; back with game_pc true
+  {
+    const w = dom.window, before = errors.length;
+    const shown = sel => { const e = w.document.querySelector(sel); return !!e && w.getComputedStyle(e).display !== "none"; };
+    const look = () => ["#hwyAuto", 'details.setsec[data-sec-key="honk"]', 'label:has(#serverPlay)', '#alertChips .pcOnly'].map(shown);
+    w.eval("data.game_pc = false; render()");
+    const off = [w.document.body.classList.contains("notgamepc"), ...look()];
+    w.eval("data.game_pc = true; render()");
+    const on = [w.document.body.classList.contains("notgamepc"), ...look()];
+    const goodM = JSON.stringify([off, on]) === JSON.stringify([[true, false, false, false, false], [false, true, true, true, true]]) && errors.length === before;
+    allOk = allOk && goodM;
+    console.log(goodM ? "OK" : "FAIL", "| server mode |", goodM ? "auto honk, auto-target, play on this PC left out; back on the game PC" : JSON.stringify([off, on]), errors.slice(before));
   }
   // another site's POST is refused before any handler runs (radius: harmless even if it got through with {})
   const post = origin => fetch(base + "api/radius", {method: "POST", body: "{}",

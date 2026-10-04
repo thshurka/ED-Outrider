@@ -208,7 +208,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
 - **Server mode** (`[server] game_pc`, `State.game_pc`; `resolve_game_pc`: auto is off inside a container). Off: no
   virtual keyboard (`simulate_keyboard_off`), no co-pilot button or clipboard (`simulate_settings`), the PC player off;
   every route that presses keys or plays on this PC is registered through `pc_only()` and answers 409 `not_game_pc`.
-  A new such route goes through `pc_only()` too; the payload's `game_pc` tells the page what to leave out.
+  A new such route goes through `pc_only()` too; the payload's `game_pc` tells the page what to leave out: the page sets
+  `body.notgamepc`, which hides every `.pcOnly` element and `[data-aim]` button (mark a new game-PC control `pcOnly`).
 - **The rail presses keys** (like auto honk and auto-target): one tap of one bound key combination per press
   (`Honker.tap`), only for a button in the CURRENT context's set, only while the game is live, never with --simulate,
   and refused (not queued) while auto honk or auto-target hold the keyboard. Never a sequence. Tests use
