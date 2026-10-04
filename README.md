@@ -377,9 +377,15 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
 ## 🗣 The voice
 
 Alerts are spoken when 🗣 in the header is on. **Piper**, a neural voice running on your CPU, sounds far
-better than the browser's own voice, which is used for alerts when Piper isn't installed. What you ask for (a status
-report, the last line again, a question from the tablet) is only ever said in Piper: without it, it is shown as a
-caption instead. The voice (`voice` in the config file; Cori, `en_GB-cori-medium`, unless you pick another) downloads
+better than the browser's own voice, which is only used when Outrider has no Piper at all. With Piper, a line it can't
+say is not said (what you ask for is still shown as a caption).
+
+**"Click Here To Allow Audio".** A browser plays no sound on a page until you click on it, and Outrider reloads itself
+after an update. When the window that speaks is held back like this, a red pill on the menu bar (and 🔇 in the tab's
+title) asks for that click, the tablet's caption line says the PC's page needs it, and the lines wait: they play once
+you click, or are dropped if they are no longer news. "Play speech and sounds on this PC" needs no click. To never be
+asked, allow sound for the page in the browser (Chrome: Site settings → Sound: Allow; Firefox: Autoplay: Allow Audio
+and Video). The voice (`voice` in the config file; Cori, `en_GB-cori-medium`, unless you pick another) downloads
 into `data/piper-voices/` the first time. Settings → Voice switches between installed voices, and its **More voices**
 lists every Piper voice by language: pick one and Outrider downloads it and switches to it (on a Docker server too).
 

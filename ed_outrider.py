@@ -4704,6 +4704,7 @@ class State:
         self.ask_phrases = outrider.ask.load_phrases()
         self.assistant = dict(outrider.ask.ASSISTANT)
         self.speaker_seen = None
+        self.speaker_audio_blocked = False   # the speaking window's browser holds audio back until a click (the tablet says so)
         self.autohonk = dict(AUTOHONK)
         self._honk_arrival = None  # the arrival the auto honk last looked at
         self.honk_confirm = 10.0   # s to wait for the journal's discovery scan after the press
@@ -4816,6 +4817,8 @@ class State:
         return {
             "version": self.version, "run_id": RUN_ID, "page_stamp": stamp["page"], "restart_needed": stamp["restart_needed"],
             "game_pc": self.game_pc,   # False: the page leaves out what needs the game PC
+            # the speaking window waits for a click before it can make a sound (it lapses with the window itself)
+            "speaker_audio_blocked": bool(self.speaker_audio_blocked and self.speaker_present()),
             "status": self.status, "radius": self.radius,
             "radius_choices": sorted({float(x) for x in RADIUS_CHOICES} | {self.radius}),
             "sphere_cut": self.sphere_cut,
@@ -11004,6 +11007,18 @@ def make_app(state, hosts=None):
         # remembered (over restarts, like the radius and auto honk) once it loads: see remember_voice
         return web.json_response({"ok": True})
 
+    async def speaker_audio_view(request):
+        """POST /api/speaker/audio {blocked}: the speaking window's browser holds audio back until a click (true) or
+        plays again (false). The payload's speaker_audio_blocked tells the tablet, which asks for that click."""
+        body = await json_object(request)
+        if body is None or not isinstance(body.get("blocked"), bool):
+            return web.json_response({"error": "expected {blocked: true or false}"}, status=400)
+        state.speaker_seen = time.monotonic()
+        if state.speaker_audio_blocked != body["blocked"]:
+            state.speaker_audio_blocked = body["blocked"]
+            state.bump()
+        return web.json_response({"ok": True})
+
     async def voice_catalogue_view(request):
         """GET /api/voices/catalogue[?refresh=1]: Piper's voices for Settings > Voice > More voices, {voices: [{name,
         language, language_name, quality, speakers, size_mb, installed}], current}. One is fetched and used with POST
@@ -11117,6 +11132,7 @@ def make_app(state, hosts=None):
     app.router.add_get("/api/status.txt", status_txt_view)
     app.router.add_post("/api/voice", voice_view)
     app.router.add_get("/api/voices/catalogue", voice_catalogue_view)
+    app.router.add_post("/api/speaker/audio", speaker_audio_view)
     app.router.add_post("/api/autohonk", pc_only(autohonk_view))
     app.router.add_post("/api/autohonk/test", pc_only(autohonk_test_view))
     app.router.add_post("/api/autohonk/forget", pc_only(autohonk_forget_view))

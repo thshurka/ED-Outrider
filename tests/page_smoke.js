@@ -1123,9 +1123,9 @@ const settle = async maxMs => {
       data.tts = null;
       const plain = {words: "Server fallback check.", prio: 1, kind: "manual", pace: 1};
       await sayNow(plain);
-      piperBlockedSaid = false; data.tts = {engine: "piper", voice: "x", available: true};
+      data.tts = {engine: "piper", voice: "x", available: true};
       const piper = {words: "Piper fallback check.", prio: 1, kind: "manual", pace: 1};
-      await sayNow(piper);   // no AudioContext in jsdom: the browser voice, without the click toast
+      await sayNow(piper);   // no AudioContext in jsdom, and the server has Piper: not said (never the browser's voice)
       const asked = {words: "Asked check.", prio: 1, kind: "manual", pace: 1, piperOnly: true};
       await sayNow(asked);   // a co-pilot line: Piper or nothing, never the browser's voice
       play("chime");
@@ -1135,17 +1135,60 @@ const settle = async maxMs => {
       cb.checked = false; cb.onchange({target: cb});
       const blockedOff = soundBtn.classList.contains("blocked");
       actx = a; drawSoundBtn();
-      window.speechSynthesis = ss; window.SpeechSynthesisUtterance = U; data.tts = tts; playHere = ph; toast = tst; piperBlockedSaid = false;
-      return {ticked, off: serverPlay(), spoken, engines: [plain.engine, piper.engine], here, toasts, blocked: [blockedOn, blockedOff],
+      window.speechSynthesis = ss; window.SpeechSynthesisUtterance = U; data.tts = tts; playHere = ph; toast = tst;
+      return {ticked, off: serverPlay(), spoken, engines: [plain.engine, piper.engine || null, /while Outrider has Piper/.test(piper.unsaid || "")], here, toasts, blocked: [blockedOn, blockedOff],
               piperOnly: [asked.engine || null, /never the browser's voice/.test(asked.unsaid || "")]}; })()`);
     w.fetch = realFetch;
-    const want = {ticked: true, off: false, spoken: ["Server fallback check.", "Piper fallback check."],
-      engines: ["browser voice (the PC could not play it)", "browser voice (Piper audio blocked) (the PC could not play it)"],
+    const want = {ticked: true, off: false, spoken: ["Server fallback check."],
+      engines: ["browser voice (the PC could not play it)", null, true],
       here: ["chime"], toasts: [], blocked: [false, true], piperOnly: [null, true]};
     const wantAsked = ["api/say/play 503", "api/say/play 503", "api/say/play 503", "api/sound/play 503"];
     const goodA = JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(asked) === JSON.stringify(wantAsked) && errors.length === before;
     allOk = allOk && goodA;
-    console.log(goodA ? "OK" : "FAIL", "| play on this PC |", goodA ? "503 from the PC: the browser said both lines and played the sound; a co-pilot line not in the browser's voice" : JSON.stringify({got, asked}), errors.slice(before));
+    console.log(goodA ? "OK" : "FAIL", "| play on this PC |", goodA ? "503 from the PC: no Piper, the browser's voice; with Piper never the browser's voice; the sound played here" : JSON.stringify({got, asked}), errors.slice(before));
+  }
+  // the browser holds audio back until a click: a red pill on the menu bar and 🔇 in the title, Outrider told (the
+  // tablet asks too), and the line waits for the click, then plays in Piper (here: the server's Piper answer stubbed
+  // as failed) or is dropped when it waited too long; never the browser's voice
+  {
+    const w = dom.window, before = errors.length, real = w.fetch, reported = [], said = [];
+    w.fetch = (u, o) => {
+      if (/api\/speaker\/audio/.test(String(u))) { reported.push(JSON.parse(o.body).blocked); return Promise.resolve({ok: true, json: async () => ({ok: true})}); }
+      if (/^api\/say\?/.test(String(u))) { said.push("piper"); return Promise.resolve({ok: false, status: 500}); }
+      return real(u, o);
+    };
+    const got = await w.eval(`(async () => {
+      const saved = {actx, tts: data.tts, ss: window.speechSynthesis, U: window.SpeechSynthesisUtterance, on: speechOn, sp: isSpeaker};
+      const spoken = [];
+      window.SpeechSynthesisUtterance = function (words) { this.text = words; };
+      window.speechSynthesis = {speaking: false, pending: false, speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 0); }, cancel() {}};
+      const cb = document.getElementById("serverPlay"); cb.checked = false; cb.onchange({target: cb});
+      speechOn = true; isSpeaker = true; data.tts = {engine: "piper", voice: "x", available: true};
+      const ctx = {state: "suspended", resume() { return Promise.resolve(); }};
+      actx = ctx; audioBlockedSent = null;
+      const pill = document.getElementById("audioPill");
+      const fresh = {words: "Held check.", prio: 1, kind: "manual", pace: 1, at: Date.now(), notBefore: Date.now()};
+      const stale = {words: "Stale check.", prio: 2, kind: "find", pace: 1, at: Date.now() - 60000, notBefore: Date.now() - 60000};
+      const p1 = sayNow(fresh);
+      await new Promise(r => setTimeout(r, 1300));   // runningAudio gives the browser a second to start it
+      const held = [fresh.heldForClick === true, !pill.hidden, document.title.startsWith("🔇 "), spoken.length];
+      speechNow = null;
+      const p2 = sayNow(stale);
+      await new Promise(r => setTimeout(r, 1300));
+      ctx.state = "running"; audioStateChanged();   // the click
+      await p1; await p2;
+      const out = {held, after: [pill.hidden, document.title.startsWith("🔇 "), spoken.length],
+                   fresh: /Piper could not say it/.test(fresh.unsaid || ""), stale: stale.unsaid};
+      actx = saved.actx; data.tts = saved.tts; window.speechSynthesis = saved.ss; window.SpeechSynthesisUtterance = saved.U;
+      speechOn = saved.on; isSpeaker = saved.sp; drawAudioPill();
+      return out; })()`);
+    w.fetch = real;
+    got.reported = reported.slice(0, 2); got.said = said;
+    const want = {held: [true, true, true, 0], after: [true, false, 0], fresh: true, stale: "waited too long for a click to allow audio",
+                  reported: [true, false], said: ["piper"]};
+    const goodH = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
+    allOk = allOk && goodH;
+    console.log(goodH ? "OK" : "FAIL", "| audio held back |", goodH ? "red pill, 🔇 title, Outrider told; lines wait for the click, then Piper or dropped, never the browser's voice" : JSON.stringify(got), errors.slice(before));
   }
   // Batch B: the hush drops a find but keeps a hull line and a jump ends a "jump" hush (and the server round trip shows
   // in the header); a co-pilot request is acted on once, and only in the speaking window; the status report; a 👎
@@ -2848,7 +2891,9 @@ const settle = async maxMs => {
     let fail = "synthesis-failed";
     w.SpeechSynthesisUtterance = function (t) { this.text = t; };
     w.speechSynthesis = {speak: u => setTimeout(() => u.onerror({error: fail}), 10), cancel() {}, speaking: false, pending: false};
-    const sayItem = async () => w.eval(`(async () => { const it = {words: "Test line.", pace: 1}; await sayNow(it); return it.unsaid || "said"; })()`);
+    // (as a server without Piper: with Piper, the browser's voice is never used)
+    const sayItem = async () => w.eval(`(async () => { const t = data.tts; data.tts = null; const it = {words: "Test line.", pace: 1};
+      try { await sayNow(it); } finally { data.tts = t; } return it.unsaid || "said"; })()`);
     got.voice = [await sayItem()];
     fail = "interrupted"; got.voice.push(await sayItem());
     w.speechSynthesis = realSS; w.SpeechSynthesisUtterance = realU;

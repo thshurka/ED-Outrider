@@ -1365,3 +1365,34 @@ class VoiceCatalogue(unittest.TestCase):
                 self.assertEqual(outrider.tts.fetch_catalogue(cache=cache), {"en_GB-a-low": {}})          # cached
                 os.utime(cache, (1, time.time() - outrider.tts.CATALOGUE_MAX_AGE - 5))
                 self.assertEqual(outrider.tts.fetch_catalogue(cache=cache), {"x": 1})                     # a week old
+
+
+class AudioBlocked(unittest.TestCase):
+    """The browser holds audio back until a click (2026-10-04, the author's Docker server: the page then spoke in the
+    browser's voice). The speaking window tells the server (POST /api/speaker/audio) and the payload carries it, so
+    the tablet can say the PC's page needs a click; it lapses with the speaking window itself."""
+
+    def setUp(self):
+        import types
+        self.db = ed_outrider.open_db(":memory:")
+        self.addCleanup(self.db.close)
+        self.state = ed_outrider.State(self.db, ed_outrider.Journals(self.db), types.SimpleNamespace(cached=lambda i: (None, None)), 25)
+
+    def test_reported_and_lapses(self):
+        import asyncio
+        from aiohttp.test_utils import TestClient, TestServer
+
+        async def go():
+            async with TestClient(TestServer(ed_outrider.make_app(self.state))) as c:
+                out = [self.state.payload()["speaker_audio_blocked"]]
+                v = self.state.version
+                out.append((await c.post("/api/speaker/audio", json={"blocked": True})).status)
+                out += [self.state.payload()["speaker_audio_blocked"], self.state.version > v]
+                out.append((await c.post("/api/speaker/audio", json={"blocked": "yes"})).status)
+                out.append((await c.post("/api/speaker/audio", json={"blocked": False})).status)
+                out.append(self.state.payload()["speaker_audio_blocked"])
+                return out
+        self.assertEqual(asyncio.run(go()), [False, 200, True, True, 400, 200, False])
+        self.state.speaker_audio_blocked = True
+        self.state.speaker_seen = time.monotonic() - self.state.SPEAKER_SEEN_S - 1   # the window went away
+        self.assertFalse(self.state.payload()["speaker_audio_blocked"])

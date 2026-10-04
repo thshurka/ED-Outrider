@@ -2,6 +2,14 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · "Click Here To Allow Audio"; never the browser's voice with Piper
+- When the browser holds audio back until a click (after a page load or Outrider's own reload), the window that
+  speaks shows a red **Click Here To Allow Audio** pill on the menu bar and 🔇 in its title. The tablet's caption line
+  says the PC's page needs a click. Lines wait for the click and then play in Piper, or are dropped if they're no
+  longer news. Before, they were said in the browser's own voice (found on the author's Docker server).
+- With Piper on the server, the browser's own voice is never used: a line Piper can't say (or says while its voice
+  is still loading) is not said. Without Piper, the browser's voice is still the voice.
+
 ## 2026-10-04 · Docker: a container that cannot write its folders stops at once
 - When the container cannot write `docker/config` or `docker/data`, it says how to fix it and waits. That wait now
   ends as soon as Docker asks it to stop. It used to ignore the request, so `docker compose down` hung for the whole

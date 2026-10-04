@@ -461,7 +461,7 @@ function renderStrip() {
   } else se.innerHTML = "";
   // tab title: what a background tab needs to know
   const p = data.position;
-  document.title = (disconnected ? "⚠ " : "") + (p ? p.name : "ED Outrider") +
+  document.title = (audioIsBlocked ? "🔇 " : "") + (disconnected ? "⚠ " : "") + (p ? p.name : "ED Outrider") +
     (f && f.live && f.pct != null && f.pct < 30 ? ` · ⛽${f.pct}%` : "") +
     (unsoldLevel(data.unsold) === "urgent" ? " · 💰 sell!" : "");
   renderTilesLine();
@@ -1636,7 +1636,9 @@ const spokenText = t => String(t).replace(/<[^>]+>/g, "").replace(/[⚠📖🚢�
 // Piper's audio plays through the AudioContext, which the browser keeps suspended until you click the page.
 // Wait up to a second for it to resume; if it will not, the line goes to the browser's own voice instead
 // of being dropped, and the page says once what unlocks Piper.
-let piperBlockedSaid = false;
+// audio held back by the browser until a click (see audioBlocked): the lines waiting for it, and the pill's state
+const audioWaiters = new Set();
+let audioIsBlocked = false, audioBlockedSent = null;
 async function runningAudio() {
   const ctx = audio(); if (!ctx) return null;
   if (ctx.state !== "running") { try { await Promise.race([ctx.resume(), new Promise(res => setTimeout(res, 1000))]); } catch {} }
@@ -1772,10 +1774,16 @@ async function sayNow(item) {
       if (cur.stopped) return;
     }
     const tts = data && data.tts;
-    const ctx = tts && tts.engine === "piper" ? await runningAudio() : null;
-    // with the PC playing, the browser's click-to-allow-audio is not the user's problem: no toast for a fallback
-    if (tts && tts.engine === "piper" && !ctx && !piperBlockedSaid && !onPc) {
-      piperBlockedSaid = true; toast(item.piperOnly ? "Click the page to allow Piper audio" : "Click the page to allow Piper audio (the browser's voice speaks until then)");
+    let ctx = tts && tts.engine === "piper" ? await runningAudio() : null;
+    if (!ctx && tts && tts.engine === "piper" && actx && actx.state !== "running" && !cur.stopped) {
+      // the browser holds audio back until a click: the line waits for it (the red pill asks), then plays in Piper
+      // if it is still worth saying; never the browser's voice instead
+      item.heldForClick = true; drawAudioPill();
+      await audioUnlocked(cur);
+      cur.halt = null;
+      if (cur.stopped) return;
+      if (!speechExpire([item], Date.now(), posId()).length) { item.unsaid = "waited too long for a click to allow audio"; return; }
+      ctx = actx && actx.state === "running" ? actx : null;
     }
     if (ctx) {
       try {
@@ -1795,7 +1803,14 @@ async function sayNow(item) {
       } catch {}
     }
     if (cur.stopped) return;
-    if (item.piperOnly) { item.unsaid = "Piper could not say it (never the browser's voice for this line)"; return; }
+    // the browser's own voice only where Outrider has no Piper at all (the author's choice): with Piper, a line it
+    // could not say (or said while its voice is still loading) is not said
+    if (item.piperOnly || (tts && tts.available)) {
+      item.unsaid = tts && tts.engine === "piper" ? "Piper could not say it (never the browser's voice while Outrider has Piper)"
+        : tts && tts.available ? "Piper's voice is not ready yet (never the browser's voice while Outrider has Piper)"
+        : "Piper could not say it (never the browser's voice for this line)";
+      return;
+    }
     if (typeof speechSynthesis === "undefined") { item.unsaid = "no voice in this browser"; return; }
     item.engine = (tts && tts.engine === "piper" ? (ctx ? "browser voice (Piper failed)" : "browser voice (Piper audio blocked)") : "browser voice")
       + (onPc ? " (the PC could not play it)" : "");
@@ -5464,7 +5479,7 @@ document.addEventListener("touchstart", e => {
 let actx = null, soundOn = store.get("sound", null), lastSeq = null;
 const soundBtn = document.getElementById("sound");
 function audio() {
-  if (!actx) { try { actx = new AudioContext(); } catch { return null; } }
+  if (!actx) { try { actx = new AudioContext(); actx.onstatechange = audioStateChanged; } catch { return null; } }
   if (actx.state === "suspended") actx.resume();
   return actx;
 }
@@ -5537,7 +5552,38 @@ function drawSoundBtn() {
 soundBtn.onclick = () => { soundOn = !soundOn; store.set("sound", soundOn); if (soundOn) audio(); drawSoundBtn(); };
 document.querySelectorAll("[data-try]").forEach(b => b.onclick = () => { play(b.dataset.try); drawSoundBtn(); });
 // Browsers only allow audio after a click; any click on the page unlocks it.
-document.addEventListener("pointerdown", () => { if (soundOn && !TABLET) { audio(); setTimeout(drawSoundBtn, 50); } });
+document.addEventListener("pointerdown", () => { if ((soundOn || speechOn) && !TABLET) { audio(); setTimeout(audioStateChanged, 50); } });
+// ---- audio held back by the browser (2026-10-04): until a click on the page the browser keeps its audio engine
+// suspended, and Piper's voice and the sounds cannot play (on the PC itself, "Play on this PC" needs no click). The
+// speaking window shows a red pill on the menu bar and 🔇 in its title, tells Outrider (POST api/speaker/audio: the
+// tablet then asks for the click too), and holds its lines until the click (see sayNow). Never the browser's voice.
+function audioBlocked() {
+  if (TABLET || !speakerHere() || serverPlay()) return false;
+  const t = data && data.tts;
+  if (!((speechOn && t && t.engine === "piper") || soundOn)) return false;
+  const ctx = audio();   // made here if not yet: a browser holding audio back leaves it suspended
+  return !!ctx && ctx.state !== "running";
+}
+function audioStateChanged() {
+  if (actx && actx.state === "running") { for (const go of audioWaiters) go(); audioWaiters.clear(); }
+  drawAudioPill(); drawSoundBtn();
+}
+function drawAudioPill() {
+  audioIsBlocked = audioBlocked();
+  document.getElementById("audioPill").hidden = !audioIsBlocked;
+  if (audioIsBlocked !== document.title.startsWith("🔇 ")) document.title = audioIsBlocked ? "🔇 " + document.title : document.title.slice(3);
+  // the speaking window says so (and a window that said "blocked" takes it back when it no longer speaks)
+  if (audioIsBlocked !== audioBlockedSent && (speakerHere() || audioBlockedSent)) {
+    audioBlockedSent = audioIsBlocked;
+    fetch("api/speaker/audio", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({blocked: audioIsBlocked})}).catch(() => {});
+  }
+}
+document.getElementById("audioPill").onclick = () => { audio(); setTimeout(audioStateChanged, 50); };
+// a line waits here for the click; stopping it (a hush, a jump, danger) ends the wait too
+const audioUnlocked = cur => new Promise(res => {
+  const go = () => { audioWaiters.delete(go); res(); };
+  audioWaiters.add(go); cur.halt = go;
+});
 if (soundOn === null) soundOn = true;  // provisional until the payload's defaults arrive
 if (soundOn) audio();
 drawSoundBtn();
@@ -5638,6 +5684,7 @@ function onData() {
   loadOwnSounds();   // your own sound files, decoded before an alert needs one
   prepareLostLine();   // "lost contact", made in your voice while Outrider can still make it
   drawTts();
+  drawAudioPill();
   const sv = data.speech && data.speech.version;
   if (sv && sv !== speechLib.version && sv !== speechLibWanted) { speechLibWanted = sv; loadSpeechLib(); }
   const br = data.bio_rules, brEl = document.getElementById("bioRules");
@@ -7130,7 +7177,9 @@ function tabDrawLink(l) {
 }
 function tabDrawCaption() {
   const c = captions[captions.length - 1], el = document.getElementById("tabCaption");
-  const text = disconnected ? "Reconnecting: old alerts will not replay" : c ? c.words : "";
+  const text = disconnected ? "Reconnecting: old alerts will not replay"
+    : data && data.speaker_audio_blocked ? "🔇 Outrider's voice is waiting: click the Outrider page on the PC to allow audio"
+    : c ? c.words : "";
   if (el.textContent !== text) el.textContent = text;
 }
 // an alert: a banner over the page for a while (danger longer, and red), tap to dismiss

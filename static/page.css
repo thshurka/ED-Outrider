@@ -303,6 +303,11 @@ button.icon { background: var(--panel); color: var(--text); border: 1px solid va
   padding: 3px 8px; cursor: pointer; font: inherit; font-size: 15px; line-height: 1; }
 button.icon.on { border-color: var(--accent); }
 button.icon.blocked { border-color: var(--warn); }
+/* the browser holds audio back until a click: a red pill on the menu bar asks for it (the click is the pill itself) */
+.audiopill { border-radius: 999px; padding: 3px 12px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  background: var(--bad); color: #fff; border: 1px solid var(--bad); animation: audiopill 1.6s ease-in-out infinite; }
+.audiopill[hidden] { display: none; }
+@keyframes audiopill { 50% { opacity: .65; } }
 /* the hush: ▾ beside 🗣 opens the menu; "hushed 7:42" while it runs */
 .hushwrap { position: relative; display: inline-flex; align-items: center; gap: 4px; }
 button.icon.hushbtn { padding: 3px 4px; font-size: 11px; }
