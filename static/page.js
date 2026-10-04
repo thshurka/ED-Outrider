@@ -1644,8 +1644,9 @@ async function runningAudio() {
 }
 // Queue a line. `delay` (ms) holds it back without holding up the lines behind it (it lets an alert's sound
 // play first); `kind` is the alert kind ("manual" for a click in this window), `tag` its speech.json key.
-// `log` is the transcript entry alertOut made for it (a line spoken some other way gets its own).
-function speak(text, {delay = 0, kind = "manual", tag = null, still = null, voice = null, pace = 1, log = null} = {}) {
+// `log` is the transcript entry alertOut made for it (a line spoken some other way gets its own). `piperOnly`: said in
+// Piper or not at all, never the browser's own voice (the co-pilot channel's lines: the author's choice).
+function speak(text, {delay = 0, kind = "manual", tag = null, still = null, voice = null, pace = 1, log = null, piperOnly = false} = {}) {
   const words = spokenText(text);
   const entry = log || logSpeech({kind, tag});
   if (words) entry.words = words;
@@ -1655,7 +1656,7 @@ function speak(text, {delay = 0, kind = "manual", tag = null, still = null, voic
   if (tag && !speechCooled(speechLast, tag, now)) return setFate(entry, `refused: said under ${SPEECH_COOLDOWN[tag] / 1000} s ago`);
   const prevLast = tag ? speechLast[tag] : undefined;
   if (tag) speechLast[tag] = now;
-  const item = {words, kind, tag, still, voice, pace, prio: speechPrio(kind, tag), at: now, notBefore: now + delay, prevLast,
+  const item = {words, kind, tag, still, voice, pace, piperOnly, prio: speechPrio(kind, tag), at: now, notBefore: now + delay, prevLast,
                 sys: SPEECH_SYS_BOUND.has(kind) && data && data.position ? posId() : null, log: entry};
   const before = speechItems;
   speechItems = speechAdd(speechItems, item);
@@ -1774,7 +1775,7 @@ async function sayNow(item) {
     const ctx = tts && tts.engine === "piper" ? await runningAudio() : null;
     // with the PC playing, the browser's click-to-allow-audio is not the user's problem: no toast for a fallback
     if (tts && tts.engine === "piper" && !ctx && !piperBlockedSaid && !onPc) {
-      piperBlockedSaid = true; toast("Click the page to allow Piper audio (the browser's voice speaks until then)");
+      piperBlockedSaid = true; toast(item.piperOnly ? "Click the page to allow Piper audio" : "Click the page to allow Piper audio (the browser's voice speaks until then)");
     }
     if (ctx) {
       try {
@@ -1794,6 +1795,7 @@ async function sayNow(item) {
       } catch {}
     }
     if (cur.stopped) return;
+    if (item.piperOnly) { item.unsaid = "Piper could not say it (never the browser's voice for this line)"; return; }
     if (typeof speechSynthesis === "undefined") { item.unsaid = "no voice in this browser"; return; }
     item.engine = (tts && tts.engine === "piper" ? (ctx ? "browser voice (Piper failed)" : "browser voice (Piper audio blocked)") : "browser voice")
       + (onPc ? " (the PC could not play it)" : "");
@@ -5616,16 +5618,20 @@ function takeCopilot(cp, first) {
   else if (fresh && cp.action === "status") addCaption(statusReportText());   // Now's captions show what was asked for
   else if (fresh && (cp.action === "say" || cp.action === "caption") && cp.words) addCaption(cp.words);   // a voice answer (api/ask)
 }
+// Every line here is said in Piper or not at all (never the browser's own voice: the author's choice); each is shown as
+// a caption too, so a line Piper could not say is still there to read.
 function copilotDo(cp) {
   if (cp.action === "status") {   // a tap while something is being said cuts it short (danger excepted)
     if (speechNow && speechNow.prio !== 0) { setFate(speechPlaying, "cut short: a status report was asked for"); speechNow.stop(); }
     const text = statusReportText();
-    speak(text, {kind: "manual"}); addCaption(text);
-  } else if (cp.action === "again") speak(lastSaid ? lastSaid.words : "Nothing said yet.", {kind: "manual", voice: lastSaid && lastSaid.voice, pace: lastSaid ? lastSaid.pace || 1 : 1});
-  else if (cp.action === "replay" && cp.words) speak(cp.words, {kind: "manual"});
+    speak(text, {kind: "manual", piperOnly: true}); addCaption(text);
+  } else if (cp.action === "again") {
+    const text = lastSaid ? lastSaid.words : "Nothing said yet.";
+    speak(text, {kind: "manual", voice: lastSaid && lastSaid.voice, pace: lastSaid ? lastSaid.pace || 1 : 1, piperOnly: true}); addCaption(text);
+  } else if (cp.action === "replay" && cp.words) { speak(cp.words, {kind: "manual", piperOnly: true}); addCaption(cp.words); }
   // an answer to a question by voice (POST api/ask): said here, as a line you asked for; "caption": shown only (a hush's
   // answer: the hush itself is announced)
-  else if (cp.action === "say" && cp.words) { speak(cp.words, {kind: "manual"}); addCaption(cp.words); }
+  else if (cp.action === "say" && cp.words) { speak(cp.words, {kind: "manual", piperOnly: true}); addCaption(cp.words); }
   else if (cp.action === "caption" && cp.words) addCaption(cp.words);
 }
 function onData() {

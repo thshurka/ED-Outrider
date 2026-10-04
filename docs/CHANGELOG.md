@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · What you ask for is said in Piper only
+- A status report, "say again", a replay, and an answer to a question from the tablet are said in Piper (on the PC
+  or in the browser, as before) or not at all: never in the browser's own voice. Each is shown as a caption either
+  way. Alerts still fall back to the browser's voice when Piper can't speak.
+
 ## 2026-10-04 · Review fixes, batch F: the rail's keyboard and the dialogs' buttons
 - A rail button pressed just as Outrider let go of the virtual keyboard (auto honk and auto-target off, the rail's
   last use ending) no longer leaves the device open (R12); auto honk's press closes it in the same case too.

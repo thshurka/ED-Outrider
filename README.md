@@ -369,7 +369,9 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
 ## 🗣 The voice
 
 Alerts are spoken when 🗣 in the header is on. **Piper**, a neural voice running on your CPU, sounds far
-better than the browser's own voice, which is used when Piper isn't installed. The voice (`voice` in the
+better than the browser's own voice, which is used for alerts when Piper isn't installed. What you ask for (a status
+report, the last line again, a question from the tablet) is only ever said in Piper: without it, it is shown as a
+caption instead. The voice (`voice` in the
 config file) downloads into `data/piper-voices/` the first time; the dialog switches between installed voices.
 
 **Choosing how it sounds**

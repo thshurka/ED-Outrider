@@ -1126,6 +1126,8 @@ const settle = async maxMs => {
       piperBlockedSaid = false; data.tts = {engine: "piper", voice: "x", available: true};
       const piper = {words: "Piper fallback check.", prio: 1, kind: "manual", pace: 1};
       await sayNow(piper);   // no AudioContext in jsdom: the browser voice, without the click toast
+      const asked = {words: "Asked check.", prio: 1, kind: "manual", pace: 1, piperOnly: true};
+      await sayNow(asked);   // a co-pilot line: Piper or nothing, never the browser's voice
       play("chime");
       await new Promise(r => setTimeout(r, 400));
       actx = {state: "suspended"}; drawSoundBtn();
@@ -1134,15 +1136,16 @@ const settle = async maxMs => {
       const blockedOff = soundBtn.classList.contains("blocked");
       actx = a; drawSoundBtn();
       window.speechSynthesis = ss; window.SpeechSynthesisUtterance = U; data.tts = tts; playHere = ph; toast = tst; piperBlockedSaid = false;
-      return {ticked, off: serverPlay(), spoken, engines: [plain.engine, piper.engine], here, toasts, blocked: [blockedOn, blockedOff]}; })()`);
+      return {ticked, off: serverPlay(), spoken, engines: [plain.engine, piper.engine], here, toasts, blocked: [blockedOn, blockedOff],
+              piperOnly: [asked.engine || null, /never the browser's voice/.test(asked.unsaid || "")]}; })()`);
     w.fetch = realFetch;
     const want = {ticked: true, off: false, spoken: ["Server fallback check.", "Piper fallback check."],
       engines: ["browser voice (the PC could not play it)", "browser voice (Piper audio blocked) (the PC could not play it)"],
-      here: ["chime"], toasts: [], blocked: [false, true]};
-    const wantAsked = ["api/say/play 503", "api/say/play 503", "api/sound/play 503"];
+      here: ["chime"], toasts: [], blocked: [false, true], piperOnly: [null, true]};
+    const wantAsked = ["api/say/play 503", "api/say/play 503", "api/say/play 503", "api/sound/play 503"];
     const goodA = JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(asked) === JSON.stringify(wantAsked) && errors.length === before;
     allOk = allOk && goodA;
-    console.log(goodA ? "OK" : "FAIL", "| play on this PC |", goodA ? "503 from the PC: the browser said both lines and played the sound" : JSON.stringify({got, asked}), errors.slice(before));
+    console.log(goodA ? "OK" : "FAIL", "| play on this PC |", goodA ? "503 from the PC: the browser said both lines and played the sound; a co-pilot line not in the browser's voice" : JSON.stringify({got, asked}), errors.slice(before));
   }
   // Batch B: the hush drops a find but keeps a hull line and a jump ends a "jump" hush (and the server round trip shows
   // in the header); a co-pilot request is acted on once, and only in the speaking window; the status report; a 👎
@@ -1153,7 +1156,9 @@ const settle = async maxMs => {
     const realSay = w.sayNow, flags = w.eval("[speechOn, isSpeaker]");
     const savedData = w.eval("JSON.stringify(data)"), savedLib = w.eval("JSON.stringify(speechLib)");
     w.eval("speechOn = true; isSpeaker = true; speechItems = []; speechLast = {}; speechLog.length = 0; lastSaid = null");
-    w.sayNow = async item => { w.eval("speechNow = {prio: " + item.prio + ", kind: " + JSON.stringify(item.kind) + ", stop() { this.stopped = true; }}"); await sleep(30); w.eval("speechNow = null"); };
+    const piperOnlyOf = {};   // each line the stand-in voice got: was it Piper-only?
+    w.sayNow = async item => { piperOnlyOf[item.words] = !!item.piperOnly;
+      w.eval("speechNow = {prio: " + item.prio + ", kind: " + JSON.stringify(item.kind) + ", stop() { this.stopped = true; }}"); await sleep(30); w.eval("speechNow = null"); };
     const fates = () => JSON.parse(w.eval("JSON.stringify(speechLog.map(e => [e.words, e.fate]))"));
     const fateOf = words => (fates().find(f => f[0] === words) || [])[1];
     // the hush: a jump hush on this system, as the payload brings it
@@ -1191,6 +1196,7 @@ const settle = async maxMs => {
     w.eval('takeCopilot({seq: lastCopilotSeq + 1, action: "again"}, false)');
     await sleep(200);
     got.again = fates().filter(f => f[0] === "Copilot check.").length;
+    got.copilotPiperOnly = [piperOnlyOf["Copilot check."], piperOnlyOf["Hull at 40 percent."]];   // co-pilot lines only
     // the status report
     got.status = w.eval(`(() => { const d = data, hd = hereData; hereData = null;
       data = Object.assign({}, d, {status: "ready", radius: 25, sphere_cut: null, on_body: null, sampling: null, fuel: {pct: 64, jumps_max: 8},
@@ -1242,7 +1248,7 @@ const settle = async maxMs => {
     w.eval(`[speechOn, isSpeaker] = ${JSON.stringify(flags)}; speechItems = []; speechLast = {}; hushState = null; hushKey = null; drawHush();
       data = ${savedData}; speechLib = ${savedLib}; render()`);
     const want = {hushed: true, hush: ["said", "silent: hushed", "said"], label: "hushed till the jump", afterJump: false, back: "said",
-      server: ["10m", true], serverOff: true, copilot: [1, false, true], again: 2,
+      server: ["10m", true], serverOff: true, copilot: [1, false, true], again: 2, copilotPiperOnly: [true, false],
       status: ["Fuel 64 percent, 8 jumps. 412.0M aboard, 3.2 rebuys. Nearest unvisited: Drojau LL-O b26-3, 6.4 light-years.",
                "Stratum Tectonicas, sample 2 of 3, 80 metres still to go."],
       ban: {thumb: true, posted: [["api/speech/ban", "hull", true]], picks: true, banned: true, review: true},

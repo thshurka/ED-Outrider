@@ -63,7 +63,9 @@ upstream project's choices, not rules of the game.
   things are, so anything more would be invented. Marks are text under it, never on it.
 - **A question by voice is answered on the PC and captioned everywhere** (tablet plan phase 6). `/api/ask` sends the
   answer through the co-pilot channel: the window that speaks says it (a line you asked for, so it speaks through a
-  hush, as the status report does), every other window, the tablet's included, shows it as a caption. `spoken` says
+  hush, as the status report does), every other window, the tablet's included, shows it as a caption. Every co-pilot
+  line (status report, say again, replay, an answer) is said in Piper or not at all, never in the browser's own voice
+  (`speak(..., {piperOnly: true})`; the author's choice, 2026-10-04): the caption is there either way. `spoken` says
   whether a window that speaks has asked for the payload in the last minute (S24: its long poll says `speaker=1`).
   Vespa's "status report" is composed on the server (system, fuel, unsold, the Highway's next stop), not the page's
   report: that one depends on each browser's thresholds (S23). The AI layer is off by default and sees only the
