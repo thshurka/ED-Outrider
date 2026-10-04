@@ -138,6 +138,18 @@ class Packaging(unittest.TestCase):
         secs = int(m.group(1)) * (60 if m.group(2) == "m" else 1)
         self.assertGreaterEqual(secs, ed_outrider.BACKUP_SHUTDOWN_WAIT + 30)
 
+    def test_launch_script(self):
+        """launch_outrider.sh: runnable, valid shell, installs when requirements.txt changed (its stamp) or the
+        environment is broken, and hands over to Outrider with exec (Ctrl-C and SIGTERM reach it directly)."""
+        import subprocess
+        path = os.path.join(self.ROOT, "launch_outrider.sh")
+        self.assertTrue(os.access(path, os.X_OK))
+        self.assertEqual(subprocess.run(["bash", "-n", path], capture_output=True).returncode, 0)
+        script = self.read("launch_outrider.sh")
+        for part in ("sha256sum requirements.txt", ".requirements.sha256", "import aiohttp", "pip install --quiet -r requirements.txt",
+                     'exec python ed_outrider.py "$@"', "sys.version_info < (3, 11)"):
+            self.assertIn(part, script)
+
     def test_bundle_rewrites_the_compose_file(self):
         """scripts/docker_bundle.sh runs the saved image instead of a build: the two lines it rewrites are there, and the
         bundles (dist/) and your .env never go into an image."""

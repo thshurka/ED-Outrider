@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · launch_outrider.sh
+- `./launch_outrider.sh` starts Outrider and sets it up first when needed: it makes `.venv` and installs
+  `requirements.txt` on the first run, again when `requirements.txt` has changed or the environment is broken, and
+  otherwise starts at once. Arguments go to Outrider.
+
 ## 2026-10-04 · The schematic draws each body
 - Here's schematic shows each scanned body as a small picture made from its scan data, the same painter as the body
   panel's: class colours, gas-giant bands, oceans and clouds, an atmosphere's rim, rings, a star's glow. Each picture

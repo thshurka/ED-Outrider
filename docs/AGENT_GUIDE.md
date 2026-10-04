@@ -54,6 +54,7 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `tests/page_smoke.js` | Loads the page in jsdom from a running server, opens every view, drives many page functions |
 | `tests/fixtures/journals/` | Synthetic sample journals, `Status.json` and `NavRoute.json` (made-up commander and systems) |
 | `scripts/verify.sh` | Runs everything below in one go against a throwaway server |
+| `launch_outrider.sh` | The player's start script: makes `.venv` and installs `requirements.txt` when missing, changed (a sha256 stamp in `.venv/.requirements.sha256`) or broken (no aiohttp), then `exec`s `ed_outrider.py` with its arguments (Ctrl-C reaches Outrider directly) |
 | `scripts/docker_bundle.sh` | Builds the image and saves it into `dist/ed-outrider-docker-<version>-<arch>.tgz` with a compose file for it (`image:` and `pull_policy: never` instead of `build:`, rewritten from `docker-compose.yml`), `.env.example` and INSTALL.txt. Publishes nothing |
 
 ## How data flows
