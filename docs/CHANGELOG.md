@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Docker from the registry, in the release and the README
+- The release now leads with GitHub's container registry: its `docker-compose.yml` (running
+  `ghcr.io/weslocke/ed-outrider:latest`) and `env.example` are attached, at fixed "latest release" addresses, so a
+  server needs two downloads and `docker compose up -d`; `docker compose pull` updates it. The bundle stays for an
+  offline server. `scripts/docker_bundle.sh` writes those two files into `dist/` too.
+
 ## 2026-10-04 · Published: a GitHub release and a container image
 - Release v2026.10.11 on GitHub with the Docker bundle attached, and the image on GitHub's container registry as
   `ghcr.io/weslocke/ed-outrider` (2026.10.11 and latest). The Dockerfile's labels link it to the repository.

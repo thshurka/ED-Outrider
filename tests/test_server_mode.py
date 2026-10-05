@@ -162,6 +162,8 @@ class Packaging(unittest.TestCase):
         self.assertTrue({"dist", ".env", "data", "docker/data", "docker/config"} <= set(ignored))
         script = self.read("scripts/docker_bundle.sh")
         self.assertIn("pull_policy: never", script)
+        self.assertIn('image: $REG:latest', script)   # the release's compose file runs the published image
+        self.assertIn("REG=ghcr.io/weslocke/ed-outrider", script)
         self.assertTrue(os.access(os.path.join(self.ROOT, "scripts", "docker_bundle.sh"), os.X_OK))
 
 

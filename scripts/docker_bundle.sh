@@ -100,5 +100,23 @@ Do not expose Outrider to the internet: for access away from home, use a VPN int
 EOF
 
 tar -C dist -czf "dist/$NAME.tgz" "$NAME"
+
+# for a GitHub release, beside the bundle: the compose file for the published image (GitHub's container registry:
+# no download or docker load, and `docker compose pull` updates it), and the .env template
+REG=ghcr.io/weslocke/ed-outrider
+{
+  echo "# ED Outrider as a server, from the image published on GitHub ($REG). In a folder of its own, with .env beside"
+  echo "# this file (copied from env.example: set JOURNALS, and UID/GID if yours are not 1000):"
+  echo "#   mkdir -p docker/data docker/config && docker compose up -d   start (the first time it downloads the image)"
+  echo "#   docker compose pull && docker compose up -d                   update to the latest release"
+  echo "#   docker compose logs -f                                        its log"
+  echo "#   docker compose down                                           stop"
+  sed -n '/^name:/,$p' docker-compose.yml \
+    | sed -e '/^    build: \.$/d' -e "s|^    image: ed-outrider:local$|    image: $REG:latest|"
+} > dist/docker-compose.yml
+grep -q "image: $REG:latest" dist/docker-compose.yml && ! grep -q "^    build:" dist/docker-compose.yml \
+  || { echo "docker-compose.yml changed shape: update the registry compose rewrite in $0" >&2; exit 1; }
+cp "$OUT/.env.example" dist/env.example
 rm -rf "$OUT"
 echo "dist/$NAME.tgz ($(du -h "dist/$NAME.tgz" | cut -f1)): $IMAGE, $REV"
+echo "dist/docker-compose.yml and dist/env.example: release files for $REG (push $IMAGE there as :$VER and :latest)"

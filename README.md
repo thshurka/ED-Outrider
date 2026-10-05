@@ -685,21 +685,27 @@ turns the automation off inside a container by itself; `false` does the same on 
   second by default.
 - Or let Docker mount it: `docker-compose.yml` has NFS and CIFS volume examples.
 
-**2. Install,** as the user who will own the files, either way:
+**2. Install,** as the user who will own the files, one of three ways:
 
-- **From a release bundle** (no checkout or build on the server). A bundle,
-  `ed-outrider-docker-<version>-<arch>.tgz`, holds the built image and a compose file that runs it:
+- **From GitHub's container registry** (the simplest: nothing to build or load). In a folder of its own:
+  ```bash
+  curl -fsSLO https://github.com/weslocke/ED-Outrider/releases/latest/download/docker-compose.yml
+  curl -fsSL -o .env https://github.com/weslocke/ED-Outrider/releases/latest/download/env.example
+  nano .env                                  # set JOURNALS to the mount, and UID/GID (id -u, id -g), PORT, TZ
+  mkdir -p docker/data docker/config
+  docker compose up -d                       # downloads ghcr.io/weslocke/ed-outrider the first time
+  ```
+- **From a release bundle** (no internet needed on the server): `ed-outrider-docker-<version>-<arch>.tgz`, attached to
+  each release, holds the built image and a compose file that runs it:
   ```bash
   tar xzf ed-outrider-docker-<version>-<arch>.tgz && cd ed-outrider-docker-<version>-<arch>
   docker load -i ed-outrider-image.tar
   cp .env.example .env        # set JOURNALS to the mount, and UID/GID (id -u, id -g), PORT, TZ
   docker compose up -d
   ```
-  Its INSTALL.txt has the same steps. Each release on GitHub has the bundle attached, and the same image is on
-  GitHub's container registry as `ghcr.io/weslocke/ed-outrider` (`docker pull ghcr.io/weslocke/ed-outrider:latest`;
-  to use it, set that as the compose file's `image:`). `scripts/docker_bundle.sh` makes one, on a computer with this repository and
-  Docker, into `dist/`; it is built for that computer's architecture (`PLATFORM=linux/arm64` for an ARM server, if
-  your Docker can build for it).
+  Its INSTALL.txt has the same steps. `scripts/docker_bundle.sh` makes one, on a computer with this repository and
+  Docker, into `dist/` (with the registry's compose file and `env.example` for a release); it is built for that
+  computer's architecture (`PLATFORM=linux/arm64` for an ARM server, if your Docker can build for it).
 - **From a checkout:**
   ```bash
   git clone https://github.com/weslocke/ED-Outrider.git && cd ED-Outrider
@@ -717,6 +723,7 @@ and `docker compose restart`.
 
 **Updating.**
 
+- **From the registry:** `docker compose pull && docker compose up -d`.
 - **A newer bundle:** extract it beside the old one, then from the new folder:
   ```bash
   OLD=../ed-outrider-docker-<old version>-<arch>       # the old bundle's folder
