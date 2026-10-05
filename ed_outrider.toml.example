@@ -11,6 +11,9 @@
 # You only need [journals] if that does not find yours. `python3 ed_outrider.py --write-config`
 # writes the settings that are in effect right now as a starting point.
 #
+# Windows paths: forward slashes ("C:/Users/you/...") or single quotes ('C:\Users\you\...'). In double quotes a
+# backslash starts an escape, so "C:\Users\..." is an error and the whole file is ignored (the console says so).
+#
 # Switches take a bare true or false (no quotes: "false" in quotes is text, not off). A value of the wrong
 # type is reported when the server starts and the default is used instead (numbers out of range are brought
 # into it).

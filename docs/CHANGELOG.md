@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · Windows paths in the config file
+- A path written `"C:\Users\..."` in `ed_outrider.toml` makes the whole file unreadable (in double quotes a TOML
+  backslash starts an escape), and Outrider then runs on defaults. The console line now says so and how to write it
+  (`C:/Users/...`, or single quotes); the README's Settings section and the example config explain it too.
+
 ## 2026-10-05 · The agent notes brought up to date
 - AGENT_GUIDE: the per-device keys (`desktopTheme`, `tabletAudio`, `tabletEmblem`), every test file, `static/emblems/`,
   `scripts/install.sh` and `dark_icons.py`, the drawn schematic and desktop theme in page.js, `DESKTOP_STYLES`, what

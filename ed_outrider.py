@@ -571,14 +571,23 @@ def load_config(path):
             if os.path.exists(path):
                 print(f"config {path} ignored: reading it needs Python 3.11+ (or pip install tomli)", file=sys.stderr)
             return {}
+    raw = b""
     try:
         with open(path, "rb") as f:
-            return tomllib.load(f)
+            raw = f.read()
+        return tomllib.loads(raw.decode("utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:   # UnicodeDecodeError: not saved as UTF-8
-        print(f"config {path}: {e} (ignored)", file=sys.stderr)
+        # the likeliest slip on Windows: a path in double quotes, where a backslash starts an escape ("C:\Users")
+        hint = (CONFIG_BACKSLASH_HINT if isinstance(e, tomllib.TOMLDecodeError) and re.search(rb'"[^"\n]*\\[^"\n]*"', raw)
+                else "")
+        print(f"config {path}: {e} (ignored: every setting is at its default){hint}", file=sys.stderr)
         return {}
+
+
+CONFIG_BACKSLASH_HINT = ("\n  a path in double quotes cannot hold single backslashes: write C:/Users/... or 'C:\\Users\\...'"
+                         " (single quotes), or set it in Settings > Server")
 
 
 def _config_folders(value, key):

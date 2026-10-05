@@ -798,6 +798,12 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 `python3 ed_outrider.py --write-config` writes one with the settings in effect. Switches take a bare `true` or
 `false`; a wrong value is reported at start and the default kept.
 
+> [!IMPORTANT]
+> **Windows paths in the file:** use forward slashes, `"C:/Users/you/Saved Games/..."`, or single quotes,
+> `'C:\Users\you\Saved Games\...'`. In double quotes a backslash starts an escape (`"C:\Users"` is an error),
+> and a file that cannot be read is ignored as a whole: every setting back at its default, with one line in the
+> console saying why. Settings → Server takes paths either way and writes them correctly.
+
 | Section | What it holds |
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them (setting `live` turns off legacy auto-detection: list `legacy` too) |

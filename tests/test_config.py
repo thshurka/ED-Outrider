@@ -513,7 +513,31 @@ class Batch5ConfigCli(unittest.TestCase):
                 self.assertEqual(ed_outrider.load_config(f.name), {})
         finally:
             os.remove(f.name)
-        self.assertIn("(ignored)", err.getvalue())
+        self.assertIn("(ignored: every setting is at its default)", err.getvalue())
+        self.assertNotIn("backslashes", err.getvalue())   # not a path slip: no hint about one
+
+    def test_config_windows_backslashes(self):
+        """A Windows path typed in double quotes ("C:\\Users\\..."): TOML reads the backslashes as escapes and the whole
+        file is ignored, so the message says how to write it; forward slashes and single quotes load."""
+        import contextlib, io, tempfile
+        def load(text):
+            with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False, encoding="utf-8") as f:
+                f.write(text)
+            err = io.StringIO()
+            try:
+                with contextlib.redirect_stderr(err):
+                    return ed_outrider.load_config(f.name), err.getvalue()
+            finally:
+                os.remove(f.name)
+        cfg, err = load('[journals]\nlive = ["C:\\Users\\me\\Saved Games"]\n')
+        self.assertEqual(cfg, {})
+        self.assertIn("C:/Users/", err)
+        self.assertIn("single quotes", err)
+        self.assertEqual(load('[journals]\nlive = ["C:/Users/me"]\n')[0], {"journals": {"live": ["C:/Users/me"]}})
+        self.assertEqual(load("[journals]\nlive = ['C:\\Users\\me']\n")[0], {"journals": {"live": ["C:\\Users\\me"]}})
+        cfg, err = load('[server]\nport = "8025\n')   # broken, but no backslash anywhere: no path hint
+        self.assertEqual(cfg, {})
+        self.assertNotIn("backslashes", err)
 
     def test_infinite_numbers(self):   # F49
         import tomllib
