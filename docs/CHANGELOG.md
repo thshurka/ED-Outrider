@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · Version 2026.10.14
+- The Update pill, a second tablet without the rail, the compact layout for smaller tablets, and the clipboard tools
+  named in the README, requirements.txt and the launcher.
+
 ## 2026-10-05 · A second tablet, and small tablets
 - The tablet's Settings: **Show the game controls** (per tablet, on by default; offered when the Outrider has a rail).
   Off, that tablet has no rail and its pages take the width, as on a server, so one tablet can carry the rail and
