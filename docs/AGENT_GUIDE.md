@@ -11,7 +11,8 @@ rules that keep the journal data, the page and the voice consistent. See also `J
   page on `http://127.0.0.1:8025/` that updates live, with sounds and optional spoken alerts. The same page in a
   touch layout at `/tablet` (wrapped by the separate ED Outrider for Android app), questions by voice
   (`/api/ask`), read-only tools for AI clients (MCP), and a server mode for Docker with the game-PC parts off.
-- Python 3.11+, aiohttp, no framework. The page is plain HTML/CSS/JS, no build step.
+- Python 3.11+, aiohttp, no framework. The page is plain HTML/CSS/JS, no build step. Linux first; Windows runs
+  everything but the game-PC parts (`launch_outrider.bat`), less tested.
 - Optional parts: Piper voices (`piper-tts`), and on Linux auto honk, auto-target, the control rail and the co-pilot
   button (`evdev`).
 - Licence GPL-2.0-or-later. Bundled data keeps its own licence (see the README footer).
@@ -41,22 +42,25 @@ rules that keep the journal data, the page and the voice consistent. See also `J
 | `outrider/mcp.py` | The MCP bridge (`python3 -m outrider.mcp`): MCP's stdio JSON-RPC written directly (`handle`, `serve`; no SDK), `http_get` to the running server on 127.0.0.1, `mcp_settings` (`[mcp]`, also read by `settings_from`) |
 | `outrider/auth.py` | `[server] password`: session tokens (`make_token`/`check_token`, HMAC, no list kept), `password_ok`, `is_loopback`, `request_token` (Bearer, then the `outrider_session` cookie), `version_tuple`, `RateLimit`. The guard itself is `session_guard` in `make_app`, the sessions `State.session_secret`/`new_session`/`session_ok`/`end_session` |
 | `voice_lab.py` | A separate Tk window for trying voices and lines; not needed by the server |
-| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip); `hwyAutoStart(kind)` (test now, and Target next / Retry via POST `/api/highway/target`), `hwyAimBtn` (🎯 beside "Next:"), `hwySpoken` (the Highway clause of the status report); `linkState`/`drawLinkPill` (the link pill); `outVolume` (Volume, per device); `ownSounds` (your own sound files); drawn bodies: `bodyLook` (pure: kind, colours, rim, rings, size, seed from the ids) and `drawBodyArt` (the body panel's picture, `bodyArtHtml` its caption); the maps' touch: `pinchStep` (pure) |
-| `static/tablet.css`, `static/themes/`, `static/fonts/` | The tablet layout (`GET /tablet`: the same page with `body.tablet`; `load_page(tablet=True)` adds `TABLET_STYLES` and `data-theme`). `tablet.css` is structure only: the shell's grid and its neutral parts (`.tb-head`, `.tb-nav`, `.tb-main`, `.tb-rail`, `.tb-foot`, `.tb-banner`, `.tb-sheet`), every colour, font and radius a `--tb-*` custom property; each theme (`themes/lcars.css`) sets them and page.css's colours under its `[data-theme]`, and may dress a part's shape. `fonts/`: OFL fonts only, each with its `OFL-<Family>.txt`. `page.js`'s tablet section is at its end ("---- the tablet layout": `tabSetup` moves header, Now and main into `#tabMain`; `tabAutoView` the surface map's switch to Now and back; `tabRender` the status strip; `tabDrawLink`/`tabLinkText`; `tabBanner` for alerts; `tabRowTap`/`tabRowFacts`/`tabOpenRow` the row sheet over `TAB_SHEET_TABLES`; `tabOpenSettings`), its state in `TB` at the top beside `TABLET` |
+| `static/page.html`, `page.css`, `page.js` | The page. `page.js` holds settings, polling, rendering, alerts and the speech queue; the Highway tab is its `hwy*` section (`loadHwy`, `renderHwyList`, `drawHwyAuto` the auto-target box from `data.autotarget`, the plot form, the map's pure `hwyFit`/`hwyToScreen`, its background `drawHwyBackground` with the region layer `hwyRegionsSet`/`hwyRegionLayer`/`hwyRegionAt`, `renderHwyLine` for the strip); `hwyAutoStart(kind)` (test now, and Target next / Retry via POST `/api/highway/target`), `hwyAimBtn` (🎯 beside "Next:"), `hwySpoken` (the Highway clause of the status report); `linkState`/`drawLinkPill` (the link pill); `outVolume` (Volume, per device); `ownSounds` (your own sound files); drawn bodies: `bodyLook` (pure: kind, colours, rim, rings, size, seed from the ids) and `drawBodyArt` (the body panel's picture, `bodyArtHtml` its caption), `paintBody`/`bodyArtUrl` (the same drawing as cached data URLs for Here's schematic, seeded by `schemSystem`); `deskTheme` (this browser's desktop theme); the maps' touch: `pinchStep` (pure) |
+| `static/tablet.css`, `static/themes/`, `static/fonts/` | The tablet layout (`GET /tablet`: the same page with `body.tablet`; `load_page(tablet=True)` adds `TABLET_STYLES` and `data-theme`; the desktop page links only the themes, `DESKTOP_STYLES`). `tablet.css` is structure only: the shell's grid and its neutral parts (`.tb-head`, `.tb-nav`, `.tb-main`, `.tb-rail`, `.tb-foot`, `.tb-banner`, `.tb-sheet`), every colour, font and radius a `--tb-*` custom property; each theme (`themes/lcars.css`) sets them and page.css's colours under its `[data-theme]`, and may dress a part's shape. `fonts/`: OFL fonts only, each with its `OFL-<Family>.txt`. `page.js`'s tablet section is at its end ("---- the tablet layout": `tabSetup` moves header, Now and main into `#tabMain`; `tabAutoView` the surface map's switch to Now and back; `tabRender` the status strip; `tabDrawLink`/`tabLinkText`; `tabBanner` for alerts; `tabRowTap`/`tabRowFacts`/`tabOpenRow` the row sheet over `TAB_SHEET_TABLES`; `tabOpenSettings`), its state in `TB` at the top beside `TABLET` |
+| `static/emblems/` | The faction emblems under the tablet's page list (Elite, Babylon 5, Star Wars themes; `TB_EMBLEMS`, Settings' Show the theme's emblem), each credited in `CREDITS.txt` (`test_tablet.py` checks) |
 | `static/sounds.json` | The alert sounds (synthesised note lists), shared by the page and the PC player |
 | `resources/speech.json` | Spoken lines per alert and personality (business, sarcastic, sweet, plus `_profane` lists) |
 | `resources/bio_rules.json` | Spawn rules and region map data fetched from upstream projects (refreshed at start when upstream changed) |
 | `resources/mining_odds.json` | Planetary mining survey odds per ground type (EDFM, CC BY-SA 4.0); read only, never edit by hand |
 | `ed_outrider.toml.example` | Every config key, commented. The real `ed_outrider.toml` is git-ignored |
-| `data/` | The player's own files, git-ignored as a whole: `ed_outrider.sqlite` (default `db`), `browser_defaults.json` (beside the database), `speech_banned.json`, `backups/` (default `backup_dir`), `piper-voices/`. Created on first start |
+| `data/` | The player's own files, git-ignored as a whole: `ed_outrider.sqlite` (default `db`), `browser_defaults.json` (beside the database), `speech_banned.json`, `backups/` (default `backup_dir`), `piper-voices/` (with `voices.json`, Piper's catalogue cached a week), `fonts/` (the player's own theme fonts, served at `/userfonts/`). Created on first start |
 | `docs/` | These notes; `docs/images/` the README screenshots |
-| `tests/test_*.py`, `tests/support.py` | Unit tests by subject (`test_state`, `test_values`, `test_spansh`, `test_speech`, `test_devices`, `test_fuel`, `test_highway`, `test_config`, `test_pages`; unittest, in-memory SQLite). `support.py` holds the shared fixtures and fakes (`FakeGame`, `_fake_evdev`, `_HwSession`, `scan`, `T`...) and the helpers test classes share; import from it, never import a test class into another file (it would run twice). One file runs alone as `python3 -m unittest tests.test_highway` |
+| `tests/test_*.py`, `tests/support.py` | Unit tests by subject (`test_state`, `test_values`, `test_spansh`, `test_speech`, `test_devices`, `test_fuel`, `test_highway`, `test_config`, `test_pages`, `test_tablet` (themes, emblems, fonts, contrast), `test_rail`, `test_ask`, `test_mcp`, `test_auth`, `test_settings`, `test_server_mode` (server mode, Docker packaging, the launchers); unittest, in-memory SQLite). `support.py` holds the shared fixtures and fakes (`FakeGame`, `_fake_evdev`, `_HwSession`, `scan`, `T`...) and the helpers test classes share; import from it, never import a test class into another file (it would run twice). One file runs alone as `python3 -m unittest tests.test_highway` |
 | `tests/page_smoke.js` | Loads the page in jsdom from a running server, opens every view, drives many page functions |
 | `tests/fixtures/journals/` | Synthetic sample journals, `Status.json` and `NavRoute.json` (made-up commander and systems) |
 | `scripts/verify.sh` | Runs everything below in one go against a throwaway server |
 | `launch_outrider.sh` | The player's start script: makes `.venv` and installs `requirements.txt` when missing, changed (a sha256 stamp in `.venv/.requirements.sha256`) or broken (no aiohttp), then `exec`s `ed_outrider.py` with its arguments (Ctrl-C reaches Outrider directly) |
 | `launch_outrider.bat` | The same for Windows: the stamp is a copy of `requirements.txt` (`.venv\.requirements.txt`) compared in Python with the aiohttp check (not `fc`: Wine's called identical files different); pauses on an error so a double-clicked window stays open. Windows line endings, kept by `.gitattributes`. Tested under Wine 10 with Windows Python 3.12: first run, the fast path and the page smoke test (Piper aside: Wine lacks `ucrtbase.crealf`, which numpy calls, so it crashes there; a Wine gap, not Windows) |
-| `scripts/docker_bundle.sh` | Builds the image and saves it into `dist/ed-outrider-docker-<version>-<arch>.tgz` with a compose file for it (`image:` and `pull_policy: never` instead of `build:`, rewritten from `docker-compose.yml`), `.env.example` and INSTALL.txt. Publishes nothing |
+| `scripts/install.sh` | The older one-off setup (`.venv`, requirements, the voices up front); `launch_outrider.sh` does the same when needed and starts Outrider |
+| `scripts/dark_icons.py` | Writes the dark theme's icon masks into `themes/dark.css` from `static/icons/lucide/` |
+| `scripts/docker_bundle.sh` | Builds the image and saves it into `dist/ed-outrider-docker-<version>-<arch>.tgz` with a compose file for it (`image:` and `pull_policy: never` instead of `build:`, rewritten from `docker-compose.yml`), `.env.example` and INSTALL.txt; also the release's `dist/docker-compose.yml` (running `ghcr.io/weslocke/ed-outrider:latest`) and `dist/env.example`. Publishes nothing |
 
 ## How data flows
 
@@ -161,8 +165,8 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   error on the page) and the next one still runs; `sqlite3.Error` propagates.
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
-  screen speaks, `volume`, `tilesMode`, Settings' `alertSection` and `settingsOpen` (its open sections), the tablet's `tabletView`, `tabletTheme` and
-  `tabletDim`) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
+  screen speaks, `volume`, `tilesMode`, Settings' `alertSection` and `settingsOpen` (its open sections), `desktopTheme`, the tablet's `tabletView`, `tabletTheme`,
+  `tabletDim`, `tabletEmblem` and `tabletAudio` (Play alerts here)) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
 - **An open page reloads itself on newer page files:** the payload's `page_stamp` (`page_stamp()`: sizes and
   modification times of `PAGE_FILES`) against the `__PAGE_STAMP__` it was served with; `pageStampTick` reloads once
   nothing was touched for `RELOAD_IDLE_MS` and nothing is said, open or typed in. A new file the page loads goes in
@@ -229,9 +233,11 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   `test_server_mode.Packaging` without Docker; build and run it by hand (`docker build`, `docker run` with scratch
   folders) after changing it. verify.sh never needs Docker. The entrypoint is PID 1: anything it waits on must trap
   SIGTERM, or `docker stop` hangs for the whole grace period. The compose project is named `ed-outrider` (one
-  project for a checkout and every bundle). A release is `scripts/docker_bundle.sh` after bumping
-  `outrider.__version__`; the README's Docker section and the bundle's INSTALL.txt (written by the script) must
-  agree on the install and update steps.
+  project for a checkout and every bundle). A release, after bumping `outrider.__version__` and pushing: `scripts/docker_bundle.sh`; tag the image
+  `ghcr.io/weslocke/ed-outrider:<version>` and `:latest` and push both; then a GitHub Release `v<version>` on that
+  commit with `dist/docker-compose.yml`, `dist/env.example` and the bundle attached (the README fetches the first two
+  from `releases/latest/download/`, so every release must carry them), its notes leading with the registry. The
+  README's Docker section and the bundle's INSTALL.txt (written by the script) must agree on the install and update steps.
 - **Stopping.** SIGTERM (docker stop, systemd) sets `run()`'s stop event: the same cleanup as Ctrl-C (tasks
   cancelled, commit, the quit backup, "stopped cleanly", exit 0). `verify.sh` stops its scratch server that way and
   fails if it does not stop cleanly.
@@ -251,7 +257,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   a POST route or a tool that acts (presses, plots, bookmarks, hushes): `test_mcp.py` walks every tool and checks.
   A new tool goes in the registry once; the MCP bridge and the voice's AI layer both serve it. Keep answers compact
   (`capped`, the fields that answer the question).
-- **The Android app's contract** (`project/done/plans/PLAN-tablet-2026-10-02.md`). `GET /api/version` answers exactly
+- **The Android app's contract** (the app is its own repository, ED-Outrider-Android). `GET /api/version` answers exactly
   `{outrider, api, min_app, password, signed_in}`; `POST /api/auth/signin` {password} gives `{ok, token}` and the
   cookie; `POST /api/auth/signout`; `POST /api/ask` {text, source?} gives exactly `{answer, spoken, matched, command}`; `/api/version` also has `game_pc`
   (added 2026-10-04);

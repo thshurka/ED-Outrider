@@ -18,4 +18,5 @@ The rules that matter most:
   the galaxy map for auto-target).
 - Keep the paired lists in step: `SETTINGS_KEYS` (page.js) with `BROWSER_SETTINGS` (ed_outrider.py); speech keys
   across `resources/speech.json`, `outrider.speech.KEYS`/`SAMPLES` and page.js `LINE_SAMPLES`. Bump `PARSER_VERSION` when past
-  journals must be re-read, and keep live-only tables out of `RESET_JOURNAL_DATA`.
+  journals must be re-read (and `CACHE_VERSION` when cached Spansh records change shape), and keep live-only tables
+  out of `RESET_JOURNAL_DATA`.

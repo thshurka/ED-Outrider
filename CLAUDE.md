@@ -12,6 +12,8 @@ The rules that matter most:
 - Verify with `scripts/verify.sh` (unit tests, lint, JS syntax, page smoke test on a throwaway server); it must
   end in PASS. Each fix gets a test that fails without it.
 - Never touch the player's own running Outrider (port 8025) or their real `data/` (`ed_outrider.sqlite`, backups, ...)
-  and `ed_outrider.toml`; never trigger auto honk or read real input devices. Stop any server you start by its PID.
+  and `ed_outrider.toml`; never trigger auto honk or auto-target (key presses reach the focused window, a running game included) or read real
+  input devices; use the fakes in `tests/support.py`. Stop any server you start by its PID.
 - Keep `SETTINGS_KEYS`/`BROWSER_SETTINGS` and the speech keys (`resources/speech.json`, `outrider.speech.KEYS`/`SAMPLES`,
-  `LINE_SAMPLES`) in step; bump `PARSER_VERSION` or `CACHE_VERSION` when stored data changes shape.
+  `LINE_SAMPLES`) in step; bump `PARSER_VERSION` or `CACHE_VERSION` when stored data changes shape, and keep live-only tables out of
+  `RESET_JOURNAL_DATA`.

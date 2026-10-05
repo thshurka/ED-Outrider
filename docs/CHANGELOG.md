@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · The agent notes brought up to date
+- AGENT_GUIDE: the per-device keys (`desktopTheme`, `tabletAudio`, `tabletEmblem`), every test file, `static/emblems/`,
+  `scripts/install.sh` and `dark_icons.py`, the drawn schematic and desktop theme in page.js, `DESKTOP_STYLES`, what
+  `data/` holds now, the bundle's release files and the whole release (ghcr and the GitHub Release), Windows; no more
+  pointer to a private plan. AGENTS.md and CLAUDE.md carry the same rules. page.js's tablet comments no longer say it
+  never speaks.
+
 ## 2026-10-05 · A Windows launcher
 - `launch_outrider.bat`: double-click it on Windows (Python 3.11 or newer) and it sets Outrider up and starts it, as
   `launch_outrider.sh` does on Linux: `.venv` and `requirements.txt` the first time and after a change, then straight

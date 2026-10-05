@@ -31,7 +31,7 @@ const store = {
 };
 let data = null, version = -1;
 // The tablet layout (GET /tablet sets body.tablet): the same views in a shell of its own, drawn by "---- the tablet
-// layout" near the end. It never speaks or plays sounds (the PC does), keeps its own page, and has no Overview.
+// layout" near the end. It is silent unless its Play alerts here is ticked (tabletSpeaks), keeps its own page, and has no Overview.
 const TABLET = typeof document !== "undefined" && !!document.body && document.body.classList.contains("tablet");
 // its state, here at the top so nothing reads it before it exists (its functions are at the end, hoisted):
 // group: the nav group shown while you browse another one; beforeMap: the page to go back to when the surface map hides
@@ -7107,9 +7107,9 @@ document.addEventListener("click", async e => {
 // ---- the tablet layout (GET /tablet; PLAN-tablet phase 3) ----
 // The same views in a shell of neutral parts: the head with the status strip (system, fuel, unsold) and the link pill,
 // the page nav (three groups of four pages), the main column (the header's strips, Now and the views, moved into it),
-// the game-button rail (kept for the next phase) and the footer with the PC's voice controls. A theme stylesheet
-// (static/themes/<name>.css, data-theme on <html>, chosen per device) dresses them. The tablet never speaks or plays
-// sounds: an alert is a banner here. The one page switch it makes by itself: to Now when the surface map shows, and
+// the game-button rail (the control rail) and the footer with the PC's voice controls. A theme stylesheet
+// (static/themes/<name>.css, data-theme on <html>, chosen per device) dresses them. An alert is a banner here; the tablet
+// speaks and plays sounds only with Play alerts here ticked (tabletSpeaks). The one page switch it makes by itself: to Now when the surface map shows, and
 // back to the page you were on when it hides. A tap on a table row opens a sheet with all its facts (no hover here).
 const tabGroupOf = v => Object.keys(TB.groups).find(g => TB.groups[g].includes(v)) || "explore";
 // a sheet opened and closed (the open attribute where a browser has no modal dialogs: the smoke test's jsdom)
