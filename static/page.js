@@ -2580,6 +2580,7 @@ function render() {
   // a server away from the game PC ([server] game_pc false): what needs that PC is left out (body.notgamepc hides every
   // .pcOnly: Settings' Auto honk, "play on this PC", the Highway's auto-target box and 🎯 / Retry, the tablet's rail)
   document.body.classList.toggle("notgamepc", data.game_pc === false);
+  if (TABLET) document.getElementById("tabRailRow").hidden = data.game_pc === false;   // only an Outrider with a rail offers it
   if (TABLET) tabRender();
   // the strips drawn above may have grown the header past what app mode leaves room for (or shrunk it back)
   if (applyAppMode()) { renderSurface(); drawMap(); drawHwyMap(); }
@@ -7179,6 +7180,7 @@ function tabSetup() {
   tabTheme(store.get("tabletTheme", TB.themes[0]));
   tabDim(store.get("tabletDim", false) === true);
   tabEmblem(store.get("tabletEmblem", true) !== false);
+  tabRailShown(store.get("tabletRail", true) !== false);
   const nav = document.getElementById("tabNav");
   nav.querySelectorAll("[data-group]").forEach(b => b.onclick = () => { TB.group = b.dataset.group; tabDrawNav(); });
   // a page you choose: no automatic way back from Now any more, and the nav shows that page's group again
@@ -7198,6 +7200,7 @@ function tabSetup() {
   document.getElementById("tabTheme").onchange = e => { store.set("tabletTheme", e.target.value); tabTheme(e.target.value); };
   document.getElementById("tabDim").onchange = e => { store.set("tabletDim", e.target.checked); tabDim(e.target.checked); };
   document.getElementById("tabEmblem").onchange = e => { store.set("tabletEmblem", e.target.checked); tabEmblem(e.target.checked); };
+  document.getElementById("tabRailOn").onchange = e => { store.set("tabletRail", e.target.checked); tabRailShown(e.target.checked); };
   document.getElementById("tabAudio").onchange = e => tabSetAudio(e.target.checked);
   document.getElementById("tabAlertsBtn").onclick = tabOpenAlerts;
   document.getElementById("tabAlertList").addEventListener("change", tabAlertToggle);
@@ -7232,6 +7235,12 @@ const TB_EMBLEMS = ["elite", "babylon5", "narn", "minbari", "centauri", "sith", 
 function tabEmblem(on) {   // Settings: Show the theme's emblem (per tablet, on by default)
   document.documentElement.classList.toggle("tb-noemblem", !on);
   document.getElementById("tabEmblem").checked = !!on;
+}
+// Settings: Show the game controls (per tablet, on by default): off lays the page out as for a server (no rail column,
+// the pages take its width), so one tablet can have the rail and another not (the author's second tablet, 2026-10-05)
+function tabRailShown(on) {
+  document.body.classList.toggle("tb-norail", !on);
+  document.getElementById("tabRailOn").checked = !!on;
 }
 function tabTheme(name) {
   const t = TB.themes.includes(name) ? name : TB.themes[0];
@@ -7473,7 +7482,11 @@ function tabRailTick(now = Date.now()) {   // confirmed, or past its time: SENT 
 }
 function tabDrawRail() {
   const r = data && data.rail, list = document.getElementById("tabRailList");
-  document.getElementById("tabRailTitle").textContent = r && r.label ? r.label : "Game controls";
+  // the rail's heading, and its short form for a small tablet's narrow rail ("Ship controls" -> "Ship")
+  const head = r && r.label ? r.label : "Game controls", headShort = head.replace(/ controls$/, "");
+  const th = headShort !== head ? `<span class="rb-full">${esc(head)}</span><span class="rb-short">${esc(headShort)}</span>` : esc(head);
+  const tEl = document.getElementById("tabRailTitle");
+  if (tEl.innerHTML !== th) tEl.innerHTML = th;
   tabRailTick();
   const sub = !r ? "" : !r.context ? `no rail: ${r.why}` : !r.can_press ? `presses off: ${r.why_not}` : "set follows Status.json";
   document.getElementById("tabRailSub").textContent = sub;
@@ -7485,7 +7498,7 @@ function tabDrawRail() {
     const sub = mode === "bind" ? (b.now_on ? `On ${b.now_on} only: add a keyboard key` : `Bind a key: ${b.action_label}`) : mode === "pending" ? "waiting for the game" : mode === "nolink" ? "Outrider not reachable" : "";
     return `<button type="button" class="tb-rb ${mode}${b.amber ? " amber" : ""}${b.states === 3 && b.state === "high" ? " high" : ""}" data-rail="${esc(b.id)}"` +
       `${dis ? " disabled" : ""} aria-label="${esc(`${b.label}, ${state}${sub ? ", " + sub : ""}`)}" title="${esc(b.keys || b.why || "")}">` +
-      `<span class="tb-rbl"><b>${esc(b.label)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span><span class="tb-rbs"><i></i>${esc(state)}</span></button>`;
+      `<span class="tb-rbl"><b>${b.short && b.short !== b.label ? `<span class="rb-full">${esc(b.label)}</span><span class="rb-short">${esc(b.short)}</span>` : esc(b.label)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span><span class="tb-rbs"><i></i>${esc(state)}</span></button>`;
   }).join("");
   if (list.innerHTML !== html) list.innerHTML = html;
 }

@@ -2,6 +2,15 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · A second tablet, and small tablets
+- The tablet's Settings: **Show the game controls** (per tablet, on by default; offered when the Outrider has a rail).
+  Off, that tablet has no rail and its pages take the width, as on a server, so one tablet can carry the rail and
+  another not.
+- A smaller tablet (under 1200 x 700 CSS px, e.g. 1006 x 601) gets a compact layout: the page list is
+  narrower (136 px) and the rail too (150 px), its buttons a little shorter so all eight fit without scrolling, with
+  short names (Gear, Scoop, Night vis., Lights, FA, Silent, Hardpts, Analysis; the SRV and on-foot sets likewise; a
+  name you gave a button is kept) and the heading "Ship" / "SRV" / "On foot". A larger tablet's 1280 x 800 is unchanged.
+
 ## 2026-10-05 · An Update pill when a new release is out
 - Once a day Outrider asks GitHub for its latest release (`[server] update_check`, on by default; only the request is
   made). A newer one shows a small **⬆ Update** pill in the header, or the tablet's head bar, in the theme's colours.
@@ -82,7 +91,7 @@ Newest first, one entry per commit.
 ## 2026-10-04 · Version 2026.10.11; new screenshots
 - Every README screenshot retaken at a true 2560 × 1440 (a 1440p screen at 100%): the orange view buttons, the split
   Here, the drawn schematic (Lysood HP-I b9-2: water worlds and ringed gas giants). The tablet's is at its own screen,
-  1920 × 1200 (a Galaxy Tab A11+), with its control rail.
+  1920 × 1200 (a larger tablet), with its control rail.
 - Version 2026.10.11: the drawn schematic, "1 jump", `launch_outrider.sh`.
 
 ## 2026-10-04 · launch_outrider.sh

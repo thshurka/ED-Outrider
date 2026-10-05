@@ -70,6 +70,17 @@ class Pure(unittest.TestCase):
         self.assertTrue(all(len(v) <= rail.RAIL_MAX for v in actions.values()))
         self.assertEqual([b["id"] for b in rail.CATALOGUE["ship"] if b["amber"]], ["silent"])
 
+    def test_short_labels(self):
+        """A small tablet's narrow rail (under 1200 x 700 CSS px): every catalogue name has a short form of at most 10
+        characters (the author's set, 2026-10-05); a name the player chose is shown as it is."""
+        for c in rail.CONTEXTS:
+            for b in rail.CATALOGUE[c]:
+                self.assertIn(b["label"], rail.SHORT_LABELS, f"{c} {b['label']} has no short form")
+                self.assertLessEqual(len(rail.short_label(b["label"])), 10, b["label"])
+        self.assertEqual([rail.short_label(b["label"]) for b in rail.default_set("ship")],
+                         ["Gear", "Scoop", "Night vis.", "Lights", "FA", "Silent", "Hardpts", "Analysis"])
+        self.assertEqual(rail.short_label("Scoop!"), "Scoop!")
+
     def test_states(self):
         st = lambda c, i, **kw: rail.state_of(rail.catalogue_entry(c, i), dict(kw, live=True))   # noqa: E731
         self.assertEqual([st("ship", "gear", flags=F(2)), st("ship", "gear", flags=0)], ["on", "off"])
@@ -220,6 +231,7 @@ class Server(unittest.TestCase):
         self.assertEqual((r["context"], r["can_press"], [b["id"] for b in r["buttons"]]),
                          ("ship", True, ["gear", "scoop", "nv", "lights", "fa", "silent", "hard", "hud"]))
         gear, nv = r["buttons"][0], r["buttons"][2]
+        self.assertEqual((gear["label"], gear["short"], nv["short"]), ("Landing gear", "Gear", "Night vis."))
         self.assertEqual((gear["bound"], gear["state"], nv["bound"], nv["action_label"]), (True, "off", False, "Night Vision Toggle"))
         self.assertIn("no keyboard binding", nv["why"])
         # bound on the HOTAS only: it says where, and that a keyboard key is what the rail needs (asked by the author)
@@ -261,6 +273,7 @@ class Server(unittest.TestCase):
     def test_edit_sets(self):
         out, status = self.state.rail_save("ship", [{"id": "scoop", "label": "Scoop!"}, {"id": "gear"}])
         self.assertEqual((status, [b["label"] for b in self.state.rail_info()["buttons"]]), (200, ["Scoop!", "Landing gear"]))
+        self.assertEqual([b["short"] for b in self.state.rail_info()["buttons"]], ["Scoop!", "Gear"])   # a chosen name stays
         self.assertEqual(self.state.rail_save("ship", [{"id": "head"}])[1], 400)
         self.assertEqual(self.state.rail_save("moon", [])[1], 400)
         self.db.executescript(ed_outrider.RESET_JOURNAL_DATA)   # a journal re-read keeps your sets (live-only data)

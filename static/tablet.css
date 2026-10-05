@@ -2,7 +2,7 @@
    neutral parts (.tb-head with the status strip, .tb-nav, .tb-main, .tb-rail, .tb-foot, .tb-banner, .tb-sheet) and
    touch sizes. Every colour, font, radius and border is a custom property with a plain default here; a theme
    (static/themes/<name>.css, scoped to its [data-theme]) sets them and may dress a part's shape. Target: a landscape
-   tablet near 1280 x 800 CSS px (the Galaxy Tab A11+ at dpr 1.5); touch targets at least 48 px. */
+   tablet near 1280 x 800 CSS px (a larger tablet, e.g. 1920 x 1200 at dpr 1.5); touch targets at least 48 px. */
 :root {
   --tb-pad: 10px; --tb-gap: 10px; --tb-head-h: 64px; --tb-foot-h: 44px; --tb-nav-w: 170px; --tb-rail-w: 196px; --tb-touch: 48px;
   --tb-font: system-ui, sans-serif; --tb-font-display: var(--tb-font); --tb-size: 17px; --tb-case: none; --tb-track: 0;
@@ -236,9 +236,35 @@ body.tablet.app main.nearPinned > #hereView.detail > #bodyPanel, body.tablet.app
 #tabFuel, #tabUnsold, .tb-link { flex-shrink: 0; }
 .tb-railhead > div { min-width: 0; }
 .tb-rbl { overflow: hidden; } .tb-rbl b { overflow: hidden; text-overflow: ellipsis; }   /* a long label never runs under its state */
-/* a server: no rail column, the main column takes its width */
-body.tablet.notgamepc, body.tablet.app.notgamepc { grid-template-columns: var(--tb-nav-w) minmax(0, 1fr); }
-body.tablet.notgamepc .tb-banner { right: calc(var(--tb-pad) + 12px); }
+/* a server, or this tablet's Show the game controls off: no rail column, the main column takes its width */
+body.tablet.notgamepc, body.tablet.app.notgamepc,
+body.tablet.tb-norail, body.tablet.app.tb-norail { grid-template-columns: var(--tb-nav-w) minmax(0, 1fr); }
+body.tablet.notgamepc .tb-banner, body.tablet.tb-norail .tb-banner { right: calc(var(--tb-pad) + 12px); }
+body.tablet.tb-norail #tabRail { display: none !important; }
+/* a smaller tablet (under 1200 x 700 CSS px, e.g. 1006 x 601; a larger one's 1280 x 800 stays as it is, the
+   author's choice, 2026-10-05): the rail tightens so all eight buttons fit without scrolling, and narrows, its buttons
+   showing the catalogue's short names (rail.py SHORT_LABELS; the full name stays the button's accessible name) */
+.rb-short { display: none; }
+@media (max-width: 1199px), (max-height: 699px) {
+  :root { --tb-rail-w: 150px; --tb-nav-w: 136px; }
+  /* the page list narrows as well (the author, 2026-10-05): less padding, a size smaller, tracking capped; a theme
+     that sets its own smaller sizes keeps them (its stylesheet comes after this one); the emblem rule is unchanged */
+  .tb-nav, .tb-pages { gap: 5px; }
+  .tb-group { min-height: 44px; padding: 0 10px 5px; font-size: 16px; }
+  .tb-page { min-height: 42px; padding: 0 10px; font-size: 15px; }
+  .tb-nav :is(.tb-group, .tb-page) { letter-spacing: min(var(--tb-track), .6px); }
+  [data-theme="lcars"] .tb-pages .tb-page { margin-left: 18px; }
+  .tb-rail, .tb-raillist { gap: 5px; }
+  .tb-railhead { min-height: 34px; }
+  .tb-railhead .tb-btn { min-height: 32px; padding: 0 10px; }
+  .tb-railtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-railsub { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-rb { flex-basis: 50px; min-height: 42px; padding: 0 10px 0 12px; gap: 6px; }
+  .tb-rbl small { font-size: 11px; }
+  .tb-rbs { max-width: 58px; font-size: 12px; }
+  .rb-full { display: none; }
+  .rb-short { display: inline; }
+}
 /* the tablet's alert choices (Settings > Play alerts here > Choose alerts…): a big sheet, big toggles */
 .tb-sheet.tb-alerts { width: min(900px, 96vw); }
 .tb-alertlist { display: flex; flex-direction: column; overflow-y: auto; max-height: 64vh; }

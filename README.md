@@ -529,7 +529,7 @@ Settings shows whether it is listening.
 
 ## 📱 On a tablet
 
-Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for the Galaxy Tab A11+, about 1280 × 800):
+Open `http://<your PC>:8025/tablet` on a tablet in landscape (made for a larger tablet, about 1280 × 800 CSS pixels):
 the same pages in a cockpit layout, in one of nine themes: LCARS (below), Elite (the cockpit HUD's orange, with cut
 corners), four from Babylon 5 (Earthforce: navy and steel; Narn: rust and ochre, wedge-cut; Minbari: indigo, lilac and
 pearl, soft arches and thin double lines; Centauri: gold on royal purple, ornate notched double borders), Sith (black,
@@ -561,9 +561,12 @@ for this: see [Other devices on your network](#-other-devices-on-your-network).
   for new browsers.
 - **Target next** on the Highway runs at once (no countdown), since tapping the tablet leaves the game focused. Auto
   honk, auto-target's switch and test, backups and the voice settings stay on the PC.
-- **Settings** (bottom right): the theme, a dim switch, Play alerts here and Choose alerts…, the screen size in CSS
+- **Settings** (bottom right): the theme, a dim switch, the theme's emblem, **Show the game controls** (off: no rail
+  on this tablet and the pages take its width, for a second tablet), Play alerts here and Choose alerts…, the screen size in CSS
   pixels, the app's version and, in the Android app, its own screens (Server…, Voice…, App menu…), and Sign out when
   Outrider asks for a password.
+- **A smaller tablet** (under 1200 × 700 CSS pixels) gets a compact layout: a narrower page
+  list, and a narrower rail whose eight buttons fit without scrolling, with short names (Gear, Scoop, Night vis.…).
 - **The control rail** on the right (on the game PC only; not in Docker): up to eight game buttons for where you are
   (ship, SRV, Nomad, fighter, on foot), each pressing that control's keyboard binding on the PC once. The defaults are
   landing gear, cargo scoop, night vision, ship lights, flight assist, silent running, hardpoints and analysis mode;

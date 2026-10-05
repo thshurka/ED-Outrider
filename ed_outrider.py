@@ -9074,7 +9074,8 @@ class State:
                                                     category=outrider.rail.CATEGORY[ctx])
             for b in items:
                 keys, text = binds.get(b["action"], (None, "not read"))
-                out["buttons"].append({"id": b["id"], "label": b["label"], "action": b["action"],
+                out["buttons"].append({"id": b["id"], "label": b["label"], "short": outrider.rail.short_label(b["label"]),
+                                       "action": b["action"],
                                        "action_label": outrider.honk.action_label(b["action"]), "bound": bool(keys),
                                        "keys": text if keys else None, "why": None if keys else text,
                                        # where an unbound one is now (a HOTAS button), for the tablet's short line

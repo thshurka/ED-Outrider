@@ -122,7 +122,7 @@ class Tablet(unittest.TestCase):
 
     def test_name_fields_are_not_auto_capitalised(self):
         """A tablet keyboard capitalises a field's first letter and corrects words: system names and search terms
-        must reach Outrider as typed (found on the Galaxy Tab's Samsung keyboard)."""
+        must reach Outrider as typed (found on a tablet's on-screen keyboard)."""
         with open(os.path.join(ed_outrider.STATIC_DIR, "page.html"), encoding="utf-8") as f:
             html = f.read()
         for id_ in ("findName", "hwyFrom", "hwyTo", "lFilter", "mFilter", "bFilter"):

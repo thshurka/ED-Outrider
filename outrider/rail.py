@@ -81,6 +81,22 @@ DEFAULT_IDS = {"ship": ["gear", "scoop", "nv", "lights", "fa", "silent", "hard",
                "foot": ["torch", "nv", "shields", "bio"]}
 
 
+# the catalogue's names shortened for a small tablet's narrow rail (the author's choice, 2026-10-05); a name the player
+# gave a button in the editor is never shortened
+SHORT_LABELS = {
+    "Landing gear": "Gear", "Cargo scoop": "Scoop", "Night vision": "Night vis.", "Ship lights": "Lights",
+    "Flight assist": "FA", "Silent running": "Silent", "Hardpoints": "Hardpts", "Analysis mode": "Analysis",
+    "Fighter: dock": "Ftr dock", "Galaxy map": "Gal. map", "System map": "Sys. map", "FSS": "FSS",
+    "Drive assist": "DA", "Headlights": "Lights", "Handbrake": "Brake", "Turret view": "Turret", "Recall ship": "Recall",
+    "Flashlight": "Torch", "Suit shields": "Shields", "Bio Scanner": "Bio scan",
+}
+
+
+def short_label(label):
+    """A button's name on a narrow rail: the catalogue's short form, or the name itself (one the player chose)."""
+    return SHORT_LABELS.get(label, label)
+
+
 def catalogue_entry(context, id_):
     return next((dict(b) for b in CATALOGUE.get(context, []) if b["id"] == id_), None)
 
