@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Readable theme colours
+- Every theme's text colours are checked against its background and panels (4.5:1). Two fell short and are lifted:
+  Sith's red as text (the page's accent, 3.7:1; its fills and the tablet's frame keep the deep crimson) and the Rebel
+  Alliance's red for errors.
+
 ## 2026-10-04 · Themes for the desktop page
 - Settings → Display → **Theme on this browser**: the tablet's nine themes for the desktop page too, or **Default -
   Outrider** (the look so far, the only one that follows your system's light mode). Per browser; the tablet keeps its

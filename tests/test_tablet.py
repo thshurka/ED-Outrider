@@ -68,6 +68,36 @@ class Tablet(unittest.TestCase):
         self.assertIn('localStorage.getItem("desktopTheme")', head)   # before the stylesheets apply: no flash
         self.assertLess(head.index('localStorage.getItem("desktopTheme")'), head.index('static/page.css'))
 
+    def test_theme_text_contrast(self):
+        """Every theme's text colours read on its background and its panels (WCAG 4.5:1), the desktop page's Default
+        too: the page writes small text in each of them (Sith's crimson as text was 3.5:1)."""
+        def lum(h):
+            h = h.strip().lstrip("#")
+            r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+            f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4   # noqa: E731
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+        def ratio(a, b):
+            la, lb = sorted((lum(a), lum(b)), reverse=True)
+            return (la + 0.05) / (lb + 0.05)
+
+        def colours(block):
+            d = dict(re.findall(r"(--[\w-]+):\s*([^;]+);", block))
+            def res(v, n=0):
+                m = re.fullmatch(r"var\((--[\w-]+)\)", v.strip())
+                return res(d[m.group(1)], n + 1) if m and n < 10 else v.strip()
+            return {k: res(v) for k, v in d.items()}
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.css"), encoding="utf-8") as f:
+            blocks = {"default": re.search(r"^:root \{(.*?)\n\}", f.read(), re.S | re.M).group(1)}
+        for t in ed_outrider.TABLET_THEMES:
+            with open(os.path.join(ed_outrider.STATIC_DIR, "themes", f"{t}.css"), encoding="utf-8") as f:
+                blocks[t] = re.search(r':root\[data-theme="%s"\]\s*\{(.*?)\n\}' % t, f.read(), re.S).group(1)
+        for t, block in blocks.items():
+            c = colours(block)
+            for k in ("--text", "--muted", "--accent", "--good", "--warn", "--bad", "--info"):
+                for ground in ("--bg", "--panel"):
+                    self.assertGreaterEqual(round(ratio(c[k], c[ground]), 2), 4.5, f"{t}: {k} {c[k]} on {ground} {c[ground]}")
+
     def test_name_fields_are_not_auto_capitalised(self):
         """A tablet keyboard capitalises a field's first letter and corrects words: system names and search terms
         must reach Outrider as typed (found on the Galaxy Tab's Samsung keyboard)."""

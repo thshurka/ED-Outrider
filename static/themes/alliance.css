@@ -14,7 +14,7 @@
   --al-bg: #0B0F14; --al-orange: #F28C28; --al-sand: #C9B98F; --al-blue: #4FA3D9; --al-text: #F2EBDD; --al-red: #E8453C;
   --al-panel: #141A22; --al-line: #2A3442;
   --bg: var(--al-bg); --panel: var(--al-panel); --line: var(--al-line); --text: var(--al-text); --muted: #A9A08A;
-  --accent: var(--al-orange); --good: #8FD08A; --warn: #F2C94C; --bad: var(--al-red); --info: var(--al-blue);
+  --accent: var(--al-orange); --good: #8FD08A; --warn: #F2C94C; --bad: #F05A4E; --info: var(--al-blue);
   --hot: #8FD08A; --biohot: #C8A8E8;
   --tb-font: "Rajdhani", system-ui, sans-serif; --tb-font-display: "Alliance Display", "Rajdhani", sans-serif;
   --tb-case: uppercase; --tb-track: 1px; --tb-size: 18px;
@@ -25,9 +25,9 @@
   --tb-page-bg: var(--al-panel); --tb-page-fg: var(--al-text); --tb-page-on-bg: var(--al-blue); --tb-page-on-fg: var(--al-bg);
   --tb-fill: transparent;
   --tb-btn-bg: var(--al-sand); --tb-btn-fg: var(--al-bg); --tb-btn-on-bg: var(--al-blue); --tb-btn-on-fg: var(--al-bg); --tb-btn-radius: 6px;
-  --tb-link-ok: var(--al-blue); --tb-link-stale: #F2C94C; --tb-link-none: var(--al-red);
+  --tb-link-ok: var(--al-blue); --tb-link-stale: #F2C94C; --tb-link-none: var(--bad);
   --tb-rail-border: var(--al-line); --tb-sheet-bg: #0E141B; --tb-sheet-border: var(--al-orange); --tb-sheet-radius: 6px;
-  --tb-banner-bg: #0E141B; --tb-banner-fg: var(--al-text); --tb-banner-border: var(--al-orange); --tb-danger: var(--al-red);
+  --tb-banner-bg: #0E141B; --tb-banner-fg: var(--al-text); --tb-banner-border: var(--al-orange); --tb-danger: var(--bad);
   --tb-rb-on-bg: var(--al-orange); --tb-rb-on-fg: var(--al-bg); --tb-rb-off-bg: var(--al-panel); --tb-rb-off-fg: var(--al-text);
   --tb-rb-high-bg: #FFB45E; --tb-rb-pend-bg: var(--al-panel); --tb-rb-pend-fg: var(--al-blue); --tb-rb-unk-border: var(--al-sand);
   --tb-rb-unk-fg: var(--al-sand); --tb-rb-dim: var(--al-line); --tb-rb-dim-fg: #7D8796; --tb-rb-amber: #F2C94C; --tb-rb-radius: 6px;

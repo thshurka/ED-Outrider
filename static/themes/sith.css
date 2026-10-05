@@ -14,11 +14,11 @@
   --sh-red: #D0021B; --sh-red2: #5A0A12; --sh-steel: #E8E8E8; --sh-text: #C9CED6; --sh-amber: #FFB000;
   --sh-panel: #0A0A0B; --sh-line: #2A2D33; --sh-cut: 8px;
   --bg: #000000; --panel: var(--sh-panel); --line: var(--sh-line); --text: var(--sh-text); --muted: #8B919B;
-  --accent: var(--sh-red); --good: #9FD4C0; --warn: var(--sh-amber); --bad: #FF5A6A; --info: var(--sh-steel);
+  --accent: #FF4255; --good: #9FD4C0;   /* the page's text accent: --sh-red as text is 3.7:1, too dark; the fills keep it */ --warn: var(--sh-amber); --bad: #FF5A6A; --info: var(--sh-steel);
   --hot: #9FD4C0; --biohot: #C8A8E8;
   --tb-font: "Rajdhani", system-ui, sans-serif; --tb-font-display: "Sith Display", "Share Tech Mono", monospace;
   --tb-case: uppercase; --tb-track: 1.5px; --tb-size: 18px;
-  --tb-title: var(--sh-steel);
+  --tb-title: var(--sh-steel); --tb-frame: var(--sh-red);   /* the tablet keeps its crimson frame (the page accent is lighter) */
   --tb-chip-bg: transparent; --tb-chip-k: #8B919B; --tb-chip-v: var(--sh-steel); --tb-chip-radius: 0;
   --tb-group-bg: transparent; --tb-group-fg: var(--sh-text); --tb-group-open-bg: var(--sh-red); --tb-group-open-fg: #000;
   --tb-group-radius: 0; --tb-page-radius: 0;
@@ -56,5 +56,5 @@
 [data-theme="sith"] .tb-rbl b { font-size: 14px; letter-spacing: 1px; } [data-theme="sith"] .tb-page { font-size: 15px; }
 [data-theme="sith"] .tb-btn, [data-theme="sith"] .tb-voice { font-size: 13px; }
 /* the faction's emblem under the page list, one colour drawn in the theme's accent (static/emblems/CREDITS.txt) */
-[data-theme="sith"] .tb-emblem { display: block; background-color: var(--accent); opacity: .55;
+[data-theme="sith"] .tb-emblem { display: block; background-color: var(--sh-red); opacity: .55;
   -webkit-mask: url("../emblems/sith.svg") center / contain no-repeat; mask: url("../emblems/sith.svg") center / contain no-repeat; }
