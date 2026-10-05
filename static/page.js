@@ -6787,6 +6787,24 @@ document.getElementById("alertsBtn").onclick = () => {
   if (last > 0) showAlertSection(last, false);
 };
 drawAlertsBtn();
+// ---- the desktop theme (Settings > Display; the author, 2026-10-04): the tablet's themes for this page too, per browser
+// ("desktopTheme", not shared), set on <html data-theme> (page.html's head sets it before the first paint). "" is
+// Default - Outrider, which alone keeps the light mode. The tablet chooses its own (tabTheme).
+function deskTheme(t, save = true) {
+  t = TB.themes.includes(t) ? t : "";
+  if (save) store.set("desktopTheme", t);
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  document.getElementById("deskTheme").value = t;
+  if (data) render();   // the maps read the colours when they draw
+  try { drawMap(); } catch {}
+  try { drawHwyMap(); } catch {}
+}
+if (!TABLET) {
+  const sel = document.getElementById("deskTheme");
+  for (const o of document.querySelectorAll("#tabTheme option")) sel.append(new Option(o.textContent, o.value));
+  sel.value = TB.themes.includes(store.get("desktopTheme", "")) ? store.get("desktopTheme", "") : "";
+  sel.onchange = () => deskTheme(sel.value);
+} else document.getElementById("deskTheme").closest("label").hidden = true;
 // ---- Server settings: every key of the config file (GET api/config), saved into it (POST api/config) and used from
 // Outrider's next start. Grouped by the file's sections, each folding; the password and the AI key are never shown,
 // only whether they are set. Only the keys you change are written: the file keeps its comments and other keys.

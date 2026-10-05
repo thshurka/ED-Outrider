@@ -3689,6 +3689,23 @@ const settle = async maxMs => {
     allOk = allOk && goodV;
     console.log(goodV ? "OK" : "FAIL", "| more voices |", goodV ? "Piper's catalogue by language; Download and use asks the server for it" : JSON.stringify(got), errors.slice(before));
   }
+  // the desktop theme (Settings > Display): Default - Outrider and the tablet's nine; a choice is set on <html>, changes
+  // the colours, is remembered for this browser; the Default again removes it
+  {
+    const w = dom.window, d = w.document, before = errors.length, sel = d.getElementById("deskTheme");
+    const bg = () => w.getComputedStyle(d.documentElement).getPropertyValue("--bg").trim();
+    const got = {opts: [...sel.options].map(o => o.value), first: sel.options[0].textContent, label: (sel.options[1] || {}).textContent};
+    const bg0 = bg();
+    sel.value = "elite"; sel.dispatchEvent(new w.Event("change"));
+    got.on = [d.documentElement.dataset.theme, w.localStorage.getItem("desktopTheme"), bg() !== bg0];
+    sel.value = ""; sel.dispatchEvent(new w.Event("change"));
+    got.off = [d.documentElement.hasAttribute("data-theme"), w.localStorage.getItem("desktopTheme"), bg() === bg0];
+    const want = {opts: ["", "lcars", "elite", "babylon5", "narn", "minbari", "centauri", "sith", "alliance", "dark"], first: "Default - Outrider",
+                  label: "LCARS", on: ["elite", '"elite"', true], off: [false, '""', true]};
+    const goodTh = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
+    allOk = allOk && goodTh;
+    console.log(goodTh ? "OK" : "FAIL", "| desktop theme |", goodTh ? "Default - Outrider and nine themes; set, remembered, back to the Default" : JSON.stringify(got), errors.slice(before));
+  }
   // server mode (payload game_pc false): what needs the game PC is left out of the desktop page; back with game_pc true
   {
     const w = dom.window, before = errors.length;

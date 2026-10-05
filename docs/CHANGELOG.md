@@ -2,6 +2,11 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Themes for the desktop page
+- Settings → Display → **Theme on this browser**: the tablet's nine themes for the desktop page too, or **Default -
+  Outrider** (the look so far, the only one that follows your system's light mode). Per browser; the tablet keeps its
+  own choice. The maps take the theme's colours as well, and the theme is in place before the page first shows.
+
 ## 2026-10-04 · Docker from the registry, in the release and the README
 - The release now leads with GitHub's container registry: its `docker-compose.yml` (running
   `ghcr.io/weslocke/ed-outrider:latest`) and `env.example` are attached, at fixed "latest release" addresses, so a

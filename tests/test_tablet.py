@@ -39,18 +39,34 @@ class Tablet(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(ed_outrider.STATIC_DIR, name)), name)
         # the server's data is filled in the same as on the desktop page
         self.assertNotIn("/*SEARCH_OPTIONS*/null", tablet)
-        # the desktop page: no tablet class, no theme, no tablet stylesheet (its shell's markup stays hidden)
+        # the desktop page: no tablet class, no theme set by the server, no tablet stylesheet (its shell's markup stays
+        # hidden); the themes' stylesheets are linked (stamped), for a desktop theme of this browser's choosing
         self.assertNotIn('class="tablet"', desk)
-        self.assertNotIn("data-theme", desk)
+        self.assertNotIn("data-theme=", desk)
         self.assertNotIn("tablet.css", desk)
+        for t in ed_outrider.TABLET_THEMES:
+            self.assertRegex(desk, rf'href="static/themes/{t}\.css\?v=\d+"')
         self.assertIn('<nav id="tabNav" class="tb-nav" aria-label="Pages" hidden>', desk)
-        # every theme the page offers has its stylesheet, scoped to its data-theme (the desktop is never themed)
+        # every theme the page offers has its stylesheet, scoped to its data-theme
         for t in ed_outrider.TABLET_THEMES:
             with open(os.path.join(ed_outrider.STATIC_DIR, "themes", f"{t}.css"), encoding="utf-8") as f:
                 css = f.read()
             self.assertIn(f'[data-theme="{t}"]', css)
             self.assertIsNone(re.search(r"^:root\s*\{", css, re.M), "a theme sets nothing outside its data-theme")
             self.assertIn(f'<option value="{t}">', tablet)
+
+    def test_desktop_theme_picker(self):
+        """Desktop themes (the author, 2026-10-04): Settings > Display offers Default - Outrider and every tablet theme
+        under the tablet's label; the browser's choice is set before the first paint (no flash of the default)."""
+        with open(os.path.join(ed_outrider.STATIC_DIR, "page.html"), encoding="utf-8") as f:
+            html = f.read()
+        tab = dict(re.findall(r'<option value="(\w+)">([^<]+)</option>', re.search(r'<select id="tabTheme">(.*?)</select>', html).group(1)))
+        self.assertEqual(list(tab), list(ed_outrider.TABLET_THEMES))
+        desk = re.search(r'<select id="deskTheme"[^>]*>(.*?)</select>', html, re.S).group(1)
+        self.assertIn('<option value="">Default - Outrider</option>', desk)
+        head = html[:html.index("</head>")]
+        self.assertIn('localStorage.getItem("desktopTheme")', head)   # before the stylesheets apply: no flash
+        self.assertLess(head.index('localStorage.getItem("desktopTheme")'), head.index('static/page.css'))
 
     def test_name_fields_are_not_auto_capitalised(self):
         """A tablet keyboard capitalises a field's first letter and corrects words: system names and search terms
