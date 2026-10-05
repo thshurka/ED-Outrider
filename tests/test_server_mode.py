@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import io
 import os
+import re
 import tempfile
 import tomllib
 import unittest
@@ -149,6 +150,24 @@ class Packaging(unittest.TestCase):
         for part in ("sha256sum requirements.txt", ".requirements.sha256", "import aiohttp", "pip install --quiet -r requirements.txt",
                      'exec python ed_outrider.py "$@"', "sys.version_info < (3, 11)"):
             self.assertIn(part, script)
+
+    def test_windows_launch_script(self):
+        """launch_outrider.bat, launch_outrider.sh's twin for Windows: Windows line endings in the file and kept by git
+        (.gitattributes), the same install rules, the stamp compared in Python (Wine's fc called identical files
+        different: tested 2026-10-05), and a pause before a double-clicked window closes on an error."""
+        with open(os.path.join(self.ROOT, "launch_outrider.bat"), "rb") as f:
+            raw = f.read()
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))   # every line ends in CRLF
+        self.assertIn("*.bat text eol=crlf", self.read(".gitattributes").splitlines())
+        script = raw.decode("ascii")
+        for part in ("sys.version_info < (3, 11)", "py -3", '-m venv "%VENV%"', "pip install --quiet -r requirements.txt",
+                     "import aiohttp, sys; sys.exit(open('requirements.txt', 'rb').read() != open(r'%STAMP%', 'rb').read())",
+                     "copy /y requirements.txt", '"%VPY%" ed_outrider.py %*', "pause"):
+            self.assertIn(part, script)
+        self.assertNotIn("fc /b", script)
+        labels = {line[1:].strip() for line in script.splitlines() if line.startswith(":")}
+        gotos = set(re.findall(r"goto (\w+)", script))
+        self.assertLessEqual(gotos, labels)   # every goto has its label
 
     def test_bundle_rewrites_the_compose_file(self):
         """scripts/docker_bundle.sh runs the saved image instead of a build: the two lines it rewrites are there, and the

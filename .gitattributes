@@ -1,0 +1,2 @@
+# the Windows launcher keeps Windows line endings in every checkout (cmd can misread labels with Unix ones)
+*.bat text eol=crlf

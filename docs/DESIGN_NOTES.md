@@ -233,6 +233,8 @@ upstream project's choices, not rules of the game.
 ## Known limits
 
 - **Auto honk and the co-pilot button are Linux only** (evdev/uinput); Windows input was discussed, not written.
+- **Windows runs the rest** (`launch_outrider.bat`): journals found in the Windows save folder, every file read and
+  written as UTF-8, no SIGTERM handler there (Ctrl-C). Less tested than Linux: under Wine, not a real Windows.
 - **Core module health is as of the last Loadout or repair;** the journal logs nothing in between, so jet-cone
   boosts since are only counted.
 - **Status.json does not update while you stand still,** so positions can be up to a reading old.

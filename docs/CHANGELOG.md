@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · A Windows launcher
+- `launch_outrider.bat`: double-click it on Windows (Python 3.11 or newer) and it sets Outrider up and starts it, as
+  `launch_outrider.sh` does on Linux: `.venv` and `requirements.txt` the first time and after a change, then straight
+  in. Everything but the game-PC automation works on Windows; the README says so. Tried under Wine with Windows
+  Python 3.12 (Wine's own gaps aside: Piper's numpy crashes there).
+
 ## 2026-10-04 · Version 2026.10.12
 - The desktop themes (Settings → Display), with their README picture.
 

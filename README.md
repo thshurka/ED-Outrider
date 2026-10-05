@@ -64,6 +64,11 @@ installs again only when `requirements.txt` has changed (after a `git pull`), an
 its arguments go to Outrider (`./launch_outrider.sh --port 8026`). By hand it is
 `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`, then `.venv/bin/python ed_outrider.py`.
 
+**On Windows**, install [Python](https://www.python.org/downloads/) 3.11 or newer and double-click
+**`launch_outrider.bat`** (or run it in a Command Prompt): it does the same. Everything works there except the
+game-PC automation (auto honk, auto-target, the control rail and the co-pilot button), which is Linux only for now.
+Windows is less tested than Linux: if something goes wrong, an issue on GitHub is welcome.
+
 > [!TIP]
 > The first start reads all your journals (a few seconds); after that it only reads what's new.
 > Journal folders are found automatically on Windows and Steam/Proton. A browser needs one click on the
@@ -857,7 +862,7 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `tests/` | `python3 -m unittest discover tests`; `node tests/page_smoke.js <port> [path to node_modules with jsdom]` for the page, against a scratch server only (it refuses 8025 and a missing port) |
 | `tests/fixtures/` | Synthetic sample journals (a made-up commander and systems) for tests and scratch servers |
 | `Dockerfile`, `docker-compose.yml`, `docker/` | Running Outrider as a server in Docker (see Running as a server); `docker/entrypoint.sh` writes the first config and checks the folders can be written |
-| `launch_outrider.sh` | Starts Outrider, making `.venv` and installing `requirements.txt` first when needed |
+| `launch_outrider.sh`, `launch_outrider.bat` | Start Outrider (Linux and macOS; Windows), making `.venv` and installing `requirements.txt` first when needed |
 | `scripts/verify.sh` | Every check in one go: unit tests, lint, the page smoke test on a throwaway server (and a clean stop) |
 | `scripts/docker_bundle.sh` | A Docker release bundle in `dist/` (git-ignored): the built image saved with a compose file that runs it (no checkout or build on the server) |
 | `scripts/dark_icons.py` | Writes the tablet's Dark theme icons (Lucide, ISC) into `static/themes/dark.css` |
