@@ -175,10 +175,14 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   the server has no Piper (`data.tts.available` false); while the browser holds audio back (`audioBlocked()`), the
   speaking window shows `#audioPill`, posts `/api/speaker/audio` (the payload's `speaker_audio_blocked`, on the
   tablet's caption line) and `sayNow` holds its line until the click (`audioUnlocked`), dropping it if stale. It has no Overview. The desktop page must
-  not change: tablet-only rules go under `body.tablet` in `tablet.css`, themes only under their `[data-theme]` (only
-  `/tablet` sets one). The dark theme's icons are CSS masks written into `themes/dark.css` by `scripts/dark_icons.py` from
-  `static/icons/lucide/` (run it after changing its `ICONS`). A new theme: its stylesheet in `TABLET_STYLES`, its name in `TABLET_THEMES` and `TB.themes`,
-  an `<option>` in `#tabTheme`. A font: OFL only, with its licence file (`test_tablet.py` checks); a fan font is the
+  not change: tablet-only rules go under `body.tablet` in `tablet.css`, themes only under their `[data-theme]` (`/tablet`
+  sets one; the desktop page only when its browser chose one in Settings > Display: `desktopTheme`, `deskTheme()`, set
+  in `<head>` before the first paint; the Default is no `data-theme` at all). The dark theme's icons are CSS masks written into `themes/dark.css` by `scripts/dark_icons.py` from
+  `static/icons/lucide/` (run it after changing its `ICONS`). A new theme: its stylesheet in `TABLET_STYLES` (the desktop page links it too: `DESKTOP_STYLES`), its name in
+  `TABLET_THEMES` and `TB.themes`, an `<option>` in `#tabTheme` (the desktop picker copies it), and a desktop section in
+  its file under `[data-theme="…"] body:not(.tablet)` with `--desk-pill`, `--desk-radius`, `--desk-pill-size` (and
+  `--desk-pill-font`/`-case` for a very wide display face); `test_tablet.py` checks the section, the selected pill's
+  contrast and every text colour against the background and panels (4.5:1). Keep the pill row about the Default's width. A font: OFL only, with its licence file (`test_tablet.py` checks); a fan font is the
   player's drop-in in `data/fonts/` (`/userfonts/`, `USER_FONT_RE`), listed first in the theme's `@font-face`.
   Every `<button>` in a `<form method="dialog">` has a `type` (`test_tablet.py` checks): a ✕ or Done is
   `type="button" data-close` (closed by one page-wide handler), since an untyped one is what Enter in a field presses.

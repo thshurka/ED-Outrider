@@ -175,6 +175,15 @@ in its own box. **▴** folds the tiles into one line (remembered on this device
 them only on a small window). A table too wide for its box
 switches to short forms ("HMC", "G star"; hover for the full text) rather than scroll sideways.
 
+**Themes.** ⚙ Settings → Display → **Theme on this browser** dresses the page in one of the tablet's themes: LCARS,
+Elite, Babylon 5 (Earthforce, Narn, Minbari, Centauri), Sith, Rebel Alliance or Dark, each with its colours, its
+lettering on the title, tabs and labels, and its shapes. **Default - Outrider** is the look above, and the only one that
+follows your system's light mode. Each browser keeps its own choice, and the tablet has its own.
+
+<p align="center">
+  <img src="docs/images/themes.png" alt="The desktop page in four themes: LCARS, Elite, Minbari and Centauri" width="900">
+</p>
+
 **Now** is the cockpit view for a second monitor or a tablet, in big text: the system, the target, fuel,
 what to do next, the body you have targeted, and the nearest unvisited system.
 
@@ -617,7 +626,7 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
 - **Small things worth knowing:** the pill at the top right says whether the page is linked to Outrider ("stale"
   after 30 s without an answer; on the tablet just "linked"); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
   its colony distance; Search's mining list includes minerals you have refined, with those bodies first; the
-  Settings' chips jump to its sections; and Settings → Display chooses whether the header tiles fold to one line on a
+  Settings' chips jump to its sections; and Settings → Display chooses this browser's theme and whether the header tiles fold to one line on a
   small window, on this device.
 
 ## 🌐 Other devices on your network

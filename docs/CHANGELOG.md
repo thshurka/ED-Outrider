@@ -2,6 +2,9 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Version 2026.10.12
+- The desktop themes (Settings → Display), with their README picture.
+
 ## 2026-10-04 · Each theme's own touch on the desktop page
 - A theme on the desktop page now brings more than its colours: its display face on the title, the view pills, the
   tile labels and the dialogs' headings, and its shapes: LCARS's coloured pills and side bars, Elite's and Narn's cut

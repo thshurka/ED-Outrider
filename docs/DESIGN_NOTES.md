@@ -52,6 +52,11 @@ upstream project's choices, not rules of the game.
   the author chose: an emblem under the page list in the Elite, Babylon 5 and Star Wars themes (static/emblems/,
   each under the terms in its CREDITS.txt: Frontier's media usage rules for Elite, public-domain fan redrawings and
   Wikimedia Commons files for the others). Local copies only: the Android app blocks anything but Outrider.
+- **Desktop themes are the tablet's, chosen per browser; the Default stays as it was.** One stylesheet per theme serves
+  both (the tablet's rules under `body.tablet`, the desktop's under `body:not(.tablet)`), so a theme cannot drift
+  between the two. The themes are dark; only the Default follows the system's light mode. A theme dresses the frame
+  (title, tabs, labels, dialogs) in its display face and leaves the tables and lists in a plain one: the condensed and
+  wide faces are for a glance, not for reading a dense table. The emblems stay on the tablet (no room on the desktop).
 - **The tablet is silent unless asked: Play alerts here.** The PC's voice is the cockpit's; a tablet that also spoke
   would double every line, and on a plain-http LAN address there are no Web Locks to pick one speaker, so alerts are
   a banner there. But a Docker server often has no browser open at all (the author, 2026-10-04), so the tablet's
