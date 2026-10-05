@@ -695,7 +695,9 @@ turns the automation off inside a container by itself; `false` does the same on 
   cp .env.example .env        # set JOURNALS to the mount, and UID/GID (id -u, id -g), PORT, TZ
   docker compose up -d
   ```
-  Its INSTALL.txt has the same steps. `scripts/docker_bundle.sh` makes one, on a computer with this repository and
+  Its INSTALL.txt has the same steps. Each release on GitHub has the bundle attached, and the same image is on
+  GitHub's container registry as `ghcr.io/weslocke/ed-outrider` (`docker pull ghcr.io/weslocke/ed-outrider:latest`;
+  to use it, set that as the compose file's `image:`). `scripts/docker_bundle.sh` makes one, on a computer with this repository and
   Docker, into `dist/`; it is built for that computer's architecture (`PLATFORM=linux/arm64` for an ARM server, if
   your Docker can build for it).
 - **From a checkout:**

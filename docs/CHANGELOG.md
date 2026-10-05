@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Published: a GitHub release and a container image
+- Release v2026.10.11 on GitHub with the Docker bundle attached, and the image on GitHub's container registry as
+  `ghcr.io/weslocke/ed-outrider` (2026.10.11 and latest). The Dockerfile's labels link it to the repository.
+
 ## 2026-10-04 · Version 2026.10.11; new screenshots
 - Every README screenshot retaken at a true 2560 × 1440 (a 1440p screen at 100%): the orange view buttons, the split
   Here, the drawn schematic (Lysood HP-I b9-2: water worlds and ringed gas giants). The tablet's is at its own screen,
