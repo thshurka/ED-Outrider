@@ -1,7 +1,8 @@
 """Neutron Highway auto-target: after an FSD supercharge on the route, make the next route system the target by
-pressing keys in the galaxy map (optional, Linux; off by default).
+pressing keys in the galaxy map (optional, Linux, and Windows as an experiment; off by default).
 
-It presses keys on the same uinput virtual keyboard as auto honk (outrider/honk.py), with your own keyboard bindings
+It presses keys on the same keyboard as auto honk (outrider/honk.py: a uinput virtual keyboard on Linux, SendInput
+through outrider/winkeys.py on Windows), with your own keyboard bindings
 read from the active controls preset, and checks Status.json at every step: GuiFocus (0 the cockpit, 6 the galaxy
 map) and, at the end, Destination.System, which must be the next system's id64.
 
@@ -261,7 +262,7 @@ class Targeter:
             keys, what = self.resolve(name, binds)
             bad = [k for k in keys if honk.key_code(ev, k) is None] if keys and ev else []
             if not keys or bad:
-                why = what if not keys else f"no evdev key for {', '.join(bad)}"
+                why = what if not keys else f"no {honk.KEYS_WORD} key for {', '.join(bad)}"
                 if (name, why) not in missing:
                     missing.append((name, why))
                 continue

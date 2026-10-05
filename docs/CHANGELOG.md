@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · Auto honk, auto-target and the control rail on Windows (experimental)
+- On Windows these press keys the Windows way (`SendInput` with scan codes, as VoiceAttack does) through
+  `outrider/winkeys.py`, which stands in for evdev, so everything above it is unchanged; Linux keeps evdev. Chosen by
+  platform at start, nothing to set. The Highway's clipboard copy (and auto-target's paste) work on Windows too.
+  Checked under Wine (the scan codes, extended keys and the clipboard), not yet against the game on Windows: marked
+  experimental in the status and the README. Elite must not run as administrator. The co-pilot button stays Linux only.
+
 ## 2026-10-05 · Windows paths in the config file
 - A path written `"C:\Users\..."` in `ed_outrider.toml` makes the whole file unreadable (in double quotes a TOML
   backslash starts an escape), and Outrider then runs on defaults. The console line now says so and how to write it

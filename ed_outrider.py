@@ -176,7 +176,7 @@ except ImportError:
 import outrider.materials  # engineering materials and synthesis recipes (no dependencies)
 import outrider.tts        # spoken alerts; Piper itself is optional (the page falls back to browser speech)
 import outrider.speech     # the words for spoken alerts, per personality (resources/speech.json)
-import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux, needs evdev)
+import outrider.honk       # auto honk: holds Primary Fire on arrival (optional; Linux with evdev, Windows experimental)
 import outrider.target     # the Highway's auto-target: targets the next route system in the galaxy map (same keyboard)
 import outrider.button     # the co-pilot button: tap, double tap, hold on a HOTAS button (optional; Linux, read-only)
 import outrider.auth       # [server] password: sign-in for devices on the network (the tablet and its app)
@@ -975,7 +975,7 @@ watch_firsts = {"true" if st["watch_firsts"] else "false"}   # check your unsold
 server_player = {q(st["server_player"])}   # auto (the first of pw-play, paplay, aplay, ffplay found), one of those, or off (Linux)
 {"" if st["sound_dir"] else "# "}sound_dir = {p(_root_relative(st["sound_dir"]) if st["sound_dir"] else "my-sounds")}   # your own alert sounds: <name>.wav (fanfare, thud, chime, alert...), up to 3 s each
 
-[autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; see outrider/honk.py)
+[autohonk]   # hold Primary Fire on arriving by hyperspace, so the Discovery Scanner fires (Linux; Windows experimental; see outrider/honk.py)
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump,
 # and Primary Fire needs a keyboard binding (key = "auto" reads it, modifiers too, from your controls preset).
 enabled = {"true" if st["autohonk"]["enabled"] else "false"}   # the page's Settings can switch it on and off too
@@ -995,8 +995,8 @@ hold_ms = {st["copilot"]["hold_ms"]}   # ms held (or more) that make a hold
 double_ms = {st["copilot"]["double_ms"]}   # ms between a tap's release and the next press that make a double tap
 
 [highway]   # the Neutron Highway: a Spansh route that Outrider follows as you fly
-clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving at a route system, copy the next one's name to the desktop clipboard (wl-copy or xclip)
-# Auto-target (Linux, off by default; the Highway tab can switch it): after a neutron supercharge on the route, press keys
+clipboard = {"true" if st["highway"]["clipboard"] else "false"}   # on arriving at a route system, copy the next one's name to the desktop clipboard (wl-copy or xclip on Linux; built in on Windows)
+# Auto-target (Linux, Windows experimental; off by default; the Highway tab can switch it): after a neutron supercharge on the route, press keys
 # in the galaxy map to make the next route system the target (outrider/target.py; python3 -m outrider.target --show
 # prints the steps with your keys). The keys go to whichever window has focus. It is key-press automation of the same
 # kind as auto honk: check Frontier's rules for yourself.

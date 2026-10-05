@@ -1,4 +1,5 @@
-"""Auto honk: hold Primary Fire on arriving in a system, so the Discovery Scanner fires (optional, Linux).
+"""Auto honk: hold Primary Fire on arriving in a system, so the Discovery Scanner fires (optional; Linux, and
+Windows as an experiment: outrider/winkeys.py presses the keys there with SendInput, the rest is the same).
 
 Outrider presses keys on a virtual keyboard (the kernel's uinput, the same route Steam Input uses), so the
 game sees ordinary key presses, under Wayland or X and through Proton alike. For it to work:
@@ -62,6 +63,22 @@ def _import_evdev():
             return evdev
         except ImportError:
             sys.path.remove(venv)
+    return None
+
+
+WINDOWS = sys.platform.startswith("win")
+EXPERIMENTAL = " (experimental on Windows)" if WINDOWS else ""   # said in every "ready" status there
+KEYS_WORD = "Windows key" if WINDOWS else "evdev"                  # "no evdev equivalent for KEY_..."
+
+
+def keyboard_backend():
+    """What presses keys on this system: evdev on Linux (None without the package), outrider.winkeys on Windows,
+    None anywhere else."""
+    if sys.platform.startswith("linux"):
+        return _import_evdev()
+    if sys.platform.startswith("win"):
+        from . import winkeys
+        return winkeys
     return None
 
 
@@ -275,14 +292,14 @@ class Honker:
 
     def __init__(self, key=DEFAULT_KEY, hold=6.0, journal_dirs=()):
         self.key, self.hold, self.journal_dirs = key, hold, list(journal_dirs or ())
-        self.evdev = _import_evdev() if sys.platform.startswith("linux") else None
+        self.evdev = keyboard_backend()   # evdev, or its Windows stand-in (outrider/winkeys.py)
         self.ui = None
         # who wants the device open: "honk" (auto honk and its Test button) and "target" (the Highway's auto-target);
         # it is closed when the last one lets go
         self.owners = set()
         self.lock = threading.Lock()   # held by press() for the whole hold, and by auto-target for its whole sequence
         self.stop = threading.Event()  # close() during a hold: let go now, then close the device
-        self.status = ("Linux only for now" if not sys.platform.startswith("linux")
+        self.status = ("Linux and Windows only" if not (sys.platform.startswith("linux") or WINDOWS)
                        else "needs the python evdev package (pip install evdev)" if not self.evdev else "off")
 
     @property
@@ -301,7 +318,7 @@ class Honker:
             # checked here too, or the status says ready and every press fails on a key evdev lacks
             bad = [k for k in keys if key_code(self.evdev, k) is None] if keys and self.evdev else []
             if bad:
-                return None, (f"no evdev equivalent for {', '.join(bad)} (Primary Fire's keyboard binding): "
+                return None, (f"no {KEYS_WORD} equivalent for {', '.join(bad)} (Primary Fire's keyboard binding): "
                               "bind it to another key, or set [autohonk] key")
             return keys, what
         keys = parse_combo(self.key)
@@ -321,7 +338,7 @@ class Honker:
                 self.stop.clear()
             if owner == "honk":      # already open for auto-target: auto honk's status still says what it presses
                 keys, what = self.combo()
-                self.status = f"ready: holds {what} for {self.hold:g} s" if keys else f"not ready: {what}"
+                self.status = f"ready: holds {what} for {self.hold:g} s{EXPERIMENTAL}" if keys else f"not ready: {what}"
             return True
         keys, what = self.combo()
         e = self.evdev.ecodes
@@ -330,12 +347,13 @@ class Honker:
             self.ui = self.evdev.UInput({e.EV_KEY: all_keys}, name="ED Outrider auto honk")
         except (OSError, self.evdev.UInputError) as err:
             self.owners.discard(owner)
-            self.device_error = f"cannot create the virtual keyboard ({err}); /dev/uinput needs to be writable"
+            self.device_error = (f"cannot press keys on Windows ({err})" if WINDOWS
+                                 else f"cannot create the virtual keyboard ({err}); /dev/uinput needs to be writable")
             if owner == "honk":
                 self.status = self.device_error
             return False
         if owner == "honk":
-            self.status = f"ready: holds {what} for {self.hold:g} s" if keys else f"not ready: {what}"
+            self.status = f"ready: holds {what} for {self.hold:g} s{EXPERIMENTAL}" if keys else f"not ready: {what}"
         return True
 
     device_error = None   # why the virtual keyboard could not be created (the last try)
@@ -413,7 +431,7 @@ class Honker:
         if self.stop.is_set():   # close() came just after the check above, while the lock was still held
             self.close()
             return None
-        self.status = f"ready: holds {what} for {self.hold:g} s"
+        self.status = f"ready: holds {what} for {self.hold:g} s{EXPERIMENTAL}"
         return what
 
     TAP_HOLD_S = 0.1   # a tap's key-down time (the game misses shorter presses now and then)
@@ -427,7 +445,7 @@ class Honker:
             raise ValueError("the virtual keyboard is not open")
         codes = [key_code(self.evdev, k) for k in keys or ()]
         if not codes or None in codes:
-            raise ValueError(f"no evdev key for {' + '.join(map(str, keys or ())) or 'nothing'}")
+            raise ValueError(f"no {KEYS_WORD} key for {' + '.join(map(str, keys or ())) or 'nothing'}")
         e = self.evdev.ecodes
         if not self.lock.acquire(blocking=False):
             raise NotNow("auto honk or auto-target is pressing keys: try again in a moment")

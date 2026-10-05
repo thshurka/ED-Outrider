@@ -232,7 +232,13 @@ upstream project's choices, not rules of the game.
 
 ## Known limits
 
-- **Auto honk and the co-pilot button are Linux only** (evdev/uinput); Windows input was discussed, not written.
+- **Key presses on Windows are a stand-in for evdev** (`outrider/winkeys.py`): the same evdev key names mapped to
+  scan codes and sent with `SendInput` (scan-code mode, extended flag for arrows, right Ctrl, numpad Enter...), so
+  auto honk, auto-target and the rail run unchanged above it. Chosen by platform at start (`honk.keyboard_backend`).
+  Experimental: checked under Wine (a low-level hook saw the right scan codes and flags; Wine reports right Ctrl's
+  virtual key as left Ctrl, the scan code and flag being right), never yet against the game on Windows. Windows
+  drops keys sent to an elevated window, without an error. The co-pilot button (reading a HOTAS) is still Linux
+  only: Windows' simple joystick API stops at 32 buttons.
 - **Windows runs the rest** (`launch_outrider.bat`): journals found in the Windows save folder, every file read and
   written as UTF-8, no SIGTERM handler there (Ctrl-C). Less tested than Linux: under Wine, not a real Windows.
 - **Core module health is as of the last Loadout or repair;** the journal logs nothing in between, so jet-cone

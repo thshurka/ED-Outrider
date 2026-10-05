@@ -53,6 +53,77 @@ class HonkBinding(unittest.TestCase):
         self.assertEqual(outrider.honk.parse_combo("alt+k"), ["KEY_LEFTALT", "KEY_K"])
 
 
+class WindowsKeys(unittest.TestCase):
+    """Auto honk, auto-target and the rail on Windows: outrider/winkeys.py stands in for evdev, pressing keys by scan
+    code with SendInput. Tests record what would be sent (winkeys.SEND); nothing reaches Windows."""
+
+    def setUp(self):
+        import outrider.winkeys as wk
+        self.wk, self.sent = wk, []
+        self.addCleanup(setattr, wk, "SEND", wk.SEND)
+        wk.SEND = self.sent.extend
+
+    def test_every_key_outrider_presses_has_a_scan_code(self):
+        import outrider.honk as honk
+        import outrider.target as target
+        codes = self.wk.ecodes.ecodes
+        names = {honk.elite_key("Key_" + k) for k in honk.ELITE_KEYS}
+        names |= {f"KEY_KP{d}" for d in range(10)} | {f"KEY_F{n}" for n in range(1, 25)}
+        names |= {f"KEY_{c}" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}
+        names |= {k for k, _ in target.US_KEYMAP.values()}
+        self.assertEqual(sorted(n for n in names if n not in codes), [])
+        self.assertEqual(len(set(codes.values())), len(codes))   # no two keys share a scan code
+        self.assertEqual(codes["KEY_K"], 0x25)
+        self.assertEqual(codes["KEY_RIGHTCTRL"], 0xE01D)         # extended
+        self.assertEqual(codes["KEY_KPENTER"], 0xE01C)
+        self.assertEqual(codes["KEY_ENTER"], 0x1C)               # the main Enter is not
+
+    def test_write_sends_scan_codes(self):
+        ui = self.wk.UInput({}, name="test")
+        ui.write(self.wk.EV_KEY, 0xE048, 1)   # the up arrow: extended
+        ui.write(self.wk.EV_KEY, 0xE048, 2)   # autorepeat: nothing
+        ui.write(self.wk.EV_KEY, 0xE048, 0)
+        ui.write(0, 0, 0)                     # evdev's SYN: nothing
+        ui.syn()
+        self.assertEqual(self.sent, [(0x48, True, False), (0x48, True, True)])
+        with self.assertRaises(OSError):
+            ui.write(self.wk.EV_KEY, None, 1)
+
+    def test_honker_presses_through_winkeys(self):
+        import outrider.honk as honk
+        with unittest.mock.patch.object(honk.sys, "platform", "win32"):
+            self.assertIs(honk.keyboard_backend(), self.wk)
+        with unittest.mock.patch.object(honk.sys, "platform", "darwin"):
+            self.assertIsNone(honk.keyboard_backend())
+        h = honk.Honker("KEY_RIGHTCTRL+KEY_K", hold=0.01)
+        h.evdev = self.wk
+        self.assertTrue(h.open())
+        self.assertEqual(h.press(), "Right Ctrl + K")
+        # modifiers first, released in reverse, as a person would
+        self.assertEqual(self.sent, [(0x1D, True, False), (0x25, False, False), (0x25, False, True), (0x1D, True, True)])
+        self.sent.clear()
+        h.tap(["KEY_LEFTSHIFT", "KEY_A"], hold=0)
+        self.assertEqual(self.sent, [(0x2A, False, False), (0x1E, False, False), (0x1E, False, True), (0x2A, False, True)])
+        h.close()
+        self.assertFalse(h.ready)
+
+    def test_clipboard_on_windows(self):
+        got = []
+        cb = ed_outrider.Clipboard(True, platform="win32", win_set=got.append, which=lambda n: None, env={})
+        self.assertEqual(cb.info()["tool"], "Windows")
+        self.assertTrue(cb.info()["available"])
+        self.assertTrue(cb.copy("Col 285 Sector AB-C d1-2"))
+        self.assertEqual(got, ["Col 285 Sector AB-C d1-2"])
+
+        def busy(text):
+            raise OSError(5, "the clipboard is in use by another program")
+        cb = ed_outrider.Clipboard(True, platform="win32", win_set=busy)
+        self.assertFalse(cb.copy("X"))
+        self.assertIn("in use", cb.last["error"])
+        self.assertFalse(ed_outrider.Clipboard(False, platform="win32", win_set=got.append).copy("Y"))   # [highway] clipboard off
+        self.assertEqual(len(got), 1)
+
+
 class BatchGHonkBackups(unittest.TestCase):
     """Batch G: auto honk's combat-mode and fire-group safety (P7, unit tests only: fake honkers, no device, no
     keys), and verified backups with --restore / --list-backups (P19, temp files only)."""

@@ -116,7 +116,8 @@
 #                                    # each time (commander names are often unpronounceable)
 
 [autohonk]
-# Hold Primary Fire on arriving in a system by hyperspace, so the Discovery Scanner fires (Linux; outrider/honk.py).
+# Hold Primary Fire on arriving in a system by hyperspace, so the Discovery Scanner fires (Linux;
+# Windows as an experiment, through SendInput: don't run Elite as administrator; outrider/honk.py).
 # IMPORTANT: the Discovery Scanner MUST be on PRIMARY FIRE in the fire group that is active when you jump.
 # Primary Fire needs a keyboard binding in Elite's controls (as its second binding, keeping your trigger first).
 # enabled = false        # the page's 🔔 alerts dialog switches it on and off too (and remembers)
@@ -169,7 +170,7 @@
 # The Neutron Highway: a route plotted with Spansh (neutron stars as boosts) that Outrider follows as you fly.
 # clipboard = true          # on arriving at a route system, copy the next system's name to the desktop clipboard
 #                           # (wl-copy under Wayland, xclip under X11; Linux), ready to paste into the galaxy map
-# Auto-target (Linux, off by default; the Highway tab can switch it): after an FSD supercharge in a route system,
+# Auto-target (Linux, Windows experimental; off by default; the Highway tab can switch it): after an FSD supercharge in a route system,
 # press keys in the galaxy map to make the next route system the target (outrider/target.py), through the same
 # virtual keyboard as auto honk. The keys go to whichever window has focus. It is key-press automation of the same
 # kind as auto honk: whether it fits Frontier's rules is your call. python3 -m outrider.target --show prints the steps.

@@ -49,7 +49,7 @@ also run 24/7 on a home server in Docker.
 | ⛏️ **Rhino mining** | A heading-up surface map on Now with your rigs, sample points and ship, and every collection kept per body. |
 | 📱 **A tablet in the cockpit** | Every page in a touch layout with nine themes, alerts as banners, game buttons on a control rail, and the voice on the tablet if you like. |
 | 🎙️ **Ask out loud** | "Hey Vespa, status report": answered in the voice from what Outrider knows, with an optional AI for anything else. |
-| 🎯 **Automation (game PC, Linux)** | Auto honk fires the Discovery Scanner on arrival, auto-target targets the next Highway system, and one HOTAS button asks for a status report. |
+| 🎯 **Automation (game PC; Linux, Windows experimental)** | Auto honk fires the Discovery Scanner on arrival, auto-target targets the next Highway system, and one HOTAS button asks for a status report. |
 
 ## 🚀 Getting started
 
@@ -65,9 +65,10 @@ its arguments go to Outrider (`./launch_outrider.sh --port 8026`). By hand it is
 `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`, then `.venv/bin/python ed_outrider.py`.
 
 **On Windows**, install [Python](https://www.python.org/downloads/) 3.11 or newer and double-click
-**`launch_outrider.bat`** (or run it in a Command Prompt): it does the same. Everything works there except the
-game-PC automation (auto honk, auto-target, the control rail and the co-pilot button), which is Linux only for now.
-Windows is less tested than Linux: if something goes wrong, an issue on GitHub is welcome.
+**`launch_outrider.bat`** (or run it in a Command Prompt): it does the same. Everything works there; auto honk, auto-target and the control rail
+are **experimental on Windows** (they press keys the Windows way, untested against the game so far), and the
+co-pilot button is Linux only for now. Windows is less tested than Linux: if something goes wrong, an issue on GitHub
+is welcome.
 
 > [!TIP]
 > The first start reads all your journals (a few seconds); after that it only reads what's new.
@@ -77,7 +78,8 @@ Windows is less tested than Linux: if something goes wrong, an issue on GitHub i
 `requirements.txt` also installs two optional parts; leave either line out if you don't want it:
 
 - **Piper** (`piper-tts`, about 100 MB) for a natural speaking voice.
-- **evdev** (Linux only) for auto honk, auto-target, the control rail and the co-pilot button. It is built from
+- **evdev** (Linux only) for auto honk, auto-target, the control rail and the co-pilot button (Windows needs
+  nothing extra for the first three). It is built from
   source, so it needs your distribution's Python development headers.
 
 Start Outrider with the `.venv`'s Python (`.venv/bin/python ed_outrider.py`, as above): plain `python3 ed_outrider.py` finds Piper and evdev in a `.venv` in the Outrider folder, but aiohttp must then be installed for that `python3` too.
@@ -433,11 +435,11 @@ follows it as you fly. One route is kept (following it needs no network) until y
   included) is **Off Route: Detour** until you are back on it, with the closest route system marked. A line under
   the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly · 38 of 399 · refuel in 3 jumps").
 - **Clipboard.** On arrival the next system's name goes on the desktop clipboard for the galaxy map (Linux:
-  `wl-copy` or `xclip`; on the game PC only).
+  `wl-copy` or `xclip`; Windows: built in; on the game PC only).
 - **The voice:** "Next Neutron Highway Stop: Hwy Stop 38, with three jumps left to refuel. Boost your FSD to
   continue.", plus refuel stops, detours, "Back on the highway", "Highway complete" and the fuel warning.
 
-**Auto-target** (Linux, on the game PC only, off by default; the tab's **Auto-target the next system** box). After an FSD supercharge
+**Auto-target** (Linux, Windows experimental; on the game PC only, off by default; the tab's **Auto-target the next system** box). After an FSD supercharge
 in a route system it waits 5 s, then presses keys to make the next route system your target: it opens the galaxy
 map, searches for the system, plots the route, closes the map and checks the target took. It says "Successfully
 targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own alerts row.
@@ -465,7 +467,8 @@ targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own aler
 
 ## 🎯 Auto honk
 
-On Linux, Outrider can fire the Discovery Scanner for you. It runs on the game PC only (never in Docker). On arriving by hyperspace it waits a moment,
+Outrider can fire the Discovery Scanner for you, on Linux (and on Windows as an experiment). It runs on the game PC
+only (never in Docker). On arriving by hyperspace it waits a moment,
 holds Primary Fire, and says how it went ("System Scan Completed, 12 Bodies discovered"). It is off until
 you tick it in ⚙ Settings.
 
@@ -484,8 +487,12 @@ Setting it up:
   be pressed.
 - **Try it first.** The dialog's *test in 5 s* button, or `python3 -m outrider.honk --test 10`, holds Primary Fire
   once. `python3 -m outrider.honk --show` prints the binding it will press.
-- It presses keys through a virtual keyboard (`evdev`; Steam's controller rule already gives you access),
-  and **the keys go to whichever window has focus**, so switch it off before alt-tabbing away mid-jump.
+- It presses keys through a virtual keyboard (`evdev`; Steam's controller rule already gives you access), on
+  Windows with `SendInput` as VoiceAttack does, and **the keys go to whichever window has focus**, so switch it off
+  before alt-tabbing away mid-jump.
+- **On Windows (experimental):** don't run Elite as administrator, or Windows silently drops the keys (unless
+  Outrider runs as administrator too). It has not been tried against the game on Windows yet: start with the
+  test button, and an issue on GitHub saying how it went is very welcome.
 
 ## 🕹️ The co-pilot button
 
@@ -557,7 +564,7 @@ for this: see [Other devices on your network](#-other-devices-on-your-network).
   the SRV, the Nomad and fighters, and on foot have their own. A button shows the game's state (Status.json), SENT
   until the game confirms a press, and "not confirmed" if it doesn't. A control with no keyboard binding says "bind a
   key" (give it a second, keyboard binding in Elite's controls). Edit chooses, renames and orders each set (stored on
-  the PC). The rail presses keys only while the game runs, through auto honk's virtual keyboard (Linux), and never
+  the PC). The rail presses keys only while the game runs, through auto honk's keyboard (Linux; Windows experimental), and never
   while auto honk or auto-target is pressing; one tap per button, never a sequence.
 
 **The Android app.** [ED Outrider for Android](https://github.com/weslocke/ED-Outrider-Android) shows the tablet layout
@@ -860,8 +867,9 @@ Changing Outrider yourself, or with a coding agent? Start with [`docs/AGENT_GUID
 | `outrider/tools.py` | The read-only questions an AI may ask (one registry, used by the MCP bridge and the voice) |
 | `outrider/ask.py`, `resources/ask.json` | Questions by voice (`POST /api/ask`): the fixed phrases, then the optional AI layer |
 | `outrider/mcp.py` | The MCP bridge for AI clients: `python3 -m outrider.mcp` (stdio); `--list` shows the tools |
-| `outrider/honk.py` | Auto honk (Linux, optional); `--show`, `--test` |
-| `outrider/target.py` | The Highway's auto-target (Linux, optional); `--show` |
+| `outrider/honk.py` | Auto honk (Linux; Windows experimental; optional); `--show`, `--test` |
+| `outrider/winkeys.py` | Key presses and the clipboard on Windows (`SendInput`), standing in for evdev |
+| `outrider/target.py` | The Highway's auto-target (Linux; Windows experimental; optional); `--show` |
 | `outrider/bio.py` | The exobiology predictor; `--backtest` scores it against your journals, `--update-rules` fetches the rules by hand |
 | `resources/bio_rules.json` | Spawn rules, colour variants, nebulae and regions from BioScan, ExploData and klightspeed's region map |
 | `resources/mining_odds.json` | Planetary mining odds per ground type, from the Elite Dangerous Field Manual's survey by CMDR Grumlop (CC BY-SA 4.0); read only |

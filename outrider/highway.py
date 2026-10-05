@@ -3,6 +3,7 @@ ahead, the spoken arrival line, the background image's check, and the desktop cl
 The route's state and the auto-target orchestration live in ed_outrider.State."""
 import math
 import os
+import sys
 import time
 
 from outrider.core import iso_ts
@@ -127,19 +128,24 @@ def highway_text(rows, i):
 
 
 class Clipboard:
-    """The desktop clipboard (Linux): wl-copy under Wayland, xclip under X11, whichever is installed for the session
-    there is. Run as a plain subprocess (no shell) with the text on its stdin; both fork to serve the selection, so
-    the call returns at once. Tests pass fakes for `which`, `run` and `env`: nothing is ever copied from a test."""
+    """The desktop clipboard. Linux: wl-copy under Wayland, xclip under X11, whichever is installed for the session
+    there is, run as a plain subprocess (no shell) with the text on its stdin; both fork to serve the selection, so
+    the call returns at once. Windows: the clipboard API itself (outrider.winkeys.set_clipboard). Tests pass fakes for
+    `which`, `run`, `env`, `platform` and `win_set`: nothing is ever copied from a test."""
     TOOLS = (("wl-copy", "WAYLAND_DISPLAY", ("wl-copy",)), ("xclip", "DISPLAY", ("xclip", "-selection", "clipboard")))
 
-    def __init__(self, enabled=True, which=None, run=None, env=None):
+    def __init__(self, enabled=True, which=None, run=None, env=None, platform=None, win_set=None):
         import shutil
         import subprocess
         self.enabled = bool(enabled)
         self._which, self._run, self._env = which or shutil.which, run or subprocess.run, os.environ if env is None else env
         self._devnull = subprocess.DEVNULL
-        self.tool = self.argv = None
-        for name, var, argv in self.TOOLS:
+        self.tool = self.argv = self._win_set = None
+        if (platform or sys.platform).startswith("win"):
+            if win_set is None:
+                from outrider.winkeys import set_clipboard as win_set
+            self.tool, self._win_set = "Windows", win_set
+        for name, var, argv in () if self.tool else self.TOOLS:
             if self._env.get(var) and self._which(name):
                 self.tool, self.argv = name, list(argv)
                 break
@@ -152,12 +158,16 @@ class Clipboard:
     def copy(self, text, force=False):
         """Put `text` on the clipboard; True when the tool said it did (blocking, briefly: run it off the loop). force:
         even with [highway] clipboard off (auto-target's paste entry asked for it)."""
-        if not ((self.enabled or force) and self.argv and text):
+        if not ((self.enabled or force) and (self.argv or self._win_set) and text):
             return False
         err = None
         try:
-            ok = self._run(self.argv, input=str(text).encode(), stdout=self._devnull, stderr=self._devnull,
-                           timeout=5, check=False).returncode == 0
+            if self._win_set:
+                self._win_set(str(text))
+                ok = True
+            else:
+                ok = self._run(self.argv, input=str(text).encode(), stdout=self._devnull, stderr=self._devnull,
+                               timeout=5, check=False).returncode == 0
             if not ok:
                 err = f"{self.tool} failed"
         except (OSError, ValueError) as e:
