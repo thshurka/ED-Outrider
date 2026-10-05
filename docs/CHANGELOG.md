@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · The clipboard tools in the README
+- Getting started now says the Highway's clipboard copy and auto-target's paste need `wl-copy` (wl-clipboard,
+  Wayland) or `xclip` (X11) from the distribution on Linux, how to install them, and that nothing else needs them.
+
 ## 2026-10-05 · Version 2026.10.13
 - The Windows launcher, auto honk, auto-target and the control rail on Windows (experimental), the Windows
   clipboard, the config file's Windows path hint and the NFS note in the release's env file.

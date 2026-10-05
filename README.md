@@ -82,6 +82,11 @@ is welcome.
   nothing extra for the first three). It is built from
   source, so it needs your distribution's Python development headers.
 
+Not from pip, and optional too: on Linux the Highway's clipboard copy (and auto-target's paste) need **`wl-copy`**
+(the `wl-clipboard` package, for Wayland) or **`xclip`** (for X11), from your distribution, e.g.
+`sudo apt install wl-clipboard` or `sudo apt install xclip`. Without either, nothing is copied and everything else works
+(the start-up log says which one it found). Windows needs nothing.
+
 Start Outrider with the `.venv`'s Python (`.venv/bin/python ed_outrider.py`, as above): plain `python3 ed_outrider.py` finds Piper and evdev in a `.venv` in the Outrider folder, but aiohttp must then be installed for that `python3` too.
 Your own files (the database, backups, downloaded voices, banned lines) all go in `data/`.
 
@@ -435,7 +440,7 @@ follows it as you fly. One route is kept (following it needs no network) until y
   included) is **Off Route: Detour** until you are back on it, with the closest route system marked. A line under
   the tiles shows the next stop ("🛣 Next: Hwy Stop 38 · ⚡ neutron · 4.2 ly · 38 of 399 · refuel in 3 jumps").
 - **Clipboard.** On arrival the next system's name goes on the desktop clipboard for the galaxy map (Linux:
-  `wl-copy` or `xclip`; Windows: built in; on the game PC only).
+  `wl-copy` or `xclip`, see Getting started; Windows: built in; on the game PC only).
 - **The voice:** "Next Neutron Highway Stop: Hwy Stop 38, with three jumps left to refuel. Boost your FSD to
   continue.", plus refuel stops, detours, "Back on the highway", "Highway complete" and the fuel warning.
 
@@ -461,7 +466,8 @@ targeted neutron jump target Hwy Stop 38" (or "Failed to…") under its own aler
 - **Test now** in the box targets the nearest known system a plain jump away, after a 5-second countdown.
   `python3 -m outrider.target --show` prints the steps with your keys.
 - Every step can be changed under `[highway]` (`autotarget_search`, `autotarget_submit`, `autotarget_plot`…) if a
-  game update moves things; `autotarget_entry = "paste"` pastes the name instead of typing it.
+  game update moves things; `autotarget_entry = "paste"` pastes the name instead of typing it. Pasting (also how
+  it enters a name a US keyboard layout can't type) needs the clipboard: `wl-copy` or `xclip` on Linux.
 - **Frontier's rules:** this is key-press automation like auto honk (and tools such as Auto_Neutron). Whether to
   use it is your call.
 
