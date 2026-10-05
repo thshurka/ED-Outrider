@@ -1,4 +1,4 @@
-/* LCARS, the tablet's first theme (data-theme="lcars"; only /tablet sets it, the desktop page is never themed). Black,
+/* LCARS, the tablet's first theme (data-theme="lcars": /tablet by default, the desktop page when chosen in Settings > Display). Black,
    peach, lavender, periwinkle and orange, amber for Silent Running; elbows at the head's and foot's left corners and
    pills down the page nav. Fonts: Antonio (display) and Barlow Condensed (text), both SIL OFL 1.1, in static/fonts/
    with their licences. A font of your own for the display face goes first if you drop it in as
@@ -60,3 +60,14 @@
   text-transform: uppercase; letter-spacing: 1px; }
 [data-theme="lcars"] body.tablet #nowView .now-card { border-radius: 22px; }
 [data-theme="lcars"] .tb-sheet h2 { color: var(--lc-peach); }
+
+/* ---- the desktop page (Settings > Display): pills in the LCARS colours, a side bar on the tiles and dialogs ---- */
+:root[data-theme="lcars"] { --desk-pill: 999px; --desk-radius: 0 14px 14px 0; --desk-lbl: var(--lc-peach); --desk-pill-size: 13px; }
+[data-theme="lcars"] body:not(.tablet) header { border-bottom: 6px solid var(--lc-orange); }
+[data-theme="lcars"] body:not(.tablet) .views button { background: var(--lc-lavender); color: var(--lc-ink); border-color: transparent; font-weight: 600; }
+[data-theme="lcars"] body:not(.tablet) .views button:nth-child(3n+2) { background: var(--lc-periwinkle); }
+[data-theme="lcars"] body:not(.tablet) .views button:nth-child(3n) { background: var(--lc-peach); }
+[data-theme="lcars"] body:not(.tablet) .views button.on { background: var(--lc-orange); }
+[data-theme="lcars"] body:not(.tablet) .tile { border: 0; border-left: 10px solid var(--lc-lavender); }
+[data-theme="lcars"] body:not(.tablet) dialog { border: 0; border-left: 14px solid var(--lc-orange); }
+[data-theme="lcars"] body:not(.tablet) th { color: var(--lc-peach); }

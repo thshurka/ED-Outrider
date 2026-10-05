@@ -68,3 +68,13 @@
 [data-theme="babylon5"] .tb-btn { font-size: 12px; } [data-theme="babylon5"] .tb-voice { font-size: 12px; }
 /* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
 [data-theme="babylon5"] .tb-emblem { display: block; background-image: url("../emblems/babylon5.webp"); }
+
+/* ---- the desktop page (Settings > Display): Earthforce steel rules and angled tabs ---- */
+:root[data-theme="babylon5"] { --desk-pill: 0; --desk-radius: 4px; --desk-lbl: var(--b5-grey); --desk-pill-size: 13px; --desk-pill-font: var(--tb-font); --desk-pill-case: none; }
+[data-theme="babylon5"] body:not(.tablet) header { border-bottom: 3px solid var(--b5-steel); }
+[data-theme="babylon5"] body:not(.tablet) .views button { clip-path: polygon(0 0, 100% 0, calc(100% - 9px) 100%, 0 100%); padding-right: 16px;
+  border-color: var(--b5-line); }
+[data-theme="babylon5"] body:not(.tablet) .views button.on { background: var(--b5-steel); color: var(--b5-navy); border-color: var(--b5-steel); }
+[data-theme="babylon5"] body:not(.tablet) .tile { border-color: var(--b5-line); border-top: 3px solid var(--b5-steel); }
+[data-theme="babylon5"] body:not(.tablet) dialog { border-color: var(--b5-steel); border-top-width: 6px; }
+[data-theme="babylon5"] body:not(.tablet) th { color: var(--b5-grey); }

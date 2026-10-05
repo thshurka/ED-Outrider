@@ -948,3 +948,22 @@ body.notgamepc .pcOnly, body.notgamepc [data-aim] { display: none !important; }
 .mvrow { display: flex; align-items: center; gap: 0.7em; padding: 2px 0; }
 .mvrow .mvname { min-width: 9em; text-transform: capitalize; }
 .mvrow button { margin-left: auto; }
+
+/* ---- a desktop theme (Settings > Display; themes/*.css, loaded here too): only with one chosen, never the Default.
+   Each theme's display face (the one it gives the tablet) on the frame of the page: the title, the view pills, the
+   tile labels, the dialogs' headings and Now's system; the tables and lists keep the plain face (a condensed or wide
+   display face is for a glance, not for reading a dense table). Shapes from a few variables a theme may set:
+   --desk-pill (the view pills' corners), --desk-radius (tiles, dialogs, small buttons), --desk-pill-size. */
+:root[data-theme] body:not(.tablet) :where(header h1, .views button, .tile .lbl, dialog h3, dialog h4, #nowView .now-sys, .setsec > summary) {
+  font-family: var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track); }
+/* a very wide display face (Michroma, Orbitron, Russo One) would push the pills onto more lines and the tile labels onto
+   two: those themes give both their text face instead (--desk-pill-font), the pills in normal case (--desk-pill-case:
+   capitals are the widest) */
+:root[data-theme] body:not(.tablet) .views button { font-family: var(--desk-pill-font, var(--tb-font-display));
+  text-transform: var(--desk-pill-case, var(--tb-case)); }
+:root[data-theme] body:not(.tablet) .tile .lbl { font-family: var(--desk-pill-font, var(--tb-font-display)); }
+:root[data-theme] body:not(.tablet) header h1 { color: var(--tb-title, var(--accent)); }
+:root[data-theme] body:not(.tablet) .views button { border-radius: var(--desk-pill, 999px); font-size: var(--desk-pill-size, 13px);
+  letter-spacing: min(var(--tb-track), .5px); padding-inline: 9px; }   /* the row about the Default's width */
+:root[data-theme] body:not(.tablet) :where(.tile, dialog, button.icon, .linkpill, .chips label) { border-radius: var(--desk-radius, 8px); }
+:root[data-theme] body:not(.tablet) .tile .lbl { color: var(--desk-lbl, var(--muted)); }

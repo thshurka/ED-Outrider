@@ -78,3 +78,14 @@
    static/emblems/CREDITS.txt) */
 [data-theme="elite"] .tb-emblem { display: block; background-image: url("../emblems/elite.webp"); background-size: min(100%, 140px) auto;
   opacity: 1; }
+
+/* ---- the desktop page (Settings > Display): thin orange lines and cut corners ---- */
+:root[data-theme="elite"] { --desk-pill: 0; --desk-radius: 0; --desk-lbl: var(--el-orange); --desk-pill-size: 13px; --desk-pill-font: var(--tb-font); --desk-pill-case: none; }
+[data-theme="elite"] body:not(.tablet) :is(.tile, .views button, dialog) {
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+[data-theme="elite"] body:not(.tablet) header { border-bottom: 1px solid var(--el-orange); }
+[data-theme="elite"] body:not(.tablet) .tile { border-color: var(--el-line); }
+[data-theme="elite"] body:not(.tablet) .views button { border-color: var(--el-orange2); color: var(--el-text); }
+[data-theme="elite"] body:not(.tablet) .views button.on { background: var(--el-orange); color: var(--el-ink); }
+[data-theme="elite"] body:not(.tablet) dialog { border-color: var(--el-orange); }
+[data-theme="elite"] body:not(.tablet) th { color: var(--el-orange); }

@@ -56,3 +56,12 @@
 [data-theme="minbari"] .tb-sheet h2 { color: var(--mb-lilac); font-family: var(--tb-font-display); letter-spacing: 1px; }
 /* the faction's emblem under the page list (a public-domain fan redrawing: static/emblems/CREDITS.txt) */
 [data-theme="minbari"] .tb-emblem { display: block; background-image: url("../emblems/minbari.webp"); }
+
+/* ---- the desktop page (Settings > Display): arched tiles, thin double lines ---- */
+:root[data-theme="minbari"] { --desk-pill: 999px; --desk-radius: 18px 18px 8px 8px; --desk-lbl: var(--mb-lilac); --desk-pill-size: 14px; }
+[data-theme="minbari"] body:not(.tablet) header { border-bottom: 3px double var(--mb-violet); }
+[data-theme="minbari"] body:not(.tablet) .tile { border-color: var(--mb-line); }
+[data-theme="minbari"] body:not(.tablet) .views button { border-color: var(--mb-violet); }
+[data-theme="minbari"] body:not(.tablet) .views button.on { background: var(--mb-lilac); color: var(--mb-bg); border-color: var(--mb-lilac); }
+[data-theme="minbari"] body:not(.tablet) dialog { border: 3px double var(--mb-lilac); border-radius: 28px 28px 14px 14px; }
+[data-theme="minbari"] body:not(.tablet) th { color: var(--mb-lilac); }

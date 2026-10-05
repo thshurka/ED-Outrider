@@ -98,6 +98,28 @@ class Tablet(unittest.TestCase):
                 for ground in ("--bg", "--panel"):
                     self.assertGreaterEqual(round(ratio(c[k], c[ground]), 2), 4.5, f"{t}: {k} {c[k]} on {ground} {c[ground]}")
 
+    def test_desktop_theme_sections(self):
+        """Each theme has its desktop section (body:not(.tablet): the shapes and the pills' size), and the view pill
+        that is on reads on its fill (4.5:1): white on Dark's blue and black on Sith's crimson did not."""
+        def lum(h):
+            h = h.strip().lstrip("#")
+            r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+            f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4   # noqa: E731
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        for t in ed_outrider.TABLET_THEMES:
+            with open(os.path.join(ed_outrider.STATIC_DIR, "themes", f"{t}.css"), encoding="utf-8") as f:
+                css = f.read()
+            self.assertIn(f'[data-theme="{t}"] body:not(.tablet)', css, t)
+            self.assertRegex(css, r":root\[data-theme=\"%s\"\] \{ --desk-pill: " % t)
+            block = re.search(r':root\[data-theme="%s"\]\s*\{(.*?)\n\}' % t, css, re.S).group(1)
+            d = dict(re.findall(r"(--[\w-]+):\s*([^;]+);", block))
+            res = lambda v: res(d[m.group(1)]) if (m := re.fullmatch(r"var\((--[\w-]+)\)", v.strip())) else v.strip()   # noqa: E731
+            on = re.search(r"\.views button\.on \{ background: ([^;]+); color: ([^;]+);", css)
+            bg, fg = res(on.group(1)) if on else res(d["--accent"]), res(on.group(2)) if on else res(d["--bg"])
+            fg = "#ffffff" if fg == "#fff" else "#000000" if fg == "#000" else fg
+            la, lb = sorted((lum(bg), lum(fg)), reverse=True)
+            self.assertGreaterEqual(round((la + 0.05) / (lb + 0.05), 2), 4.5, f"{t}: the pill that is on, {fg} on {bg}")
+
     def test_name_fields_are_not_auto_capitalised(self):
         """A tablet keyboard capitalises a field's first letter and corrects words: system names and search terms
         must reach Outrider as typed (found on the Galaxy Tab's Samsung keyboard)."""

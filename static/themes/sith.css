@@ -58,3 +58,12 @@
 /* the faction's emblem under the page list, one colour drawn in the theme's accent (static/emblems/CREDITS.txt) */
 [data-theme="sith"] .tb-emblem { display: block; background-color: var(--sh-red); opacity: .55;
   -webkit-mask: url("../emblems/sith.svg") center / contain no-repeat; mask: url("../emblems/sith.svg") center / contain no-repeat; }
+
+/* ---- the desktop page (Settings > Display): black, hard thin lines, a crimson edge ---- */
+:root[data-theme="sith"] { --desk-pill: 0; --desk-radius: 0; --desk-lbl: var(--sh-steel); --desk-pill-size: 12px; }
+[data-theme="sith"] body:not(.tablet) header { border-bottom: 1px solid var(--sh-red); }
+[data-theme="sith"] body:not(.tablet) .tile { border-color: var(--sh-line); border-left: 3px solid var(--sh-red); }
+[data-theme="sith"] body:not(.tablet) .views button { border-color: var(--sh-line); color: var(--sh-text); }
+[data-theme="sith"] body:not(.tablet) .views button.on { background: var(--sh-red); color: #fff; border-color: var(--sh-red); }
+[data-theme="sith"] body:not(.tablet) dialog { border-color: var(--sh-red); }
+[data-theme="sith"] body:not(.tablet) th { color: var(--sh-steel); }

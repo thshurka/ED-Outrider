@@ -2,6 +2,13 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-04 · Each theme's own touch on the desktop page
+- A theme on the desktop page now brings more than its colours: its display face on the title, the view pills, the
+  tile labels and the dialogs' headings, and its shapes: LCARS's coloured pills and side bars, Elite's and Narn's cut
+  corners, Earthforce's angled tabs and steel rules, Minbari's arched tiles and thin double lines, Centauri's notched
+  corners and gold double borders, Sith's hard lines and crimson edge, the Alliance's orange and sand, Dark's soft
+  cards. The tables and lists keep a plain face, and the view pills fit on one line as with the Default.
+
 ## 2026-10-04 · Readable theme colours
 - Every theme's text colours are checked against its background and panels (4.5:1). Two fell short and are lifted:
   Sith's red as text (the page's accent, 3.7:1; its fills and the tablet's frame keep the deep crimson) and the Rebel

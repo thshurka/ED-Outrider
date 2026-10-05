@@ -56,3 +56,13 @@
 /* the emblem on the page's own background, not on the column's rust fill (an orange box on the author's tablet); the fill
    comes back with Show the theme's emblem off */
 :root[data-theme="narn"]:not(.tb-noemblem) .tb-navfill { background: transparent; }
+
+/* ---- the desktop page (Settings > Display): heavy rust, wedge-cut ---- */
+:root[data-theme="narn"] { --desk-pill: 0; --desk-radius: 0; --desk-lbl: var(--nn-ochre); --desk-pill-size: 13px; --desk-pill-font: var(--tb-font); --desk-pill-case: none; }
+[data-theme="narn"] body:not(.tablet) :is(.tile, dialog) { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); }
+[data-theme="narn"] body:not(.tablet) header { border-bottom: 4px solid var(--nn-rust); }
+[data-theme="narn"] body:not(.tablet) .tile { border-color: var(--nn-line); border-left: 4px solid var(--nn-rust); }
+[data-theme="narn"] body:not(.tablet) .views button { border-color: var(--nn-rust2); }
+[data-theme="narn"] body:not(.tablet) .views button.on { background: var(--nn-ochre); color: var(--nn-bg); border-color: var(--nn-ochre); }
+[data-theme="narn"] body:not(.tablet) dialog { border-color: var(--nn-rust); border-left-width: 6px; }
+[data-theme="narn"] body:not(.tablet) th { color: var(--nn-ochre); }
