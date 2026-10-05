@@ -2,6 +2,10 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · Version 2026.10.13
+- The Windows launcher, auto honk, auto-target and the control rail on Windows (experimental), the Windows
+  clipboard, the config file's Windows path hint and the NFS note in the release's env file.
+
 ## 2026-10-05 · The NFS mount option in the release's env file
 - `env.example` (the file a Docker server downloads) now says to mount NFS with `actimeo=1`, and why: without it
   NFS caches the journal's size for up to a minute and the alerts arrive late and all at once. The offline bundle's
