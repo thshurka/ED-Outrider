@@ -32,9 +32,10 @@ years (EDSM as a fallback when Spansh is down) and serves http://127.0.0.1:8025/
              the neutron plotter from a range), followed as you fly (next stop, detour, back on it, complete): the
              jump list, a top-down map on the galactic regions (or your own galaxy image), a line under the tiles on
              Overview / Nearby / Here, the next system put on
-             the desktop clipboard (wl-copy / xclip) and said on arrival; optionally (Linux, off by default) the
+             the desktop clipboard (wl-copy / xclip, or Windows') and said on arrival; optionally (Linux, Windows experimental;
+             off by default) the
              next system targeted after a supercharge, or on demand with 🎯 Target next / ⟳ Retry, by key
-             presses in the galaxy map (outrider/target.py, the same virtual keyboard as auto honk); the drive
+             presses in the galaxy map (outrider/target.py, the same keyboard as auto honk); the drive
              maths in outrider/fsd.py, the route helpers in outrider/highway.py; [highway] in the config
   History   your sessions: jumps, light-years, firsts, mapped, footfalls, samples, codex, plus an
              all-time row and the Last session card; trips from sale to sale (paid vs estimated, what
@@ -80,7 +81,7 @@ window for trying voices and lines. Optionally the server plays the speech and t
 served to the page by GET /api/sound/file/{name}), so no click on the page is needed; the next line is
 synthesised while one plays (POST /api/say/prefetch), and Volume is set per device. When Outrider stops
 answering for 30 s, the page says "Lost contact with Outrider" in the Piper voice (made in advance; else the alert
-sound). Auto honk (outrider/honk.py, Linux, optional) holds Primary Fire's
+sound). Auto honk (outrider/honk.py, optional; Linux, Windows experimental) holds Primary Fire's
 keyboard binding on arriving by hyperspace so the Discovery Scanner fires, and says how many bodies
 it found. The voice can be hushed for a while (the page, or POST /api/hush: the state is the server's, so
 every window and device sees it), and a co-pilot button (outrider/button.py, Linux, optional, read-only) asks the
@@ -134,8 +135,8 @@ tests/test_*.py, shared fakes in tests/support.py); python3 -m outrider.bio --ba
 your journals.
 
 Requires Python 3.11+ (for reading the config file; 3.9/3.10 need `pip install tomli`) and aiohttp;
-piper-tts (spoken alerts) and evdev (auto honk, Linux) are optional, as are wl-copy or xclip (the Highway's
-clipboard copy, Linux).
+piper-tts (spoken alerts) and evdev (auto honk, Linux; Windows needs nothing extra) are optional, as are wl-copy or
+xclip (the Highway's clipboard copy, Linux).
 """
 
 from __future__ import annotations
@@ -8975,7 +8976,8 @@ class State:
         info["steps"] = t.describe(steps)
         info["status"] = ("off" if not cfg["autotarget"] else "dry run: logs the steps, presses nothing" if info["dry_run"]
                           else h.device_error or "the virtual keyboard is not open" if not h.ready
-                          else "not ready: a key has no keyboard binding" if missing else "ready")
+                          else "not ready: a key has no keyboard binding" if missing
+                          else "ready" + outrider.honk.EXPERIMENTAL)   # "ready (experimental on Windows)" there
         return info
 
     # ---- the tablet's control rail (outrider/rail.py; tablet plan phase 4) ----

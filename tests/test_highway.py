@@ -15,6 +15,7 @@ from support import (  # also puts the repository root on sys.path
 )
 import outrider.bio  # noqa: E402
 import ed_outrider  # noqa: E402
+import outrider.honk  # noqa: E402
 import outrider.fsd  # noqa: E402
 
 
@@ -1515,6 +1516,8 @@ class HighwayAutoTarget(unittest.TestCase):
         self.assertEqual((last["done"], last["phase"], last["why"]), (False, 7, "no system was targeted"))
         info = self.state.autotarget_info()
         self.assertEqual((info["status"], info["missing"], len(info["steps"])), ("ready", [], 16))
+        with unittest.mock.patch.object(outrider.honk, "EXPERIMENTAL", " (experimental on Windows)"):   # as on Windows
+            self.assertEqual(self.state.autotarget_info()["status"], "ready (experimental on Windows)")
 
     def test_trigger_guards(self):
         import asyncio
