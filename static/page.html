@@ -18,7 +18,7 @@ try { var d = document.documentElement, t = JSON.parse(localStorage.getItem("des
   <div class="topbar">
     <h1>ED Outrider</h1>
     <span class="views"><button data-view="overview">Overview</button><button data-view="near">Nearby</button><button data-view="here">Here</button><button data-view="bio">Samples</button><button data-view="bm" id="bmViewBtn">Bookmarks</button><button data-view="search">Search</button><button data-view="map">Map</button><button data-view="hwy" title="the Neutron Highway: plot a route with Spansh and follow it as you fly">Highway</button><button data-view="hist">History</button><button data-view="log">Log</button><button data-view="mat">Materials</button><button data-view="firsts">My firsts</button><button data-view="now" title="big text for a second monitor (or open the page with ?mode=now)">Now</button><button id="nowPop" title="open Now in a window of its own, to drag to another monitor (it stays on Now)">↗</button></span>
-    <span class="icons"><button type="button" id="audioPill" class="audiopill" hidden title="the browser holds back Outrider's voice and sounds until you click on the page: click here">🔇 Click Here To Allow Audio</button><span id="linkPill" class="linkpill" role="status" title="the page's link to Outrider"></span><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
+    <span class="icons"><button type="button" id="audioPill" class="audiopill" hidden title="the browser holds back Outrider's voice and sounds until you click on the page: click here">🔇 Click Here To Allow Audio</button><button type="button" id="updPill" class="updpill" hidden title="a newer Outrider is out: click for what's new and how to update">⬆ Update</button><span id="linkPill" class="linkpill" role="status" title="the page's link to Outrider"></span><button id="sound" class="icon" title="sounds">🔊</button><button id="speechBtn" class="icon" title="spoken alerts">🗣</button><span class="hushwrap"><button id="hushBtn" class="icon hushbtn" title="hush the voice for a while (danger lines still speak)" aria-haspopup="true">▾</button><span id="hushLbl" class="hushlbl" hidden></span>
       <span id="hushMenu" class="hushmenu" hidden><b>Hush the voice</b><button type="button" data-hush="10m">10 minutes</button><button type="button" data-hush="30m">30 minutes</button><button type="button" data-hush="jump">until the next jump</button><button type="button" data-hush="off">cancel the hush</button><span class="unk">hull, heat, interdiction and fuel still speak, and what you ask for</span></span></span><button id="alertsBtn" class="icon" title="settings: alerts, voice, thresholds, the server">⚙</button><span id="lastSaidLine" class="lastsaid" hidden><button type="button" id="lastSaidBtn" class="icon" title="say it again">▶</button><span id="lastSaidText"></span></span></span>
   </div>
   <div class="tilewrap">
@@ -413,6 +413,7 @@ try { var d = document.documentElement, t = JSON.parse(localStorage.getItem("des
     <div class="tb-chip" id="tabFuel"><span class="tb-k">Fuel</span><span class="tb-v" id="tabFuelV">—</span></div>
     <div class="tb-chip" id="tabUnsold"><span class="tb-k">Unsold</span><span class="tb-v" id="tabUnsoldV">—</span></div>
     <span class="tb-grow"></span>
+    <button type="button" id="tabUpd" class="tb-upd" hidden title="a newer Outrider is out: tap for what's new and how to update">⬆ Update</button>
     <div id="tabLink" class="tb-link" role="status" title="the link to Outrider: the age of the last answer"></div>
   </div>
 </div>
@@ -677,6 +678,19 @@ try { var d = document.documentElement, t = JSON.parse(localStorage.getItem("des
       <div id="speechTally" class="hint"></div>
       <div id="speechBans" class="hint"></div>
       <div id="speechLog"></div></details>
+    </div>
+  </form>
+</dialog>
+<dialog id="updDialog" class="upddlg" aria-labelledby="updTitle">
+  <form method="dialog">
+    <h3 id="updTitle">ED Outrider <span id="updVer"></span> is out</h3>
+    <p id="updHave" class="hint"></p>
+    <p id="updHow"></p>
+    <div class="btns">
+      <a id="updNotes" href="#" target="_blank" rel="noopener">What's new ↗</a>
+      <span class="grow"></span>
+      <button type="button" id="updSkip" title="hide the pill until a newer version than this one (this browser)">Skip this version</button>
+      <button type="button" data-close class="primary">Close</button>
     </div>
   </form>
 </dialog>

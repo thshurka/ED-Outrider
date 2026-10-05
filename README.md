@@ -641,6 +641,11 @@ lists the zips; add `--db` for a second database. `--restore` leaves `speech.jso
   comes off automatically, based on what your past sales paid.
 - **Losing your ship loses your data.** Discoveries and samples that went down show as *lost* until you scan
   them again. Scanning a body you've already sold adds nothing; only mapping it still pays.
+- **New versions.** Once a day Outrider asks GitHub whether a newer release is out (only that request: nothing
+  about you is sent; `[server] update_check = false` turns it off). When there is one, a small **⬆ Update** pill
+  appears beside the link pill (on the tablet, beside "linked"), in the theme's colours. It opens what's new and how
+  to update this copy: Docker, a git clone or a downloaded release. **Skip this version** hides it until the next
+  one (per browser).
 - **Small things worth knowing:** the pill at the top right says whether the page is linked to Outrider ("stale"
   after 30 s without an answer; on the tablet just "linked"); Here's Dist, Grav, Now and Max headings sort the bodies; a genus's tooltip gives
   its colony distance; Search's mining list includes minerals you have refined, with those bodies first; the
@@ -748,7 +753,7 @@ server's name to **allowed hosts** if you open it by name, save, and `docker com
 cannot write `/config` or `/app/data`, the folders belong to someone else: `sudo chown -R $(id -u):$(id -g) docker/`
 and `docker compose restart`.
 
-**Updating.**
+**Updating.** The page's **⬆ Update** pill says when a new release is out.
 
 - **From the registry:** `docker compose pull && docker compose up -d`.
 - **A newer bundle:** extract it beside the old one, then from the new folder:
@@ -820,7 +825,7 @@ Outrider folder; they default to `data/ed_outrider.sqlite`, `data/backups` and `
 | Section | What it holds |
 |---|---|
 | `[journals]` | `live` and `legacy` folders, when auto-detection misses them (setting `live` turns off legacy auto-detection: list `legacy` too) |
-| `[server]` | `host`, `port`, `password`, `game_pc`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
+| `[server]` | `host`, `port`, `password`, `game_pc`, `update_check`, `allowed_hosts`, `radius`, `radius_choices`, `db`, `backup_dir`, `backup_keep`, `backup_every_days`, `speech_file` |
 | `[defaults]` | What a new browser starts with (`voice` defaults to `en_GB-cori-medium`): thresholds (`unsold_warn`, `unsold_urgent`, `bio_min`, `body_highlight_level`, `biology_highlight_value`, `body_max_value_include_bonus`, `high_gravity`, `module_warn`), `sounds`, `voice`, `voice_fallback`, `speech_styles`, `speech_profanity`, `speech_profanity_pct`, `speech_danger_business`, `speak_bio_signals`, `speak_geo_signals`, `speak_mapped`, `codex_interesting`, `speech_speed`, `speech_names`; the surface map's `surface_alt`, `rig_spacing`, `surface_map_min`, `surface_map_strip`, `rig_warn` |
 | `[spansh]` | `concurrency`, `map_max_radius`, `map_max_pages`, `watch_firsts` |
 | `[autohonk]` | `enabled`, `key`, `delay`, `hold`, `skip_honked`, `announce` |

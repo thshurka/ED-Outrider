@@ -45,6 +45,13 @@ html.tb-dim body.tablet { filter: brightness(.55); }
 .tb-link::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
 .tb-link.stale { border-color: var(--tb-link-stale); color: var(--tb-link-stale); }
 .tb-link.none { border-color: var(--tb-link-none); color: var(--tb-link-none); border-style: dashed; }
+/* a newer release on GitHub: beside the link, in the theme's title colour and chip shape; tap for how to update */
+.tb-upd { flex: 0 0 auto; min-height: 36px; padding: 4px 14px; border-radius: var(--tb-chip-radius); cursor: pointer;
+  border: 1px solid var(--tb-title); background: transparent; color: var(--tb-title);
+  font: 600 15px var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track); white-space: nowrap; }
+.tb-upd[hidden] { display: none; }
+a.tb-btn { display: inline-flex; align-items: center; text-decoration: none; }   /* a link dressed as a button (What's new) */
+.tb-facts dd code { font-size: .85em; overflow-wrap: anywhere; }
 .tb-nav { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden auto; }
 .tb-group { flex: 0 0 auto; min-height: 54px; border: 0; border-radius: var(--tb-group-radius); background: var(--tb-group-bg); color: var(--tb-group-fg);
   font: 600 19px var(--tb-font-display); text-transform: var(--tb-case); letter-spacing: var(--tb-track);

@@ -10,8 +10,10 @@ import re
 import tempfile
 import tomllib
 import unittest
+import unittest.mock
 
-from support import ed_outrider
+from support import ed_outrider, types_ns
+import outrider  # noqa: E402
 
 ARGS = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
 
@@ -223,6 +225,88 @@ class NfsCaching(unittest.TestCase):
     def test_unreadable_mounts(self):
         self.assertEqual(ed_outrider.nfs_cache_warnings(["/mnt/elite"], mounts=None, realpath=lambda p: p,
                                                         read=lambda: (_ for _ in ()).throw(OSError("no /proc"))), [])
+
+
+class UpdateCheck(unittest.TestCase):
+    """[server] update_check: GitHub's latest release against the running version, once a day; a newer one goes in
+    the payload for the page's Update pill, with how this install updates. Never a real request (a fake session)."""
+
+    def test_newer_release(self):
+        nr = ed_outrider.newer_release
+        rel = {"tag_name": "v2026.10.14", "html_url": "https://github.com/weslocke/ED-Outrider/releases/tag/v2026.10.14",
+               "published_at": "2026-10-06T12:00:00Z", "draft": False, "prerelease": False}
+        self.assertEqual(nr(rel, "2026.10.13"), {"version": "2026.10.14", "published": "2026-10-06",
+                                                 "url": "https://github.com/weslocke/ED-Outrider/releases/tag/v2026.10.14"})
+        self.assertEqual(nr(dict(rel, tag_name="v2026.11.1"), "2026.10.13")["version"], "2026.11.1")   # numbers, not text
+        self.assertIsNone(nr(rel, "2026.10.14"))                     # the same
+        self.assertIsNone(nr(rel, "2026.10.20"))                     # older (a local build ahead of the release)
+        self.assertIsNone(nr(dict(rel, prerelease=True), "2026.10.13"))
+        self.assertIsNone(nr(dict(rel, draft=True), "2026.10.13"))
+        for junk in (None, [], {}, {"tag_name": 5}, {"tag_name": "latest"}, {"message": "API rate limit exceeded"}):
+            self.assertIsNone(nr(junk, "2026.10.13"))
+        # a link anywhere but GitHub is never put on the page: the releases page instead
+        self.assertEqual(nr(dict(rel, html_url="https://evil.example/x"), "2026.10.13")["url"], ed_outrider.RELEASES_PAGE)
+
+    def test_install_kind(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(ed_outrider.install_kind(d, {}), "download")
+            self.assertEqual(ed_outrider.install_kind(d, {"OUTRIDER_CONTAINER": "1"}), "docker")
+            os.mkdir(os.path.join(d, ".git"))
+            self.assertEqual(ed_outrider.install_kind(d, {}), "git")
+            self.assertEqual(ed_outrider.install_kind(d, {"OUTRIDER_CONTAINER": "1"}), "docker")
+
+    def test_watch_and_payload(self):
+        import asyncio
+        db = ed_outrider.open_db(":memory:")
+        self.addCleanup(db.close)
+        state = ed_outrider.State(db, ed_outrider.Journals(db), None, 25)
+        self.assertIsNone(state.payload()["update"])
+        answers = [{"tag_name": "v9999.1.1", "html_url": "https://github.com/weslocke/ED-Outrider/releases/tag/v9999.1.1"},
+                   OSError("offline"), {"tag_name": "v1.0.0"}]
+        asked = []
+
+        class Resp:
+            def __init__(self, a): self.a = a
+            async def __aenter__(self):
+                if isinstance(self.a, Exception):
+                    raise self.a
+                return self
+            async def __aexit__(self, *exc): return False
+            def raise_for_status(self): pass
+            async def json(self, content_type=None): return self.a
+
+        class Session:
+            def get(self, url, **kw):
+                asked.append(url)
+                return Resp(answers[len(asked) - 1])
+
+        state.spansh = types_ns(session=Session())
+        seen, sleeps = [], []
+
+        async def sleep(secs):
+            sleeps.append(secs)
+            seen.append(state.payload()["update"])
+            if len(sleeps) >= 4:
+                raise asyncio.CancelledError
+        err = io.StringIO()
+        with unittest.mock.patch.object(ed_outrider.asyncio, "sleep", sleep), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(state.watch_updates())
+        self.assertEqual(asked, [ed_outrider.RELEASES_LATEST] * 3)
+        self.assertEqual(sleeps, [ed_outrider.UPDATE_CHECK_START, ed_outrider.UPDATE_CHECK_EVERY,
+                                  ed_outrider.UPDATE_CHECK_RETRY, ed_outrider.UPDATE_CHECK_EVERY])
+        found = seen[1]
+        self.assertEqual((found["version"], found["current"]), ("9999.1.1", outrider.__version__))
+        self.assertIn(found["kind"], ("git", "download", "docker"))
+        self.assertEqual(seen[2], found)          # a failed check keeps what was found
+        self.assertIsNone(seen[3])                # the latest is no longer newer: the pill goes
+        self.assertIn("could not ask GitHub", err.getvalue())
+
+    def test_setting(self):
+        a = argparse.Namespace(journals=None, legacy=None, host=None, port=None, radius=None, db=None)
+        self.assertTrue(ed_outrider.settings_from({}, a)["update_check"])
+        self.assertFalse(ed_outrider.settings_from({"server": {"update_check": False}}, a)["update_check"])
 
 
 class StartUp(unittest.TestCase):

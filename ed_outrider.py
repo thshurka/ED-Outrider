@@ -296,6 +296,12 @@ FIRSTS_WATCH_YOUNG = 30 * 86400   # s after your first scan there
 FIRSTS_WATCH_DAY_CAP = 150        # checks in any 24 h, however many unsold firsts there are
 FIRSTS_WATCH_START = 120          # s after the server starts before the first check
 FIRSTS_WATCH_BACKOFF = 600        # s to wait after a failed request (Spansh down, a timeout)
+# The update check ([server] update_check): GitHub's latest release against the running version
+RELEASES_LATEST = "https://api.github.com/repos/weslocke/ED-Outrider/releases/latest"
+RELEASES_PAGE = "https://github.com/weslocke/ED-Outrider/releases/latest"
+UPDATE_CHECK_START = 60           # s after the server starts before the first check
+UPDATE_CHECK_EVERY = 86400        # s between checks
+UPDATE_CHECK_RETRY = 3600         # s to wait after a failed check (offline, GitHub down or throttled)
 FIRSTS_OWN_GRACE = 120            # s: a body Spansh updated this soon after your own scan or map of it is your own upload
 
 # Unsold data: recompute at most this often while the journal is growing (a full pass is ~1 s).
@@ -804,6 +810,7 @@ def settings_from(cfg, args, env_journals=None, detected=((), ())):
         "port": pick(args.port, num("server", sv, "port", _config_port, None), 8025),
         "allowed_hosts": [h.strip() for h in hosts if h.strip()],
         "password": password, "game_pc": game_pc,
+        "update_check": flag("server", sv, "update_check", True),
         # at least 1 ly: a bad config value is reported above; a --radius 0 flag is clamped
         "radius": max(1.0, pick(args.radius, num("server", sv, "radius", _config_radius, None), 25.0)),
         "radius_choices": radius_choices,
@@ -930,6 +937,7 @@ port = {st["port"]}   # the page's port: http://<this PC>:<port>/
 allowed_hosts = {lst(st["allowed_hosts"])}   # extra names the page may be opened by (a LAN setup; see the README)
 password = {q(st["password"])}   # devices on your network sign in with it ("" = none); this PC itself never needs it
 game_pc = {q(st["game_pc"] if st["game_pc"] == "auto" else ("true" if st["game_pc"] else "false"))}   # is this the PC the game runs on? "auto" (off inside a container, e.g. Docker), "true" or "false". Off: no auto honk, auto-target, tablet rail, co-pilot button, clipboard or playing on this PC
+update_check = {"true" if st["update_check"] else "false"}   # once a day, ask GitHub whether a newer Outrider release is out, and say so on the page (only the request: nothing about you is sent)
 radius = {st["radius"]:g}      # ly: the sphere of nearby systems the page lists
 radius_choices = [{", ".join(f"{x:g}" for x in st["radius_choices"])}]   # ly: what the page's radius dropdown offers
 backup_dir = {p(st["backup_dir"])}   # backups: dated database zips, and every live journal copied once into its journals/
@@ -4714,6 +4722,7 @@ class State:
         # window that is speaking all see the same one. In memory only: a restart ends it
         self.hush = None
         self.firsts_watch_on = False   # [spansh] watch_firsts, set at start (off in tests)
+        self.update_available = None   # a newer release on GitHub ({version, url, published}): watch_updates sets it
         self.firsts_watch_seq = 0      # bumps with each check (firsts_cached keys on it)
         self.firsts_watch_failed = {}  # {id64: time of its last failed check}: skipped for a day (in memory only)
         self._firsts_cache = None
@@ -4839,6 +4848,9 @@ class State:
         return {
             "version": self.version, "run_id": RUN_ID, "page_stamp": stamp["page"], "restart_needed": stamp["restart_needed"],
             "game_pc": self.game_pc,   # False: the page leaves out what needs the game PC
+            # a newer release ({version, current, url, kind}: kind says how to update this install), else None
+            "update": dict(self.update_available, current=outrider.__version__, kind=install_kind())
+            if self.update_available else None,
             # the speaking window waits for a click before it can make a sound (it lapses with the window itself)
             "speaker_audio_blocked": bool(self.speaker_audio_blocked and self.speaker_present()),
             "status": self.status, "radius": self.radius,
@@ -6442,6 +6454,31 @@ class State:
         if row[0] != old_seen:
             self.bump()   # the Unsold tile's count
         return got
+
+    async def watch_updates(self):
+        """[server] update_check: GitHub's latest release, at start and once a day; a newer one goes in the payload
+        (the page's Update pill). Only the request is made: nothing about the player is sent."""
+        await asyncio.sleep(UPDATE_CHECK_START)
+        said = None
+        while True:
+            try:
+                async with self.spansh.session.get(RELEASES_LATEST, headers={"Accept": "application/vnd.github+json"},
+                                                   timeout=ClientTimeout(total=30)) as r:
+                    r.raise_for_status()
+                    found = newer_release(await r.json(content_type=None), outrider.__version__)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 -- offline, GitHub down or throttled: try again later, quietly
+                print(f"update check: could not ask GitHub ({type(e).__name__}); trying again in an hour", file=sys.stderr)
+                await asyncio.sleep(UPDATE_CHECK_RETRY)
+                continue
+            if found != self.update_available:
+                self.update_available = found
+                self.bump()
+            if found and found["version"] != said:
+                said = found["version"]
+                print(f"update available: Outrider {found['version']} (this is {outrider.__version__}): {found['url']}")
+            await asyncio.sleep(UPDATE_CHECK_EVERY)
 
     async def watch_firsts(self):
         """The firsts watch's loop (only with [spansh] watch_firsts on): one check every FIRSTS_WATCH_GAP."""
@@ -11191,6 +11228,32 @@ def make_app(state, hosts=None):
     return app
 
 
+def newer_release(answer, current):
+    """GitHub's latest-release answer as {version, url, published} when it is newer than `current`, else None (the same
+    or older, a draft or pre-release, or an answer that is not a release). Tags look like v2026.10.13."""
+    if not isinstance(answer, dict) or answer.get("draft") or answer.get("prerelease"):
+        return None
+    tag = answer.get("tag_name")
+    if not isinstance(tag, str):
+        return None
+    version = tag.strip().lstrip("vV")
+    have, new = outrider.auth.version_tuple(current), outrider.auth.version_tuple(version)
+    if not new or new <= have:
+        return None
+    url = answer.get("html_url")
+    return {"version": version, "published": str(answer.get("published_at") or "")[:10],
+            "url": url if isinstance(url, str) and url.startswith("https://github.com/") else RELEASES_PAGE}
+
+
+def install_kind(root=None, env=None):
+    """How this copy of Outrider was installed, for the update's instructions: "docker" (the image sets
+    OUTRIDER_CONTAINER), "git" (a clone: git pull), else "download" (a release's source: download the new one)."""
+    env = os.environ if env is None else env
+    if env.get("OUTRIDER_CONTAINER"):
+        return "docker"
+    return "git" if os.path.exists(os.path.join(root or outrider.ROOT, ".git")) else "download"
+
+
 async def check_bio_rules(state):
     """Keep the exobiology spawn rules current. A copy ships with Outrider; each start asks GitHub
     whether BioScan or the region map changed and fetches the new data if so (offline just keeps
@@ -11557,6 +11620,8 @@ async def run(args, st):
     watcher = asyncio.create_task(state.watch())
     state.firsts_watch_on = st["watch_firsts"]
     firsts_task = asyncio.create_task(state.watch_firsts()) if st["watch_firsts"] else None
+    update_task = asyncio.create_task(state.watch_updates()) if st["update_check"] else None
+    print("update check: " + ("on (GitHub's latest release, once a day)" if st["update_check"] else "off ([server] update_check)"))
     print("firsts watch: " + ("on (your unsold firsts on Spansh: one request every 10-30 s, each system once a day)"
                               if st["watch_firsts"] else "off ([spansh] watch_firsts)"))
 
@@ -11597,7 +11662,7 @@ async def run(args, st):
             state.targeter.cancel.set()   # a sequence pressing keys lets go and stops now
         tasks = [t for t in (watcher, rules_task, state.refresh_task, state.target_task, state.unsold_task, state.seller_task,
                              state.carrier_task, state.searcher.task, state.honk_test_task, button_task,   # the quit backup: finish_backup
-                             firsts_task, state.highway_task, state.autotarget_task, state.autotarget_test_task) if t]
+                             firsts_task, update_task, state.highway_task, state.autotarget_task, state.autotarget_test_task) if t]
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

@@ -307,6 +307,15 @@ button.icon.blocked { border-color: var(--warn); }
 .audiopill { border-radius: 999px; padding: 3px 12px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
   background: var(--bad); color: #fff; border: 1px solid var(--bad); animation: audiopill 1.6s ease-in-out infinite; }
 .audiopill[hidden] { display: none; }
+/* a newer release on GitHub: a quiet pill in the theme's accent (news, not an alarm: it never blinks) */
+.updpill { border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent); white-space: nowrap; }
+.updpill:hover, .updpill:focus-visible { background: var(--accent); color: var(--bg); }
+.updpill[hidden] { display: none; }
+.upddlg { max-width: 34em; }
+.upddlg p { margin: 0 0 10px; line-height: 1.45; }
+.upddlg code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
+.upddlg .btns a { color: var(--accent); }
 @keyframes audiopill { 50% { opacity: .65; } }
 /* the hush: ▾ beside 🗣 opens the menu; "hushed 7:42" while it runs */
 .hushwrap { position: relative; display: inline-flex; align-items: center; gap: 4px; }
@@ -966,4 +975,7 @@ body.notgamepc .pcOnly, body.notgamepc [data-aim] { display: none !important; }
 :root[data-theme] body:not(.tablet) .views button { border-radius: var(--desk-pill, 999px); font-size: var(--desk-pill-size, 13px);
   letter-spacing: min(var(--tb-track), .5px); padding-inline: 9px; }   /* the row about the Default's width */
 :root[data-theme] body:not(.tablet) :where(.tile, dialog, button.icon, .linkpill, .chips label) { border-radius: var(--desk-radius, 8px); }
+/* the Update pill: shaped and lettered as the theme's view pills */
+:root[data-theme] body:not(.tablet) .updpill { border-radius: var(--desk-pill, 999px); font-family: var(--desk-pill-font, var(--tb-font-display));
+  text-transform: var(--desk-pill-case, var(--tb-case)); letter-spacing: min(var(--tb-track), .5px); }
 :root[data-theme] body:not(.tablet) .tile .lbl { color: var(--desk-lbl, var(--muted)); }

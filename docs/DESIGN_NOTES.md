@@ -232,6 +232,11 @@ upstream project's choices, not rules of the game.
 
 ## Known limits
 
+- **New versions: a notice, never an update** (`[server] update_check`, on by default). GitHub's latest release at
+  start (after a minute) and daily; a newer one is a quiet pill in the theme's accent, not an alert or a spoken
+  line, with the steps for this install (Docker, a git clone, a download). No self-update: a container cannot
+  replace its own image, a download cannot safely replace its own files, and a clone's pull and restart was left
+  until someone wants it. Watchtower, the usual Docker auto-updater, is archived (2025), so the README names none.
 - **Key presses on Windows are a stand-in for evdev** (`outrider/winkeys.py`): the same evdev key names mapped to
   scan codes and sent with `SendInput` (scan-code mode, extended flag for arrows, right Ctrl, numpad Enter...), so
   auto honk, auto-target and the rail run unchanged above it. Chosen by platform at start (`honk.keyboard_backend`).

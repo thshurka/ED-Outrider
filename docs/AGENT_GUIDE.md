@@ -88,7 +88,8 @@ rules that keep the journal data, the page and the voice consistent. See also `J
    `/clear`, `/autotarget` {enabled, delay}, `/autotarget/test`, `/target` {countdown?}: Target next / Retry), `/api/regions` (the Highway map's region grid), `/api/status` and `/api/status.txt`, `/api/version`, `/api/auth/signin`
    and `/signout` (see the app's contract below). The pages: `/`, `/tablet` (the same page, tablet layout), `/signin`;
    `/userfonts/{name}` serves a font from `data/fonts/`. The payload carries only the highway line's facts
-   (`highway_summary`); the Highway tab fetches the route itself.
+   (`highway_summary`); the Highway tab fetches the route itself. The payload's `update` ({version, current, url, kind}
+   or null) is a newer GitHub release (`State.watch_updates`, `newer_release`, `install_kind`): the Update pill.
 7. **Page.** `poll()` in `page.js` calls `onData()` (alerts) and `render()` (views). Moments with
    `seq > lastMomentSeq` become `alertOut(kind, title, body, {say})`: sound, desktop notification and a
    spoken line from `line(key, vars, plain)`.
@@ -166,7 +167,7 @@ Ids: a system id64 can exceed 2^53, so the page compares the string `id` fields,
   error on the page) and the next one still runs; `sqlite3.Error` propagates.
 - **Per-browser settings** go in **both** `SETTINGS_KEYS` (top of `page.js`) and `BROWSER_SETTINGS`
   (ed_outrider.py), in the same order; a unit test compares them. Per-device things (view, layouts, which
-  screen speaks, `volume`, `tilesMode`, Settings' `alertSection` and `settingsOpen` (its open sections), `desktopTheme`, the tablet's `tabletView`, `tabletTheme`,
+  screen speaks, `volume`, `tilesMode`, Settings' `alertSection` and `settingsOpen` (its open sections), `desktopTheme`, `updateSkip` (the release the Update pill was dismissed for), the tablet's `tabletView`, `tabletTheme`,
   `tabletDim`, `tabletEmblem` and `tabletAudio` (Play alerts here)) go in neither. Object or list values need an entry in `SETTING_SHAPES`.
 - **An open page reloads itself on newer page files:** the payload's `page_stamp` (`page_stamp()`: sizes and
   modification times of `PAGE_FILES`) against the `__PAGE_STAMP__` it was served with; `pageStampTick` reloads once
@@ -326,8 +327,8 @@ should show it. Check `JOURNAL_REFERENCE.md` for the event's quirks.
 - Never present a guess as a fact. Predictions say "up to", "could be", "odds, not contents",
   "probably full"; Outrider's own record (rig marks) is labelled as such, not as the game's.
 - Alerts are for the out of the ordinary. Routine systems stay quiet.
-- Nothing is uploaded. Outside calls are read-only lookups (Spansh, EDSM, GitHub for rules, Hugging Face
-  for voices).
+- Nothing is uploaded. Outside calls are read-only lookups (Spansh, EDSM, GitHub for rules and the update check
+  (`[server] update_check`), Hugging Face for voices).
 - The README stays tight: user-facing, short bullets. Implementation detail belongs in code comments.
 - Per-player defaults (names the voice uses, thresholds, voice) are only defaults; never hard-code a
   player's preference.

@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · An Update pill when a new release is out
+- Once a day Outrider asks GitHub for its latest release (`[server] update_check`, on by default; only the request is
+  made). A newer one shows a small **⬆ Update** pill in the header, or the tablet's head bar, in the theme's colours.
+  It opens what's new and how to update this copy (Docker, a git clone or a download); **Skip this version** hides
+  it until the next one, per browser. The start-up log says so too.
+
 ## 2026-10-05 · The clipboard tools in the README
 - Getting started now says the Highway's clipboard copy and auto-target's paste need `wl-copy` (wl-clipboard,
   Wayland) or `xclip` (X11) from the distribution on Linux, how to install them, and that nothing else needs them.

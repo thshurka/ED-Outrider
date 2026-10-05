@@ -2576,6 +2576,7 @@ function render() {
   }).join("") || `<tr><td colspan="10" class="unk">${emptyMessage(rows)}</td></tr>`;
   refocus("rows", fkRows);
   document.getElementById("updateLine").hidden = !data.restart_needed;
+  drawUpdatePill();
   // a server away from the game PC ([server] game_pc false): what needs that PC is left out (body.notgamepc hides every
   // .pcOnly: Settings' Auto honk, "play on this PC", the Highway's auto-target box and 🎯 / Retry, the tablet's rail)
   document.body.classList.toggle("notgamepc", data.game_pc === false);
@@ -5619,6 +5620,61 @@ function drawAudioPill() {
   }
 }
 document.getElementById("audioPill").onclick = () => { audio(); setTimeout(audioStateChanged, 50); };
+
+// ---- a newer release on GitHub ([server] update_check; data.update {version, current, url, kind}): a quiet pill in the
+// theme's accent on the header (the tablet: beside its link) opens what to do for this install; "Skip this version"
+// is per device (updateSkip: the pill comes back for the next one) ----
+const UPDATE_HOW = {
+  docker: "On the server, in the folder with <code>docker-compose.yml</code>: <code>docker compose pull</code>, then " +
+    "<code>docker compose up -d</code>. (From an offline bundle: load the new bundle's image as its INSTALL.txt says.)",
+  git: "In the Outrider folder: <code>git pull</code>, then restart Outrider. The launcher installs anything new it needs.",
+  download: "Download the new release from GitHub and unpack it, move your <code>data</code> folder and " +
+    "<code>ed_outrider.toml</code> into it, and start Outrider from there.",
+};
+function updateWanted() {
+  const u = data && data.update;
+  return u && typeof u.version === "string" && store.get("updateSkip", "") !== u.version ? u : null;
+}
+function drawUpdatePill() {
+  const u = updateWanted();
+  for (const id of ["updPill", "tabUpd"]) {
+    const el = document.getElementById(id);
+    el.hidden = !u;
+    if (u) el.textContent = `⬆ Update ${u.version}`;
+  }
+}
+function updateHow(u) { return UPDATE_HOW[u.kind] || UPDATE_HOW.download; }
+function openUpdate() {
+  const u = updateWanted();
+  if (!u) return;
+  const url = /^https:\/\/github\.com\//.test(u.url || "") ? u.url : "https://github.com/weslocke/ED-Outrider/releases/latest";
+  if (TABLET) {
+    document.getElementById("tabSheetTitle").textContent = `ED Outrider ${u.version} is out`;
+    document.getElementById("tabSheetList").innerHTML =
+      `<dt>New</dt><dd>${esc(u.version)}${u.published ? ` · ${esc(u.published)}` : ""}</dd>` +
+      `<dt>This one</dt><dd>${esc(u.current || "?")}</dd><dt>To update</dt><dd>${updateHow(u)}</dd>`;
+    document.getElementById("tabSheetActs").innerHTML =
+      `<a class="tb-btn" href="${esc(url)}" target="_blank" rel="noopener">What's new ↗</a>` +
+      `<button type="button" class="tb-btn" data-act="updskip">Skip this version</button>`;
+    tabShow(document.getElementById("tabSheet"));
+    return;
+  }
+  document.getElementById("updVer").textContent = u.version;
+  document.getElementById("updHave").textContent = `This is ${u.current || "?"}` + (u.published ? `; ${u.version} came out on ${u.published}.` : ".");
+  document.getElementById("updHow").innerHTML = updateHow(u);
+  document.getElementById("updNotes").href = url;
+  const d = document.getElementById("updDialog");
+  if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute("open", ""); }
+}
+function skipUpdate() {
+  const u = data && data.update;
+  if (u && u.version) store.set("updateSkip", u.version);
+  tabClose(document.getElementById("updDialog"));
+  drawUpdatePill();
+}
+document.getElementById("updPill").onclick = openUpdate;
+document.getElementById("tabUpd").onclick = openUpdate;
+document.getElementById("updSkip").onclick = skipUpdate;
 // a line waits here for the click; stopping it (a hush, a jump, danger) ends the wait too
 const audioUnlocked = cur => new Promise(res => {
   const go = () => { audioWaiters.delete(go); res(); };
@@ -7151,6 +7207,7 @@ function tabSetup() {
     const b = e.target.closest("[data-act]"); if (!b) return;
     tabClose(document.getElementById("tabSheet"));
     if (b.dataset.act === "here") showInHere(b.dataset.id);
+    else if (b.dataset.act === "updskip") skipUpdate();
     else if (b.dataset.act === "bm") openBookmark(b.dataset.id, b.dataset.name);
   });
   document.getElementById("tabBanner").onclick = () => tabBannerHide();

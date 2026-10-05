@@ -3706,6 +3706,32 @@ const settle = async maxMs => {
     allOk = allOk && goodTh;
     console.log(goodTh ? "OK" : "FAIL", "| desktop theme |", goodTh ? "Default - Outrider and nine themes; set, remembered, back to the Default" : JSON.stringify(got), errors.slice(before));
   }
+  // a newer release (payload update, [server] update_check): the Update pill shows it, opens how to update for this
+  // install (Docker here) with GitHub's link, "Skip this version" hides it for that version only; none: no pill
+  {
+    const w = dom.window, d = w.document, before = errors.length, pill = d.getElementById("updPill");
+    w.localStorage.removeItem("updateSkip");
+    w.eval(`data.update = {version: "9999.1.1", current: "2026.10.13", published: "2026-10-06", kind: "docker",
+            url: "https://github.com/weslocke/ED-Outrider/releases/tag/v9999.1.1"}; render()`);
+    const got = {shown: !pill.hidden, text: pill.textContent};
+    pill.click();
+    const dlg = d.getElementById("updDialog");
+    got.dlg = [dlg.open || dlg.hasAttribute("open"), d.getElementById("updVer").textContent,
+               d.getElementById("updHow").textContent.includes("docker compose pull"), d.getElementById("updNotes").href];
+    d.getElementById("updSkip").click();
+    got.skipped = [pill.hidden, w.localStorage.getItem("updateSkip"), dlg.open || dlg.hasAttribute("open")];
+    w.eval(`data.update = Object.assign({}, data.update, {version: "9999.2.0"}); render()`);
+    got.next = !pill.hidden;   // a newer one than the skipped: the pill is back
+    w.eval("data.update = null; render()");
+    got.none = pill.hidden;
+    w.localStorage.removeItem("updateSkip");
+    const want = {shown: true, text: "⬆ Update 9999.1.1",
+                  dlg: [true, "9999.1.1", true, "https://github.com/weslocke/ED-Outrider/releases/tag/v9999.1.1"],
+                  skipped: [true, '"9999.1.1"', false], next: true, none: true};
+    const goodUp = JSON.stringify(got) === JSON.stringify(want) && errors.length === before;
+    allOk = allOk && goodUp;
+    console.log(goodUp ? "OK" : "FAIL", "| update pill |", goodUp ? "shown for a newer release, how to update (Docker), skip this version, the next one shows again" : JSON.stringify(got), errors.slice(before));
+  }
   // server mode (payload game_pc false): what needs the game PC is left out of the desktop page; back with game_pc true
   {
     const w = dom.window, before = errors.length;
