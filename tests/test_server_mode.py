@@ -148,7 +148,8 @@ class Packaging(unittest.TestCase):
         self.assertEqual(subprocess.run(["bash", "-n", path], capture_output=True).returncode, 0)
         script = self.read("launch_outrider.sh")
         for part in ("sha256sum requirements.txt", ".requirements.sha256", "import aiohttp", "pip install --quiet -r requirements.txt",
-                     'exec python ed_outrider.py "$@"', "sys.version_info < (3, 11)"):
+                     'exec python ed_outrider.py "$@"', "sys.version_info < (3, 11)",
+                     "command -v wl-copy", "command -v xclip"):   # the clipboard tools pip cannot install: a hint
             self.assertIn(part, script)
 
     def test_windows_launch_script(self):

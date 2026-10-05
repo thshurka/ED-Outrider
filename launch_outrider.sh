@@ -45,6 +45,11 @@ if needs_install; then
         exit 1
     fi
     echo "$want" > "$STAMP"
+    # not pip's to install (system programs): said once, after an install, when the desktop has neither
+    if ! command -v wl-copy >/dev/null 2>&1 && ! command -v xclip >/dev/null 2>&1; then
+        echo "Optional: for the Highway's clipboard copy, install wl-copy (Wayland: the wl-clipboard package) or xclip (X11)"
+        echo "with your package manager, e.g. sudo apt install wl-clipboard"
+    fi
 fi
 
 # shellcheck disable=SC1091
