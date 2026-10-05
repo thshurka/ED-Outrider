@@ -46,7 +46,9 @@ grep -q "image: $IMAGE" "$OUT/docker-compose.yml" && grep -q "^name: ed-outrider
 
 cat > "$OUT/.env.example" <<EOF
 # copy to .env and set at least JOURNALS
-# the game's journal folder (an NFS or CIFS mount of the game PC's share), read-only
+# the game's journal folder (an NFS or CIFS mount of the game PC's share), read-only.
+# NFS: mount it with actimeo=1 (e.g. fstab options ro,actimeo=1). By default NFS caches a file's size for up to a
+# minute, so the journal seems not to grow and the alerts arrive late and all at once; Outrider warns at start.
 JOURNALS=/mnt/elite-journals
 # your user and group on this computer: id -u, id -g
 UID=1000
@@ -68,8 +70,9 @@ rail, the co-pilot button, the clipboard and sound played on the PC. Everything 
      docker load -i ed-outrider-image.tar
 
 2. Make the game's journal folder reachable here, read-only: share it from the game PC over NFS or CIFS and mount
-   it (NFS: mount with actimeo=1, so Status.json's updates come through). The README's "Running as a server
-   (Docker)" has the export and mount lines.
+   it. NFS: mount it with actimeo=1, or NFS shows the journal's growth up to a minute late and the alerts come late
+   and all at once (Outrider warns at start). The README's "Running as a server (Docker)" has the export and mount
+   lines.
 
 3. Settings:
      cp .env.example .env      then set JOURNALS to that mount (and UID/GID: id -u, id -g)

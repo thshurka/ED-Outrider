@@ -2,6 +2,12 @@
 
 Newest first, one entry per commit.
 
+## 2026-10-05 · The NFS mount option in the release's env file
+- `env.example` (the file a Docker server downloads) now says to mount NFS with `actimeo=1`, and why: without it
+  NFS caches the journal's size for up to a minute and the alerts arrive late and all at once. The offline bundle's
+  INSTALL.txt gave the wrong reason (Status.json); it now gives this one. The v2026.10.12 release's `env.example`
+  was replaced with the new text.
+
 ## 2026-10-05 · Auto honk, auto-target and the control rail on Windows (experimental)
 - On Windows these press keys the Windows way (`SendInput` with scan codes, as VoiceAttack does) through
   `outrider/winkeys.py`, which stands in for evdev, so everything above it is unchanged; Linux keeps evdev. Chosen by

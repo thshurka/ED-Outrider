@@ -183,6 +183,11 @@ class Packaging(unittest.TestCase):
         self.assertIn("pull_policy: never", script)
         self.assertIn('image: $REG:latest', script)   # the release's compose file runs the published image
         self.assertIn("REG=ghcr.io/weslocke/ed-outrider", script)
+        # the env file a server downloads (and INSTALL.txt) say how to mount NFS, and why: late alerts otherwise
+        env = script[script.index('cat > "$OUT/.env.example"'):script.index("JOURNALS=/mnt/elite-journals")]
+        self.assertIn("actimeo=1", env)
+        self.assertIn("late and all at once", env)
+        self.assertNotIn("so Status.json's updates come through", script)   # the old, wrong reason
         self.assertTrue(os.access(os.path.join(self.ROOT, "scripts", "docker_bundle.sh"), os.X_OK))
 
 
